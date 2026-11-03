@@ -807,17 +807,46 @@ except Exception as e:
 	}
 }
 ACF
-        # Symlink in steamapps/common if game_dir is external
+        # Symlink in steamapps/common if game_dir is external, or ensure install dir exists
+        mkdir -p "$steam_apps/common"
         if [ -n "$game_dir" ] && [ -d "$game_dir" ]; then
-            mkdir -p "$steam_apps/common"
             local common_target="$steam_apps/common/$install_name"
             if [ ! -e "$common_target" ]; then
                 ln -sf "$game_dir" "$common_target"
                 echo "[INFO] Symlink common dibuat: $common_target -> $game_dir"
             fi
+        else
+            mkdir -p "$steam_apps/common/$install_name"
         fi
         echo "[VERIFIED] appmanifest_${appid}.acf terdaftar (Status: Terinstal di Steam, Size: $size_bytes bytes)."
     fi
+}
+
+# Unlock game in official Steam client without downloading game files
+unlock_game() {
+    local appid="${1:-}"
+    local title="${2:-}"
+
+    if [ -z "$appid" ]; then
+        echo "Usage: gamectl unlock <appid> [title]" >&2
+        return 1
+    fi
+
+    if [ -z "$title" ]; then
+        echo "[INFO] Mengambil judul game untuk AppID $appid dari Steam Store API..."
+        title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
+        [ -z "$title" ] && title="AppID_${appid}"
+    fi
+
+    echo "=========================================="
+    echo " UNLOCK STEAM TANPA DOWNLOAD (Full DLC)"
+    echo "=========================================="
+    echo " AppID : $appid"
+    echo " Judul : $title"
+    echo "=========================================="
+
+    sync_steam "$appid" "$title" ""
+    echo "[SUCCESS] Game '$title' ($appid) telah dibuka di Steam resmi dengan Full DLC tanpa download."
 }
 
 # Main Library View
@@ -1002,9 +1031,10 @@ search_steam() {
             echo "  1) [All-in-One] Unduh + Injeksi GBE + Sync Steam (Background)"
             echo "  2) [All-in-One] Unduh + Injeksi GBE + Sync Steam (Foreground Stream)"
             echo "  3) [Standalone] Unduh + Injeksi GBE saja (Tanpa Client Steam)"
-            echo "  4) [Raw Download] Unduh aset mentah saja (Tanpa Injeksi)"
-            echo "  5) Batal"
-            read -r -p "Pilihan [1-5]: " opt
+            echo "  4) [Unlock Steam Saja] Buka di Steam resmi tanpa unduh game (Full DLC)"
+            echo "  5) [Raw Download] Unduh aset mentah saja (Tanpa Injeksi)"
+            echo "  6) Batal"
+            read -r -p "Pilihan [1-6]: " opt
             case "$opt" in
                 1)
                     download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --all --background
@@ -1016,6 +1046,9 @@ search_steam() {
                     download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --inject-only --background
                     ;;
                 4)
+                    unlock_game "$sel_id" "$sel_name"
+                    ;;
+                5)
                     download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --raw --background
                     ;;
                 *)
@@ -1028,7 +1061,7 @@ search_steam() {
 }
 
 # Export functions for subshells in fzf
-export -f preview_game sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads
+export -f preview_game sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads unlock_game
 
 # Top-level Menu
 case "${1:-}" in
@@ -1053,6 +1086,14 @@ case "${1:-}" in
             download_game "$2" "${@:3}"
         else
             echo "Usage: gamectl download <appid> [dir] [title] [--raw|--inject-only|--all] [--foreground|-f]"
+            exit 1
+        fi
+        ;;
+    unlock|add-steam|--unlock)
+        if [ -n "${2:-}" ]; then
+            unlock_game "$2" "${3:-}"
+        else
+            echo "Usage: gamectl unlock <appid> [title]"
             exit 1
         fi
         ;;
@@ -1103,6 +1144,8 @@ Usage:
   gamectl download <appid> [dir] [title] [--raw|--inject-only|--all] [-f]
                       Unduh game headless via DepotDownloader (pilihan paket fleksibel)
   gamectl downloads   Pantau status & log unduhan aktif
+  gamectl unlock <appid> [title]
+                      Buka game di Steam resmi tanpa unduh file (Full DLC)
   gamectl inject <dir> [appid] [--no-sync|--all]
                       Injeksi GBE Fork standalone & portable save
   gamectl fetch-dlc <dir> [appid] Unduh & tulis daftar DLC ke steam_settings/DLC.txt

@@ -119,6 +119,21 @@ gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" --raw
 gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" -f
 ```
 
+### 4.4 Registrasi Library Steam Tanpa Download (`gamectl unlock`)
+Untuk menampilkan game dan seluruh DLC-nya di Library Steam resmi tanpa perlu mengunduh file aset game:
+```bash
+# Registrasi AppID & resolve otomatis judul + DLC dari Steam API:
+gamectl unlock 1145360
+
+# Atau dengan menyertakan judul eksplisit:
+gamectl unlock 1145360 "Hades II"
+```
+Mekanisme ini secara otomatis:
+1. Menambahkan AppID ke daftar lisensi SLSsteam (`~/.config/SLSsteam/config.yaml`).
+2. Menarik seluruh katalog DLC dari Steam Web API dan memetakan `DlcData` di SLSsteam.
+3. Menulis manifest `~/.local/share/Steam/steamapps/appmanifest_<appid>.acf` berstatus `StateFlags: 4` (Installed).
+4. Saat Steam client dibuka, game langsung terdaftar di library dengan seluruh DLC aktif.
+
 ---
 
 ## 5. Panduan Fitur & Alur Kerja TUI
@@ -200,19 +215,22 @@ Selain antarmuka TUI interaktif, `gamectl` menyediakan sub-perintah langsung:
 # 1. Buka antarmuka TUI utama
 gamectl
 
-# 2. Unduh game secara headless via DepotDownloader
-gamectl download <appid> [target_dir] [title] [--foreground]
+# 2. Unduh game secara headless via DepotDownloader (pilihan paket fleksibel)
+gamectl download <appid> [target_dir] [title] [--raw|--inject-only|--all] [-f]
 
 # 3. Pantau status & antrean download yang aktif
 gamectl downloads
 
-# 4. Injeksi GBE Fork, konfigurasi save ./saves, dan auto-DLC
-gamectl inject /path/to/game [appid]
+# 4. Buka game di Steam resmi tanpa unduh aset (Zero-Download Full DLC)
+gamectl unlock <appid> [title]
 
-# 5. Unduh & tulis daftar DLC Steam ke steam_settings/DLC.txt
+# 5. Injeksi GBE Fork, konfigurasi save ./saves, dan auto-DLC
+gamectl inject /path/to/game [appid] [--no-sync|--all]
+
+# 6. Unduh & tulis daftar DLC Steam ke steam_settings/DLC.txt
 gamectl fetch-dlc /path/to/game [appid]
 
-# 6. Sinkronisasi dual-mode Steam Client resmi & SLSsteam full DLC
+# 7. Sinkronisasi dual-mode Steam Client resmi & SLSsteam full DLC (dengan direktori game)
 gamectl sync-steam <appid> [title] [game_dir]
 
 # 7. Tampilkan daftar game terdeteksi dalam format teks deterministik

@@ -14,6 +14,7 @@ Dibuat khusus untuk arsitektur workstation efisien (seperti ThinkPad T440p) yang
 - **Savegame Snapshot Protection (Anti-Data-Loss)**: Membuat cadangan otomatis rotasi 3-slot (`slot1`, `slot2`, `slot3`) sebelum setiap game dijalankan, melindungi progres dari dirty shutdown atau crash.
 - **Automated GBE Fork Injection (`gamectl inject`)**: Mengonversi biner game Valve menjadi standalone portabel dengan auto-deteksi ELF 32/64-bit, portable save `./saves`, dan generator `steam_settings/DLC.txt`.
 - **Headless Downloader Engine (`gamectl download`)**: Mengunduh game langsung dari Steam Content Server via DepotDownloader headless CLI tanpa memerlukan client Steam GUI atau cache berat.
+- **Zero-Download Steam Library Registration (`gamectl unlock`)**: Mendaftarkan kepemilikan AppID dan seluruh DLC ke SLSsteam serta membuat manifest ACF tanpa perlu mengunduh file game. Saat Steam resmi dibuka, game langsung muncul di library dengan status full DLC.
 - **Dual-Mode Steam & SLSsteam Sync (`gamectl sync-steam`)**: Otomatis mendaftarkan AppID & DLC ke `~/.config/SLSsteam/config.yaml` dan membuat `appmanifest_<appid>.acf` berstatus terinstal. Game siap dimainkan mandiri dan langsung berstatus full DLC saat aplikasi Steam resmi dibuka.
 - **One-Key Multi-Node Sync (`<Ctrl-S>`)**: Menyinkronkan progres savegame portabel langsung ke node pendamping (`tuf-gaming-arch`) via SSH/Rsync dengan proteksi pre-flight timeout 1 detik.
 - **Steam & ProtonDB Discovery**: Pencarian judul game via Steam Web API publik yang terintegrasi dengan tier rating kompatibilitas Linux dari ProtonDB (Native, Platinum, Gold, Silver).
@@ -85,17 +86,24 @@ Installer akan membuat symlink eksekutabel ke `~/.local/bin/gamectl` dan alias `
    gamectl inject "$HOME/Games/Limbo" 48000 --no-sync
    ```
 
-5. **Sinkronisasi Dual-Mode ke Steam Client Resmi**:
+5. **Buka di Steam Resmi Tanpa Download (Zero-Download Full DLC)**:
+   ```bash
+   gamectl unlock 1145360 "Hades II"
+   # atau cukup masukkan AppID (judul di-resolve otomatis via Steam API):
+   gamectl unlock 1145360
+   ```
+
+6. **Sinkronisasi Dual-Mode ke Steam Client Resmi (Dengan Game Files)**:
    ```bash
    gamectl sync-steam 427520 "Factorio" "$HOME/Games/Factorio"
    ```
 
-6. **Daftar Game yang Terdeteksi**:
+7. **Daftar Game yang Terdeteksi**:
    ```bash
    gamectl --list
    ```
 
-7. **Sinkronisasi Manual Savegame ke Node Pendamping**:
+8. **Sinkronisasi Manual Savegame ke Node Pendamping**:
    ```bash
    gamectl --sync /path/to/game "Game Title"
    ```
