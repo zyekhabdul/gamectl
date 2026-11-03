@@ -197,22 +197,37 @@ Selain antarmuka TUI interaktif, `gamectl` menyediakan sub-perintah langsung:
 # 1. Buka antarmuka TUI utama
 gamectl
 
-# 2. Tampilkan daftar game terdeteksi dalam format teks deterministik
+# 2. Unduh game secara headless via DepotDownloader
+gamectl download <appid> [target_dir] [title] [--foreground]
+
+# 3. Pantau status & antrean download yang aktif
+gamectl downloads
+
+# 4. Injeksi GBE Fork, konfigurasi save ./saves, dan auto-DLC
+gamectl inject /path/to/game [appid]
+
+# 5. Unduh & tulis daftar DLC Steam ke steam_settings/DLC.txt
+gamectl fetch-dlc /path/to/game [appid]
+
+# 6. Sinkronisasi dual-mode Steam Client resmi & SLSsteam full DLC
+gamectl sync-steam <appid> [title] [game_dir]
+
+# 7. Tampilkan daftar game terdeteksi dalam format teks deterministik
 gamectl --list
 
-# 3. Cari game di Steam Store API dan cek kompatibilitas ProtonDB
+# 8. Cari game di Steam Store API dan cek kompatibilitas ProtonDB
 gamectl --search
 
-# 4. Sinkronisasi manual direktori game ke host companion
+# 9. Sinkronisasi manual direktori game ke host companion
 gamectl --sync /path/to/game "Game Title"
 
-# 5. Buat snapshot manual savegame dari terminal
+# 10. Buat snapshot manual savegame dari terminal
 gamectl --backup /path/to/game
 
-# 6. Tampilkan panduan ringkas
+# 11. Tampilkan panduan ringkas
 gamectl --help
 
-# 7. Tampilkan versi aktif
+# 12. Tampilkan versi aktif
 gamectl --version
 ```
 
