@@ -32,10 +32,10 @@ Target: Menggantikan total ekosistem SLSsteamMoon + ACCELA + Headcrab + SteaMidr
 - [x] Pembuatan backup biner asli jika sebelumnya sudah ada `libsteam_api.so` bawaan Valve (`libsteam_api.so.orig`).
 
 ### Chunk 2: Generator Otomatis DLC Unlocker (`gamectl fetch-dlc`)
-- [ ] Implementasi fungsi parsing daftar DLC dari Steam Web API publik:
-  `https://store.steampowered.com/api/appdetails?appids=<appid>&filters=basic,dlc`
-- [ ] Konversi daftar DLC menjadi format standar GBE Fork: `steam_settings/DLC.txt` (`<dlc_id>=<dlc_name>`).
-- [ ] Integrasi otomatis fungsi ini ke dalam alur `gamectl inject`.
+- [x] Implementasi fungsi parsing daftar DLC dari Steam Web API publik:
+  `https://store.steampowered.com/api/dlcforapp/?appid=<appid>`
+- [x] Konversi daftar DLC menjadi format standar GBE Fork: `steam_settings/DLC.txt` (`<dlc_id>=<dlc_name>`).
+- [x] Integrasi otomatis fungsi ini ke dalam alur `gamectl inject`.
 
 ### Chunk 3: Integrasi Headless Downloader Engine (Pengganti ACCELA)
 - [ ] Penyediaan runtime headless downloader CLI (pemeriksaan ketersediaan `depotdownloader` / wrapper SteamCMD).

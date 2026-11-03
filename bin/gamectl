@@ -256,6 +256,12 @@ preview_game() {
         echo " Snapshots    : $snaps slot aktif"
     fi
 
+    if [ -f "$gdir/steam_settings/DLC.txt" ]; then
+        local dlc_count
+        dlc_count=$(grep -c "=" "$gdir/steam_settings/DLC.txt" 2>/dev/null || echo 0)
+        echo " DLC Unlocked : $dlc_count item"
+    fi
+
     echo " Total Size   : $(du -sh "$gdir" 2>/dev/null | cut -f1)"
     echo "--------------------------------------------------------"
     echo " ACTION KEYS:"
@@ -430,9 +436,67 @@ EOF
     if [ -n "$appid" ] && [ "$appid" != "STANDALONE" ]; then
         echo -n "$appid" > "$target_dir/steam_appid.txt"
         echo "[INFO] AppID $appid terdaftar di: $target_dir/steam_appid.txt"
+        fetch_dlc "$target_dir" "$appid"
     fi
 
     echo "[VERIFIED] Game berhasil diinjeksi GBE Fork (Arsitektur: $arch, Save: ./saves, AppID: ${appid:-None})"
+}
+
+# Fetch and generate steam_settings/DLC.txt for GBE Fork
+fetch_dlc() {
+    local target_dir="$1"
+    local appid="${2:-}"
+
+    if [ ! -d "$target_dir" ]; then
+        echo "[ERROR] Direktori target tidak ditemukan: $target_dir" >&2
+        return 1
+    fi
+
+    target_dir="$(cd "$target_dir" && pwd)"
+
+    # Resolve AppID if not provided
+    if [ -z "$appid" ]; then
+        if [ -f "$target_dir/steam_appid.txt" ]; then
+            appid=$(tr -dc '0-9' < "$target_dir/steam_appid.txt")
+        fi
+    fi
+
+    if [ -z "$appid" ] || [ "$appid" = "STANDALONE" ]; then
+        echo "[WARN] AppID numerik tidak ditemukan. Melewati pembuatan DLC.txt."
+        return 0
+    fi
+
+    echo "[INFO] Mengambil daftar DLC untuk AppID $appid dari Steam API..."
+    local dlc_file="$target_dir/steam_settings/DLC.txt"
+    mkdir -p "$target_dir/steam_settings"
+
+    # Primary: dlcforapp endpoint (names & IDs in single call)
+    local dlc_data=""
+    dlc_data=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/dlcforapp/?appid=${appid}" | jq -r '.dlc[]? | "\(.id)=\(.name)"' 2>/dev/null || true)
+
+    # Fallback: appdetails basic,dlc
+    if [ -z "$dlc_data" ]; then
+        local dlc_ids
+        dlc_ids=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic,dlc" | jq -r ".\"${appid}\".data.dlc[]?" 2>/dev/null || true)
+        if [ -n "$dlc_ids" ]; then
+            dlc_data=""
+            while read -r did; do
+                [ -n "$did" ] && dlc_data+="${did}=DLC_${did}"$'\n'
+            done <<< "$dlc_ids"
+        fi
+    fi
+
+    if [ -n "$dlc_data" ]; then
+        echo -n "$dlc_data" > "$dlc_file"
+        # Ensure trailing newline
+        [ -s "$dlc_file" ] && echo "" >> "$dlc_file"
+        local count
+        count=$(grep -c "=" "$dlc_file" || echo 0)
+        echo "[VERIFIED] Berhasil menulis $count DLC ke: $dlc_file"
+    else
+        touch "$dlc_file"
+        echo "[INFO] Tidak ada DLC yang ditemukan di Steam API. File kosong: $dlc_file"
+    fi
 }
 
 # Main Library View
@@ -511,7 +575,7 @@ search_steam() {
 }
 
 # Export functions for subshells in fzf
-export -f preview_game sync_to_tuf backup_save inject_game
+export -f preview_game sync_to_tuf backup_save inject_game fetch_dlc
 
 # Top-level Menu
 case "${1:-}" in
@@ -520,6 +584,14 @@ case "${1:-}" in
             inject_game "$2" "${3:-}"
         else
             echo "Usage: gamectl inject <game_dir> [appid]"
+            exit 1
+        fi
+        ;;
+    fetch-dlc|--fetch-dlc)
+        if [ -n "${2:-}" ]; then
+            fetch_dlc "$2" "${3:-}"
+        else
+            echo "Usage: gamectl fetch-dlc <game_dir> [appid]"
             exit 1
         fi
         ;;
@@ -553,7 +625,8 @@ gamectl - Sovereign TUI Game Manager & Launcher (Zero-Bloat)
 
 Usage:
   gamectl             Buka antarmuka TUI library game
-  gamectl inject <dir> [appid]  Injeksi GBE Fork standalone & portable save
+  gamectl inject <dir> [appid]    Injeksi GBE Fork standalone & portable save
+  gamectl fetch-dlc <dir> [appid] Unduh & tulis daftar DLC ke steam_settings/DLC.txt
   gamectl --search    Cari game di Steam Store & audit ProtonDB rating
   gamectl --list      Tampilkan daftar game yang terdeteksi
   gamectl --sync <dir> [title]  Sinkronisasi savegame ke companion node
