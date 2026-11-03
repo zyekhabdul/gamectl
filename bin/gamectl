@@ -799,15 +799,26 @@ search_steam() {
         return
     fi
 
-    # Build list with local installed status
+    # Build list with local installed status across all libraries
     local results=""
-    local steam_apps="$HOME/.local/share/Steam/steamapps"
+    local steam_libs=()
+    mapfile -t steam_libs < <(get_steam_libraries)
+
     while IFS=$'\t' read -r appid name; do
         [ -z "$appid" ] && continue
-        local status="[BELUM TERPASANG]"
-        if [ -f "$steam_apps/appmanifest_${appid}.acf" ] || [ -d "$HOME/Games/$name" ]; then
-            status="[TERPASANG]"
+        local is_installed=0
+        if [ -d "$HOME/Games/$name" ]; then
+            is_installed=1
+        else
+            for slib in "${steam_libs[@]}"; do
+                if [ -f "$slib/appmanifest_${appid}.acf" ]; then
+                    is_installed=1
+                    break
+                fi
+            done
         fi
+        local status="[BELUM TERPASANG]"
+        [ "$is_installed" -eq 1 ] && status="[TERPASANG]"
         results+="${appid}"$'\t'"${name}"$'\t'"${status}"$'\n'
     done <<< "$items"
 
@@ -824,11 +835,24 @@ search_steam() {
             echo "=========================================="
             echo " STEAM METADATA & PROTONDB AUDIT"
             echo "=========================================="
-            echo " AppID  : $appid"
-            echo " Judul  : $title"
-            echo " Status : $status"
+            echo " AppID    : $appid"
+            echo " Judul    : $title"
+            echo " Status   : $status"
             echo "------------------------------------------"
-            pdb=$(curl -s --connect-timeout 3 "https://www.protondb.com/api/v1/reports/summaries/$appid.json" 2>/dev/null)
+            details=$(curl -s --connect-timeout 2 "https://store.steampowered.com/api/appdetails?appids=$appid&filters=platforms,genres" | jq -r ".\"$appid\".data // empty" 2>/dev/null)
+            if [ -n "$details" ]; then
+                is_linux=$(echo "$details" | jq -r ".platforms.linux // false" 2>/dev/null)
+                is_win=$(echo "$details" | jq -r ".platforms.windows // false" 2>/dev/null)
+                genres=$(echo "$details" | jq -r "[.genres[]?.description] | join(\", \")" 2>/dev/null)
+                [ -n "$genres" ] && echo " Genre    : $genres"
+                if [ "$is_linux" = "true" ]; then
+                    echo " Runner   : Native Linux (Depot ELF tersedia)"
+                elif [ "$is_win" = "true" ]; then
+                    echo " Runner   : Windows Only (Memerlukan Proton/WINE)"
+                fi
+                echo "------------------------------------------"
+            fi
+            pdb=$(curl -s --connect-timeout 2 "https://www.protondb.com/api/v1/reports/summaries/$appid.json" 2>/dev/null)
             if [ -n "$pdb" ] && [ "$pdb" != "null" ]; then
                 tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null)
                 score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null)
@@ -837,7 +861,7 @@ search_steam() {
                 echo " ProtonDB Score      : $score"
                 echo " Confidence          : $conf"
             else
-                echo " ProtonDB Rating     : Belum ada laporan (Kemungkinan Native Linux)"
+                echo " ProtonDB Rating     : Belum ada laporan komunitas"
             fi
             echo "=========================================="
         ' \
@@ -856,13 +880,39 @@ search_steam() {
         echo " STATUS: $sel_status"
         echo "=========================================="
         if [ "$sel_status" = "[TERPASANG]" ]; then
-            read -r -p "Game sudah terpasang. Jalankan re-injeksi GBE & sync Steam sekarang? [y/N]: " ans
-            if [[ "$ans" =~ ^[Yy]$ ]]; then
-                local gdir="$HOME/Games/$sel_name"
-                [ ! -d "$gdir" ] && gdir="$HOME/.local/share/Steam/steamapps/common/$sel_name"
-                inject_game "$gdir" "$sel_id"
-                sync_steam "$sel_id" "$sel_name" "$gdir"
+            echo "Pilih aksi untuk game terpasang:"
+            echo "  1) Luncurkan game langsung"
+            echo "  2) Re-injeksi GBE Fork & sinkronisasi Steam"
+            echo "  3) Batal / Kembali"
+            read -r -p "Pilihan [1-3]: " act_opt
+            local gdir="$HOME/Games/$sel_name"
+            if [ ! -d "$gdir" ]; then
+                for slib in "${steam_libs[@]}"; do
+                    if [ -d "$slib/common/$sel_name" ]; then
+                        gdir="$slib/common/$sel_name"
+                        break
+                    fi
+                done
             fi
+
+            case "$act_opt" in
+                1)
+                    local gbin
+                    gbin=$(find_game_binary "$gdir" 2>/dev/null || echo "")
+                    if [ -n "$gbin" ]; then
+                        launch_game "$gdir" "$gbin" "$sel_name"
+                    else
+                        echo "[ERROR] Biner eksekutabel tidak ditemukan di $gdir."
+                    fi
+                    ;;
+                2)
+                    inject_game "$gdir" "$sel_id"
+                    sync_steam "$sel_id" "$sel_name" "$gdir"
+                    ;;
+                *)
+                    echo "[INFO] Aksi dibatalkan."
+                    ;;
+            esac
         else
             echo "Pilih mode aksi:"
             echo "  1) Unduh di background (non-blocking, auto-inject & sync saat selesai)"
