@@ -39,6 +39,40 @@ if [ -f "$GBE_X86" ]; then
     echo "[VERIFIED] Template GBE Fork 32-bit terdeteksi: $GBE_X86"
 fi
 
+# Scaffold user configuration directory and templates
+CONFIG_DIR="$HOME/.config/gamectl"
+mkdir -p "$CONFIG_DIR"
+
+if [ ! -f "$CONFIG_DIR/libraries.example" ]; then
+    cat <<'EOF' > "$CONFIG_DIR/libraries.example"
+# ==============================================================================
+# gamectl - Custom Library Directories
+# ==============================================================================
+# Cantumkan satu direktori game per baris.
+# Karakter '#' menandakan komentar. Tanda tilde (~) otomatis diekspansi ke $HOME.
+#
+# Contoh:
+# ~/Games
+# ~/Downloads/LinuxGames
+# /mnt/storage/games/steamapps/common
+EOF
+    echo "[INFO] Template konfigurasi dibuat: $CONFIG_DIR/libraries.example"
+fi
+
+if [ ! -f "$CONFIG_DIR/steam_user.example" ]; then
+    cat <<'EOF' > "$CONFIG_DIR/steam_user.example"
+# ==============================================================================
+# gamectl - Steam Account for DepotDownloader
+# ==============================================================================
+# Salin file ini menjadi 'steam_user' lalu isi dengan username akun Steam Anda.
+# Username ini digunakan oleh DepotDownloader saat mengunduh game berlisensi.
+#
+# Contoh isi file:
+# nama_akun_steam_anda
+EOF
+    echo "[INFO] Template konfigurasi dibuat: $CONFIG_DIR/steam_user.example"
+fi
+
 mkdir -p "$BIN_DIR"
 chmod +x "$SRC_BIN"
 

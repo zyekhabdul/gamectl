@@ -14,7 +14,7 @@ Memperkuat instalasi dan kesiapan lingkungan `gamectl` agar bersifat *turnkey* (
   - Berikan panduan terminal jika template GBE belum tersedia di sistem.
   - DoD: `install.sh` memverifikasi seluruh runtime dependensi dengan pesan diagnostik yang jelas.
 
-- [ ] **Chunk 2: Scaffolding Konfigurasi Default (`~/.config/gamectl/`)**
+- [x] **Chunk 2: Scaffolding Konfigurasi Default (`~/.config/gamectl/`)**
   - Di `install.sh`, buat direktori `~/.config/gamectl/` jika belum ada.
   - Sediakan file template bertag komentar:
     - `~/.config/gamectl/libraries.example` (petunjuk penambahan path game custom).
