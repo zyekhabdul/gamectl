@@ -22,5 +22,5 @@ chmod +x "$SRC_BIN"
 ln -sf "$SRC_BIN" "$BIN_DIR/gamectl"
 ln -sf "$SRC_BIN" "$BIN_DIR/game"
 
-echo "[VERIFIED] Valkyrie berhasil di-link ke $BIN_DIR/gamectl dan $BIN_DIR/game"
+echo "[VERIFIED] gamectl berhasil di-link ke $BIN_DIR/gamectl dan $BIN_DIR/game"
 echo "Jalankan perintah 'gamectl' atau 'game' di terminal untuk membuka antarmuka."

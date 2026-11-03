@@ -110,7 +110,7 @@ Untuk menjembatani efisiensi performa CLI dengan kemudahan navigasi GUI, arsitek
 3. **Auto Post-Processing**:
    - Penyalinan library emulator GBE Fork (`libsteam_api.so`).
    - Pemasangan konfigurasi portable save (`local_save_path=./saves`).
-   - Pembuatan script launcher otomatis di `/home/aomiqaza/.local/bin/`.
+   - Pembuatan script launcher otomatis di `~/.local/bin/`.
 4. **State Machine Lifecycle**:
    - `[STORE]` -> Belum terpasang di disk lokal.
    - `[DOWNLOADING]` -> Proses penarikan aset berlangsung di background.
@@ -129,9 +129,9 @@ Game Linux terbagi menjadi dua arsitektur biner. Memasang library dengan arsitek
   ```bash
   ELF_TYPE=$(file -b "$GAME_BINARY" | awk '{print $1}')
   if [ "$ELF_TYPE" = "ELF" ] && file -b "$GAME_BINARY" | grep -q "32-bit"; then
-      cp /home/aomiqaza/.local/share/gbe-fork/regular/x86/libsteam_api.so "$TARGET_DIR/libsteam_api.so"
+      cp "$HOME/.local/share/gbe-fork/regular/x86/libsteam_api.so" "$TARGET_DIR/libsteam_api.so"
   else
-      cp /home/aomiqaza/.local/share/gbe-fork/regular/x64/libsteam_api.so "$TARGET_DIR/libsteam_api.so"
+      cp "$HOME/.local/share/gbe-fork/regular/x64/libsteam_api.so" "$TARGET_DIR/libsteam_api.so"
   fi
   ```
 
@@ -151,8 +151,8 @@ Menjalankan engine download secara sinkron akan membekukan antarmuka TUI.
   4. Antarmuka TUI tetap responsif 60 FPS dan mendukung sinyal pembatalan (`kill -15 $PID`).
 
 ### 6.4 Disiplin Partisi Storage (ext4 Invariant)
-- Backend menolak alokasi target pada partisi NTFS (`/home/aomiqaza/shared-storage`) untuk mencegah hilangnya atribut eksekusi POSIX dan symlink failure.
-- Direktori target dikunci secara deterministik ke partisi Linux native (`/home/aomiqaza/Games/` atau `/home/aomiqaza/.local/share/Steam/steamapps/common/`).
+- Backend menolak alokasi target pada partisi NTFS (misal mount storage eksternal non-POSIX) untuk mencegah hilangnya atribut eksekusi POSIX dan symlink failure.
+- Direktori target dikunci secara deterministik ke partisi Linux native (`$HOME/Games/` atau `$HOME/.local/share/Steam/steamapps/common/`).
 
 ### 6.5 Pre-Flight Network Probing pada Multi-Node Sync
 Sebelum mengeksekusi transfer rsync ke node pendamping `tuf-gaming-arch`:
@@ -183,5 +183,5 @@ Untuk memastikan sistem tidak membutuhkan pemeliharaan manual dan tahan lama:
 - Menetapkan aturan jendela di Niri agar game diluncurkan dalam mode `fullscreen` atau `floating` terpusat, mencegah distorsi ukuran kolom tiling Wayland.
 
 ### 7.5 Single-Command Universal Hub (`game`)
-- Seluruh ekosistem dikonsolidasikan ke dalam satu binary script mandiri di `/home/aomiqaza/.local/bin/game`.
+- Seluruh ekosistem dikonsolidasikan ke dalam satu binary script mandiri di `~/.local/bin/game` (dan symlink `~/.local/bin/gamectl`).
 - User tidak perlu lagi membuka direktori sistem, mengingat nomor AppID, atau menghafal perintah terminal yang rumit.
