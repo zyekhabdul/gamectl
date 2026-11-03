@@ -8,7 +8,7 @@ Memperkuat instalasi dan kesiapan lingkungan `gamectl` agar bersifat *turnkey* (
 
 ## 2. Granular Work Chunks (Max 10)
 
-- [ ] **Chunk 1: Audit Dependensi & Template GBE di `install.sh`**
+- [x] **Chunk 1: Audit Dependensi & Template GBE di `install.sh`**
   - Tambahkan `unzip` dan `python3` ke daftar dependensi wajib di `install.sh`.
   - Tambahkan pengecekan keberadaan template biner GBE Fork (`~/.local/share/gbe-fork/regular/x64/libsteam_api.so`).
   - Berikan panduan terminal jika template GBE belum tersedia di sistem.
