@@ -96,24 +96,27 @@ Untuk mengubah game Linux native menjadi format standalone portable yang kompati
 ### 4.2 Otomatisasi Injeksi (`gamectl inject`)
 Tidak perlu melakukan langkah manual di atas. Cukup jalankan satu perintah:
 ```bash
+# Injeksi lengkap (GBE Fork + Portable Save + Sync Steam Client):
 gamectl inject /path/to/game [appid]
+
+# Injeksi standalone saja (tanpa menyentuh konfigurasi Steam client):
+gamectl inject /path/to/game [appid] --no-sync
 ```
-Perintah ini secara otomatis:
-1. Memindai ELF binary via `file -b` dan menyalin `libsteam_api.so` (x64 atau x86) yang sesuai.
-2. Mencadangkan biner asli Valve jika ada (`libsteam_api.so.orig`).
-3. Menulis `steam_settings/configs.user.ini` dengan `local_save_path = ./saves`.
-4. Membuat folder `./saves/` dan file marker `local_save.txt`.
-5. Menulis `steam_appid.txt` dan mengunduh seluruh metadata DLC ke `steam_settings/DLC.txt`.
-6. Mendaftarkan game dan full DLC ke Steam resmi (`appmanifest_<appid>.acf` & `~/.config/SLSsteam/config.yaml`).
 
 ### 4.3 Headless Downloader (`gamectl download`)
 Untuk mengunduh game tanpa membuka client Steam atau browser:
 ```bash
-# Unduh di background (non-blocking, auto-inject & sync saat selesai)
+# 1. Unduh All-in-One di background (Unduh + Injeksi GBE + Sync Steam):
 gamectl download 48000 "$HOME/Games/Limbo" "LIMBO"
 
-# Unduh di foreground (stream progres langsung ke terminal)
-gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" --foreground
+# 2. Unduh + Injeksi GBE saja (Standalone tanpa client Steam):
+gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" --inject-only
+
+# 3. Unduh mentah saja (Raw download tanpa menyentuh file biner):
+gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" --raw
+
+# 4. Unduh di foreground (stream progres langsung ke terminal):
+gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" -f
 ```
 
 ---

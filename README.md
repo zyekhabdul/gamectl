@@ -61,14 +61,28 @@ Installer akan membuat symlink eksekutabel ke `~/.local/bin/gamectl` dan alias `
    gamectl --search
    ```
 
-3. **Unduh Game Headless (Tanpa Steam Client)**:
+3. **Unduh Game Headless (Opsi Fleksibel)**:
    ```bash
+   # Paket Lengkap (All-in-One: Unduh + Injeksi GBE + Sync Steam):
    gamectl download 48000 "$HOME/Games/Limbo" "LIMBO"
+
+   # Paket Standalone Saja (Unduh + Injeksi GBE tanpa sync Steam):
+   gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" --inject-only
+
+   # Unduh Mentah Saja (Raw download tanpa menyentuh biner/injeksi):
+   gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" --raw
+
+   # Jalankan di foreground (stream log langsung):
+   gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" -f
    ```
 
 4. **Injeksi GBE Fork Standalone & Portable Save**:
    ```bash
+   # Injeksi + Sync ke Steam resmi (All-in-One):
    gamectl inject "$HOME/Games/Limbo" 48000
+
+   # Injeksi standalone saja (tanpa menyentuh client Steam):
+   gamectl inject "$HOME/Games/Limbo" 48000 --no-sync
    ```
 
 5. **Sinkronisasi Dual-Mode ke Steam Client Resmi**:
