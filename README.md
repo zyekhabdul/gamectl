@@ -70,6 +70,13 @@ Installer akan membuat symlink eksekutabel ke `~/.local/bin/gamectl` dan alias `
 
 ---
 
+## Dokumentasi Lengkap
+
+- **[Panduan Operasional & Integrasi (GUIDE.md)](docs/GUIDE.md)**: Panduan langkah demi langkah pembuatan game standalone portable, injeksi GBE Fork, konfigurasi multi-node sync, disaster recovery savegame, dan integrasi window rules Wayland / Niri.
+- **[Spesifikasi Arsitektur Sistem (ARCHITECTURE.md)](docs/ARCHITECTURE.md)**: Analisis mendalam komparasi resource footprint headless vs GUI, arsitektur pipeline aset, dan prinsip hardening backend.
+
+---
+
 ## Struktur Proyek
 
 ```
@@ -77,8 +84,9 @@ gamectl/
 ├── bin/
 │   └── gamectl          # Core TUI executable script
 ├── docs/
-│   └── ARCHITECTURE.md   # Spesifikasi mendalam arsitektur headless Linux
-├── install.sh            # Script installer otomatis ke ~/.local/bin/
-├── README.md             # Dokumentasi ringkas
-└── .gitignore            # Filter file temporer dan cache
+│   ├── ARCHITECTURE.md  # Spesifikasi mendalam arsitektur headless Linux
+│   └── GUIDE.md         # Panduan operasional, standalone setup & disaster recovery
+├── install.sh           # Script installer otomatis ke ~/.local/bin/
+├── README.md            # Dokumentasi ringkas & overview
+└── .gitignore           # Filter file temporer dan cache
 ```
