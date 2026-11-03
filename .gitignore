@@ -1,0 +1,7 @@
+# Valkyrie gitignore
+*.tmp
+*.log
+*.pid
+.save_snapshots/
+.DS_Store
+*~

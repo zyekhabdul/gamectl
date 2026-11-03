@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# VALKYRIE - SOVEREIGN TUI GAME MANAGER & LAUNCHER (ZERO-BLOAT)
+# ==============================================================================
+# Lightweight, native Linux gaming hub:
+# - Library scanner for local/standalone games
+# - Automatic GBE Fork / runner inspection
+# - Savegame snapshot rotation (auto-backup before launch)
+# - Performance profile wrapper (Mesa GL thread, CPU governor)
+# - 1-key sync to companion node (tuf-gaming-arch) via rsync over SSH
+# - Live Steam Store search + ProtonDB rating via fzf
+# ==============================================================================
+
+set -uo pipefail
+
+TUF_HOST="tuf-gaming-arch"
+GBE_X64="$HOME/.local/share/gbe-fork/regular/x64/libsteam_api.so"
+GBE_X86="$HOME/.local/share/gbe-fork/regular/x86/libsteam_api.so"
+
+# Pre-flight cleanup of orphaned sockets and locks
+clean_stale_locks() {
+    rm -f /tmp/SteaMidra-* /tmp/steam_chrome_shmem_* /tmp/steam_chrome_overlay_* 2>/dev/null || true
+    rm -f "$HOME/.config/SLSsteam/cache/.picsbuffer.lock" 2>/dev/null || true
+}
+
+# Auto-backup savegame (Rolling 3 snapshots)
+backup_save() {
+    local game_dir="$1"
+    local save_dir="$game_dir/saves"
+    if [ -d "$save_dir" ]; then
+        local snap_dir="$game_dir/.save_snapshots"
+        mkdir -p "$snap_dir"
+        [ -d "$snap_dir/slot2" ] && rm -rf "$snap_dir/slot3" && mv "$snap_dir/slot2" "$snap_dir/slot3"
+        [ -d "$snap_dir/slot1" ] && mv "$snap_dir/slot1" "$snap_dir/slot2"
+        cp -a "$save_dir" "$snap_dir/slot1"
+        echo "[INFO] Save snapshot backed up to slot1"
+    fi
+}
+
+# Scan installed games in standard paths
+scan_installed_games() {
+    local paths=(
+        "$HOME/.local/share/Steam/steamapps/common/Limbo:limbo:48000:LIMBO"
+        "$HOME/.local/share/Steam/steamapps/common/Stardew Valley:StardewValley:413150:Stardew Valley"
+        "$HOME/.local/share/Steam/steamapps/common/Terraria:Terraria:105600:Terraria"
+        "$HOME/Games/Factorio:start.sh:427520:Factorio"
+        "$HOME/Games/RustedWarfare:start.sh:647960:Rusted Warfare"
+    )
+
+    for item in "${paths[@]}"; do
+        IFS=":" read -r gdir gbin appid title <<< "$item"
+        if [ -d "$gdir" ]; then
+            local status="STANDALONE"
+            if [ -f "$gdir/libsteam_api.so" ]; then
+                local sz
+                sz=$(stat -c%s "$gdir/libsteam_api.so" 2>/dev/null || echo 0)
+                if [ "$sz" -gt 9000000 ]; then
+                    status="GBE_FORK"
+                else
+                    status="VALVE_SO"
+                fi
+            fi
+            printf "%-8s\t%-22s\t%-12s\t%s\t%s\n" "$appid" "$title" "[$status]" "$gdir" "$gbin"
+        fi
+    done
+}
+
+# Preview pane generator for installed games
+preview_game() {
+    local appid="$1"
+    local title="$2"
+    local status="$3"
+    local gdir="$4"
+    local gbin="$5"
+
+    echo "========================================================"
+    echo " GAME DETAILS & RUNTIME STATUS"
+    echo "========================================================"
+    echo " Judul        : $title"
+    echo " AppID        : $appid"
+    echo " Status       : $status"
+    echo " Direktori    : $gdir"
+    echo " Executable   : $gdir/$gbin"
+
+    if [ -f "$gdir/$gbin" ]; then
+        echo " Arsitektur   : $(file -b "$gdir/$gbin" | cut -d',' -f1,2)"
+    fi
+
+    echo "--------------------------------------------------------"
+    echo " SAVEGAME & STORAGE"
+    if [ -d "$gdir/saves" ]; then
+        echo " Save Path    : $gdir/saves (PORTABLE)"
+        echo " Save Size    : $(du -sh "$gdir/saves" 2>/dev/null | cut -f1)"
+    else
+        echo " Save Path    : Default OS / Not isolated"
+    fi
+
+    if [ -d "$gdir/.save_snapshots" ]; then
+        local snaps
+        snaps=$(ls -d "$gdir/.save_snapshots"/slot* 2>/dev/null | wc -l)
+        echo " Snapshots    : $snaps slot aktif"
+    fi
+
+    echo " Total Size   : $(du -sh "$gdir" 2>/dev/null | cut -f1)"
+    echo "--------------------------------------------------------"
+    echo " ACTION KEYS:"
+    echo " <ENTER>       : Launch Game (Standalone + Mesa GL Thread)"
+    echo " <CTRL-S>      : Sync Savegame to $TUF_HOST"
+    echo " <CTRL-B>      : Trigger Manual Save Snapshot"
+    echo " <ESC>         : Back to Menu"
+    echo "========================================================"
+}
+
+# Launch game with performance wrapping
+launch_game() {
+    local gdir="$1"
+    local gbin="$2"
+    local title="$3"
+
+    echo "[INFO] Menyiapkan peluncuran: $title..."
+    backup_save "$gdir"
+
+    # Set Mesa performance env
+    export mesa_glthread=true
+    export vblank_mode=0
+
+    # Attempt CPU scaling governor if permitted
+    if [ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
+        echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+    fi
+
+    echo "[INFO] Menjalankan $title di Wayland..."
+    cd "$gdir"
+    ./"$gbin" "$@" || echo "[WARN] Game exited with code $?"
+
+    # Restore CPU governor to powersave
+    if [ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
+        echo powersave | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+    fi
+
+    clean_stale_locks
+    echo "[INFO] Game ditutup. Sesi bersih."
+}
+
+# Sync savegame to companion node
+sync_to_tuf() {
+    local gdir="$1"
+    local title="$2"
+    local sdir="$gdir/saves"
+
+    if [ ! -d "$sdir" ]; then
+        echo "[ERROR] Folder portable saves tidak ditemukan di $gdir"
+        return 1
+    fi
+
+    echo "[INFO] Memeriksa konektivitas ke $TUF_HOST..."
+    if ! ssh -q -o ConnectTimeout=1 -o BatchMode=yes "$TUF_HOST" exit 2>/dev/null; then
+        echo "[WARN] Node $TUF_HOST offline atau tidak terjangkau jaringan lokal."
+        return 1
+    fi
+
+    echo "[INFO] Menyinkronkan savegame $title ke $TUF_HOST..."
+    local rel_path="${gdir#$HOME/}"
+    ssh "$TUF_HOST" "mkdir -p ~/$rel_path"
+    rsync -avzP --exclude="*.tmp" "$sdir/" "$TUF_HOST:~/$rel_path/saves/"
+    echo "[VERIFIED] Sinkronisasi savegame selesai."
+}
+
+# Main Library View
+library_menu() {
+    clean_stale_locks
+
+    while true; do
+        local selection
+        selection=$(scan_installed_games | fzf \
+            --delimiter=$'\t' \
+            --with-nth=1,2,3 \
+            --header="VALKYRIE LIBRARY (Enter: Launch | Ctrl-S: Sync to TUF | Ctrl-B: Backup Save)" \
+            --prompt="Game > " \
+            --preview="/home/aomiqaza/.local/bin/game --preview {1} {2} {3} {4} {5}" \
+            --preview-window=right:55%:wrap \
+            --bind="ctrl-s:execute(/home/aomiqaza/.local/bin/game --sync {4} {2}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
+            --bind="ctrl-b:execute(/home/aomiqaza/.local/bin/game --backup {4}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
+        ) || break
+
+        if [ -n "$selection" ]; then
+            local sel_dir sel_bin sel_title
+            sel_dir=$(echo "$selection" | awk -F'\t' '{print $4}')
+            sel_bin=$(echo "$selection" | awk -F'\t' '{print $5}')
+            sel_title=$(echo "$selection" | awk -F'\t' '{print $2}')
+            launch_game "$sel_dir" "$sel_bin" "$sel_title"
+            read -r -p "Tekan [ENTER] untuk kembali ke Library..."
+        fi
+    done
+}
+
+# Live Steam Search View
+search_steam() {
+    echo -n "Masukkan nama game yang dicari: "
+    read -r query
+    [ -z "$query" ] && return
+
+    echo "[INFO] Mencari '$query' di Steam Store API..."
+    local encoded_query
+    encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$query")
+    local results
+    results=$(curl -s "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" | jq -r '.items[] | "\(.id)\t\(.name)"' 2>/dev/null)
+
+    if [ -z "$results" ]; then
+        echo "[INFO] Game tidak ditemukan."
+        sleep 1
+        return
+    fi
+
+    echo "$results" | fzf \
+        --delimiter=$'\t' \
+        --with-nth=1,2 \
+        --header="HASIL PENCARIAN STEAM (Pilih untuk melihat detail ProtonDB)" \
+        --prompt="Steam Store > " \
+        --preview='
+            appid={1}
+            echo "=========================================="
+            echo " STEAM METADATA & PROTONDB AUDIT"
+            echo "=========================================="
+            echo " AppID : $appid"
+            echo " Judul : {2}"
+            echo "------------------------------------------"
+            pdb=$(curl -s "https://www.protondb.com/api/v1/reports/summaries/$appid.json" 2>/dev/null)
+            if [ -n "$pdb" ] && [ "$pdb" != "null" ]; then
+                tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null)
+                score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null)
+                conf=$(echo "$pdb" | jq -r ".confidence // \"-\"" 2>/dev/null)
+                echo " ProtonDB Tier       : $tier"
+                echo " ProtonDB Score      : $score"
+                echo " Confidence          : $conf"
+            else
+                echo " ProtonDB Rating     : Belum ada laporan (Kemungkinan Native Linux)"
+            fi
+            echo "=========================================="
+        ' \
+        --preview-window=right:50%:wrap
+}
+
+# Export functions for subshells in fzf
+export -f preview_game sync_to_tuf backup_save
+
+# Top-level Menu
+case "${1:-}" in
+    --preview)
+        preview_game "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}"
+        ;;
+    --backup)
+        if [ -n "${2:-}" ]; then
+            backup_save "$2"
+        fi
+        ;;
+    --search)
+        search_steam
+        ;;
+    --sync)
+        if [ -n "${2:-}" ]; then
+            sync_to_tuf "$2" "${3:-Game}"
+        else
+            echo "Usage: game --sync <game_dir> [title]"
+        fi
+        ;;
+    *)
+        library_menu
+        ;;
+esac
