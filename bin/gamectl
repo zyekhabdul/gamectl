@@ -331,6 +331,7 @@ sync_to_tuf() {
 inject_game() {
     local target_dir="$1"
     local appid="${2:-}"
+    local sync_mode="${3:-all}"
 
     if [ ! -d "$target_dir" ]; then
         echo "[ERROR] Direktori target tidak ditemukan: $target_dir" >&2
@@ -437,7 +438,11 @@ EOF
         echo -n "$appid" > "$target_dir/steam_appid.txt"
         echo "[INFO] AppID $appid terdaftar di: $target_dir/steam_appid.txt"
         fetch_dlc "$target_dir" "$appid"
-        sync_steam "$appid" "$(basename "$target_dir")" "$target_dir"
+        if [ "$sync_mode" != "--no-sync" ] && [ "$sync_mode" != "no-sync" ] && [ "$sync_mode" != "standalone" ]; then
+            sync_steam "$appid" "$(basename "$target_dir")" "$target_dir"
+        else
+            echo "[INFO] Mode Standalone aktif: Melewati sinkronisasi Steam Client."
+        fi
     fi
 
     echo "[VERIFIED] Game berhasil diinjeksi GBE Fork (Arsitektur: $arch, Save: ./saves, AppID: ${appid:-None})"
@@ -530,15 +535,45 @@ ensure_downloader() {
 
 # Headless Game Downloader (Pengganti ACCELA & SteaMidra)
 download_game() {
-    local appid="$1"
-    local target_dir="${2:-}"
-    local title="${3:-}"
-    local mode="${4:-background}"
-
+    local appid="${1:-}"
     if [ -z "$appid" ]; then
-        echo "Usage: gamectl download <appid> [target_dir] [title] [--foreground|-f]" >&2
+        echo "Usage: gamectl download <appid> [target_dir] [title] [--raw|--inject-only|--all] [--foreground|-f]" >&2
         return 1
     fi
+    shift
+
+    local target_dir=""
+    local title=""
+    local action="all"     # "all", "inject", "raw"
+    local exec_mode="bg"   # "bg" or "fg"
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --raw|--download-only|--no-inject)
+                action="raw"
+                ;;
+            --inject-only|--standalone|--no-sync)
+                action="inject"
+                ;;
+            --all)
+                action="all"
+                ;;
+            --foreground|-f|foreground)
+                exec_mode="fg"
+                ;;
+            --background|-b|background)
+                exec_mode="bg"
+                ;;
+            *)
+                if [ -z "$target_dir" ]; then
+                    target_dir="$1"
+                elif [ -z "$title" ]; then
+                    title="$1"
+                fi
+                ;;
+        esac
+        shift
+    done
 
     local depot_bin
     depot_bin=$(ensure_downloader) || return 1
@@ -576,19 +611,32 @@ download_game() {
     echo " AppID     : $appid"
     echo " Judul     : $title"
     echo " Target    : $target_dir"
+    echo " Paket     : $action (raw / inject / all)"
     echo " Log Stream: $log_file"
     [ -n "$steam_user" ] && echo " Steam User: $steam_user"
     echo "=========================================="
 
-    if [ "$mode" = "--foreground" ] || [ "$mode" = "-f" ] || [ "$mode" = "foreground" ]; then
+    if [ "$exec_mode" = "fg" ]; then
         echo "[INFO] Menjalankan unduhan di foreground..."
         echo "[INFO] Mulai unduh AppID $appid ke $target_dir pada $(date)" > "$log_file"
         "$depot_bin" -app "$appid" -os linux "${extra_args[@]}" -dir "$target_dir" 2>&1 | tee -a "$log_file"
         local dl_status="${PIPESTATUS[0]}"
         if [ "$dl_status" -eq 0 ]; then
-            echo "[INFO] Unduhan selesai. Menjalankan auto-inject..."
-            "$SELF_BIN" inject "$target_dir" "$appid"
-            echo "[SUCCESS] Instalasi selesai untuk $title ($appid)."
+            case "$action" in
+                raw)
+                    echo "[SUCCESS] Unduhan aset mentah selesai untuk $title ($appid)."
+                    ;;
+                inject)
+                    echo "[INFO] Menjalankan injeksi GBE Fork standalone..."
+                    "$SELF_BIN" inject "$target_dir" "$appid" --no-sync
+                    echo "[SUCCESS] Unduh dan injeksi standalone selesai untuk $title ($appid)."
+                    ;;
+                all|*)
+                    echo "[INFO] Menjalankan injeksi GBE Fork dan sinkronisasi Steam Client..."
+                    "$SELF_BIN" inject "$target_dir" "$appid"
+                    echo "[SUCCESS] Instalasi All-in-One selesai untuk $title ($appid)."
+                    ;;
+            esac
         else
             echo "[ERROR] Unduhan gagal (exit code: $dl_status). Cek: $log_file" >&2
             return "$dl_status"
@@ -600,9 +648,21 @@ download_game() {
             "$depot_bin" -app "$appid" -os linux "${extra_args[@]}" -dir "$target_dir" >> "$log_file" 2>&1
             local bg_status=$?
             if [ $bg_status -eq 0 ]; then
-                echo "[INFO] Unduhan selesai. Menjalankan auto-inject..." >> "$log_file"
-                "$SELF_BIN" inject "$target_dir" "$appid" >> "$log_file" 2>&1
-                echo "[SUCCESS] Pemasangan lengkap selesai untuk $title ($appid) pada $(date)." >> "$log_file"
+                case "$action" in
+                    raw)
+                        echo "[SUCCESS] Unduhan aset mentah selesai untuk $title ($appid) pada $(date)." >> "$log_file"
+                        ;;
+                    inject)
+                        echo "[INFO] Menjalankan injeksi GBE Fork standalone..." >> "$log_file"
+                        "$SELF_BIN" inject "$target_dir" "$appid" --no-sync >> "$log_file" 2>&1
+                        echo "[SUCCESS] Unduh dan injeksi standalone selesai untuk $title ($appid) pada $(date)." >> "$log_file"
+                        ;;
+                    all|*)
+                        echo "[INFO] Menjalankan auto-inject dan sinkronisasi Steam Client..." >> "$log_file"
+                        "$SELF_BIN" inject "$target_dir" "$appid" >> "$log_file" 2>&1
+                        echo "[SUCCESS] Pemasangan lengkap All-in-One selesai untuk $title ($appid) pada $(date)." >> "$log_file"
+                        ;;
+                esac
             else
                 echo "[ERROR] Unduhan gagal (exit code: $bg_status) pada $(date)." >> "$log_file"
             fi
@@ -906,6 +966,14 @@ search_steam() {
                 done
             fi
 
+            echo "Pilih aksi untuk game terpasang:"
+            echo "  1) Luncurkan game langsung"
+            echo "  2) Injeksi GBE Fork saja (Standalone ./saves & DLC.txt)"
+            echo "  3) Injeksi GBE + Sync Steam Client (All-in-One full DLC)"
+            echo "  4) Sync ke Steam Client resmi saja"
+            echo "  5) Batal / Kembali"
+            read -r -p "Pilihan [1-5]: " act_opt
+
             case "$act_opt" in
                 1)
                     local gbin
@@ -917,7 +985,12 @@ search_steam() {
                     fi
                     ;;
                 2)
+                    inject_game "$gdir" "$sel_id" --no-sync
+                    ;;
+                3)
                     inject_game "$gdir" "$sel_id"
+                    ;;
+                4)
                     sync_steam "$sel_id" "$sel_name" "$gdir"
                     ;;
                 *)
@@ -925,17 +998,25 @@ search_steam() {
                     ;;
             esac
         else
-            echo "Pilih mode aksi:"
-            echo "  1) Unduh di background (non-blocking, auto-inject & sync saat selesai)"
-            echo "  2) Unduh di foreground (stream log langsung ke terminal)"
-            echo "  3) Batal"
-            read -r -p "Pilihan [1-3]: " opt
+            echo "Pilih paket instalasi untuk $sel_name:"
+            echo "  1) [All-in-One] Unduh + Injeksi GBE + Sync Steam (Background)"
+            echo "  2) [All-in-One] Unduh + Injeksi GBE + Sync Steam (Foreground Stream)"
+            echo "  3) [Standalone] Unduh + Injeksi GBE saja (Tanpa Client Steam)"
+            echo "  4) [Raw Download] Unduh aset mentah saja (Tanpa Injeksi)"
+            echo "  5) Batal"
+            read -r -p "Pilihan [1-5]: " opt
             case "$opt" in
                 1)
-                    download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" "background"
+                    download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --all --background
                     ;;
                 2)
-                    download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" "foreground"
+                    download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --all --foreground
+                    ;;
+                3)
+                    download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --inject-only --background
+                    ;;
+                4)
+                    download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --raw --background
                     ;;
                 *)
                     echo "[INFO] Aksi dibatalkan."
@@ -953,9 +1034,9 @@ export -f preview_game sync_to_tuf backup_save inject_game fetch_dlc download_ga
 case "${1:-}" in
     inject|--inject)
         if [ -n "${2:-}" ]; then
-            inject_game "$2" "${3:-}"
+            inject_game "$2" "${3:-}" "${4:-all}"
         else
-            echo "Usage: gamectl inject <game_dir> [appid]"
+            echo "Usage: gamectl inject <game_dir> [appid] [--no-sync|--all]"
             exit 1
         fi
         ;;
@@ -969,9 +1050,9 @@ case "${1:-}" in
         ;;
     download|--download)
         if [ -n "${2:-}" ]; then
-            download_game "$2" "${3:-}" "${4:-}" "${5:-}"
+            download_game "$2" "${@:3}"
         else
-            echo "Usage: gamectl download <appid> [target_dir] [title] [--foreground|-f]"
+            echo "Usage: gamectl download <appid> [dir] [title] [--raw|--inject-only|--all] [--foreground|-f]"
             exit 1
         fi
         ;;
@@ -1019,9 +1100,11 @@ gamectl - Sovereign TUI Game Manager & Launcher (Zero-Bloat)
 
 Usage:
   gamectl             Buka antarmuka TUI library game
-  gamectl download <appid> [dir] [title] Unduh game headless via DepotDownloader
-  gamectl downloads               Pantau status & log unduhan aktif
-  gamectl inject <dir> [appid]    Injeksi GBE Fork standalone & portable save
+  gamectl download <appid> [dir] [title] [--raw|--inject-only|--all] [-f]
+                      Unduh game headless via DepotDownloader (pilihan paket fleksibel)
+  gamectl downloads   Pantau status & log unduhan aktif
+  gamectl inject <dir> [appid] [--no-sync|--all]
+                      Injeksi GBE Fork standalone & portable save
   gamectl fetch-dlc <dir> [appid] Unduh & tulis daftar DLC ke steam_settings/DLC.txt
   gamectl sync-steam <appid> [title] [dir] Sinkronisasi Steam Client & SLSsteam full DLC
   gamectl --search    Cari game di Steam Store & audit ProtonDB rating
