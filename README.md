@@ -9,6 +9,7 @@ Dibuat khusus untuk arsitektur workstation efisien (seperti ThinkPad T440p) yang
 ## Fitur Utama
 
 - **Zero-Bloat & Instant Startup**: Ditulis murni dalam POSIX Bash + `fzf` + `jq`. Memangkas 99% overhead memori dibandingkan client grafis konvensional.
+- **Dynamic Multi-Library Autodetection**: Otomatis mendeteksi game yang terpasang dari seluruh direktori Steam (`libraryfolders.vdf` + ACF manifests), direktori portabel `~/Games/`, Lutris, serta custom path melalui `~/.config/gamectl/libraries` atau variabel `GAMECTL_LIBRARY_DIRS`.
 - **Split-Pane Live Inspection**: Kolom kiri menampilkan daftar pustaka game; kolom kanan menampilkan metadata biner, arsitektur ELF (32-bit / 64-bit), status runner GBE Fork, dan ukuran savegame secara real-time.
 - **Savegame Snapshot Protection (Anti-Data-Loss)**: Membuat cadangan otomatis rotasi 3-slot (`slot1`, `slot2`, `slot3`) sebelum setiap game dijalankan, melindungi progres dari dirty shutdown atau crash.
 - **Dynamic Hardware Profiling**: Otomatis menggeser CPU governor ke `performance` saat sesi game aktif, dan mengembalikannya ke `powersave` begitu game ditutup.
@@ -34,7 +35,7 @@ Dibuat khusus untuk arsitektur workstation efisien (seperti ThinkPad T440p) yang
 Pastikan dependensi sistem terpasang (`fzf`, `jq`, `curl`, `rsync`, `file`):
 
 ```bash
-git clone git@github.com:<username>/gamectl.git
+git clone git@github.com:zyekhabdul/gamectl.git
 cd gamectl
 ./install.sh
 ```
@@ -52,12 +53,17 @@ Installer akan membuat symlink eksekutabel ke `~/.local/bin/gamectl` dan alias `
    game
    ```
 
-2. **Cari Game di Steam Store & Cek ProtonDB**:
+2. **Daftar Game yang Terdeteksi**:
+   ```bash
+   gamectl --list
+   ```
+
+3. **Cari Game di Steam Store & Cek ProtonDB**:
    ```bash
    gamectl --search
    ```
 
-3. **Sinkronisasi Manual Direktori Tertentu**:
+4. **Sinkronisasi Manual Direktori Tertentu**:
    ```bash
    gamectl --sync /path/to/game "Game Title"
    ```

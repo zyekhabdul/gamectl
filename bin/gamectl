@@ -13,9 +13,10 @@
 
 set -uo pipefail
 
-TUF_HOST="tuf-gaming-arch"
-GBE_X64="$HOME/.local/share/gbe-fork/regular/x64/libsteam_api.so"
-GBE_X86="$HOME/.local/share/gbe-fork/regular/x86/libsteam_api.so"
+SELF_BIN="$(readlink -f "${BASH_SOURCE[0]}")"
+TUF_HOST="${GAMECTL_TUF_HOST:-tuf-gaming-arch}"
+GBE_X64="${GAMECTL_GBE_X64:-$HOME/.local/share/gbe-fork/regular/x64/libsteam_api.so}"
+GBE_X86="${GAMECTL_GBE_X86:-$HOME/.local/share/gbe-fork/regular/x86/libsteam_api.so}"
 
 # Pre-flight cleanup of orphaned sockets and locks
 clean_stale_locks() {
@@ -37,31 +38,185 @@ backup_save() {
     fi
 }
 
-# Scan installed games in standard paths
-scan_installed_games() {
-    local paths=(
-        "$HOME/.local/share/Steam/steamapps/common/Limbo:limbo:48000:LIMBO"
-        "$HOME/.local/share/Steam/steamapps/common/Stardew Valley:StardewValley:413150:Stardew Valley"
-        "$HOME/.local/share/Steam/steamapps/common/Terraria:Terraria:105600:Terraria"
-        "$HOME/Games/Factorio:start.sh:427520:Factorio"
-        "$HOME/Games/RustedWarfare:start.sh:647960:Rusted Warfare"
-    )
+# Dynamic executable finder for game directory
+find_game_binary() {
+    local dir="$1"
+    local base
+    base=$(basename "$dir")
+    local clean_base="${base// /}"
+    local lower_base="${base,,}"
+    local lower_clean="${clean_base,,}"
 
-    for item in "${paths[@]}"; do
-        IFS=":" read -r gdir gbin appid title <<< "$item"
-        if [ -d "$gdir" ]; then
+    # Priority 1: Common launch scripts or matching names
+    local candidates=(
+        "start.sh" "run.sh" "launch.sh" "start" "run"
+        "$base" "$clean_base" "$lower_base" "$lower_clean"
+    )
+    for c in "${candidates[@]}"; do
+        if [ -x "$dir/$c" ] && [ ! -d "$dir/$c" ]; then
+            echo "$c"
+            return 0
+        fi
+    done
+
+    # Priority 2: Any root executable file excluding assets/libs/runtime dumps
+    local f fname
+    for f in "$dir"/*; do
+        if [ -x "$f" ] && [ ! -d "$f" ]; then
+            fname=$(basename "$f")
+            case "$fname" in
+                *.so|*.so.*|*.dll|*.dylib|installscript.vdf|*.png|*.bmp|*.txt|*.pkg|createdump|monoconfig|monomachineconfig)
+                    continue
+                    ;;
+                *)
+                    echo "$fname"
+                    return 0
+                    ;;
+            esac
+        fi
+    done
+    return 1
+}
+
+# Discover all configured Steam library paths
+get_steam_libraries() {
+    local primary="$HOME/.local/share/Steam/steamapps"
+    [ -d "$primary" ] && echo "$primary"
+
+    local vdf="$primary/libraryfolders.vdf"
+    if [ -f "$vdf" ]; then
+        local line path
+        while read -r line; do
+            path=$(echo "$line" | sed -E 's/.*"path"[[:space:]]+"([^"]+)".*/\1\/steamapps/')
+            if [ -d "$path" ] && [ "$path" != "$primary" ]; then
+                echo "$path"
+            fi
+        done < <(grep -E '^\s*"path"' "$vdf" 2>/dev/null || true)
+    fi
+}
+
+# Scan installed games dynamically in standard & custom paths
+scan_installed_games() {
+    declare -A seen_dirs
+
+    # 1. Scan Steam Libraries
+    local steam_lib
+    while read -r steam_lib; do
+        [ -d "$steam_lib" ] || continue
+        for acf in "$steam_lib"/appmanifest_*.acf; do
+            [ -f "$acf" ] || continue
+
+            local appid name installdir
+            appid=$(grep -E '^\s*"appid"' "$acf" | head -n 1 | sed -E 's/.*"appid"[[:space:]]+"([0-9]+)".*/\1/')
+            name=$(grep -E '^\s*"name"' "$acf" | head -n 1 | sed -E 's/.*"name"[[:space:]]+"([^"]+)".*/\1/')
+            installdir=$(grep -E '^\s*"installdir"' "$acf" | head -n 1 | sed -E 's/.*"installdir"[[:space:]]+"([^"]+)".*/\1/')
+
+            # Filter out Proton, Steam Linux Runtimes, and tools
+            [[ "$name" =~ ^(Steam Linux Runtime|Proton|Steamworks) ]] && continue
+            [ -z "$installdir" ] && continue
+
+            local gdir="$steam_lib/common/$installdir"
+            [ -d "$gdir" ] || continue
+            [[ -v seen_dirs["$gdir"] ]] && continue
+            seen_dirs["$gdir"]=1
+
+            local gbin
+            gbin=$(find_game_binary "$gdir") || continue
+            [ -z "$gbin" ] && continue
+
             local status="STANDALONE"
+            local so_file=""
             if [ -f "$gdir/libsteam_api.so" ]; then
+                so_file="$gdir/libsteam_api.so"
+            elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
+                so_file="$gdir/lib64/libsteam_api.so"
+            fi
+
+            if [ -n "$so_file" ]; then
                 local sz
-                sz=$(stat -c%s "$gdir/libsteam_api.so" 2>/dev/null || echo 0)
+                sz=$(stat -c%s "$so_file" 2>/dev/null || echo 0)
                 if [ "$sz" -gt 9000000 ]; then
                     status="GBE_FORK"
                 else
                     status="VALVE_SO"
                 fi
             fi
+
+            printf "%-8s\t%-22s\t%-12s\t%s\t%s\n" "$appid" "$name" "[$status]" "$gdir" "$gbin"
+        done
+    done < <(get_steam_libraries)
+
+    # 2. Scan Custom & Standalone Directories
+    local custom_search_dirs=(
+        "$HOME/Games"
+        "$HOME/.local/share/lutris/games"
+    )
+
+    # Allow extending library directories via ~/.config/gamectl/libraries or env
+    if [ -f "$HOME/.config/gamectl/libraries" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            line="${line#"${line%%[![:space:]]*}"}" # trim leading
+            line="${line%"${line##*[![:space:]]}"}" # trim trailing
+            [ -z "$line" ] && continue
+            [[ "$line" =~ ^# ]] && continue
+            custom_search_dirs+=("${line/#\~/$HOME}")
+        done < "$HOME/.config/gamectl/libraries"
+    fi
+
+    if [ -n "${GAMECTL_LIBRARY_DIRS:-}" ]; then
+        IFS=":" read -r -a extra_dirs <<< "$GAMECTL_LIBRARY_DIRS"
+        custom_search_dirs+=("${extra_dirs[@]}")
+    fi
+
+    for base_dir in "${custom_search_dirs[@]}"; do
+        [ -d "$base_dir" ] || continue
+        for gdir in "$base_dir"/*; do
+            [ -d "$gdir" ] || continue
+            [[ -v seen_dirs["$gdir"] ]] && continue
+            seen_dirs["$gdir"]=1
+
+            local folder_name
+            folder_name=$(basename "$gdir")
+            [[ "$folder_name" =~ ^\. ]] && continue
+
+            local gbin
+            gbin=$(find_game_binary "$gdir") || continue
+            [ -z "$gbin" ] && continue
+
+            local appid="STANDALONE"
+            if [ -f "$gdir/steam_appid.txt" ]; then
+                appid=$(tr -dc '0-9' < "$gdir/steam_appid.txt")
+                [ -z "$appid" ] && appid="STANDALONE"
+            elif [ -f "$gdir/.gamectl_appid" ]; then
+                appid=$(tr -dc '0-9' < "$gdir/.gamectl_appid")
+                [ -z "$appid" ] && appid="STANDALONE"
+            fi
+
+            local title="$folder_name"
+            if [ -f "$gdir/.gamectl_title" ]; then
+                title=$(head -n 1 "$gdir/.gamectl_title")
+            fi
+
+            local status="STANDALONE"
+            local so_file=""
+            if [ -f "$gdir/libsteam_api.so" ]; then
+                so_file="$gdir/libsteam_api.so"
+            elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
+                so_file="$gdir/lib64/libsteam_api.so"
+            fi
+
+            if [ -n "$so_file" ]; then
+                local sz
+                sz=$(stat -c%s "$so_file" 2>/dev/null || echo 0)
+                if [ "$sz" -gt 9000000 ]; then
+                    status="GBE_FORK"
+                else
+                    status="VALVE_SO"
+                fi
+            fi
+
             printf "%-8s\t%-22s\t%-12s\t%s\t%s\n" "$appid" "$title" "[$status]" "$gdir" "$gbin"
-        fi
+        done
     done
 }
 
@@ -177,10 +332,10 @@ library_menu() {
             --with-nth=1,2,3 \
             --header="GAMECTL LIBRARY (Enter: Launch | Ctrl-S: Sync to TUF | Ctrl-B: Backup Save)" \
             --prompt="Game > " \
-            --preview="/home/aomiqaza/.local/bin/game --preview {1} {2} {3} {4} {5}" \
+            --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:wrap \
-            --bind="ctrl-s:execute(/home/aomiqaza/.local/bin/game --sync {4} {2}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
-            --bind="ctrl-b:execute(/home/aomiqaza/.local/bin/game --backup {4}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
+            --bind="ctrl-s:execute($SELF_BIN --sync {4} {2}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
+            --bind="ctrl-b:execute($SELF_BIN --backup {4}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
         ) || break
 
         if [ -n "$selection" ]; then
@@ -261,8 +416,28 @@ case "${1:-}" in
         if [ -n "${2:-}" ]; then
             sync_to_tuf "$2" "${3:-Game}"
         else
-            echo "Usage: game --sync <game_dir> [title]"
+            echo "Usage: gamectl --sync <game_dir> [title]"
         fi
+        ;;
+    --list)
+        scan_installed_games
+        ;;
+    --version|-v)
+        echo "gamectl v1.1.0 (sovereign native TUI)"
+        ;;
+    --help|-h)
+        cat <<EOF
+gamectl - Sovereign TUI Game Manager & Launcher (Zero-Bloat)
+
+Usage:
+  gamectl             Buka antarmuka TUI library game
+  gamectl --search    Cari game di Steam Store & audit ProtonDB rating
+  gamectl --list      Tampilkan daftar game yang terdeteksi
+  gamectl --sync <dir> [title]  Sinkronisasi savegame ke companion node
+  gamectl --backup <dir>        Buat snapshot backup savegame
+  gamectl --help      Tampilkan panduan ini
+  gamectl --version   Tampilkan versi aktif
+EOF
         ;;
     *)
         library_menu
