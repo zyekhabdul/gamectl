@@ -22,5 +22,11 @@ chmod +x "$SRC_BIN"
 ln -sf "$SRC_BIN" "$BIN_DIR/gamectl"
 ln -sf "$SRC_BIN" "$BIN_DIR/game"
 
+# Ensure DepotDownloader runtime is provisioned
+if ! command -v depotdownloader >/dev/null 2>&1; then
+    echo "[INFO] Menyiapkan runtime headless downloader (DepotDownloader)..."
+    "$SRC_BIN" ensure-downloader >/dev/null 2>&1 || true
+fi
+
 echo "[VERIFIED] gamectl berhasil di-link ke $BIN_DIR/gamectl dan $BIN_DIR/game"
 echo "Jalankan perintah 'gamectl' atau 'game' di terminal untuk membuka antarmuka."

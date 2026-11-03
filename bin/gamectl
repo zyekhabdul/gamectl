@@ -499,6 +499,108 @@ fetch_dlc() {
     fi
 }
 
+# Ensure DepotDownloader runtime is available
+ensure_downloader() {
+    local depot_bin=""
+    if command -v depotdownloader >/dev/null 2>&1; then
+        depot_bin="$(command -v depotdownloader)"
+    elif [ -x "$HOME/.local/share/gamectl/bin/DepotDownloader" ]; then
+        depot_bin="$HOME/.local/share/gamectl/bin/DepotDownloader"
+    elif [ -x "$HOME/.local/bin/depotdownloader" ]; then
+        depot_bin="$HOME/.local/bin/depotdownloader"
+    else
+        echo "[INFO] Mengunduh DepotDownloader standalone binary..." >&2
+        mkdir -p "$HOME/.local/share/gamectl/bin" "$HOME/.local/bin"
+        local dl_url="https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_3.4.0/DepotDownloader-linux-x64.zip"
+        if curl -sL "$dl_url" -o /tmp/depotdownloader.zip 2>/dev/null; then
+            unzip -q -o /tmp/depotdownloader.zip -d "$HOME/.local/share/gamectl/bin/"
+            chmod +x "$HOME/.local/share/gamectl/bin/DepotDownloader"
+            ln -sf "$HOME/.local/share/gamectl/bin/DepotDownloader" "$HOME/.local/bin/depotdownloader"
+            rm -f /tmp/depotdownloader.zip
+            depot_bin="$HOME/.local/share/gamectl/bin/DepotDownloader"
+            echo "[VERIFIED] DepotDownloader terpasang di $depot_bin" >&2
+        else
+            echo "[ERROR] Gagal mengunduh DepotDownloader dari GitHub." >&2
+            return 1
+        fi
+    fi
+    echo "$depot_bin"
+}
+
+# Headless Game Downloader (Pengganti ACCELA & SteaMidra)
+download_game() {
+    local appid="$1"
+    local target_dir="${2:-}"
+    local title="${3:-}"
+    local mode="${4:-background}"
+
+    if [ -z "$appid" ]; then
+        echo "Usage: gamectl download <appid> [target_dir] [title] [--foreground|-f]" >&2
+        return 1
+    fi
+
+    local depot_bin
+    depot_bin=$(ensure_downloader) || return 1
+
+    if [ -z "$title" ]; then
+        title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
+        [ -z "$title" ] && title="AppID_${appid}"
+    fi
+
+    local safe_title
+    safe_title=$(echo "$title" | tr -cd '[:alnum:] _-')
+    [ -z "$safe_title" ] && safe_title="$appid"
+
+    if [ -z "$target_dir" ]; then
+        target_dir="$HOME/Games/$safe_title"
+    fi
+
+    mkdir -p "$target_dir"
+    target_dir="$(cd "$target_dir" && pwd)"
+    local log_file="/tmp/gamectl_dl_${appid}.log"
+
+    echo "=========================================="
+    echo " HEADLESS GAME DOWNLOADER (DepotDownloader)"
+    echo "=========================================="
+    echo " AppID     : $appid"
+    echo " Judul     : $title"
+    echo " Target    : $target_dir"
+    echo " Log Stream: $log_file"
+    echo "=========================================="
+
+    if [ "$mode" = "--foreground" ] || [ "$mode" = "-f" ] || [ "$mode" = "foreground" ]; then
+        echo "[INFO] Menjalankan unduhan di foreground..."
+        echo "[INFO] Mulai unduh AppID $appid ke $target_dir pada $(date)" > "$log_file"
+        "$depot_bin" -app "$appid" -os linux -dir "$target_dir" 2>&1 | tee -a "$log_file"
+        local dl_status="${PIPESTATUS[0]}"
+        if [ "$dl_status" -eq 0 ]; then
+            echo "[INFO] Unduhan selesai. Menjalankan auto-inject..."
+            "$SELF_BIN" inject "$target_dir" "$appid"
+            echo "[SUCCESS] Instalasi selesai untuk $title ($appid)."
+        else
+            echo "[ERROR] Unduhan gagal (exit code: $dl_status). Cek: $log_file" >&2
+            return "$dl_status"
+        fi
+    else
+        echo "[INFO] Meluncurkan proses unduh di background..."
+        (
+            echo "[INFO] Mulai unduh AppID $appid ke $target_dir pada $(date)" > "$log_file"
+            "$depot_bin" -app "$appid" -os linux -dir "$target_dir" >> "$log_file" 2>&1
+            local bg_status=$?
+            if [ $bg_status -eq 0 ]; then
+                echo "[INFO] Unduhan selesai. Menjalankan auto-inject..." >> "$log_file"
+                "$SELF_BIN" inject "$target_dir" "$appid" >> "$log_file" 2>&1
+                echo "[SUCCESS] Pemasangan lengkap selesai untuk $title ($appid) pada $(date)." >> "$log_file"
+            else
+                echo "[ERROR] Unduhan gagal (exit code: $bg_status) pada $(date)." >> "$log_file"
+            fi
+        ) &
+        local pid=$!
+        echo "[VERIFIED] Unduhan berjalan di background (PID: $pid)."
+        echo "Pantau progres: tail -f $log_file"
+    fi
+}
+
 # Main Library View
 library_menu() {
     clean_stale_locks
@@ -575,7 +677,7 @@ search_steam() {
 }
 
 # Export functions for subshells in fzf
-export -f preview_game sync_to_tuf backup_save inject_game fetch_dlc
+export -f preview_game sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader
 
 # Top-level Menu
 case "${1:-}" in
@@ -594,6 +696,17 @@ case "${1:-}" in
             echo "Usage: gamectl fetch-dlc <game_dir> [appid]"
             exit 1
         fi
+        ;;
+    download|--download)
+        if [ -n "${2:-}" ]; then
+            download_game "$2" "${3:-}" "${4:-}" "${5:-}"
+        else
+            echo "Usage: gamectl download <appid> [target_dir] [title] [--foreground|-f]"
+            exit 1
+        fi
+        ;;
+    ensure-downloader)
+        ensure_downloader
         ;;
     --preview)
         preview_game "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}"
@@ -625,6 +738,7 @@ gamectl - Sovereign TUI Game Manager & Launcher (Zero-Bloat)
 
 Usage:
   gamectl             Buka antarmuka TUI library game
+  gamectl download <appid> [dir] [title] Unduh game headless via DepotDownloader
   gamectl inject <dir> [appid]    Injeksi GBE Fork standalone & portable save
   gamectl fetch-dlc <dir> [appid] Unduh & tulis daftar DLC ke steam_settings/DLC.txt
   gamectl --search    Cari game di Steam Store & audit ProtonDB rating

@@ -38,10 +38,10 @@ Target: Menggantikan total ekosistem SLSsteamMoon + ACCELA + Headcrab + SteaMidr
 - [x] Integrasi otomatis fungsi ini ke dalam alur `gamectl inject`.
 
 ### Chunk 3: Integrasi Headless Downloader Engine (Pengganti ACCELA)
-- [ ] Penyediaan runtime headless downloader CLI (pemeriksaan ketersediaan `depotdownloader` / wrapper SteamCMD).
-- [ ] Implementasi sub-command: `gamectl download <appid> [target_dir] [title]`.
-- [ ] Peluncuran proses download di latar belakang dengan pencatatan log stream non-blocking ke `/tmp/dl_${APPID}.log`.
-- [ ] Hook otomatis: panggil `gamectl inject` begitu proses download tuntas (exit code 0).
+- [x] Penyediaan runtime headless downloader CLI (pemeriksaan ketersediaan `depotdownloader` / wrapper SteamCMD).
+- [x] Implementasi sub-command: `gamectl download <appid> [target_dir] [title]`.
+- [x] Peluncuran proses download di latar belakang dengan pencatatan log stream non-blocking ke `/tmp/dl_${APPID}.log`.
+- [x] Hook otomatis: panggil `gamectl inject` begitu proses download tuntas (exit code 0).
 
 ### Chunk 4: Redesain TUI Search Berorientasi Aksi (`gamectl --search`)
 - [ ] Tambahkan status instalasi lokal pada preview search: cek apakah AppID sudah ada di Steam atau `~/Games/`.
