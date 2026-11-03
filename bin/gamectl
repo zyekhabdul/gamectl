@@ -560,6 +560,16 @@ download_game() {
     target_dir="$(cd "$target_dir" && pwd)"
     local log_file="/tmp/gamectl_dl_${appid}.log"
 
+    local extra_args=()
+    local user_cfg="$HOME/.config/gamectl/steam_user"
+    local steam_user="${GAMECTL_STEAM_USER:-}"
+    if [ -z "$steam_user" ] && [ -f "$user_cfg" ]; then
+        steam_user=$(head -n 1 "$user_cfg" | tr -d '[:space:]')
+    fi
+    if [ -n "$steam_user" ]; then
+        extra_args+=("-username" "$steam_user" "-remember-password")
+    fi
+
     echo "=========================================="
     echo " HEADLESS GAME DOWNLOADER (DepotDownloader)"
     echo "=========================================="
@@ -567,12 +577,13 @@ download_game() {
     echo " Judul     : $title"
     echo " Target    : $target_dir"
     echo " Log Stream: $log_file"
+    [ -n "$steam_user" ] && echo " Steam User: $steam_user"
     echo "=========================================="
 
     if [ "$mode" = "--foreground" ] || [ "$mode" = "-f" ] || [ "$mode" = "foreground" ]; then
         echo "[INFO] Menjalankan unduhan di foreground..."
         echo "[INFO] Mulai unduh AppID $appid ke $target_dir pada $(date)" > "$log_file"
-        "$depot_bin" -app "$appid" -os linux -dir "$target_dir" 2>&1 | tee -a "$log_file"
+        "$depot_bin" -app "$appid" -os linux "${extra_args[@]}" -dir "$target_dir" 2>&1 | tee -a "$log_file"
         local dl_status="${PIPESTATUS[0]}"
         if [ "$dl_status" -eq 0 ]; then
             echo "[INFO] Unduhan selesai. Menjalankan auto-inject..."
@@ -586,7 +597,7 @@ download_game() {
         echo "[INFO] Meluncurkan proses unduh di background..."
         (
             echo "[INFO] Mulai unduh AppID $appid ke $target_dir pada $(date)" > "$log_file"
-            "$depot_bin" -app "$appid" -os linux -dir "$target_dir" >> "$log_file" 2>&1
+            "$depot_bin" -app "$appid" -os linux "${extra_args[@]}" -dir "$target_dir" >> "$log_file" 2>&1
             local bg_status=$?
             if [ $bg_status -eq 0 ]; then
                 echo "[INFO] Unduhan selesai. Menjalankan auto-inject..." >> "$log_file"
@@ -599,6 +610,30 @@ download_game() {
         local pid=$!
         echo "[VERIFIED] Unduhan berjalan di background (PID: $pid)."
         echo "Pantau progres: tail -f $log_file"
+    fi
+}
+
+# List active and recent downloads
+list_downloads() {
+    echo "=========================================="
+    echo " STATUS UNDUHAN GAMECTL (DepotDownloader)"
+    echo "=========================================="
+    local count=0
+    for log in /tmp/gamectl_dl_*.log; do
+        [ -f "$log" ] || continue
+        count=$((count + 1))
+        local appid
+        appid=$(basename "$log" | sed -E 's/gamectl_dl_([0-9]+)\.log/\1/')
+        local status="[SELESAI/BERHENTI]"
+        if pgrep -f "DepotDownloader.*-app ${appid}" >/dev/null 2>&1; then
+            status="[SEDANG MENGUNDUH]"
+        fi
+        echo "$status AppID: $appid | Log: $log"
+        tail -n 2 "$log" 2>/dev/null | sed 's/^/  > /'
+        echo "------------------------------------------"
+    done
+    if [ $count -eq 0 ]; then
+        echo "[INFO] Tidak ada riwayat atau proses unduhan aktif di /tmp/."
     fi
 }
 
@@ -851,7 +886,7 @@ search_steam() {
 }
 
 # Export functions for subshells in fzf
-export -f preview_game sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam
+export -f preview_game sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads
 
 # Top-level Menu
 case "${1:-}" in
@@ -878,6 +913,9 @@ case "${1:-}" in
             echo "Usage: gamectl download <appid> [target_dir] [title] [--foreground|-f]"
             exit 1
         fi
+        ;;
+    downloads|--downloads)
+        list_downloads
         ;;
     sync-steam|--sync-steam)
         if [ -n "${2:-}" ]; then
@@ -921,6 +959,7 @@ gamectl - Sovereign TUI Game Manager & Launcher (Zero-Bloat)
 Usage:
   gamectl             Buka antarmuka TUI library game
   gamectl download <appid> [dir] [title] Unduh game headless via DepotDownloader
+  gamectl downloads               Pantau status & log unduhan aktif
   gamectl inject <dir> [appid]    Injeksi GBE Fork standalone & portable save
   gamectl fetch-dlc <dir> [appid] Unduh & tulis daftar DLC ke steam_settings/DLC.txt
   gamectl sync-steam <appid> [title] [dir] Sinkronisasi Steam Client & SLSsteam full DLC
