@@ -40,7 +40,7 @@ Memperkuat instalasi dan kesiapan lingkungan `gamectl` agar bersifat *turnkey* (
   - Di `install.sh`, otomatis pasang file ke `~/.local/share/applications/gamectl.desktop`.
   - DoD: File desktop tervalidasi via `desktop-file-validate` (bila terpasang) dan terdaftar di `~/.local/share/applications/`.
 
-- [ ] **Chunk 6: Pembaruan Dokumentasi & Uji Verifikasi Empiris**
+- [x] **Chunk 6: Pembaruan Dokumentasi & Uji Verifikasi Empiris**
   - Perbarui `README.md` dan `docs/GUIDE.md` untuk mendokumentasikan file konfigurasi, template, autocompletion, dan desktop entry.
   - Jalankan pengujian empiris end-to-end: `./install.sh`, uji completion, uji syntax `bash -n bin/gamectl`, uji fallback YAML.
   - DoD: Seluruh pengujian menghasilkan exit code 0 dan checkpoint RAG tersimpan.

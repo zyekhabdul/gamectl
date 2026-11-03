@@ -24,10 +24,12 @@ Pastikan paket berikut telah terpasang pada distribusi Linux:
 - `curl` (HTTP client untuk discovery metadata)
 - `rsync` & `openssh` (protokol transfer savegame multi-node)
 - `file` (inspeksi header binary ELF 32-bit / 64-bit)
+- `unzip` (ekstraksi archive binary DepotDownloader)
+- `python3` & `python-ruamel-yaml` / `python-yaml` (sinkronisasi konfigurasi SLSsteam)
 
 Pada Arch Linux:
 ```bash
-sudo pacman -S fzf jq curl rsync openssh file
+sudo pacman -S fzf jq curl rsync openssh file unzip python python-ruamel-yaml
 ```
 
 ### 2.2 Dependensi Runner (GBE Fork)
@@ -74,6 +76,18 @@ Host tuf-gaming-arch
     ConnectTimeout 1
     BatchMode yes
 ```
+
+### 3.4 Kredensial Steam untuk Downloader (`~/.config/gamectl/steam_user`)
+Jika Anda mengunduh game yang memerlukan lisensi akun Steam Anda:
+```bash
+echo "nama_akun_steam_anda" > ~/.config/gamectl/steam_user
+```
+DepotDownloader otomatis membaca username ini dan menyertakan flag `-remember-password`.
+
+### 3.5 Shell Completion & Desktop Launcher
+Installer otomatis memasang integrasi sistem:
+- **Bash Completion**: Terpasang di `~/.local/share/bash-completion/completions/gamectl`. Tekan `<TAB>` untuk melengkapi subcommand dan flag.
+- **Desktop Launcher**: Terpasang di `~/.local/share/applications/gamectl.desktop`. Game manager dapat dicari dan diluncurkan via application launcher Wayland/Niri (fuzzel, rofi, wofi).
 
 ---
 

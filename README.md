@@ -36,7 +36,7 @@ Dibuat khusus untuk arsitektur workstation efisien (seperti ThinkPad T440p) yang
 
 ## Instalasi Cepat
 
-Pastikan dependensi sistem terpasang (`fzf`, `jq`, `curl`, `rsync`, `file`):
+Pastikan dependensi sistem terpasang (`fzf`, `jq`, `curl`, `rsync`, `ssh`, `file`, `unzip`, `python3`):
 
 ```bash
 git clone git@github.com:zyekhabdul/gamectl.git
@@ -44,7 +44,12 @@ cd gamectl
 ./install.sh
 ```
 
-Installer akan membuat symlink eksekutabel ke `~/.local/bin/gamectl` dan alias `~/.local/bin/game`, serta memastikan runtime DepotDownloader siap digunakan.
+Installer otomatis melakukan setup turnkey:
+1. Membuat symlink biner `gamectl` dan alias `game` di `~/.local/bin/`.
+2. Menginisialisasi direktori konfigurasi dan template di `~/.config/gamectl/` (`libraries.example`, `steam_user.example`).
+3. Memasang autocompletion shell ke `~/.local/share/bash-completion/completions/gamectl`.
+4. Mendaftarkan desktop entry ke `~/.local/share/applications/gamectl.desktop` untuk launcher Wayland (fuzzel, rofi, wofi).
+5. Memastikan runtime headless downloader (DepotDownloader) dan template GBE Fork siap digunakan.
 
 ---
 
@@ -123,10 +128,13 @@ Installer akan membuat symlink eksekutabel ke `~/.local/bin/gamectl` dan alias `
 gamectl/
 ├── bin/
 │   └── gamectl          # Core TUI executable script
+├── completions/
+│   └── gamectl.bash     # Shell autocompletion script (Bash/Zsh)
 ├── docs/
 │   ├── ARCHITECTURE.md  # Spesifikasi mendalam arsitektur headless Linux
 │   └── GUIDE.md         # Panduan operasional, standalone setup & disaster recovery
-├── install.sh           # Script installer otomatis ke ~/.local/bin/
+├── gamectl.desktop      # Freedesktop XDG application launcher
+├── install.sh           # Script installer turnkey otomatis
 ├── README.md            # Dokumentasi ringkas & overview
 └── .gitignore           # Filter file temporer dan cache
 ```
