@@ -758,11 +758,11 @@ library_menu() {
         selection=$(scan_installed_games | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
-            --header="GAMECTL LIBRARY (Enter: Launch | Ctrl-I: Inject GBE | Ctrl-S: Sync to TUF | Ctrl-B: Backup Save)" \
+            --header="GAMECTL LIBRARY (Enter: Launch | Ctrl-I: Inject GBE & Sync | Ctrl-S: Sync TUF | Ctrl-B: Backup)" \
             --prompt="Game > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:wrap \
-            --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; read -n 1 -s -r -p 'Injeksi dan Sync selesai. Tekan tombol apa saja untuk lanjut...')" \
+            --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk kembali ke pustaka...')+reload($SELF_BIN --list)" \
             --bind="ctrl-s:execute($SELF_BIN --sync {4} {2}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
             --bind="ctrl-b:execute($SELF_BIN --backup {4}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
         ) || break
