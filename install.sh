@@ -74,6 +74,22 @@ EOF
     echo "[INFO] Template konfigurasi dibuat: $CONFIG_DIR/steam_user.example"
 fi
 
+if [ ! -f "$CONFIG_DIR/remote_host.example" ]; then
+    cat <<'EOF' > "$CONFIG_DIR/remote_host.example"
+# ==============================================================================
+# gamectl - Remote Sync Host
+# ==============================================================================
+# Salin file ini menjadi 'remote_host' lalu isi dengan hostname atau alias SSH
+# untuk target sinkronisasi savegame portabel (<Ctrl-S> atau gamectl --sync).
+# Pastikan host terdaftar di ~/.ssh/config dengan autentikasi SSH key.
+#
+# Contoh isi file:
+# companion-pc
+# 192.168.1.50
+EOF
+    echo "[INFO] Template konfigurasi dibuat: $CONFIG_DIR/remote_host.example"
+fi
+
 mkdir -p "$BIN_DIR"
 chmod +x "$SRC_BIN"
 

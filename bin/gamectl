@@ -7,16 +7,24 @@
 # - Automatic GBE Fork / runner inspection
 # - Savegame snapshot rotation (auto-backup before launch)
 # - Performance profile wrapper (Mesa GL thread, CPU governor)
-# - 1-key sync to companion node (tuf-gaming-arch) via rsync over SSH
+# - 1-key sync to remote companion host via rsync over SSH
 # - Live Steam Store search + ProtonDB rating via fzf
 # ==============================================================================
 
 set -uo pipefail
 
 SELF_BIN="$(readlink -f "${BASH_SOURCE[0]}")"
-TUF_HOST="${GAMECTL_TUF_HOST:-tuf-gaming-arch}"
 GBE_X64="${GAMECTL_GBE_X64:-$HOME/.local/share/gbe-fork/regular/x64/libsteam_api.so}"
 GBE_X86="${GAMECTL_GBE_X86:-$HOME/.local/share/gbe-fork/regular/x86/libsteam_api.so}"
+
+# Resolve remote sync host (optional)
+get_remote_host() {
+    local host="${GAMECTL_REMOTE_HOST:-${GAMECTL_SYNC_HOST:-${GAMECTL_TUF_HOST:-}}}"
+    if [ -z "$host" ] && [ -f "$HOME/.config/gamectl/remote_host" ]; then
+        host=$(head -n 1 "$HOME/.config/gamectl/remote_host" | tr -d '[:space:]')
+    fi
+    echo "$host"
+}
 
 # Pre-flight cleanup of orphaned sockets and locks
 clean_stale_locks() {
@@ -266,7 +274,13 @@ preview_game() {
     echo "--------------------------------------------------------"
     echo " ACTION KEYS:"
     echo " <ENTER>       : Launch Game (Standalone + Mesa GL Thread)"
-    echo " <CTRL-S>      : Sync Savegame to $TUF_HOST"
+    local rhost
+    rhost=$(get_remote_host)
+    if [ -n "$rhost" ]; then
+        echo " <CTRL-S>      : Sync Savegame to $rhost"
+    else
+        echo " <CTRL-S>      : Sync Savegame to Remote (Belum dikonfigurasi)"
+    fi
     echo " <CTRL-B>      : Trigger Manual Save Snapshot"
     echo " <ESC>         : Back to Menu"
     echo "========================================================"
@@ -303,28 +317,42 @@ launch_game() {
     echo "[INFO] Game ditutup. Sesi bersih."
 }
 
-# Sync savegame to companion node
-sync_to_tuf() {
+# Sync savegame to remote companion host
+sync_save_remote() {
     local gdir="$1"
     local title="$2"
+    local override_host="${3:-}"
     local sdir="$gdir/saves"
+    local rhost="$override_host"
+    [ -z "$rhost" ] && rhost=$(get_remote_host)
 
     if [ ! -d "$sdir" ]; then
         echo "[ERROR] Folder portable saves tidak ditemukan di $gdir"
         return 1
     fi
 
-    echo "[INFO] Memeriksa konektivitas ke $TUF_HOST..."
-    if ! ssh -q -o ConnectTimeout=1 -o BatchMode=yes "$TUF_HOST" exit 2>/dev/null; then
-        echo "[WARN] Node $TUF_HOST offline atau tidak terjangkau jaringan lokal."
+    if [ -z "$rhost" ]; then
+        echo "[WARN] Target remote host belum dikonfigurasi."
+        echo "       Tentukan host di ~/.config/gamectl/remote_host atau variabel GAMECTL_REMOTE_HOST."
         return 1
     fi
 
-    echo "[INFO] Menyinkronkan savegame $title ke $TUF_HOST..."
+    echo "[INFO] Memeriksa konektivitas ke $rhost..."
+    if ! ssh -q -o ConnectTimeout=1 -o BatchMode=yes "$rhost" exit 2>/dev/null; then
+        echo "[WARN] Host remote '$rhost' offline atau tidak terjangkau jaringan lokal."
+        return 1
+    fi
+
+    echo "[INFO] Menyinkronkan savegame $title ke $rhost..."
     local rel_path="${gdir#$HOME/}"
-    ssh "$TUF_HOST" "mkdir -p ~/$rel_path"
-    rsync -avzP --exclude="*.tmp" "$sdir/" "$TUF_HOST:~/$rel_path/saves/"
-    echo "[VERIFIED] Sinkronisasi savegame selesai."
+    ssh "$rhost" "mkdir -p ~/$rel_path"
+    rsync -avzP --exclude="*.tmp" "$sdir/" "$rhost:~/$rel_path/saves/"
+    echo "[VERIFIED] Sinkronisasi savegame ke $rhost selesai."
+}
+
+# Alias for backward compatibility
+sync_to_tuf() {
+    sync_save_remote "$@"
 }
 
 # Inject GBE Fork emulator and portable saves into a game folder
@@ -874,7 +902,7 @@ library_menu() {
         selection=$(scan_installed_games | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
-            --header="GAMECTL LIBRARY (Enter: Launch | Ctrl-I: Inject GBE & Sync | Ctrl-S: Sync TUF | Ctrl-B: Backup)" \
+            --header="GAMECTL LIBRARY (Enter: Launch | Ctrl-I: Inject GBE & Sync | Ctrl-S: Sync Remote | Ctrl-B: Backup)" \
             --prompt="Game > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:wrap \
@@ -1077,7 +1105,7 @@ search_steam() {
 }
 
 # Export functions for subshells in fzf
-export -f preview_game sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads unlock_game
+export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads unlock_game get_remote_host
 
 # Top-level Menu
 case "${1:-}" in
@@ -1138,11 +1166,11 @@ case "${1:-}" in
     --search)
         search_steam
         ;;
-    --sync)
+    --sync|sync-remote)
         if [ -n "${2:-}" ]; then
-            sync_to_tuf "$2" "${3:-Game}"
+            sync_save_remote "$2" "${3:-Game}" "${4:-}"
         else
-            echo "Usage: gamectl --sync <game_dir> [title]"
+            echo "Usage: gamectl --sync <game_dir> [title] [remote_host]"
         fi
         ;;
     --list)
@@ -1168,7 +1196,7 @@ Usage:
   gamectl sync-steam <appid> [title] [dir] Sinkronisasi Steam Client & SLSsteam full DLC
   gamectl --search    Cari game di Steam Store & audit ProtonDB rating
   gamectl --list      Tampilkan daftar game yang terdeteksi
-  gamectl --sync <dir> [title]  Sinkronisasi savegame ke companion node
+  gamectl --sync <dir> [title] [host]  Sinkronisasi savegame ke remote companion host
   gamectl --backup <dir>        Buat snapshot backup savegame
   gamectl --help      Tampilkan panduan ini
   gamectl --version   Tampilkan versi aktif
