@@ -1,46 +1,48 @@
-# WORK PACKET 2: ENVIRONMENT HARDENING & TURNKEY SETUP
+# WORK PACKET 3: WINDOWS RUNNER SUPPORT, GBE DUAL-ARCH & RUNTIME WRAPPERS
 Track: Maintenance
 
 ## 1. Objective & Scope
-Memperkuat instalasi dan kesiapan lingkungan `gamectl` agar bersifat *turnkey* (siap pakai di mesin Linux manapun) dengan scaffolding konfigurasi otomatis, audit dependensi lengkap, fallback YAML parser yang tahan banting, integrasi shell auto-completion, dan desktop entry untuk Wayland application launcher.
+Memperluas kapabilitas `gamectl` agar mendukung ekosistem game Windows (.exe) dan kebutuhan kustomisasi gamer/modder tingkat lanjut di Linux/Wayland:
+- Dual-architecture GBE Fork injection (Linux ELF `.so` + Windows `.dll`).
+- Headless runner discovery (umu-run, Proton-GE, Wine) dengan prefix terisolasi (`$GAME_DIR/pfx`).
+- Tooling wrapper modular (`gamemoderun`, `mangohud`, `gamescope` FSR/scaling).
+- Multi-identity GBE manager (`gamectl set-id`) untuk multiplayer LAN tanpa bentrok SteamID.
 
 ---
 
 ## 2. Granular Work Chunks (Max 10)
 
-- [x] **Chunk 1: Audit Dependensi & Template GBE di `install.sh`**
-  - Tambahkan `unzip` dan `python3` ke daftar dependensi wajib di `install.sh`.
-  - Tambahkan pengecekan keberadaan template biner GBE Fork (`~/.local/share/gbe-fork/regular/x64/libsteam_api.so`).
-  - Berikan panduan terminal jika template GBE belum tersedia di sistem.
-  - DoD: `install.sh` memverifikasi seluruh runtime dependensi dengan pesan diagnostik yang jelas.
+- [ ] **Chunk 1: Template Audit & Dual-Architecture GBE Injection (Windows DLL)**
+  - Tambahkan audit template GBE Fork Windows (`steam_api64.dll` dan `steam_api.dll`) di `install.sh`.
+  - Perbarui `inject_game` di `bin/gamectl` agar mendeteksi arsitektur target Windows (64-bit vs 32-bit).
+  - Lakukan backup `.dll` asli ke `.dll.orig` dan pasang shim GBE Windows yang sesuai.
+  - DoD: `gamectl inject` berhasil mendeteksi dan menginjeksi game berbasis biner Windows di samping binary Linux native.
 
-- [x] **Chunk 2: Scaffolding Konfigurasi Default (`~/.config/gamectl/`)**
-  - Di `install.sh`, buat direktori `~/.config/gamectl/` jika belum ada.
-  - Sediakan file template bertag komentar:
-    - `~/.config/gamectl/libraries.example` (petunjuk penambahan path game custom).
-    - `~/.config/gamectl/steam_user.example` (petunjuk penambahan akun Steam untuk DepotDownloader).
-  - DoD: Menjalankan `./install.sh` menginisialisasi direktori config dan file template tanpa menimpa config yang sudah ada.
+- [ ] **Chunk 2: Isolated Proton / Wine Prefix & Headless Runner Wrapper**
+  - Implementasikan fungsi pencarian runner di `bin/gamectl` (prioritas: `umu-run` -> `GE-Proton` / `Proton` Steam -> `wine`).
+  - Konfigurasikan inisialisasi Wine prefix terisolasi di direktori lokal game (`$GAME_DIR/pfx`).
+  - Perbarui `find_game_binary` dan `launch_game` agar mampu meluncurkan biner `.exe` melalui runner terpilih dengan prefix terisolasi.
+  - DoD: Menjalankan game Windows mengeksekusi runner yang valid dengan prefix lokal tanpa mengotori `~/.wine` di sistem host.
 
-- [x] **Chunk 3: Resilient YAML Engine Fallback di `bin/gamectl` (`sync_steam`)**
-  - Perbarui inline Python script di `sync_steam` untuk mencoba `ruamel.yaml` terlebih dahulu (guna mempertahankan quotes dan komentar).
-  - Jika `ruamel.yaml` tidak terpasang (`ImportError`), fallback otomatis ke pustaka standar `yaml` (PyYAML).
-  - DoD: `gamectl sync-steam` dan `gamectl unlock` tetap berhasil memutasi `config.yaml` baik menggunakan `ruamel.yaml` maupun `PyYAML`.
+- [ ] **Chunk 3: Runtime Performance & Display Wrappers (GameMode, MangoHud, Gamescope)**
+  - Deteksi ketersediaan `gamemoderun`, `mangohud`, dan `gamescope` pada sistem host.
+  - Tambahkan argumen peluncuran fleksibel di CLI/TUI (`--hud`, `--fsr`, `--gamescope`, `--gamemode`).
+  - Sediakan konfigurasi default persist di `~/.config/gamectl/wrappers`.
+  - DoD: `launch_game` mampu merangkai wrapper (contoh: `gamemoderun mangohud gamescope -- <runner> <binary>`) secara deterministik saat diaktifkan.
 
-- [x] **Chunk 4: Shell Autocompletion untuk Bash & Zsh**
-  - Buat skrip completion `completions/gamectl.bash` di repositori.
-  - Lengkapi completion untuk seluruh subcommands (`download`, `downloads`, `unlock`, `inject`, `fetch-dlc`, `sync-steam`, `ensure-downloader`, `--search`, `--list`, `--sync`, `--backup`, `--help`, `--version`).
-  - Lengkapi completion untuk flag download (`--raw`, `--inject-only`, `--all`, `-f`, `--foreground`).
-  - Di `install.sh`, otomatis pasang completion ke `~/.local/share/bash-completion/completions/gamectl`.
-  - DoD: Menekan `<TAB>` pada `gamectl ` di terminal Bash memunculkan daftar subcommand dan opsi secara akurat.
+- [ ] **Chunk 4: LAN Multi-Identity & SteamID Manager (`gamectl set-id`)**
+  - Buat subcommand `gamectl set-id <player_name> [steamid]` dan helper generator SteamID acak yang valid.
+  - Mutasi otomatis `steam_settings/configs.user.ini` pada game target atau direktori aktif.
+  - Sediakan opsi scaffolding `steam_settings/custom_broadcasts.txt` untuk deteksi IP LAN teman bermain.
+  - DoD: Perintah `gamectl set-id "Player2"` menghasilkan SteamID unik dan nama akun terpisah guna mencegah konflik sesi multiplayer offline.
 
-- [x] **Chunk 5: Desktop Application Entry (`gamectl.desktop`)**
-  - Buat file `gamectl.desktop` di repositori.
-  - Konfigurasikan spesifikasi Freedesktop XDG (`Type=Application`, `Categories=Game;Utility;`, `Exec=sh -c '...'`).
-  - Otomatis deteksi terminal emulator yang tersedia (`foot`, `alacritty`, `kitty`, `ghostty`, atau `xterm`) agar kompatibel dengan launcher Niri/Wayland (fuzzel, rofi, wofi).
-  - Di `install.sh`, otomatis pasang file ke `~/.local/share/applications/gamectl.desktop`.
-  - DoD: File desktop tervalidasi via `desktop-file-validate` (bila terpasang) dan terdaftar di `~/.local/share/applications/`.
+- [ ] **Chunk 5: Shell Autocompletion, CLI Help & Panduan Dokumentasi**
+  - Perbarui `completions/gamectl.bash` untuk subcommand `set-id` dan flag-flag wrapper baru (`--hud`, `--gamescope`, dll).
+  - Perbarui `README.md` dan `docs/GUIDE.md` dengan panduan penggunaan runner Windows, template GBE DLL, dan integrasi wrapper.
+  - DoD: `gamectl --help` menampilkan panduan perintah baru dan bash completion merespons input dengan presisi.
 
-- [x] **Chunk 6: Pembaruan Dokumentasi & Uji Verifikasi Empiris**
-  - Perbarui `README.md` dan `docs/GUIDE.md` untuk mendokumentasikan file konfigurasi, template, autocompletion, dan desktop entry.
-  - Jalankan pengujian empiris end-to-end: `./install.sh`, uji completion, uji syntax `bash -n bin/gamectl`, uji fallback YAML.
-  - DoD: Seluruh pengujian menghasilkan exit code 0 dan checkpoint RAG tersimpan.
+- [ ] **Chunk 6: Verifikasi Empiris & RAG Checkpoint**
+  - Jalankan audit sintaks (`bash -n bin/gamectl install.sh completions/gamectl.bash`).
+  - Lakukan dry-run verifikasi injeksi DLL dan eksekusi runner wrapper.
+  - Catat checkpoint aktif ke `00-AGY-Memory/gamectl/STATE.md` via `agy-guard checkpoint`.
+  - DoD: Seluruh pemeriksaan sintaks dan eksekusi menghasilkan exit code 0.
