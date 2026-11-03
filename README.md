@@ -1,6 +1,6 @@
-# Valkyrie: Sovereign TUI Game Manager for Linux
+# gamectl: Sovereign TUI Game Manager for Linux
 
-**Valkyrie** adalah antarmuka Terminal User Interface (TUI) berbobot ultra-ringan (< 15 MB RAM) yang dirancang untuk mengelola, meluncurkan, dan menyinkronkan game standalone portabel di Linux tanpa ketergantungan pada client distribusi berat seperti Steam Client atau wrapper AppImage berbasis Electron/Chromium.
+**gamectl** adalah antarmuka Terminal User Interface (TUI) berbobot ultra-ringan (< 15 MB RAM) yang dirancang untuk mengelola, meluncurkan, dan menyinkronkan game standalone portabel di Linux tanpa ketergantungan pada client distribusi berat seperti Steam Client atau wrapper AppImage berbasis Electron/Chromium.
 
 Dibuat khusus untuk arsitektur workstation efisien (seperti ThinkPad T440p) yang dipasangkan dengan companion node performa tinggi (`tuf-gaming-arch`).
 
@@ -34,12 +34,12 @@ Dibuat khusus untuk arsitektur workstation efisien (seperti ThinkPad T440p) yang
 Pastikan dependensi sistem terpasang (`fzf`, `jq`, `curl`, `rsync`, `file`):
 
 ```bash
-git clone git@github.com:<username>/valkyrie.git
-cd valkyrie
+git clone git@github.com:<username>/gamectl.git
+cd gamectl
 ./install.sh
 ```
 
-Installer akan membuat symlink eksekutabel ke `~/.local/bin/valkyrie` dan alias `~/.local/bin/game`.
+Installer akan membuat symlink eksekutabel ke `~/.local/bin/gamectl` dan alias `~/.local/bin/game`.
 
 ---
 
@@ -47,19 +47,19 @@ Installer akan membuat symlink eksekutabel ke `~/.local/bin/valkyrie` dan alias 
 
 1. **Buka Library Game**:
    ```bash
-   valkyrie
+   gamectl
    # atau menggunakan alias:
    game
    ```
 
 2. **Cari Game di Steam Store & Cek ProtonDB**:
    ```bash
-   valkyrie --search
+   gamectl --search
    ```
 
 3. **Sinkronisasi Manual Direktori Tertentu**:
    ```bash
-   valkyrie --sync /path/to/game "Game Title"
+   gamectl --sync /path/to/game "Game Title"
    ```
 
 ---
@@ -67,9 +67,9 @@ Installer akan membuat symlink eksekutabel ke `~/.local/bin/valkyrie` dan alias 
 ## Struktur Proyek
 
 ```
-valkyrie/
+gamectl/
 ├── bin/
-│   └── valkyrie          # Core TUI executable script
+│   └── gamectl          # Core TUI executable script
 ├── docs/
 │   └── ARCHITECTURE.md   # Spesifikasi mendalam arsitektur headless Linux
 ├── install.sh            # Script installer otomatis ke ~/.local/bin/

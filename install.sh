@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# VALKYRIE INSTALLER
+# GAMECTL INSTALLER
 # ==============================================================================
 set -euo pipefail
 
 BIN_DIR="$HOME/.local/bin"
-SRC_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/valkyrie"
+SRC_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/gamectl"
 
 echo "[INFO] Memeriksa dependensi sistem..."
 for cmd in fzf jq curl rsync ssh file; do
@@ -19,8 +19,8 @@ mkdir -p "$BIN_DIR"
 chmod +x "$SRC_BIN"
 
 # Create symlinks
-ln -sf "$SRC_BIN" "$BIN_DIR/valkyrie"
+ln -sf "$SRC_BIN" "$BIN_DIR/gamectl"
 ln -sf "$SRC_BIN" "$BIN_DIR/game"
 
-echo "[VERIFIED] Valkyrie berhasil di-link ke $BIN_DIR/valkyrie dan $BIN_DIR/game"
-echo "Jalankan perintah 'valkyrie' atau 'game' di terminal untuk membuka antarmuka."
+echo "[VERIFIED] Valkyrie berhasil di-link ke $BIN_DIR/gamectl dan $BIN_DIR/game"
+echo "Jalankan perintah 'gamectl' atau 'game' di terminal untuk membuka antarmuka."

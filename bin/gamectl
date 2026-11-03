@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# VALKYRIE - SOVEREIGN TUI GAME MANAGER & LAUNCHER (ZERO-BLOAT)
+# GAMECTL - SOVEREIGN TUI GAME MANAGER & LAUNCHER (ZERO-BLOAT)
 # ==============================================================================
 # Lightweight, native Linux gaming hub:
 # - Library scanner for local/standalone games
@@ -175,7 +175,7 @@ library_menu() {
         selection=$(scan_installed_games | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
-            --header="VALKYRIE LIBRARY (Enter: Launch | Ctrl-S: Sync to TUF | Ctrl-B: Backup Save)" \
+            --header="GAMECTL LIBRARY (Enter: Launch | Ctrl-S: Sync to TUF | Ctrl-B: Backup Save)" \
             --prompt="Game > " \
             --preview="/home/aomiqaza/.local/bin/game --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:wrap \
