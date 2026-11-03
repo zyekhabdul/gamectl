@@ -2,7 +2,7 @@
 
 **gamectl** adalah antarmuka Terminal User Interface (TUI) berbobot ultra-ringan (< 15 MB RAM) yang dirancang untuk mengelola, meluncurkan, dan menyinkronkan game standalone portabel di Linux tanpa ketergantungan pada client distribusi berat seperti Steam Client atau wrapper AppImage berbasis Electron/Chromium.
 
-Dibuat khusus untuk arsitektur workstation efisien (seperti ThinkPad T440p) yang dipasangkan dengan companion node performa tinggi (`tuf-gaming-arch`).
+Dibuat untuk arsitektur workstation Linux yang mengutamakan efisiensi resource, peluncuran instan, dan portabilitas game standalone antar perangkat.
 
 ---
 
@@ -16,7 +16,7 @@ Dibuat khusus untuk arsitektur workstation efisien (seperti ThinkPad T440p) yang
 - **Headless Downloader Engine (`gamectl download`)**: Mengunduh game langsung dari Steam Content Server via DepotDownloader headless CLI tanpa memerlukan client Steam GUI atau cache berat.
 - **Zero-Download Steam Library Registration (`gamectl unlock`)**: Mendaftarkan kepemilikan AppID dan seluruh DLC ke SLSsteam serta membuat manifest ACF tanpa perlu mengunduh file game. Saat Steam resmi dibuka, game langsung muncul di library dengan status full DLC.
 - **Dual-Mode Steam & SLSsteam Sync (`gamectl sync-steam`)**: Otomatis mendaftarkan AppID & DLC ke `~/.config/SLSsteam/config.yaml` dan membuat `appmanifest_<appid>.acf` berstatus terinstal. Game siap dimainkan mandiri dan langsung berstatus full DLC saat aplikasi Steam resmi dibuka.
-- **One-Key Multi-Node Sync (`<Ctrl-S>`)**: Menyinkronkan progres savegame portabel langsung ke node pendamping (`tuf-gaming-arch`) via SSH/Rsync dengan proteksi pre-flight timeout 1 detik.
+- **One-Key Multi-Node Sync (`<Ctrl-S>`)**: Menyinkronkan progres savegame portabel ke host remote lain (SSH/Rsync) secara instan dengan proteksi pre-flight timeout (konfigurasi opsional).
 - **Steam & ProtonDB Discovery**: Pencarian judul game via Steam Web API publik yang terintegrasi dengan tier rating kompatibilitas Linux dari ProtonDB (Native, Platinum, Gold, Silver).
 - **Self-Healing Pre-Flight**: Pembersihan otomatis file lock dan socket terlantar di `/tmp/` sebelum sesi dimulai.
 
@@ -28,7 +28,7 @@ Dibuat khusus untuk arsitektur workstation efisien (seperti ThinkPad T440p) yang
 | :--- | :--- |
 | `<ENTER>` | Luncurkan Game Standalone (Mesa GL Threading + Snapshot Backup) |
 | `<Ctrl-I>` | Injeksi GBE Fork Portabel & Sinkronisasi Dual-Mode Steam/SLSsteam |
-| `<Ctrl-S>` | Sinkronisasi Savegame Portabel ke `tuf-gaming-arch` via SSH |
+| `<Ctrl-S>` | Sinkronisasi Savegame Portabel ke Remote Host via SSH (jika dikonfigurasi) |
 | `<Ctrl-B>` | Buat Snapshot Manual Savegame saat ini |
 | `<ESC>` / `<Ctrl-C>` | Keluar dari Antarmuka |
 
@@ -108,9 +108,9 @@ Installer otomatis melakukan setup turnkey:
    gamectl --list
    ```
 
-8. **Sinkronisasi Manual Savegame ke Node Pendamping**:
+8. **Sinkronisasi Manual Savegame ke Remote Host**:
    ```bash
-   gamectl --sync /path/to/game "Game Title"
+   gamectl --sync /path/to/game "Game Title" [remote_host]
    ```
 
 ---

@@ -60,7 +60,7 @@ Arsitektur headless beroperasi murni pada network layer dan file I/O tanpa displ
 
 ## 4. Pola Isolasi Runtime & Portabilitas (Portable Game Topology)
 
-Untuk memastikan game dapat dieksekusi secara mandiri (standalone) dan dipindahkan antar node (misal dari node ThinkPad ke node companion TUF Gaming) tanpa dependensi client:
+Untuk memastikan game dapat dieksekusi secara mandiri (standalone) dan dipindahkan antar node (misal dari workstation ke node companion lain) tanpa dependensi client:
 
 ```
 [ Root Game Directory ]
@@ -99,7 +99,7 @@ Untuk menjembatani efisiensi performa CLI dengan kemudahan navigasi GUI, arsitek
 │                                      │                                          │
 │                                      │  [ SHORTCUTS ]                           │
 │                                      │  <ENTER>  : Launch Standalone / Install  │
-│                                      │  <CTRL-S> : Sync ke tuf-gaming-arch      │
+│                                      │  <CTRL-S> : Sync ke Remote Host          │
 │                                      │  <ESC>    : Keluar                       │
 └──────────────────────────────────────┴──────────────────────────────────────────┘
 ```
@@ -155,12 +155,12 @@ Menjalankan engine download secara sinkron akan membekukan antarmuka TUI.
 - Direktori target dikunci secara deterministik ke partisi Linux native (`$HOME/Games/` atau `$HOME/.local/share/Steam/steamapps/common/`).
 
 ### 6.5 Pre-Flight Network Probing pada Multi-Node Sync
-Sebelum mengeksekusi transfer rsync ke node pendamping `tuf-gaming-arch`:
+Sebelum mengeksekusi transfer rsync ke host remote companion:
 - Backend melakukan uji konektivitas SSH 1 detik:
   ```bash
-  ssh -q -o ConnectTimeout=1 -o BatchMode=yes tuf-gaming-arch exit
+  ssh -q -o ConnectTimeout=1 -o BatchMode=yes "$REMOTE_HOST" exit
   ```
-- Jika node pendamping offline atau di luar jangkauan jaringan lokal, TUI menampilkan notifikasi peringatan non-blocking tanpa membekukan sesi aktif.
+- Jika remote host offline, tidak terkonfigurasi, atau di luar jangkauan jaringan, TUI menampilkan notifikasi peringatan non-blocking tanpa membekukan sesi aktif.
 
 ---
 

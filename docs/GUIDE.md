@@ -48,7 +48,7 @@ Tambahkan ke `~/.bashrc`, `~/.zshrc`, atau environment session Anda jika ingin m
 
 | Variabel | Default | Keterangan |
 | :--- | :--- | :--- |
-| `GAMECTL_TUF_HOST` | `tuf-gaming-arch` | Host alias SSH untuk target sinkronisasi savegame |
+| `GAMECTL_REMOTE_HOST` | *Kosong* | Host alias SSH untuk target sinkronisasi savegame (`remote_host`) |
 | `GAMECTL_GBE_X64` | `~/.local/share/gbe-fork/regular/x64/libsteam_api.so` | Path binary GBE Fork 64-bit |
 | `GAMECTL_GBE_X86` | `~/.local/share/gbe-fork/regular/x86/libsteam_api.so` | Path binary GBE Fork 32-bit |
 | `GAMECTL_LIBRARY_DIRS` | *Kosong* | Path tambahan dipisah titik dua (`/path1:/path2`) |
@@ -66,15 +66,19 @@ cat <<EOF > ~/.config/gamectl/libraries
 EOF
 ```
 
-### 3.3 SSH Config Node Pendamping (`~/.ssh/config`)
-Agar shortcut `<Ctrl-S>` bekerja secara non-interaktif tanpa input password:
+### 3.3 Remote Sync Host (`~/.ssh/config` & `~/.config/gamectl/remote_host`)
+Agar shortcut `<Ctrl-S>` atau perintah `gamectl --sync` dapat menyinkronkan savegame ke host lain via SSH tanpa password:
 ```text
-Host tuf-gaming-arch
+Host companion-pc
     HostName 192.168.1.50
-    User aomiqaza
+    User username
     IdentityFile ~/.ssh/id_ed25519
     ConnectTimeout 1
     BatchMode yes
+```
+Daftarkan alias host tersebut di `~/.config/gamectl/remote_host` atau via environment `GAMECTL_REMOTE_HOST`:
+```bash
+echo "companion-pc" > ~/.config/gamectl/remote_host
 ```
 
 ### 3.4 Kredensial Steam untuk Downloader (`~/.config/gamectl/steam_user`)
@@ -179,7 +183,7 @@ game
 | :--- | :--- |
 | `<ENTER>` | **Launch Game**: Membuat auto-snapshot savegame, menaikkan CPU governor ke `performance`, mengaktifkan `mesa_glthread=true`, lalu meluncurkan game. Saat game ditutup, CPU governor dikembalikan ke `powersave`. |
 | `<Ctrl-I>` | **Instant GBE Inject & Steam Sync**: Mengubah game `[VALVE_SO]` atau `[STANDALONE]` menjadi `[GBE_FORK]` portabel, mengunduh DLC, dan menyinkronkan status instalasi ke Steam resmi + SLSsteam secara instan. |
-| `<Ctrl-S>` | **Multi-Node Sync**: Menguji konektivitas SSH ke node pendamping (`ConnectTimeout=1`). Jika online, melakukan sinkronisasi delta via `rsync` dari folder `./saves` lokal ke direktori game pada node target. |
+| `<Ctrl-S>` | **Remote Save Sync**: Menguji konektivitas SSH ke remote host (`ConnectTimeout=1`). Jika online dan terkonfigurasi, melakukan sinkronisasi delta via `rsync` dari folder `./saves` lokal ke direktori game pada remote host. |
 | `<Ctrl-B>` | **Manual Snapshot**: Membuat salinan cadangan instan savegame ke rotasi slot `.save_snapshots`. |
 | `<ESC>` / `<Ctrl-C>` | Keluar dari antarmuka `gamectl`. |
 
@@ -253,8 +257,8 @@ gamectl --list
 # 8. Cari game di Steam Store API dan cek kompatibilitas ProtonDB
 gamectl --search
 
-# 9. Sinkronisasi manual direktori game ke host companion
-gamectl --sync /path/to/game "Game Title"
+# 9. Sinkronisasi manual direktori game ke remote companion host
+gamectl --sync /path/to/game "Game Title" [remote_host]
 
 # 10. Buat snapshot manual savegame dari terminal
 gamectl --backup /path/to/game
