@@ -44,15 +44,15 @@ Target: Menggantikan total ekosistem SLSsteamMoon + ACCELA + Headcrab + SteaMidr
 - [x] Hook otomatis: panggil `gamectl inject` begitu proses download tuntas (exit code 0).
 
 ### Chunk 4: Redesain TUI Search Berorientasi Aksi (`gamectl --search`)
-- [ ] Tambahkan status instalasi lokal pada preview search: cek apakah AppID sudah ada di Steam atau `~/Games/`.
-- [ ] Tambahkan bind aksi `<ENTER>` di fzf search:
+- [x] Tambahkan status instalasi lokal pada preview search: cek apakah AppID sudah ada di Steam atau `~/Games/`.
+- [x] Tambahkan bind aksi `<ENTER>` di fzf search:
   - Jika belum terpasang: Tampilkan konfirmasi unduh & pasang headless.
   - Jika sudah terpasang: Tampilkan info lokasi dan opsi luncurkan langsung.
-- [ ] Tampilkan informasi kategori depot dan kesiapan runner Linux di panel preview.
+- [x] Tampilkan informasi kategori depot dan kesiapan runner Linux di panel preview.
 
 ### Chunk 5: Keybind Injeksi pada TUI Library Utama (`<Ctrl-I>`)
-- [ ] Tambahkan shortcut `<Ctrl-I>` pada menu utama `gamectl` (Library TUI).
-- [ ] Memungkinkan user mengubah game berstatus `[VALVE_SO]` atau `[STANDALONE]` menjadi `[GBE_FORK]` secara instan dari tampilan daftar game.
+- [x] Tambahkan shortcut `<Ctrl-I>` pada menu utama `gamectl` (Library TUI).
+- [x] Memungkinkan user mengubah game berstatus `[VALVE_SO]` atau `[STANDALONE]` menjadi `[GBE_FORK]` secara instan dari tampilan daftar game.
 
 ### Chunk 6: Integrasi Dual-Mode Steam Client & SLSsteam Sync (`gamectl sync-steam`)
 - [x] Otomatisasi pendaftaran AppID ke `~/.config/SLSsteam/config.yaml` (`AppIds:` & `AdditionalApps:`).

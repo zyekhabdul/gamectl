@@ -723,10 +723,11 @@ library_menu() {
         selection=$(scan_installed_games | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
-            --header="GAMECTL LIBRARY (Enter: Launch | Ctrl-S: Sync to TUF | Ctrl-B: Backup Save)" \
+            --header="GAMECTL LIBRARY (Enter: Launch | Ctrl-I: Inject GBE | Ctrl-S: Sync to TUF | Ctrl-B: Backup Save)" \
             --prompt="Game > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:wrap \
+            --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; read -n 1 -s -r -p 'Injeksi dan Sync selesai. Tekan tombol apa saja untuk lanjut...')" \
             --bind="ctrl-s:execute($SELF_BIN --sync {4} {2}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
             --bind="ctrl-b:execute($SELF_BIN --backup {4}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
         ) || break
@@ -742,7 +743,7 @@ library_menu() {
     done
 }
 
-# Live Steam Search View
+# Live Steam Search View (Actionable TUI Search)
 search_steam() {
     echo -n "Masukkan nama game yang dicari: "
     read -r query
@@ -751,29 +752,48 @@ search_steam() {
     echo "[INFO] Mencari '$query' di Steam Store API..."
     local encoded_query
     encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$query")
-    local results
-    results=$(curl -s "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" | jq -r '.items[] | "\(.id)\t\(.name)"' 2>/dev/null)
+    local raw_results
+    raw_results=$(curl -s --connect-timeout 5 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
 
-    if [ -z "$results" ]; then
+    local items
+    items=$(echo "$raw_results" | jq -r '.items[]? | "\(.id)\t\(.name)"' 2>/dev/null || true)
+
+    if [ -z "$items" ]; then
         echo "[INFO] Game tidak ditemukan."
         sleep 1
         return
     fi
 
-    echo "$results" | fzf \
+    # Build list with local installed status
+    local results=""
+    local steam_apps="$HOME/.local/share/Steam/steamapps"
+    while IFS=$'\t' read -r appid name; do
+        [ -z "$appid" ] && continue
+        local status="[BELUM TERPASANG]"
+        if [ -f "$steam_apps/appmanifest_${appid}.acf" ] || [ -d "$HOME/Games/$name" ]; then
+            status="[TERPASANG]"
+        fi
+        results+="${appid}"$'\t'"${name}"$'\t'"${status}"$'\n'
+    done <<< "$items"
+
+    local selection
+    selection=$(echo -n "$results" | fzf \
         --delimiter=$'\t' \
-        --with-nth=1,2 \
-        --header="HASIL PENCARIAN STEAM (Pilih untuk melihat detail ProtonDB)" \
+        --with-nth=1,2,3 \
+        --header="HASIL PENCARIAN STEAM (Enter: Pasang/Aksi | Esc: Batal)" \
         --prompt="Steam Store > " \
         --preview='
             appid={1}
+            title={2}
+            status={3}
             echo "=========================================="
             echo " STEAM METADATA & PROTONDB AUDIT"
             echo "=========================================="
-            echo " AppID : $appid"
-            echo " Judul : {2}"
+            echo " AppID  : $appid"
+            echo " Judul  : $title"
+            echo " Status : $status"
             echo "------------------------------------------"
-            pdb=$(curl -s "https://www.protondb.com/api/v1/reports/summaries/$appid.json" 2>/dev/null)
+            pdb=$(curl -s --connect-timeout 3 "https://www.protondb.com/api/v1/reports/summaries/$appid.json" 2>/dev/null)
             if [ -n "$pdb" ] && [ "$pdb" != "null" ]; then
                 tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null)
                 score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null)
@@ -787,6 +807,47 @@ search_steam() {
             echo "=========================================="
         ' \
         --preview-window=right:50%:wrap
+    ) || return
+
+    if [ -n "$selection" ]; then
+        local sel_id sel_name sel_status
+        sel_id=$(echo "$selection" | awk -F'\t' '{print $1}')
+        sel_name=$(echo "$selection" | awk -F'\t' '{print $2}')
+        sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
+
+        echo ""
+        echo "=========================================="
+        echo " TARGET: $sel_name (AppID: $sel_id)"
+        echo " STATUS: $sel_status"
+        echo "=========================================="
+        if [ "$sel_status" = "[TERPASANG]" ]; then
+            read -r -p "Game sudah terpasang. Jalankan re-injeksi GBE & sync Steam sekarang? [y/N]: " ans
+            if [[ "$ans" =~ ^[Yy]$ ]]; then
+                local gdir="$HOME/Games/$sel_name"
+                [ ! -d "$gdir" ] && gdir="$HOME/.local/share/Steam/steamapps/common/$sel_name"
+                inject_game "$gdir" "$sel_id"
+                sync_steam "$sel_id" "$sel_name" "$gdir"
+            fi
+        else
+            echo "Pilih mode aksi:"
+            echo "  1) Unduh di background (non-blocking, auto-inject & sync saat selesai)"
+            echo "  2) Unduh di foreground (stream log langsung ke terminal)"
+            echo "  3) Batal"
+            read -r -p "Pilihan [1-3]: " opt
+            case "$opt" in
+                1)
+                    download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" "background"
+                    ;;
+                2)
+                    download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" "foreground"
+                    ;;
+                *)
+                    echo "[INFO] Aksi dibatalkan."
+                    ;;
+            esac
+        fi
+        read -r -p "Tekan [ENTER] untuk melanjutkan..."
+    fi
 }
 
 # Export functions for subshells in fzf
