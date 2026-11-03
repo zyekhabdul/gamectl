@@ -12,7 +12,9 @@ Dibuat khusus untuk arsitektur workstation efisien (seperti ThinkPad T440p) yang
 - **Dynamic Multi-Library Autodetection**: Otomatis mendeteksi game yang terpasang dari seluruh direktori Steam (`libraryfolders.vdf` + ACF manifests), direktori portabel `~/Games/`, Lutris, serta custom path melalui `~/.config/gamectl/libraries` atau variabel `GAMECTL_LIBRARY_DIRS`.
 - **Split-Pane Live Inspection**: Kolom kiri menampilkan daftar pustaka game; kolom kanan menampilkan metadata biner, arsitektur ELF (32-bit / 64-bit), status runner GBE Fork, dan ukuran savegame secara real-time.
 - **Savegame Snapshot Protection (Anti-Data-Loss)**: Membuat cadangan otomatis rotasi 3-slot (`slot1`, `slot2`, `slot3`) sebelum setiap game dijalankan, melindungi progres dari dirty shutdown atau crash.
-- **Dynamic Hardware Profiling**: Otomatis menggeser CPU governor ke `performance` saat sesi game aktif, dan mengembalikannya ke `powersave` begitu game ditutup.
+- **Automated GBE Fork Injection (`gamectl inject`)**: Mengonversi biner game Valve menjadi standalone portabel dengan auto-deteksi ELF 32/64-bit, portable save `./saves`, dan generator `steam_settings/DLC.txt`.
+- **Headless Downloader Engine (`gamectl download`)**: Mengunduh game langsung dari Steam Content Server via DepotDownloader headless CLI tanpa memerlukan client Steam GUI atau cache berat.
+- **Dual-Mode Steam & SLSsteam Sync (`gamectl sync-steam`)**: Otomatis mendaftarkan AppID & DLC ke `~/.config/SLSsteam/config.yaml` dan membuat `appmanifest_<appid>.acf` berstatus terinstal. Game siap dimainkan mandiri dan langsung berstatus full DLC saat aplikasi Steam resmi dibuka.
 - **One-Key Multi-Node Sync (`<Ctrl-S>`)**: Menyinkronkan progres savegame portabel langsung ke node pendamping (`tuf-gaming-arch`) via SSH/Rsync dengan proteksi pre-flight timeout 1 detik.
 - **Steam & ProtonDB Discovery**: Pencarian judul game via Steam Web API publik yang terintegrasi dengan tier rating kompatibilitas Linux dari ProtonDB (Native, Platinum, Gold, Silver).
 - **Self-Healing Pre-Flight**: Pembersihan otomatis file lock dan socket terlantar di `/tmp/` sebelum sesi dimulai.
@@ -24,6 +26,7 @@ Dibuat khusus untuk arsitektur workstation efisien (seperti ThinkPad T440p) yang
 | Shortcut | Aksi |
 | :--- | :--- |
 | `<ENTER>` | Luncurkan Game Standalone (Mesa GL Threading + Snapshot Backup) |
+| `<Ctrl-I>` | Injeksi GBE Fork Portabel & Sinkronisasi Dual-Mode Steam/SLSsteam |
 | `<Ctrl-S>` | Sinkronisasi Savegame Portabel ke `tuf-gaming-arch` via SSH |
 | `<Ctrl-B>` | Buat Snapshot Manual Savegame saat ini |
 | `<ESC>` / `<Ctrl-C>` | Keluar dari Antarmuka |
@@ -40,7 +43,7 @@ cd gamectl
 ./install.sh
 ```
 
-Installer akan membuat symlink eksekutabel ke `~/.local/bin/gamectl` dan alias `~/.local/bin/game`.
+Installer akan membuat symlink eksekutabel ke `~/.local/bin/gamectl` dan alias `~/.local/bin/game`, serta memastikan runtime DepotDownloader siap digunakan.
 
 ---
 
@@ -53,17 +56,32 @@ Installer akan membuat symlink eksekutabel ke `~/.local/bin/gamectl` dan alias `
    game
    ```
 
-2. **Daftar Game yang Terdeteksi**:
-   ```bash
-   gamectl --list
-   ```
-
-3. **Cari Game di Steam Store & Cek ProtonDB**:
+2. **Cari & Unduh Game Langsung via TUI**:
    ```bash
    gamectl --search
    ```
 
-4. **Sinkronisasi Manual Direktori Tertentu**:
+3. **Unduh Game Headless (Tanpa Steam Client)**:
+   ```bash
+   gamectl download 48000 "$HOME/Games/Limbo" "LIMBO"
+   ```
+
+4. **Injeksi GBE Fork Standalone & Portable Save**:
+   ```bash
+   gamectl inject "$HOME/Games/Limbo" 48000
+   ```
+
+5. **Sinkronisasi Dual-Mode ke Steam Client Resmi**:
+   ```bash
+   gamectl sync-steam 427520 "Factorio" "$HOME/Games/Factorio"
+   ```
+
+6. **Daftar Game yang Terdeteksi**:
+   ```bash
+   gamectl --list
+   ```
+
+7. **Sinkronisasi Manual Savegame ke Node Pendamping**:
    ```bash
    gamectl --sync /path/to/game "Game Title"
    ```

@@ -61,10 +61,10 @@ Target: Menggantikan total ekosistem SLSsteamMoon + ACCELA + Headcrab + SteaMidr
 - [x] Hook otomatis: dipanggil saat game baru selesai ditambahkan atau diinjeksi via `gamectl`.
 
 ### Chunk 7: Uji Verifikasi Empiris & Dokumentasi
-- [ ] Uji fungsionalitas injeksi pada direktori mock/sample game.
-- [ ] Uji parsing DLC generator, format `DLC.txt`, dan pembaruan `~/.config/SLSsteam/config.yaml`.
-- [ ] Verifikasi script syntax (`bash -n bin/gamectl`).
-- [ ] Perbarui dokumentasi di `README.md` dan `docs/GUIDE.md` mencakup seluruh alur baru.
+- [x] Uji fungsionalitas injeksi pada direktori mock/sample game.
+- [x] Uji parsing DLC generator, format `DLC.txt`, dan pembaruan `~/.config/SLSsteam/config.yaml`.
+- [x] Verifikasi script syntax (`bash -n bin/gamectl`).
+- [x] Perbarui dokumentasi di `README.md` dan `docs/GUIDE.md` mencakup seluruh alur baru.
 
 ---
 

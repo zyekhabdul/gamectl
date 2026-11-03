@@ -88,37 +88,33 @@ Untuk mengubah game Linux native menjadi format standalone portable yang kompati
 ├── libsteam_api.so               # GBE Fork shim
 ├── steam_appid.txt               # Berisi angka AppID Steam (misal: 48000)
 ├── steam_settings/
-│   └── configs.user.ini          # Konfigurasi offline & storage isolation
+│   ├── configs.user.ini          # Konfigurasi offline & storage isolation
+│   └── DLC.txt                   # Daftar DLC yang di-unlock (<id>=<nama>)
 └── saves/                        # Folder penyimpan progres lokal (portable)
 ```
 
-### 4.2 Langkah Injeksi GBE Fork
-1. **Audit Arsitektur Biner**:
-   ```bash
-   file -b ./game_executable
-   # Jika output memuat "ELF 64-bit":
-   cp ~/.local/share/gbe-fork/regular/x64/libsteam_api.so ./libsteam_api.so
-   # Jika output memuat "ELF 32-bit":
-   cp ~/.local/share/gbe-fork/regular/x86/libsteam_api.so ./libsteam_api.so
-   ```
+### 4.2 Otomatisasi Injeksi (`gamectl inject`)
+Tidak perlu melakukan langkah manual di atas. Cukup jalankan satu perintah:
+```bash
+gamectl inject /path/to/game [appid]
+```
+Perintah ini secara otomatis:
+1. Memindai ELF binary via `file -b` dan menyalin `libsteam_api.so` (x64 atau x86) yang sesuai.
+2. Mencadangkan biner asli Valve jika ada (`libsteam_api.so.orig`).
+3. Menulis `steam_settings/configs.user.ini` dengan `local_save_path = ./saves`.
+4. Membuat folder `./saves/` dan file marker `local_save.txt`.
+5. Menulis `steam_appid.txt` dan mengunduh seluruh metadata DLC ke `steam_settings/DLC.txt`.
+6. Mendaftarkan game dan full DLC ke Steam resmi (`appmanifest_<appid>.acf` & `~/.config/SLSsteam/config.yaml`).
 
-2. **Daftarkan AppID**:
-   ```bash
-   echo "48000" > ./steam_appid.txt
-   ```
+### 4.3 Headless Downloader (`gamectl download`)
+Untuk mengunduh game tanpa membuka client Steam atau browser:
+```bash
+# Unduh di background (non-blocking, auto-inject & sync saat selesai)
+gamectl download 48000 "$HOME/Games/Limbo" "LIMBO"
 
-3. **Konfigurasi Portable Saves**:
-   ```bash
-   mkdir -p ./steam_settings ./saves
-   cat <<EOF > ./steam_settings/configs.user.ini
-   [user::general]
-   account_name = Player
-   account_steamid = 76561198000000000
-
-   [user::saves]
-   local_save_path = ./saves
-   EOF
-   ```
+# Unduh di foreground (stream progres langsung ke terminal)
+gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" --foreground
+```
 
 ---
 
@@ -142,6 +138,7 @@ game
     - `[STANDALONE]`: Game DRM-free tanpa shim Steam API.
   - Arsitektur Biner ELF (misal: `ELF 64-bit LSB pie executable`).
   - Status Savegame: `(PORTABLE)` jika folder `saves/` terisolasi, atau lokasi default OS.
+  - Jumlah DLC aktif (`steam_settings/DLC.txt`).
   - Status Snapshot Cadangan & Total Ukuran Storage.
 
 ### 5.3 Shortcut Keyboard
@@ -149,6 +146,7 @@ game
 | Tombol | Deskripsi & Alur Kerja |
 | :--- | :--- |
 | `<ENTER>` | **Launch Game**: Membuat auto-snapshot savegame, menaikkan CPU governor ke `performance`, mengaktifkan `mesa_glthread=true`, lalu meluncurkan game. Saat game ditutup, CPU governor dikembalikan ke `powersave`. |
+| `<Ctrl-I>` | **Instant GBE Inject & Steam Sync**: Mengubah game `[VALVE_SO]` atau `[STANDALONE]` menjadi `[GBE_FORK]` portabel, mengunduh DLC, dan menyinkronkan status instalasi ke Steam resmi + SLSsteam secara instan. |
 | `<Ctrl-S>` | **Multi-Node Sync**: Menguji konektivitas SSH ke node pendamping (`ConnectTimeout=1`). Jika online, melakukan sinkronisasi delta via `rsync` dari folder `./saves` lokal ke direktori game pada node target. |
 | `<Ctrl-B>` | **Manual Snapshot**: Membuat salinan cadangan instan savegame ke rotasi slot `.save_snapshots`. |
 | `<ESC>` / `<Ctrl-C>` | Keluar dari antarmuka `gamectl`. |
