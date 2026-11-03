@@ -714,6 +714,17 @@ except Exception as e:
     local steam_apps="$HOME/.local/share/Steam/steamapps"
     if [ -d "$steam_apps" ]; then
         local acf_file="$steam_apps/appmanifest_${appid}.acf"
+        local install_name="$safe_title"
+        local size_bytes="1000000000"
+        local steamid="${GAMECTL_STEAMID:-76561198609877617}"
+
+        if [ -n "$game_dir" ] && [ -d "$game_dir" ]; then
+            install_name="$(basename "$game_dir")"
+            local calc_sz
+            calc_sz=$(du -sb "$game_dir" 2>/dev/null | awk '{print $1}')
+            [ -n "$calc_sz" ] && [ "$calc_sz" -gt 0 ] && size_bytes="$calc_sz"
+        fi
+
         cat <<ACF > "$acf_file"
 "AppState"
 {
@@ -721,11 +732,11 @@ except Exception as e:
 	"Universe"		"1"
 	"name"		"$safe_title"
 	"StateFlags"		"4"
-	"installdir"		"$safe_title"
+	"installdir"		"$install_name"
 	"LastUpdated"		"$(date +%s)"
-	"SizeOnDisk"		"1000000000"
+	"SizeOnDisk"		"$size_bytes"
 	"buildid"		"1"
-	"LastOwner"		"76561198609877617"
+	"LastOwner"		"$steamid"
 	"UserConfig"
 	{
 		"language"		"english"
@@ -739,13 +750,13 @@ ACF
         # Symlink in steamapps/common if game_dir is external
         if [ -n "$game_dir" ] && [ -d "$game_dir" ]; then
             mkdir -p "$steam_apps/common"
-            local common_target="$steam_apps/common/$safe_title"
+            local common_target="$steam_apps/common/$install_name"
             if [ ! -e "$common_target" ]; then
                 ln -sf "$game_dir" "$common_target"
                 echo "[INFO] Symlink common dibuat: $common_target -> $game_dir"
             fi
         fi
-        echo "[VERIFIED] appmanifest_${appid}.acf terdaftar (Status: Terinstal di Steam)."
+        echo "[VERIFIED] appmanifest_${appid}.acf terdaftar (Status: Terinstal di Steam, Size: $size_bytes bytes)."
     fi
 }
 
