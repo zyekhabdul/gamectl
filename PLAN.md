@@ -55,10 +55,10 @@ Target: Menggantikan total ekosistem SLSsteamMoon + ACCELA + Headcrab + SteaMidr
 - [ ] Memungkinkan user mengubah game berstatus `[VALVE_SO]` atau `[STANDALONE]` menjadi `[GBE_FORK]` secara instan dari tampilan daftar game.
 
 ### Chunk 6: Integrasi Dual-Mode Steam Client & SLSsteam Sync (`gamectl sync-steam`)
-- [ ] Otomatisasi pendaftaran AppID ke `~/.config/SLSsteam/config.yaml` (`AppIds:` & `AdditionalApps:`).
-- [ ] Otomatisasi pendaftaran seluruh DLC game ke section `DlcData:` di `~/.config/SLSsteam/config.yaml` agar berstatus full DLC saat client Steam resmi dibuka.
-- [ ] Pembuatan template `appmanifest_<appid>.acf` di `~/.local/share/Steam/steamapps/` (`StateFlags: 4`) agar Steam client resmi langsung mengenali status game terinstal.
-- [ ] Hook otomatis: dipanggil saat game baru selesai ditambahkan atau diinjeksi via `gamectl`.
+- [x] Otomatisasi pendaftaran AppID ke `~/.config/SLSsteam/config.yaml` (`AppIds:` & `AdditionalApps:`).
+- [x] Otomatisasi pendaftaran seluruh DLC game ke section `DlcData:` di `~/.config/SLSsteam/config.yaml` agar berstatus full DLC saat client Steam resmi dibuka.
+- [x] Pembuatan template `appmanifest_<appid>.acf` di `~/.local/share/Steam/steamapps/` (`StateFlags: 4`) agar Steam client resmi langsung mengenali status game terinstal.
+- [x] Hook otomatis: dipanggil saat game baru selesai ditambahkan atau diinjeksi via `gamectl`.
 
 ### Chunk 7: Uji Verifikasi Empiris & Dokumentasi
 - [ ] Uji fungsionalitas injeksi pada direktori mock/sample game.

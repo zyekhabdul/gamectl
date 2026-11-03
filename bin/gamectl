@@ -437,6 +437,7 @@ EOF
         echo -n "$appid" > "$target_dir/steam_appid.txt"
         echo "[INFO] AppID $appid terdaftar di: $target_dir/steam_appid.txt"
         fetch_dlc "$target_dir" "$appid"
+        sync_steam "$appid" "$(basename "$target_dir")" "$target_dir"
     fi
 
     echo "[VERIFIED] Game berhasil diinjeksi GBE Fork (Arsitektur: $arch, Save: ./saves, AppID: ${appid:-None})"
@@ -601,6 +602,118 @@ download_game() {
     fi
 }
 
+# Dual-Mode Steam Client & SLSsteam Full DLC Sync
+sync_steam() {
+    local appid="$1"
+    local title="${2:-}"
+    local game_dir="${3:-}"
+
+    if [ -z "$appid" ] || [ "$appid" = "STANDALONE" ]; then
+        echo "[WARN] AppID numerik tidak valid. Melewati sinkronisasi Steam." >&2
+        return 0
+    fi
+
+    if [ -z "$title" ]; then
+        title="AppID_${appid}"
+    fi
+
+    local safe_title
+    safe_title=$(echo "$title" | tr -cd '[:alnum:] _-')
+    [ -z "$safe_title" ] && safe_title="$appid"
+
+    echo "[INFO] Sinkronisasi Steam Client & SLSsteam untuk: $title ($appid)..."
+
+    # 1. Fetch DLC mapping via Steam API
+    local dlc_json
+    dlc_json=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/dlcforapp/?appid=${appid}" 2>/dev/null || echo "{}")
+
+    # 2. Update ~/.config/SLSsteam/config.yaml using ruamel.yaml
+    local sls_cfg="$HOME/.config/SLSsteam/config.yaml"
+    if [ -f "$sls_cfg" ]; then
+        python3 -c "
+import sys, json
+from ruamel.yaml import YAML
+
+cfg_path = sys.argv[1]
+appid = int(sys.argv[2])
+dlc_raw = sys.argv[3]
+
+yaml = YAML()
+yaml.preserve_quotes = True
+
+try:
+    with open(cfg_path, 'r') as f:
+        data = yaml.load(f) or {}
+
+    if 'AppIds' not in data or data['AppIds'] is None:
+        data['AppIds'] = []
+    if appid not in data['AppIds']:
+        data['AppIds'].append(appid)
+
+    if 'AdditionalApps' not in data or data['AdditionalApps'] is None:
+        data['AdditionalApps'] = []
+    if appid not in data['AdditionalApps']:
+        data['AdditionalApps'].append(appid)
+
+    dlc_obj = json.loads(dlc_raw)
+    dlc_list = dlc_obj.get('dlc', [])
+    if dlc_list:
+        if 'DlcData' not in data or data['DlcData'] is None:
+            data['DlcData'] = {}
+        if appid not in data['DlcData'] or data['DlcData'][appid] is None:
+            data['DlcData'][appid] = {}
+        for item in dlc_list:
+            d_id = int(item['id'])
+            d_name = item.get('name', f'DLC {d_id}')
+            data['DlcData'][appid][d_id] = d_name
+
+    with open(cfg_path, 'w') as f:
+        yaml.dump(data, f)
+    print(f'[VERIFIED] SLSsteam config.yaml: AppID {appid} dan {len(dlc_list)} DLC terdaftar.')
+except Exception as e:
+    print(f'[WARN] SLSsteam config sync notice: {e}', file=sys.stderr)
+" "$sls_cfg" "$appid" "$dlc_json" 2>/dev/null || true
+    fi
+
+    # 3. Create appmanifest_<appid>.acf in Steam steamapps
+    local steam_apps="$HOME/.local/share/Steam/steamapps"
+    if [ -d "$steam_apps" ]; then
+        local acf_file="$steam_apps/appmanifest_${appid}.acf"
+        cat <<ACF > "$acf_file"
+"AppState"
+{
+	"appid"		"$appid"
+	"Universe"		"1"
+	"name"		"$safe_title"
+	"StateFlags"		"4"
+	"installdir"		"$safe_title"
+	"LastUpdated"		"$(date +%s)"
+	"SizeOnDisk"		"1000000000"
+	"buildid"		"1"
+	"LastOwner"		"76561198609877617"
+	"UserConfig"
+	{
+		"language"		"english"
+	}
+	"MountedConfig"
+	{
+		"language"		"english"
+	}
+}
+ACF
+        # Symlink in steamapps/common if game_dir is external
+        if [ -n "$game_dir" ] && [ -d "$game_dir" ]; then
+            mkdir -p "$steam_apps/common"
+            local common_target="$steam_apps/common/$safe_title"
+            if [ ! -e "$common_target" ]; then
+                ln -sf "$game_dir" "$common_target"
+                echo "[INFO] Symlink common dibuat: $common_target -> $game_dir"
+            fi
+        fi
+        echo "[VERIFIED] appmanifest_${appid}.acf terdaftar (Status: Terinstal di Steam)."
+    fi
+}
+
 # Main Library View
 library_menu() {
     clean_stale_locks
@@ -677,7 +790,7 @@ search_steam() {
 }
 
 # Export functions for subshells in fzf
-export -f preview_game sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader
+export -f preview_game sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam
 
 # Top-level Menu
 case "${1:-}" in
@@ -702,6 +815,14 @@ case "${1:-}" in
             download_game "$2" "${3:-}" "${4:-}" "${5:-}"
         else
             echo "Usage: gamectl download <appid> [target_dir] [title] [--foreground|-f]"
+            exit 1
+        fi
+        ;;
+    sync-steam|--sync-steam)
+        if [ -n "${2:-}" ]; then
+            sync_steam "$2" "${3:-}" "${4:-}"
+        else
+            echo "Usage: gamectl sync-steam <appid> [title] [game_dir]"
             exit 1
         fi
         ;;
@@ -741,6 +862,7 @@ Usage:
   gamectl download <appid> [dir] [title] Unduh game headless via DepotDownloader
   gamectl inject <dir> [appid]    Injeksi GBE Fork standalone & portable save
   gamectl fetch-dlc <dir> [appid] Unduh & tulis daftar DLC ke steam_settings/DLC.txt
+  gamectl sync-steam <appid> [title] [dir] Sinkronisasi Steam Client & SLSsteam full DLC
   gamectl --search    Cari game di Steam Store & audit ProtonDB rating
   gamectl --list      Tampilkan daftar game yang terdeteksi
   gamectl --sync <dir> [title]  Sinkronisasi savegame ke companion node
