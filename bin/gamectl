@@ -321,6 +321,120 @@ sync_to_tuf() {
     echo "[VERIFIED] Sinkronisasi savegame selesai."
 }
 
+# Inject GBE Fork emulator and portable saves into a game folder
+inject_game() {
+    local target_dir="$1"
+    local appid="${2:-}"
+
+    if [ ! -d "$target_dir" ]; then
+        echo "[ERROR] Direktori target tidak ditemukan: $target_dir" >&2
+        return 1
+    fi
+
+    # Canonical path
+    target_dir="$(cd "$target_dir" && pwd)"
+
+    # Resolve AppID if not provided
+    if [ -z "$appid" ]; then
+        if [ -f "$target_dir/steam_appid.txt" ]; then
+            appid=$(tr -dc '0-9' < "$target_dir/steam_appid.txt")
+        fi
+        if [ -z "$appid" ]; then
+            local parent_dir
+            parent_dir="$(dirname "$target_dir")"
+            if [ "$(basename "$parent_dir")" = "common" ]; then
+                local steamapps_dir
+                steamapps_dir="$(dirname "$parent_dir")"
+                local base_name
+                base_name="$(basename "$target_dir")"
+                for acf in "$steamapps_dir"/appmanifest_*.acf; do
+                    [ -f "$acf" ] || continue
+                    if grep -q "\"installdir\"[[:space:]]\+\"$base_name\"" "$acf" 2>/dev/null; then
+                        appid=$(grep -E '^\s*"appid"' "$acf" | head -n 1 | sed -E 's/.*"appid"[[:space:]]+"([0-9]+)".*/\1/')
+                        break
+                    fi
+                done
+            fi
+        fi
+    fi
+
+    echo "[INFO] Menyiapkan injeksi GBE Fork di: $target_dir..."
+
+    # Detect game executable and ELF architecture
+    local gbin="" is_32bit=false arch="x86_64"
+    gbin=$(find_game_binary "$target_dir") || true
+    if [ -n "$gbin" ] && [ -f "$target_dir/$gbin" ]; then
+        if file -b "$target_dir/$gbin" | grep -qi "32-bit"; then
+            is_32bit=true
+            arch="x86"
+        fi
+    fi
+
+    # Select GBE library template
+    local src_so="$GBE_X64"
+    if [ "$is_32bit" = true ]; then
+        src_so="$GBE_X86"
+    fi
+
+    if [ ! -f "$src_so" ]; then
+        echo "[ERROR] Template GBE Fork tidak ditemukan di: $src_so" >&2
+        return 1
+    fi
+
+    # Locate destination libsteam_api.so path
+    local target_so="$target_dir/libsteam_api.so"
+    if [ -d "$target_dir/lib64" ] && [ "$is_32bit" = false ]; then
+        if [ -f "$target_dir/lib64/libsteam_api.so" ]; then
+            target_so="$target_dir/lib64/libsteam_api.so"
+        fi
+    elif [ -d "$target_dir/lib32" ] && [ "$is_32bit" = true ]; then
+        if [ -f "$target_dir/lib32/libsteam_api.so" ]; then
+            target_so="$target_dir/lib32/libsteam_api.so"
+        fi
+    fi
+
+    # Backup original Valve so if present and not already GBE
+    if [ -f "$target_so" ]; then
+        local sz
+        sz=$(stat -c%s "$target_so" 2>/dev/null || echo 0)
+        if [ "$sz" -lt 9000000 ] && [ ! -f "$target_so.orig" ]; then
+            cp -a "$target_so" "$target_so.orig"
+            echo "[INFO] Backup libsteam_api.so asli tersimpan di: $target_so.orig"
+        fi
+    fi
+
+    # Copy GBE Fork shim
+    cp "$src_so" "$target_so"
+    chmod +x "$target_so"
+    echo "[INFO] GBE Fork ($arch) terpasang di: $target_so"
+
+    # Setup steam_settings and configs.user.ini
+    mkdir -p "$target_dir/steam_settings"
+    local steamid="${GAMECTL_STEAMID:-76561198609877617}"
+    local user_name="${USER:-Player}"
+    cat <<EOF > "$target_dir/steam_settings/configs.user.ini"
+[user::general]
+account_name=$user_name
+account_steamid=$steamid
+language=english
+
+[user::saves]
+local_save_path=./saves
+EOF
+
+    # Setup isolated portable saves folder and markers
+    mkdir -p "$target_dir/saves"
+    echo -n "saves" > "$target_dir/local_save.txt"
+
+    # Write steam_appid.txt if available
+    if [ -n "$appid" ] && [ "$appid" != "STANDALONE" ]; then
+        echo -n "$appid" > "$target_dir/steam_appid.txt"
+        echo "[INFO] AppID $appid terdaftar di: $target_dir/steam_appid.txt"
+    fi
+
+    echo "[VERIFIED] Game berhasil diinjeksi GBE Fork (Arsitektur: $arch, Save: ./saves, AppID: ${appid:-None})"
+}
+
 # Main Library View
 library_menu() {
     clean_stale_locks
@@ -397,10 +511,18 @@ search_steam() {
 }
 
 # Export functions for subshells in fzf
-export -f preview_game sync_to_tuf backup_save
+export -f preview_game sync_to_tuf backup_save inject_game
 
 # Top-level Menu
 case "${1:-}" in
+    inject|--inject)
+        if [ -n "${2:-}" ]; then
+            inject_game "$2" "${3:-}"
+        else
+            echo "Usage: gamectl inject <game_dir> [appid]"
+            exit 1
+        fi
+        ;;
     --preview)
         preview_game "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}"
         ;;
@@ -423,7 +545,7 @@ case "${1:-}" in
         scan_installed_games
         ;;
     --version|-v)
-        echo "gamectl v1.1.0 (sovereign native TUI)"
+        echo "gamectl v1.2.0 (sovereign native TUI)"
         ;;
     --help|-h)
         cat <<EOF
@@ -431,6 +553,7 @@ gamectl - Sovereign TUI Game Manager & Launcher (Zero-Bloat)
 
 Usage:
   gamectl             Buka antarmuka TUI library game
+  gamectl inject <dir> [appid]  Injeksi GBE Fork standalone & portable save
   gamectl --search    Cari game di Steam Store & audit ProtonDB rating
   gamectl --list      Tampilkan daftar game yang terdeteksi
   gamectl --sync <dir> [title]  Sinkronisasi savegame ke companion node

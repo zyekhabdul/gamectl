@@ -25,11 +25,11 @@ Target: Menggantikan total ekosistem SLSsteamMoon + ACCELA + Headcrab + SteaMidr
 ## 2. Rincian Kerja Granular (Sliding Packet Max 10 Chunks)
 
 ### Chunk 1: Modul Otomatisasi Injeksi GBE Fork (`gamectl inject`)
-- [ ] Implementasi CLI sub-command: `gamectl inject <path_ke_game> [appid]`
-- [ ] Detektor biner ELF 64-bit vs 32-bit via `file -b` untuk memilih `libsteam_api.so` x64 vs x86 dari GBE Fork template.
-- [ ] Otomatisasi pembuatan `steam_settings/configs.user.ini` dengan konfigurasi portable `local_save_path = ./saves`.
-- [ ] Penulisan file `steam_appid.txt` dan pembuatan direktori `./saves/`.
-- [ ] Pembuatan backup biner asli jika sebelumnya sudah ada `libsteam_api.so` bawaan Valve (`libsteam_api.so.orig`).
+- [x] Implementasi CLI sub-command: `gamectl inject <path_ke_game> [appid]`
+- [x] Detektor biner ELF 64-bit vs 32-bit via `file -b` untuk memilih `libsteam_api.so` x64 vs x86 dari GBE Fork template.
+- [x] Otomatisasi pembuatan `steam_settings/configs.user.ini` dengan konfigurasi portable `local_save_path = ./saves`.
+- [x] Penulisan file `steam_appid.txt` dan pembuatan direktori `./saves/`.
+- [x] Pembuatan backup biner asli jika sebelumnya sudah ada `libsteam_api.so` bawaan Valve (`libsteam_api.so.orig`).
 
 ### Chunk 2: Generator Otomatis DLC Unlocker (`gamectl fetch-dlc`)
 - [ ] Implementasi fungsi parsing daftar DLC dari Steam Web API publik:
