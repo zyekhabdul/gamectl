@@ -21,7 +21,7 @@ Memperkuat instalasi dan kesiapan lingkungan `gamectl` agar bersifat *turnkey* (
     - `~/.config/gamectl/steam_user.example` (petunjuk penambahan akun Steam untuk DepotDownloader).
   - DoD: Menjalankan `./install.sh` menginisialisasi direktori config dan file template tanpa menimpa config yang sudah ada.
 
-- [ ] **Chunk 3: Resilient YAML Engine Fallback di `bin/gamectl` (`sync_steam`)**
+- [x] **Chunk 3: Resilient YAML Engine Fallback di `bin/gamectl` (`sync_steam`)**
   - Perbarui inline Python script di `sync_steam` untuk mencoba `ruamel.yaml` terlebih dahulu (guna mempertahankan quotes dan komentar).
   - Jika `ruamel.yaml` tidak terpasang (`ImportError`), fallback otomatis ke pustaka standar `yaml` (PyYAML).
   - DoD: `gamectl sync-steam` dan `gamectl unlock` tetap berhasil memutasi `config.yaml` baik menggunakan `ruamel.yaml` maupun `PyYAML`.

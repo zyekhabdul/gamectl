@@ -727,18 +727,30 @@ sync_steam() {
     if [ -f "$sls_cfg" ]; then
         python3 -c "
 import sys, json
-from ruamel.yaml import YAML
 
 cfg_path = sys.argv[1]
 appid = int(sys.argv[2])
 dlc_raw = sys.argv[3]
 
-yaml = YAML()
-yaml.preserve_quotes = True
+has_ruamel = False
+try:
+    from ruamel.yaml import YAML
+    yaml_engine = YAML()
+    yaml_engine.preserve_quotes = True
+    has_ruamel = True
+except Exception:
+    try:
+        import yaml as pyyaml
+    except Exception:
+        print('[ERROR] Tidak ditemukan library YAML di Python (ruamel.yaml atau pyyaml)', file=sys.stderr)
+        sys.exit(1)
 
 try:
     with open(cfg_path, 'r') as f:
-        data = yaml.load(f) or {}
+        if has_ruamel:
+            data = yaml_engine.load(f) or {}
+        else:
+            data = pyyaml.safe_load(f) or {}
 
     if 'AppIds' not in data or data['AppIds'] is None:
         data['AppIds'] = []
@@ -763,8 +775,12 @@ try:
             data['DlcData'][appid][d_id] = d_name
 
     with open(cfg_path, 'w') as f:
-        yaml.dump(data, f)
-    print(f'[VERIFIED] SLSsteam config.yaml: AppID {appid} dan {len(dlc_list)} DLC terdaftar.')
+        if has_ruamel:
+            yaml_engine.dump(data, f)
+        else:
+            pyyaml.dump(data, f, default_flow_style=False, sort_keys=False)
+    engine_name = 'ruamel.yaml' if has_ruamel else 'pyyaml (fallback)'
+    print(f'[VERIFIED] SLSsteam config.yaml: AppID {appid} dan {len(dlc_list)} DLC terdaftar ({engine_name}).')
 except Exception as e:
     print(f'[WARN] SLSsteam config sync notice: {e}', file=sys.stderr)
 " "$sls_cfg" "$appid" "$dlc_json" 2>/dev/null || true
