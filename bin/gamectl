@@ -1024,11 +1024,6 @@ search_steam() {
         echo " STATUS: $sel_status"
         echo "=========================================="
         if [ "$sel_status" = "[TERPASANG]" ]; then
-            echo "Pilih aksi untuk game terpasang:"
-            echo "  1) Luncurkan game langsung"
-            echo "  2) Re-injeksi GBE Fork & sinkronisasi Steam"
-            echo "  3) Batal / Kembali"
-            read -r -p "Pilihan [1-3]: " act_opt
             local gdir="$HOME/Games/$sel_name"
             if [ ! -d "$gdir" ]; then
                 for slib in "${steam_libs[@]}"; do
