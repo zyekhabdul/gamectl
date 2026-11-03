@@ -5,7 +5,8 @@
 set -euo pipefail
 
 BIN_DIR="$HOME/.local/bin"
-SRC_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/gamectl"
+SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC_BIN="$SRC_DIR/bin/gamectl"
 
 echo "[INFO] Memeriksa dependensi sistem..."
 for cmd in fzf jq curl rsync ssh file unzip python3; do
@@ -84,6 +85,15 @@ ln -sf "$SRC_BIN" "$BIN_DIR/game"
 if ! command -v depotdownloader >/dev/null 2>&1; then
     echo "[INFO] Menyiapkan runtime headless downloader (DepotDownloader)..."
     "$SRC_BIN" ensure-downloader >/dev/null 2>&1 || true
+fi
+
+# Install shell autocompletion
+COMPLETION_DIR="$HOME/.local/share/bash-completion/completions"
+mkdir -p "$COMPLETION_DIR"
+if [ -f "$SRC_DIR/completions/gamectl.bash" ]; then
+    cp "$SRC_DIR/completions/gamectl.bash" "$COMPLETION_DIR/gamectl"
+    ln -sf "$COMPLETION_DIR/gamectl" "$COMPLETION_DIR/game"
+    echo "[VERIFIED] Shell completion terpasang di: $COMPLETION_DIR/gamectl"
 fi
 
 echo "[VERIFIED] gamectl berhasil di-link ke $BIN_DIR/gamectl dan $BIN_DIR/game"

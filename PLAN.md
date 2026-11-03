@@ -26,7 +26,7 @@ Memperkuat instalasi dan kesiapan lingkungan `gamectl` agar bersifat *turnkey* (
   - Jika `ruamel.yaml` tidak terpasang (`ImportError`), fallback otomatis ke pustaka standar `yaml` (PyYAML).
   - DoD: `gamectl sync-steam` dan `gamectl unlock` tetap berhasil memutasi `config.yaml` baik menggunakan `ruamel.yaml` maupun `PyYAML`.
 
-- [ ] **Chunk 4: Shell Autocompletion untuk Bash & Zsh**
+- [x] **Chunk 4: Shell Autocompletion untuk Bash & Zsh**
   - Buat skrip completion `completions/gamectl.bash` di repositori.
   - Lengkapi completion untuk seluruh subcommands (`download`, `downloads`, `unlock`, `inject`, `fetch-dlc`, `sync-steam`, `ensure-downloader`, `--search`, `--list`, `--sync`, `--backup`, `--help`, `--version`).
   - Lengkapi completion untuk flag download (`--raw`, `--inject-only`, `--all`, `-f`, `--foreground`).
