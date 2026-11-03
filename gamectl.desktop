@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=gamectl
+GenericName=Game Manager
+Comment=Sovereign TUI Game Manager & Launcher
+Exec=sh -c "if command -v foot >/dev/null 2>&1; then foot -a gamectl -e gamectl; elif command -v kitty >/dev/null 2>&1; then kitty --class gamectl gamectl; elif command -v ghostty >/dev/null 2>&1; then ghostty -e gamectl; elif command -v alacritty >/dev/null 2>&1; then alacritty --class gamectl -e gamectl; else xterm -e gamectl; fi"
+Icon=applications-games
+Terminal=false
+Categories=Game;
+Keywords=game;steam;launcher;tui;goldberg;sovereign;
+StartupWMClass=gamectl

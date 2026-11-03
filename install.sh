@@ -96,5 +96,16 @@ if [ -f "$SRC_DIR/completions/gamectl.bash" ]; then
     echo "[VERIFIED] Shell completion terpasang di: $COMPLETION_DIR/gamectl"
 fi
 
+# Install desktop application entry
+APP_DIR="$HOME/.local/share/applications"
+mkdir -p "$APP_DIR"
+if [ -f "$SRC_DIR/gamectl.desktop" ]; then
+    cp "$SRC_DIR/gamectl.desktop" "$APP_DIR/gamectl.desktop"
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
+    fi
+    echo "[VERIFIED] Desktop application entry terpasang di: $APP_DIR/gamectl.desktop"
+fi
+
 echo "[VERIFIED] gamectl berhasil di-link ke $BIN_DIR/gamectl dan $BIN_DIR/game"
 echo "Jalankan perintah 'gamectl' atau 'game' di terminal untuk membuka antarmuka."

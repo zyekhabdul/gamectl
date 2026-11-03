@@ -33,7 +33,7 @@ Memperkuat instalasi dan kesiapan lingkungan `gamectl` agar bersifat *turnkey* (
   - Di `install.sh`, otomatis pasang completion ke `~/.local/share/bash-completion/completions/gamectl`.
   - DoD: Menekan `<TAB>` pada `gamectl ` di terminal Bash memunculkan daftar subcommand dan opsi secara akurat.
 
-- [ ] **Chunk 5: Desktop Application Entry (`gamectl.desktop`)**
+- [x] **Chunk 5: Desktop Application Entry (`gamectl.desktop`)**
   - Buat file `gamectl.desktop` di repositori.
   - Konfigurasikan spesifikasi Freedesktop XDG (`Type=Application`, `Categories=Game;Utility;`, `Exec=sh -c '...'`).
   - Otomatis deteksi terminal emulator yang tersedia (`foot`, `alacritty`, `kitty`, `ghostty`, atau `xterm`) agar kompatibel dengan launcher Niri/Wayland (fuzzel, rofi, wofi).
