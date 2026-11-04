@@ -2937,10 +2937,10 @@ case "${1:-}" in
 gamectl - Sovereign TUI Game Manager & Launcher (Zero-Bloat)
 
 Usage:
-  gamectl [menu]      Buka antarmuka Master Dashboard TUI
-  gamectl library     Buka antarmuka TUI library game langsung
-  gamectl config      Buka menu konfigurasi global (~/.config/gamectl/)
-  gamectl doctor      Jalankan diagnostik kesehatan sistem (7 layer)
+  gamectl [menu]      Buka antarmuka Master Dashboard TUI (alias: dashboard)
+  gamectl library     Buka antarmuka TUI library game langsung (alias: list-ui)
+  gamectl config      Buka menu konfigurasi global (~/.config/gamectl/) (alias: configure)
+  gamectl doctor      Jalankan diagnostik kesehatan sistem (7 layer) (alias: audit)
   gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr]
                       Jalankan game dengan prefix mandiri dan opsi wrapper performa
   gamectl configure-wrappers <dir> [title]
