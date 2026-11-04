@@ -61,10 +61,11 @@ Memperbaiki 6 inkonsistensi visual, false-positive state, dan UX disconnect pada
      `             tetapi baru akan AKTIF setelah kamu menjalankan injeksi via <CTRL-I>.`
   2. [x] Tambahkan catatan aktivasi pada output konfirmasi penyimpanan.
 
-### Chunk 7: End-to-End Test Matrix & Verification
+### Chunk 7: End-to-End Test Matrix & Verification [COMPLETED]
 - **Target**: `bin/gamectl`, regression test suite
 - **DoD**:
-  1. `bash -n bin/gamectl` lolos dengan exit code 0.
-  2. Uji render preview untuk `[VALVE_SO]`, `[VALVE_DLL]`, `[STANDALONE]`, dan `[GBE_FORK]`.
-  3. Verifikasi tombol `<CTRL-B>` pada game non-GBE menghasilkan pesan peringatan yang benar.
-  4. Verifikasi `search_steam` mendeteksi game di custom library.
+  1. [x] `bash -n bin/gamectl` lolos dengan exit code 0.
+  2. [x] Uji render preview untuk `[VALVE_SO]`, `[VALVE_DLL]`, `[STANDALONE]`, dan `[GBE_FORK]`.
+  3. [x] Verifikasi tombol `<CTRL-B>` pada game non-GBE menghasilkan pesan peringatan yang benar.
+  4. [x] Verifikasi `search_steam` mendeteksi game di custom library.
+  5. [x] Verifikasi 22 test assertion matrix pass 100% (exit 0).
