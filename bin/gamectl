@@ -78,6 +78,7 @@ clean_stale_locks() {
 # Auto-backup savegame (Rolling 3 snapshots)
 backup_save() {
     local game_dir="$1"
+    local is_quiet="${2:-false}"
     local save_dir="$game_dir/saves"
     if [ -d "$save_dir" ]; then
         local snap_dir="$game_dir/.save_snapshots"
@@ -85,7 +86,15 @@ backup_save() {
         [ -d "$snap_dir/slot2" ] && rm -rf "$snap_dir/slot3" && mv "$snap_dir/slot2" "$snap_dir/slot3"
         [ -d "$snap_dir/slot1" ] && mv "$snap_dir/slot1" "$snap_dir/slot2"
         cp -a "$save_dir" "$snap_dir/slot1"
-        echo "[INFO] Save snapshot backed up to slot1"
+        echo "[INFO] Save snapshot berhasil dibuat di slot1 ($snap_dir/slot1)"
+    else
+        if [ "$is_quiet" = true ]; then
+            return 0
+        fi
+        echo "[WARN] Folder saves portable ($save_dir) tidak ditemukan." >&2
+        echo "       Game belum di-inject GBE Fork atau belum memiliki save terisolasi." >&2
+        echo "       Tekan <CTRL-I> terlebih dahulu untuk mengaktifkan portable saves." >&2
+        return 1
     fi
 }
 
@@ -386,16 +395,18 @@ preview_game() {
     echo "--------------------------------------------------------"
     echo " SAVEGAME & STORAGE"
     if [ -d "$gdir/saves" ]; then
-        echo " Save Path    : $gdir/saves (PORTABLE)"
+        echo " Save Path    : $gdir/saves (PORTABLE - AKTIF)"
         echo " Save Size    : $(du -sh "$gdir/saves" 2>/dev/null | cut -f1)"
+        if [ -d "$gdir/.save_snapshots" ]; then
+            local snaps
+            snaps=$(ls -d "$gdir/.save_snapshots"/slot* 2>/dev/null | wc -l)
+            echo " Snapshots    : $snaps slot aktif"
+        else
+            echo " Snapshots    : 0 slot (Akan dibuat saat launch atau Ctrl-B)"
+        fi
     else
-        echo " Save Path    : Default OS / Not isolated"
-    fi
-
-    if [ -d "$gdir/.save_snapshots" ]; then
-        local snaps
-        snaps=$(ls -d "$gdir/.save_snapshots"/slot* 2>/dev/null | wc -l)
-        echo " Snapshots    : $snaps slot aktif"
+        echo " Save Path    : Default OS (Global Steam/Home - Belum terisolasi)"
+        echo " Snapshots    : Nonaktif (Memerlukan GBE Fork ./saves)"
     fi
 
     if [ -f "$gdir/steam_settings/DLC.txt" ]; then
@@ -759,7 +770,7 @@ launch_game() {
     shift 3 || true
 
     echo "[INFO] Menyiapkan peluncuran: $title..."
-    backup_save "$gdir"
+    backup_save "$gdir" true || true
 
     # Set Mesa performance env
     export mesa_glthread=true

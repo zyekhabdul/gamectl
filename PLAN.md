@@ -34,14 +34,14 @@ Memperbaiki 6 inkonsistensi visual, false-positive state, dan UX disconnect pada
      - `Status: Belum di-inject (Biner Steam resmi aktif)`
      - `Catatan: Tekan <CTRL-I> untuk mengaktifkan offline LAN & profil custom`
 
-### Chunk 4: Savegame Storage & Snapshot Truthfulness Guard
+### Chunk 4: Savegame Storage & Snapshot Truthfulness Guard [COMPLETED]
 - **Target**: `bin/gamectl` (`backup_save()`, `preview_game()`)
 - **DoD**:
-  1. Modifikasi `backup_save()`: Jika folder `$gdir/saves` tidak ditemukan, jangan exit 0 secara diam-diam. Tampilkan pesan peringatan eksplisit:
+  1. [x] Modifikasi `backup_save()`: Jika folder `$gdir/saves` tidak ditemukan, jangan exit 0 secara diam-diam. Tampilkan pesan peringatan eksplisit:
      `[WARN] Folder saves portable ($gdir/saves) tidak ditemukan.`
      `       Game belum di-inject GBE Fork atau belum memiliki save terisolasi.`
      `       Tekan <CTRL-I> terlebih dahulu untuk mengaktifkan portable saves.`
-  2. Pada `preview_game()` di bagian `SAVEGAME & STORAGE`:
+  2. [x] Pada `preview_game()` di bagian `SAVEGAME & STORAGE`:
      - Jika `$gdir/saves` ada: Tampilkan `Save Path: $gdir/saves (PORTABLE - AKTIF)`.
      - Jika `$gdir/saves` belum ada: Tampilkan `Save Path: Default OS (~/.local/share atau ~/.config - Belum Terisolasi)` dan `Snapshots: Tidak aktif (Memerlukan GBE Fork ./saves)`.
 
