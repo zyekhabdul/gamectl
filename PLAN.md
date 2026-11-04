@@ -26,11 +26,11 @@ Memperbaiki 6 inkonsistensi visual, false-positive state, dan UX disconnect pada
      - `[STANDALONE]`: `DRM-Free Standalone Game`
   2. [x] Hilangkan ambiguitas istilah teknis bagi pengguna.
 
-### Chunk 3: Conditional GBE LAN Multiplayer & Identity Section
+### Chunk 3: Conditional GBE LAN Multiplayer & Identity Section [COMPLETED]
 - **Target**: `bin/gamectl` (`preview_game()`)
 - **DoD**:
-  1. Jika status game `[GBE_FORK]`: Tampilkan header `LAN MULTIPLAYER & IDENTITY (GBE FORK: AKTIF)` beserta Player Name, SteamID64, dan Broadcast IP.
-  2. Jika status game bukan `[GBE_FORK]`: Tampilkan header `LAN MULTIPLAYER & IDENTITY (GBE FORK: NONAKTIF)` dengan pesan jelas:
+  1. [x] Jika status game `[GBE_FORK]`: Tampilkan header `LAN MULTIPLAYER & IDENTITY (GBE FORK: AKTIF)` beserta Player Name, SteamID64, dan Broadcast IP.
+  2. [x] Jika status game bukan `[GBE_FORK]`: Tampilkan header `LAN MULTIPLAYER & IDENTITY (GBE FORK: NONAKTIF)` dengan pesan jelas:
      - `Status: Belum di-inject (Biner Steam resmi aktif)`
      - `Catatan: Tekan <CTRL-I> untuk mengaktifkan offline LAN & profil custom`
 

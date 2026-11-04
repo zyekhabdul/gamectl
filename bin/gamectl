@@ -441,20 +441,26 @@ preview_game() {
     fi
 
     echo "--------------------------------------------------------"
-    echo " LAN MULTIPLAYER & IDENTITY (GBE FORK)"
-    local p_info
-    p_info=$(get_game_persona "$gdir")
-    local p_name p_id
-    p_name=$(echo "$p_info" | cut -d'|' -f1)
-    p_id=$(echo "$p_info" | cut -d'|' -f2)
-    echo " Player Name  : ${p_name:-Player}"
-    echo " SteamID64    : ${p_id:-Auto-Generated / Default}"
-    if [ -f "$gdir/steam_settings/custom_broadcasts.txt" ]; then
-        local bc_count
-        bc_count=$(grep -v -E '^[[:space:]]*(#|$)' "$gdir/steam_settings/custom_broadcasts.txt" 2>/dev/null | wc -l)
-        echo " Broadcast IPs: $bc_count peer terkonfigurasi"
+    if [[ "$status" =~ GBE_FORK ]]; then
+        echo " LAN MULTIPLAYER & IDENTITY (GBE FORK: AKTIF)"
+        local p_info
+        p_info=$(get_game_persona "$gdir")
+        local p_name p_id
+        p_name=$(echo "$p_info" | cut -d'|' -f1)
+        p_id=$(echo "$p_info" | cut -d'|' -f2)
+        echo " Player Name  : ${p_name:-Player}"
+        echo " SteamID64    : ${p_id:-Auto-Generated / Default}"
+        if [ -f "$gdir/steam_settings/custom_broadcasts.txt" ]; then
+            local bc_count
+            bc_count=$(grep -v -E '^[[:space:]]*(#|$)' "$gdir/steam_settings/custom_broadcasts.txt" 2>/dev/null | wc -l)
+            echo " Broadcast IPs: $bc_count peer terkonfigurasi"
+        else
+            echo " Broadcast IPs: Subnet default (127.0.0.1, 255.255.255.255)"
+        fi
     else
-        echo " Broadcast IPs: Subnet default (127.0.0.1, 255.255.255.255)"
+        echo " LAN MULTIPLAYER & IDENTITY (GBE FORK: NONAKTIF)"
+        echo " Status       : Belum di-inject (Biner Steam/DRM resmi aktif)"
+        echo " Keterangan   : Tekan <CTRL-I> untuk mengaktifkan LAN co-op & profil custom"
     fi
 
     echo " Total Size   : $(du -sh "$gdir" 2>/dev/null | cut -f1)"
