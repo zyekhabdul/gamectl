@@ -12,7 +12,7 @@ Memperluas kapabilitas `gamectl` agar mendukung ekosistem game Windows (.exe) da
 
 ## 2. Granular Work Chunks (Max 10)
 
-- [ ] **Chunk 1: Template Audit & Dual-Architecture GBE Injection (Windows DLL)**
+- [x] **Chunk 1: Template Audit & Dual-Architecture GBE Injection (Windows DLL)**
   - Tambahkan audit template GBE Fork Windows (`steam_api64.dll` dan `steam_api.dll`) di `install.sh`.
   - Perbarui `inject_game` di `bin/gamectl` agar mendeteksi arsitektur target Windows (64-bit vs 32-bit).
   - Lakukan backup `.dll` asli ke `.dll.orig` dan pasang shim GBE Windows yang sesuai.

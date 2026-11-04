@@ -26,18 +26,47 @@ else
     echo "       Fitur sinkronisasi SLSsteam memerlukan library ini."
 fi
 
-# Audit GBE Fork template libraries
+# Audit GBE Fork template libraries (Linux SO & Windows DLL)
 GBE_X64="$HOME/.local/share/gbe-fork/regular/x64/libsteam_api.so"
 GBE_X86="$HOME/.local/share/gbe-fork/regular/x86/libsteam_api.so"
+
+GBE_WIN_X64=""
+for p in "$HOME/.local/share/gbe-fork/windows/release/regular/x64/steam_api64.dll" \
+         "$HOME/.local/share/gbe-fork/windows/regular/x64/steam_api64.dll" \
+         "$HOME/.local/share/gbe-fork/regular/x64/steam_api64.dll"; do
+    if [ -f "$p" ]; then GBE_WIN_X64="$p"; break; fi
+done
+
+GBE_WIN_X86=""
+for p in "$HOME/.local/share/gbe-fork/windows/release/regular/x86/steam_api.dll" \
+         "$HOME/.local/share/gbe-fork/windows/regular/x86/steam_api.dll" \
+         "$HOME/.local/share/gbe-fork/regular/x86/steam_api.dll"; do
+    if [ -f "$p" ]; then GBE_WIN_X86="$p"; break; fi
+done
+
 if [ -f "$GBE_X64" ]; then
-    echo "[VERIFIED] Template GBE Fork 64-bit terdeteksi: $GBE_X64"
+    echo "[VERIFIED] Template GBE Fork Linux 64-bit terdeteksi: $GBE_X64"
 else
-    echo "[WARN] Template GBE Fork 64-bit belum ditemukan di: $GBE_X64"
+    echo "[WARN] Template GBE Fork Linux 64-bit belum ditemukan di: $GBE_X64"
     echo "       Fitur 'gamectl inject' memerlukan biner libsteam_api.so dari Goldberg Emulator Fork."
     echo "       Tempatkan biner di ~/.local/share/gbe-fork/regular/x64/libsteam_api.so"
 fi
 if [ -f "$GBE_X86" ]; then
-    echo "[VERIFIED] Template GBE Fork 32-bit terdeteksi: $GBE_X86"
+    echo "[VERIFIED] Template GBE Fork Linux 32-bit terdeteksi: $GBE_X86"
+fi
+
+if [ -n "$GBE_WIN_X64" ]; then
+    echo "[VERIFIED] Template GBE Fork Windows 64-bit terdeteksi: $GBE_WIN_X64"
+else
+    echo "[WARN] Template GBE Fork Windows 64-bit belum ditemukan (steam_api64.dll)."
+    echo "       Tempatkan biner di ~/.local/share/gbe-fork/windows/release/regular/x64/steam_api64.dll"
+fi
+
+if [ -n "$GBE_WIN_X86" ]; then
+    echo "[VERIFIED] Template GBE Fork Windows 32-bit terdeteksi: $GBE_WIN_X86"
+else
+    echo "[WARN] Template GBE Fork Windows 32-bit belum ditemukan (steam_api.dll)."
+    echo "       Tempatkan biner di ~/.local/share/gbe-fork/windows/release/regular/x86/steam_api.dll"
 fi
 
 # Scaffold user configuration directory and templates
