@@ -1351,6 +1351,17 @@ EOF
         echo "           Nama Pemain : $player_name"
         echo "           SteamID64   : $steamid"
         echo "           Config File : $ini_file"
+        local is_gbe_check=false
+        for api_c in "$target_dir/libsteam_api.so" "$target_dir/lib64/libsteam_api.so" "$target_dir/steam_api64.dll" "$target_dir/steam_api.dll"; do
+            if [ -f "$api_c" ]; then
+                local sz
+                sz=$(stat -c%s "$api_c" 2>/dev/null || echo 0)
+                [ "$sz" -gt 7000000 ] && is_gbe_check=true && break
+            fi
+        done
+        if [ "$is_gbe_check" = false ]; then
+            echo "           Catatan     : Game belum di-inject GBE Fork. Tekan <CTRL-I> untuk mengaktifkan."
+        fi
     fi
 }
 
@@ -1372,6 +1383,28 @@ set_id_interactive() {
     cur_id=$(echo "$p_info" | cut -d'|' -f2)
     cur_lang=$(echo "$p_info" | cut -d'|' -f3)
 
+    local is_gbe=false
+    local api_cand
+    for api_cand in "$target_dir/libsteam_api.so" "$target_dir/lib64/libsteam_api.so" "$target_dir/steam_api64.dll" "$target_dir/steam_api.dll"; do
+        if [ -f "$api_cand" ]; then
+            local sz
+            sz=$(stat -c%s "$api_cand" 2>/dev/null || echo 0)
+            if [ "$sz" -gt 7000000 ]; then
+                is_gbe=true
+                break
+            fi
+        fi
+    done
+    if [ "$is_gbe" = false ]; then
+        local deep_api
+        deep_api=$(find "$target_dir" -maxdepth 3 \( -name "libsteam_api.so" -o -name "steam_api64.dll" -o -name "steam_api.dll" \) 2>/dev/null | head -n 1)
+        if [ -n "$deep_api" ]; then
+            local sz
+            sz=$(stat -c%s "$deep_api" 2>/dev/null || echo 0)
+            [ "$sz" -gt 7000000 ] && is_gbe=true
+        fi
+    fi
+
     echo ""
     echo "========================================================"
     echo " KONFIGURASI IDENTITAS LAN & STEAMID (GBE FORK)"
@@ -1381,6 +1414,14 @@ set_id_interactive() {
     echo " Nama Pemain   : ${cur_name:-[Belum diset]}"
     echo " SteamID64     : ${cur_id:-[Belum diset]}"
     echo "--------------------------------------------------------"
+
+    if [ "$is_gbe" = false ]; then
+        echo ""
+        echo "[PERINGATAN] Game ini ($title) belum di-inject GBE Fork (masih biner Steam resmi/DRM)."
+        echo "             Pengaturan persona ini akan disimpan ke steam_settings/configs.user.ini,"
+        echo "             tetapi baru akan AKTIF setelah kamu menjalankan injeksi via <CTRL-I>."
+        echo ""
+    fi
 
     read -r -p "Nama Pemain LAN [${cur_name}]: " in_name
     [ -z "$in_name" ] && in_name="$cur_name"

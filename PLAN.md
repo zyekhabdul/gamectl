@@ -52,14 +52,14 @@ Memperbaiki 6 inkonsistensi visual, false-positive state, dan UX disconnect pada
   2. Gunakan lookup associative array (`installed_appids` dan `installed_titles`).
   3. Hilangkan false-negative `[BELUM TERPASANG]` pada game yang berada di direktori kustom.
 
-### Chunk 6: Non-GBE Awareness Gate on LAN Persona Configurator
+### Chunk 6: Non-GBE Awareness Gate on LAN Persona Configurator [COMPLETED]
 - **Target**: `bin/gamectl` (`set_id_interactive()`)
 - **DoD**:
-  1. Saat `<CTRL-P>` ditekan pada game yang belum di-inject GBE: Tampilkan notifikasi sebelum meminta input:
-     `[CATATAN] Game ini ($title) saat ini berstatus $status (Biner Steam resmi).`
-     `         Pengaturan identitas akan disimpan, tetapi baru akan AKTIF di dalam`
-     `         game setelah kamu menekan <CTRL-I> untuk injeksi GBE Fork.`
-  2. Berikan konfirmasi lanjutan kepada pengguna untuk melanjutkan atau langsung injeksi.
+  1. [x] Saat `<CTRL-P>` ditekan pada game yang belum di-inject GBE: Tampilkan notifikasi sebelum meminta input:
+     `[PERINGATAN] Game ini ($title) belum di-inject GBE Fork (masih biner Steam resmi/DRM).`
+     `             Pengaturan persona ini akan disimpan ke steam_settings/configs.user.ini,`
+     `             tetapi baru akan AKTIF setelah kamu menjalankan injeksi via <CTRL-I>.`
+  2. [x] Tambahkan catatan aktivasi pada output konfirmasi penyimpanan.
 
 ### Chunk 7: End-to-End Test Matrix & Verification
 - **Target**: `bin/gamectl`, regression test suite
