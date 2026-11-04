@@ -50,7 +50,9 @@ get_remote_host() {
 
 # Pre-flight cleanup of orphaned sockets and locks
 clean_stale_locks() {
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
     rm -f /tmp/SteaMidra-* /tmp/steam_chrome_shmem_* /tmp/steam_chrome_overlay_* 2>/dev/null || true
+    rm -f "$run_dir"/SteaMidra-* "$run_dir"/steam_chrome_* 2>/dev/null || true
     rm -f "$HOME/.config/SLSsteam/cache/.picsbuffer.lock" 2>/dev/null || true
 }
 

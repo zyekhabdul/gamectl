@@ -107,7 +107,9 @@ get_remote_host() {
 
 # Pre-flight cleanup of orphaned sockets and locks
 clean_stale_locks() {
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
     rm -f /tmp/SteaMidra-* /tmp/steam_chrome_shmem_* /tmp/steam_chrome_overlay_* 2>/dev/null || true
+    rm -f "$run_dir"/SteaMidra-* "$run_dir"/steam_chrome_* 2>/dev/null || true
     rm -f "$HOME/.config/SLSsteam/cache/.picsbuffer.lock" 2>/dev/null || true
 }
 
@@ -963,11 +965,14 @@ ensure_downloader() {
         echo "[INFO] Mengunduh DepotDownloader standalone binary ($dl_arch)..." >&2
         mkdir -p "$HOME/.local/share/gamectl/bin" "$HOME/.local/bin"
         local dl_url="https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_3.4.0/DepotDownloader-${dl_arch}.zip"
-        if curl -sL "$dl_url" -o /tmp/depotdownloader.zip 2>/dev/null; then
-            unzip -q -o /tmp/depotdownloader.zip -d "$HOME/.local/share/gamectl/bin/"
+        local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+        mkdir -p -m 700 "$run_dir"
+        local dl_zip="$run_dir/depotdownloader.zip"
+        if curl -sL "$dl_url" -o "$dl_zip" 2>/dev/null; then
+            unzip -q -o "$dl_zip" -d "$HOME/.local/share/gamectl/bin/"
             chmod +x "$HOME/.local/share/gamectl/bin/DepotDownloader"
             ln -sf "$HOME/.local/share/gamectl/bin/DepotDownloader" "$HOME/.local/bin/depotdownloader"
-            rm -f /tmp/depotdownloader.zip
+            rm -f "$dl_zip"
             depot_bin="$HOME/.local/share/gamectl/bin/DepotDownloader"
             echo "[VERIFIED] DepotDownloader terpasang di $depot_bin" >&2
         else
@@ -1038,7 +1043,9 @@ download_game() {
 
     mkdir -p "$target_dir"
     target_dir="$(cd "$target_dir" && pwd)"
-    local log_file="/tmp/gamectl_dl_${appid}.log"
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    mkdir -p -m 700 "$run_dir"
+    local log_file="$run_dir/gamectl_dl_${appid}.log"
 
     local extra_args=()
     local user_cfg="$HOME/.config/gamectl/steam_user"
@@ -1123,14 +1130,18 @@ list_downloads() {
     echo "=========================================="
     echo " STATUS UNDUHAN GAMECTL (DepotDownloader)"
     echo "=========================================="
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
     local count=0
-    for log in /tmp/gamectl_dl_*.log; do
+    declare -A seen_logs=()
+    for log in "$run_dir"/gamectl_dl_*.log /tmp/gamectl_dl_*.log; do
         [ -f "$log" ] || continue
+        [[ -v seen_logs["$log"] ]] && continue
+        seen_logs["$log"]=1
         count=$((count + 1))
         local appid
         appid=$(basename "$log" | sed -E 's/gamectl_dl_([0-9]+)\.log/\1/')
         local status="[SELESAI/BERHENTI]"
-        if pgrep -f "DepotDownloader.*-app ${appid}" >/dev/null 2>&1; then
+        if pgrep -f "DepotDownloader.*-app[[:space:]]+${appid}([[:space:]]|$)" >/dev/null 2>&1; then
             status="[SEDANG MENGUNDUH]"
         fi
         echo "$status AppID: $appid | Log: $log"
@@ -1138,23 +1149,28 @@ list_downloads() {
         echo "------------------------------------------"
     done
     if [ $count -eq 0 ]; then
-        echo "[INFO] Tidak ada riwayat atau proses unduhan aktif di /tmp/."
+        echo "[INFO] Tidak ada riwayat atau proses unduhan aktif di $run_dir."
     fi
 }
 
 # Interactive Download Monitor TUI
 list_downloads_interactive() {
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    mkdir -p -m 700 "$run_dir"
     while true; do
-        local logs=(/tmp/gamectl_dl_*.log)
         local valid_logs=()
-        for l in "${logs[@]}"; do
-            [ -f "$l" ] && valid_logs+=("$l")
+        declare -A seen_logs=()
+        for l in "$run_dir"/gamectl_dl_*.log /tmp/gamectl_dl_*.log; do
+            [ -f "$l" ] || continue
+            [[ -v seen_logs["$l"] ]] && continue
+            seen_logs["$l"]=1
+            valid_logs+=("$l")
         done
 
         if [ ${#valid_logs[@]} -eq 0 ]; then
             clear
             echo "${UI_BOX}╭─ DOWNLOAD MANAGER (DepotDownloader) ────────────────────────╮${UI_RST}"
-            echo "│ ${UI_CYAN}No active or recent download tasks found in /tmp/${UI_RST}"
+            echo "│ ${UI_CYAN}No active or recent download tasks found in $run_dir${UI_RST}"
             echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
             read -r -p "Press [ENTER] to return to Dashboard..."
             return 0
