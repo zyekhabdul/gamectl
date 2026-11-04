@@ -1870,6 +1870,190 @@ unlock_game() {
     echo "[SUCCESS] Game '$title' ($appid) telah dibuka di Steam resmi dengan Full DLC tanpa download."
 }
 
+# Preview pane generator for Master Dashboard
+preview_dashboard() {
+    local item_key="${1:-1}"
+    local gcount="${2:-}"
+
+    echo "========================================================"
+    echo " GAMECTL SOVEREIGN COCKPIT - SYSTEM STATUS"
+    echo "========================================================"
+
+    local os_name="Linux"
+    if [ -f /etc/os-release ]; then
+        os_name=$(grep -E '^PRETTY_NAME=' /etc/os-release | cut -d'=' -f2 | tr -d '"')
+    fi
+    echo " Host OS      : $os_name"
+    echo " Kernel       : $(uname -s) $(uname -r) ($(uname -m))"
+
+    local disp_info="Headless/Unknown"
+    if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        disp_info="Wayland ($WAYLAND_DISPLAY)"
+        [ -n "${DISPLAY:-}" ] && disp_info="$disp_info + Xwayland ($DISPLAY)"
+    elif [ -n "${DISPLAY:-}" ]; then
+        disp_info="X11 ($DISPLAY)"
+    fi
+    echo " Display      : $disp_info"
+
+    [ -z "$gcount" ] && gcount=$(scan_installed_games 2>/dev/null | wc -l || echo "0")
+    echo " Games Loaded : $gcount judul terdeteksi"
+
+    local def_runner
+    def_runner=$(find_runner "$HOME" 2>/dev/null || true)
+    if [ -n "$def_runner" ]; then
+        echo " Win Runner   : $(basename "$def_runner") ($def_runner)"
+    else
+        echo " Win Runner   : [MISSING] Belum terpasang (umu-run/Proton/wine)"
+    fi
+
+    local gbe_l64 gbe_w64
+    gbe_l64=$(get_gbe_template "linux" "x64" 2>/dev/null || true)
+    gbe_w64=$(get_gbe_template "windows" "x64" 2>/dev/null || true)
+    local gbe_status="[READY]"
+    [ -z "$gbe_l64" ] || [ -z "$gbe_w64" ] && gbe_status="[PARTIAL]"
+    echo " GBE Fork     : $gbe_status (Linux x64: $([ -n "$gbe_l64" ] && echo "OK" || echo "MISSING") | Win x64: $([ -n "$gbe_w64" ] && echo "OK" || echo "MISSING"))"
+
+    local w_gm="[N/A]" w_hud="[N/A]" w_scope="[N/A]"
+    command -v gamemoderun >/dev/null 2>&1 && w_gm="[READY]"
+    command -v mangohud >/dev/null 2>&1 && w_hud="[READY]"
+    command -v gamescope >/dev/null 2>&1 && w_scope="[READY]"
+    echo " Tooling      : GameMode $w_gm | MangoHud $w_hud | Gamescope $w_scope"
+
+    local dl_status="[MISSING]" sls_status="[N/A]"
+    if command -v depotdownloader >/dev/null 2>&1 || [ -x "$HOME/.local/share/gamectl/bin/DepotDownloader" ] || [ -x "$HOME/.local/bin/depotdownloader" ]; then
+        dl_status="[READY]"
+    fi
+    [ -f "$HOME/.config/SLSsteam/config.yaml" ] && sls_status="[READY]"
+    echo " Integrasi    : DepotDownloader $dl_status | SLSsteam $sls_status"
+
+    echo "--------------------------------------------------------"
+    echo " INFORMASI MODUL & AKSI TERPILIH"
+    echo "--------------------------------------------------------"
+    case "$item_key" in
+        *1*|*PUSTAKA*)
+            echo " [1] PUSTAKA GAME (LIBRARY)"
+            echo " - Jelajahi koleksi game Linux Native & Windows terpasang."
+            echo " - Peluncuran instan dengan Mesa GL Threading & isolasi runner."
+            echo " - Proteksi otomatis 3-slot savegame snapshot sebelum launch."
+            ;;
+        *2*|*PENCARIAN*|*SEARCH*)
+            echo " [2] PENCARIAN STEAM STORE & PROTONDB"
+            echo " - Cari game langsung via Steam Store Web API publik."
+            echo " - Audit tier kompatibilitas Linux resmi dari ProtonDB."
+            echo " - Integrasi unduhan headless langsung via DepotDownloader."
+            ;;
+        *3*|*UNDUHAN*|*DOWNLOAD*)
+            echo " [3] PEMANTAU UNDUHAN (DOWNLOAD MONITOR)"
+            echo " - Pantau status proses unduhan DepotDownloader di background."
+            echo " - Live progress status, streaming log, dan terminasi proses."
+            ;;
+        *4*|*UNLOCK*)
+            echo " [4] UNLOCK STEAM RESMI (ZERO-DOWNLOAD)"
+            echo " - Daftarkan kepemilikan AppID & Full DLC ke SLSsteam."
+            echo " - Buat appmanifest_<appid>.acf otomatis tanpa unduh aset."
+            ;;
+        *5*|*KONFIGURASI*|*CONFIG*)
+            echo " [5] KONFIGURASI GLOBAL"
+            echo " - Kelola Persona LAN (Player Name & SteamID64 default)."
+            echo " - Atur default wrappers (GameMode, MangoHud, Gamescope FSR)."
+            echo " - Manajemen path direktori pustaka & host sync savegame."
+            ;;
+        *6*|*DIAGNOSTIK*|*DOCTOR*|*AUDIT*)
+            echo " [6] DIAGNOSTIK SISTEM (HEALTH AUDIT)"
+            echo " - Verifikasi 7 layer kesiapan sistem, runner, driver, dan CLI."
+            echo " - Deteksi dini batasan hardware GPU & driver grafis."
+            ;;
+        *)
+            echo " Pilih menu pada panel kiri menggunakan tombol panah atau angka."
+            echo " Tekan <ENTER> untuk membuka modul, atau <ESC> untuk keluar."
+            ;;
+    esac
+}
+
+# Master Dashboard Hub (Two-Panel Interactive TUI)
+dashboard_menu() {
+    clean_stale_locks
+
+    while true; do
+        local game_count
+        game_count=$(scan_installed_games 2>/dev/null | wc -l || echo "0")
+
+        local menu_entries
+        menu_entries=$(cat <<EOF
+1	PUSTAKA GAME	Koleksi game lokal, peluncuran & snapshot save
+2	PENCARIAN STEAM	Cari game di Steam Store & cek rating ProtonDB
+3	PANTAU UNDUHAN	Pantau proses background DepotDownloader
+4	UNLOCK STEAM	Daftarkan AppID ke SLSsteam (Full DLC tanpa unduh)
+5	KONFIGURASI GLOBAL	Kelola Persona LAN, Wrappers & path pustaka
+6	DIAGNOSTIK SISTEM	Audit kesehatan 7 layer dependensi & driver
+EOF
+)
+
+        local selection
+        selection=$(echo "$menu_entries" | fzf \
+            --delimiter=$'\t' \
+            --with-nth=1,2,3 \
+            --header="GAMECTL MASTER DASHBOARD (Pilih menu dengan panah/angka, Enter: Buka, Esc: Keluar)" \
+            --prompt="Dashboard > " \
+            --preview="$SELF_BIN --preview-dashboard {1} $game_count" \
+            --preview-window=right:55%:wrap \
+        ) || break
+
+        local sel_key
+        sel_key=$(echo "$selection" | awk -F'\t' '{print $1}')
+
+        case "$sel_key" in
+            1)
+                library_menu
+                ;;
+            2)
+                search_steam
+                ;;
+            3)
+                if declare -F list_downloads_interactive >/dev/null 2>&1; then
+                    list_downloads_interactive
+                else
+                    list_downloads
+                    read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
+                fi
+                ;;
+            4)
+                if declare -F unlock_interactive >/dev/null 2>&1; then
+                    unlock_interactive
+                else
+                    echo -n "Masukkan AppID yang ingin di-unlock: "
+                    read -r u_appid
+                    if [ -n "$u_appid" ]; then
+                        echo -n "Masukkan Judul Game (opsional): "
+                        read -r u_title
+                        unlock_game "$u_appid" "${u_title:-Game $u_appid}"
+                    fi
+                    read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
+                fi
+                ;;
+            5)
+                if declare -F configure_global >/dev/null 2>&1; then
+                    configure_global
+                else
+                    echo "[INFO] Modul Konfigurasi Global akan dimuat pada Chunk 3."
+                    read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
+                fi
+                ;;
+            6)
+                if declare -F doctor_audit >/dev/null 2>&1; then
+                    doctor_audit
+                else
+                    echo "[INFO] Modul Diagnostik Sistem akan dimuat pada Chunk 4."
+                    read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
+                fi
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+}
+
 # Main Library View
 library_menu() {
     clean_stale_locks
@@ -2130,11 +2314,20 @@ cli_launch() {
 }
 
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads unlock_game get_remote_host get_gbe_template find_game_binary find_runner launch_game build_wrapper_command configure_wrappers cli_launch generate_steamid64 get_game_persona set_id set_id_interactive
+export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads unlock_game get_remote_host get_gbe_template find_game_binary find_runner launch_game build_wrapper_command configure_wrappers cli_launch generate_steamid64 get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
 case "${1:-}" in
+    dashboard|menu|--dashboard)
+        dashboard_menu
+        ;;
+    library|list-ui)
+        library_menu
+        ;;
+    --preview-dashboard)
+        preview_dashboard "${2:-1}" "${3:-}"
+        ;;
     set-id)
         if [ -n "${2:-}" ]; then
             set_id "${@:2}"
@@ -2245,7 +2438,8 @@ case "${1:-}" in
 gamectl - Sovereign TUI Game Manager & Launcher (Zero-Bloat)
 
 Usage:
-  gamectl             Buka antarmuka TUI library game
+  gamectl [menu]      Buka antarmuka Master Dashboard TUI
+  gamectl library     Buka antarmuka TUI library game langsung
   gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr]
                       Jalankan game dengan prefix mandiri dan opsi wrapper performa
   gamectl configure-wrappers <dir> [title]
@@ -2270,7 +2464,7 @@ Usage:
 EOF
         ;;
     *)
-        library_menu
+        dashboard_menu
         ;;
 esac
 fi
