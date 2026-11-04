@@ -14,9 +14,11 @@ _gamectl_completions() {
         cword=$COMP_CWORD
     fi
 
-    local commands="download downloads unlock inject fetch-dlc sync-steam ensure-downloader --search --list --sync --backup --help --version -h -v"
+    local commands="launch run configure-wrappers set-id set-id-interactive generate-steamid download downloads unlock inject fetch-dlc sync-steam ensure-downloader --search --list --sync --backup --help --version -h -v"
     local download_opts="--raw --inject-only --all --foreground -f"
     local inject_opts="--all --no-sync"
+    local launch_opts="--hud --no-hud --mangohud --no-mangohud --gamemode --no-gamemode --gamescope --no-gamescope --fsr --no-fsr"
+    local set_id_opts="--broadcast --global auto random"
 
     # Complete top-level subcommands
     if [ "$cword" -eq 1 ]; then
@@ -27,6 +29,30 @@ _gamectl_completions() {
     # Subcommand-specific completions
     local subcmd="${words[1]}"
     case "$subcmd" in
+        launch|run|--launch)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "$launch_opts" -- "$cur") )
+            elif declare -F _filedir >/dev/null 2>&1; then
+                _filedir -d 2>/dev/null || _filedir
+            fi
+            return 0
+            ;;
+        configure-wrappers|set-id-interactive)
+            if declare -F _filedir >/dev/null 2>&1; then
+                _filedir -d 2>/dev/null || _filedir
+            fi
+            return 0
+            ;;
+        set-id)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "$set_id_opts" -- "$cur") )
+            elif [ "$cword" -eq 3 ] && [[ "$cur" == a* || "$cur" == r* ]]; then
+                COMPREPLY=( $(compgen -W "auto random" -- "$cur") )
+            elif declare -F _filedir >/dev/null 2>&1; then
+                _filedir -d 2>/dev/null || _filedir
+            fi
+            return 0
+            ;;
         download|--download)
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=( $(compgen -W "$download_opts" -- "$cur") )

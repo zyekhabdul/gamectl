@@ -10,9 +10,12 @@ Dibuat untuk arsitektur workstation Linux yang mengutamakan efisiensi resource, 
 
 - **Zero-Bloat & Instant Startup**: Ditulis murni dalam POSIX Bash + `fzf` + `jq`. Memangkas 99% overhead memori dibandingkan client grafis konvensional.
 - **Dynamic Multi-Library Autodetection**: Otomatis mendeteksi game yang terpasang dari seluruh direktori Steam (`libraryfolders.vdf` + ACF manifests), direktori portabel `~/Games/`, Lutris, serta custom path melalui `~/.config/gamectl/libraries` atau variabel `GAMECTL_LIBRARY_DIRS`.
-- **Split-Pane Live Inspection**: Kolom kiri menampilkan daftar pustaka game; kolom kanan menampilkan metadata biner, arsitektur ELF (32-bit / 64-bit), status runner GBE Fork, dan ukuran savegame secara real-time.
+- **Split-Pane Live Inspection**: Kolom kiri menampilkan daftar pustaka game; kolom kanan menampilkan metadata biner, arsitektur ELF (32-bit / 64-bit), status runner GBE Fork, konfigurasi wrapper performa, identitas LAN pemain, dan ukuran savegame secara real-time.
 - **Savegame Snapshot Protection (Anti-Data-Loss)**: Membuat cadangan otomatis rotasi 3-slot (`slot1`, `slot2`, `slot3`) sebelum setiap game dijalankan, melindungi progres dari dirty shutdown atau crash.
-- **Automated GBE Fork Injection (`gamectl inject`)**: Mengonversi biner game Valve menjadi standalone portabel dengan auto-deteksi ELF 32/64-bit, portable save `./saves`, dan generator `steam_settings/DLC.txt`.
+- **Dual-Architecture GBE Fork Injection (`gamectl inject`)**: Mengonversi biner game Valve (Linux native `.so` dan Windows `.dll` x64/x86) menjadi standalone portabel dengan backup `.orig`, portable save `./saves`, dan generator `steam_settings/DLC.txt`.
+- **Isolated Windows Runner & Proton Prefix**: Auto-discovery runner Windows (`umu-run` -> `GE-Proton` / `Proton` Steam -> `wine`) dengan Wine prefix terisolasi di direktori lokal game (`$GAME_DIR/pfx`) tanpa mengotori `~/.wine` host.
+- **Modular Runtime Performance Wrappers**: Integrasi on-the-fly untuk `gamemoderun`, `mangohud`, dan `gamescope` FSR upscaling melalui menu TUI interaktif (`<Ctrl-O>`) atau CLI flags.
+- **LAN Multi-Identity & SteamID Manager (`gamectl set-id`)**: Otomatis menghasilkan SteamID64 unik dan nama profil terpisah untuk co-op multiplayer offline tanpa bentrok ID, serta discovery IP peer (`custom_broadcasts.txt`).
 - **Headless Downloader Engine (`gamectl download`)**: Mengunduh game langsung dari Steam Content Server via DepotDownloader headless CLI tanpa memerlukan client Steam GUI atau cache berat.
 - **Zero-Download Steam Library Registration (`gamectl unlock`)**: Mendaftarkan kepemilikan AppID dan seluruh DLC ke SLSsteam serta membuat manifest ACF tanpa perlu mengunduh file game. Saat Steam resmi dibuka, game langsung muncul di library dengan status full DLC.
 - **Dual-Mode Steam & SLSsteam Sync (`gamectl sync-steam`)**: Otomatis mendaftarkan AppID & DLC ke `~/.config/SLSsteam/config.yaml` dan membuat `appmanifest_<appid>.acf` berstatus terinstal. Game siap dimainkan mandiri dan langsung berstatus full DLC saat aplikasi Steam resmi dibuka.
@@ -26,7 +29,9 @@ Dibuat untuk arsitektur workstation Linux yang mengutamakan efisiensi resource, 
 
 | Shortcut | Aksi |
 | :--- | :--- |
-| `<ENTER>` | Luncurkan Game Standalone (Mesa GL Threading + Snapshot Backup) |
+| `<ENTER>` | Luncurkan Game Standalone (Mesa GL Threading + Snapshot Backup + Wrappers) |
+| `<Ctrl-O>` | Konfigurasi Runtime Wrappers (GameMode / MangoHud / Gamescope FSR) |
+| `<Ctrl-P>` | Konfigurasi Identitas Pemain LAN & SteamID (GBE Fork) |
 | `<Ctrl-I>` | Injeksi GBE Fork Portabel & Sinkronisasi Dual-Mode Steam/SLSsteam |
 | `<Ctrl-S>` | Sinkronisasi Savegame Portabel ke Remote Host via SSH (jika dikonfigurasi) |
 | `<Ctrl-B>` | Buat Snapshot Manual Savegame saat ini |
@@ -103,12 +108,33 @@ Installer otomatis melakukan setup turnkey:
    gamectl sync-steam 427520 "Factorio" "$HOME/Games/Factorio"
    ```
 
-7. **Daftar Game yang Terdeteksi**:
+7. **Luncurkan Game dengan Prefix Terisolasi & Wrapper Performa**:
+   ```bash
+   # Luncurkan game dengan HUD MangoHud dan GameMode:
+   gamectl launch "$HOME/Games/Limbo" --hud --gamemode
+
+   # Luncurkan game Windows (.exe) dengan Gamescope FSR upscaling:
+   gamectl launch "$HOME/Games/WindowsGame" game.exe --gamescope --fsr
+   ```
+
+8. **Konfigurasi Identitas LAN & SteamID (GBE Fork)**:
+   ```bash
+   # Set nama pemain LAN (SteamID64 di-generate acak otomatis):
+   gamectl set-id "Player2" "$HOME/Games/Valheim"
+
+   # Set nama pemain dengan SteamID spesifik dan IP peer broadcast:
+   gamectl set-id "Alice" 76561198123456789 "$HOME/Games/Valheim" --broadcast "192.168.1.50"
+
+   # Simpan sebagai identitas default global untuk injeksi berikutnya:
+   gamectl set-id "MyGamerTag" auto --global
+   ```
+
+9. **Daftar Game yang Terdeteksi**:
    ```bash
    gamectl --list
    ```
 
-8. **Sinkronisasi Manual Savegame ke Remote Host**:
+10. **Sinkronisasi Manual Savegame ke Remote Host**:
    ```bash
    gamectl --sync /path/to/game "Game Title" [remote_host]
    ```

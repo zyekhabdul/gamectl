@@ -36,7 +36,7 @@ Memperluas kapabilitas `gamectl` agar mendukung ekosistem game Windows (.exe) da
   - Sediakan opsi scaffolding `steam_settings/custom_broadcasts.txt` untuk deteksi IP LAN teman bermain.
   - DoD: Perintah `gamectl set-id "Player2"` menghasilkan SteamID unik dan nama akun terpisah guna mencegah konflik sesi multiplayer offline.
 
-- [ ] **Chunk 5: Shell Autocompletion, CLI Help & Panduan Dokumentasi**
+- [x] **Chunk 5: Shell Autocompletion, CLI Help & Panduan Dokumentasi**
   - Perbarui `completions/gamectl.bash` untuk subcommand `set-id` dan flag-flag wrapper baru (`--hud`, `--gamescope`, dll).
   - Perbarui `README.md` dan `docs/GUIDE.md` dengan panduan penggunaan runner Windows, template GBE DLL, dan integrasi wrapper.
   - DoD: `gamectl --help` menampilkan panduan perintah baru dan bash completion merespons input dengan presisi.
