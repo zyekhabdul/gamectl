@@ -397,10 +397,47 @@ preview_game() {
         echo " DLC Unlocked : $dlc_count item"
     fi
 
+    echo "--------------------------------------------------------"
+    echo " RUNTIME WRAPPERS & PERFORMANCE"
+    local w_gm="[OFF]" w_hud="[OFF]" w_scope="[OFF]"
+    command -v gamemoderun >/dev/null 2>&1 && w_gm="[READY]" || w_gm="[N/A]"
+    command -v mangohud >/dev/null 2>&1 && w_hud="[READY]" || w_hud="[N/A]"
+    command -v gamescope >/dev/null 2>&1 && w_scope="[READY]" || w_scope="[N/A]"
+    echo " Host Tools   : GameMode $w_gm | MangoHud $w_hud | Gamescope $w_scope"
+
+    local act_w=()
+    local c_gm=0 c_hud=0 c_scope=0 c_fsr=0
+    if [ -f "$HOME/.config/gamectl/wrappers" ]; then
+        grep -q "^gamemode=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_gm=1
+        grep -q -E "^(hud|mangohud)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_hud=1
+        grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_scope=1
+        grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_fsr=1
+    fi
+    if [ -f "$gdir/.wrappers" ]; then
+        grep -q "^gamemode=1" "$gdir/.wrappers" 2>/dev/null && c_gm=1
+        grep -q "^gamemode=0" "$gdir/.wrappers" 2>/dev/null && c_gm=0
+        grep -q -E "^(hud|mangohud)=1" "$gdir/.wrappers" 2>/dev/null && c_hud=1
+        grep -q -E "^(hud|mangohud)=0" "$gdir/.wrappers" 2>/dev/null && c_hud=0
+        grep -q "^gamescope=1" "$gdir/.wrappers" 2>/dev/null && c_scope=1
+        grep -q "^gamescope=0" "$gdir/.wrappers" 2>/dev/null && c_scope=0
+        grep -q "^fsr=1" "$gdir/.wrappers" 2>/dev/null && c_fsr=1
+        grep -q "^fsr=0" "$gdir/.wrappers" 2>/dev/null && c_fsr=0
+    fi
+    [ "$c_gm" = 1 ] && act_w+=("GameMode")
+    [ "$c_hud" = 1 ] && act_w+=("MangoHud")
+    [ "$c_scope" = 1 ] && act_w+=("Gamescope")
+    [ "$c_fsr" = 1 ] && act_w+=("FSR")
+    if [ ${#act_w[@]} -gt 0 ]; then
+        echo " Active Profile: ${act_w[*]}"
+    else
+        echo " Active Profile: Default (Native / Mesa GL Thread)"
+    fi
+
     echo " Total Size   : $(du -sh "$gdir" 2>/dev/null | cut -f1)"
     echo "--------------------------------------------------------"
     echo " ACTION KEYS:"
-    echo " <ENTER>       : Launch Game (Standalone + Mesa GL Thread)"
+    echo " <ENTER>       : Launch Game"
+    echo " <CTRL-O>      : Configure Runtime Wrappers (GameMode/HUD/FSR)"
     local rhost
     rhost=$(get_remote_host)
     if [ -n "$rhost" ]; then
@@ -501,6 +538,181 @@ find_runner() {
     return 1
 }
 
+# Resolve and build wrapper prefix command array (gamemoderun, mangohud, gamescope)
+build_wrapper_command() {
+    local gdir="$1"
+    shift || true
+    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr=""
+    local remaining_args=()
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --hud|--mangohud) opt_hud=1; shift ;;
+            --no-hud|--no-mangohud) opt_hud=0; shift ;;
+            --gamemode) opt_gamemode=1; shift ;;
+            --no-gamemode) opt_gamemode=0; shift ;;
+            --gamescope) opt_gamescope=1; shift ;;
+            --no-gamescope) opt_gamescope=0; shift ;;
+            --fsr) opt_fsr=1; opt_gamescope=1; shift ;;
+            --no-fsr) opt_fsr=0; shift ;;
+            --) shift; remaining_args+=("$@"); break ;;
+            *) remaining_args+=("$1"); shift ;;
+        esac
+    done
+
+    # 1. Base defaults
+    local use_gm=0 use_hud=0 use_scope=0 use_fsr=0
+    local gscope_args="-W 1280 -H 720 -w 1920 -h 1080 -F fsr -f"
+
+    # 2. Global configuration (~/.config/gamectl/wrappers)
+    if [ -f "$HOME/.config/gamectl/wrappers" ]; then
+        while IFS='=' read -r k v || [ -n "$k" ]; do
+            k=$(echo "$k" | tr -d '[:space:]')
+            v=$(echo "$v" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+            [[ "$k" =~ ^# ]] && continue
+            case "$k" in
+                gamemode) use_gm="$v" ;;
+                hud|mangohud) use_hud="$v" ;;
+                gamescope) use_scope="$v" ;;
+                fsr) use_fsr="$v" ;;
+                gamescope_args) gscope_args="$v" ;;
+            esac
+        done < "$HOME/.config/gamectl/wrappers"
+    fi
+
+    # 3. Per-game override ($gdir/.wrappers)
+    if [ -n "$gdir" ] && [ -f "$gdir/.wrappers" ]; then
+        while IFS='=' read -r k v || [ -n "$k" ]; do
+            k=$(echo "$k" | tr -d '[:space:]')
+            v=$(echo "$v" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+            [[ "$k" =~ ^# ]] && continue
+            case "$k" in
+                gamemode) use_gm="$v" ;;
+                hud|mangohud) use_hud="$v" ;;
+                gamescope) use_scope="$v" ;;
+                fsr) use_fsr="$v" ;;
+                gamescope_args) gscope_args="$v" ;;
+            esac
+        done < "$gdir/.wrappers"
+    fi
+
+    # 4. Environment variable overrides
+    [ -n "${GAMECTL_GAMEMODE:-}" ] && use_gm="$GAMECTL_GAMEMODE"
+    [ -n "${GAMECTL_HUD:-${GAMECTL_MANGOHUD:-}}" ] && use_hud="${GAMECTL_HUD:-$GAMECTL_MANGOHUD}"
+    [ -n "${GAMECTL_GAMESCOPE:-}" ] && use_scope="$GAMECTL_GAMESCOPE"
+    [ -n "${GAMECTL_FSR:-}" ] && use_fsr="$GAMECTL_FSR"
+    [ -n "${GAMECTL_GAMESCOPE_ARGS:-}" ] && gscope_args="$GAMECTL_GAMESCOPE_ARGS"
+
+    # 5. CLI flag overrides
+    [ -n "$opt_gamemode" ] && use_gm="$opt_gamemode"
+    [ -n "$opt_hud" ] && use_hud="$opt_hud"
+    [ -n "$opt_gamescope" ] && use_scope="$opt_gamescope"
+    [ -n "$opt_fsr" ] && use_fsr="$opt_fsr"
+
+    local prefix=()
+    if [ "$use_gm" = "1" ]; then
+        if command -v gamemoderun >/dev/null 2>&1; then
+            prefix+=("gamemoderun")
+        else
+            echo "[WARN] gamemoderun diaktifkan tetapi biner tidak ditemukan di PATH." >&2
+        fi
+    fi
+
+    if [ "$use_hud" = "1" ]; then
+        if command -v mangohud >/dev/null 2>&1; then
+            prefix+=("mangohud")
+        else
+            echo "[WARN] mangohud diaktifkan tetapi biner tidak ditemukan di PATH." >&2
+        fi
+    fi
+
+    if [ "$use_scope" = "1" ] || [ "$use_fsr" = "1" ]; then
+        if command -v gamescope >/dev/null 2>&1; then
+            prefix+=("gamescope")
+            local active_args="$gscope_args"
+            if [ "$use_fsr" = "1" ] && [[ ! "$active_args" =~ (-F|fsr|-U) ]]; then
+                active_args="-F fsr $active_args"
+            fi
+            if [ -n "$active_args" ]; then
+                read -r -a parsed_args <<< "$active_args"
+                prefix+=("${parsed_args[@]}")
+            fi
+            prefix+=("--")
+        else
+            echo "[WARN] gamescope diaktifkan tetapi biner tidak ditemukan di PATH." >&2
+        fi
+    fi
+
+    GAMECTL_WRAPPER_PREFIX=("${prefix[@]}")
+    GAMECTL_REMAINING_ARGS=("${remaining_args[@]}")
+}
+
+# Interactive wrapper configuration for a game or global defaults
+configure_wrappers() {
+    local gdir="$1"
+    local title="${2:-$(basename "$gdir")}"
+    local w_file="$gdir/.wrappers"
+
+    local gm=0 hud=0 scope=0 fsr=0
+    local gscope_args="-W 1280 -H 720 -w 1920 -h 1080 -F fsr -f"
+    if [ -f "$HOME/.config/gamectl/wrappers" ]; then
+        grep -q "^gamemode=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && gm=1
+        grep -q -E "^(hud|mangohud)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && hud=1
+        grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && scope=1
+        grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && fsr=1
+    fi
+    if [ -f "$w_file" ]; then
+        grep -q "^gamemode=1" "$w_file" 2>/dev/null && gm=1
+        grep -q "^gamemode=0" "$w_file" 2>/dev/null && gm=0
+        grep -q -E "^(hud|mangohud)=1" "$w_file" 2>/dev/null && hud=1
+        grep -q -E "^(hud|mangohud)=0" "$w_file" 2>/dev/null && hud=0
+        grep -q "^gamescope=1" "$w_file" 2>/dev/null && scope=1
+        grep -q "^gamescope=0" "$w_file" 2>/dev/null && scope=0
+        grep -q "^fsr=1" "$w_file" 2>/dev/null && fsr=1
+        grep -q "^fsr=0" "$w_file" 2>/dev/null && fsr=0
+    fi
+
+    echo "========================================================"
+    echo " KONFIGURASI RUNTIME WRAPPERS: $title"
+    echo "========================================================"
+    echo " Status Host:"
+    echo "  • GameMode  : $(command -v gamemoderun >/dev/null 2>&1 && echo 'Tersedia' || echo 'Tidak terpasang')"
+    echo "  • MangoHud  : $(command -v mangohud >/dev/null 2>&1 && echo 'Tersedia' || echo 'Tidak terpasang')"
+    echo "  • Gamescope : $(command -v gamescope >/dev/null 2>&1 && echo 'Tersedia' || echo 'Tidak terpasang')"
+    echo "--------------------------------------------------------"
+    echo " Opsi Toggle:"
+    echo "  1) GameMode (gamemoderun) : $([ "$gm" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
+    echo "  2) MangoHud (FPS/Stats)   : $([ "$hud" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
+    echo "  3) Gamescope Windowing    : $([ "$scope" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
+    echo "  4) Gamescope FSR Upscale  : $([ "$fsr" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
+    echo "  5) Preset: Full Performance (GameMode + MangoHud)"
+    echo "  6) Preset: Handheld / FSR (GameMode + MangoHud + Gamescope FSR)"
+    echo "  7) Reset ke Default (Semua Nonaktif)"
+    echo "  8) Batal / Keluar"
+    read -r -p "Pilihan toggle [1-8]: " opt
+    case "$opt" in
+        1) gm=$((1 - gm)) ;;
+        2) hud=$((1 - hud)) ;;
+        3) scope=$((1 - scope)) ;;
+        4) fsr=$((1 - fsr)); [ "$fsr" = 1 ] && scope=1 ;;
+        5) gm=1; hud=1; scope=0; fsr=0 ;;
+        6) gm=1; hud=1; scope=1; fsr=1 ;;
+        7) gm=0; hud=0; scope=0; fsr=0 ;;
+        *) return 0 ;;
+    esac
+
+    cat <<EOF > "$w_file"
+# Runtime wrappers for $title
+gamemode=$gm
+hud=$hud
+gamescope=$scope
+fsr=$fsr
+gamescope_args=$gscope_args
+EOF
+    echo "[VERIFIED] Konfigurasi wrapper tersimpan di: $w_file"
+    sleep 1
+}
+
 # Launch game with performance wrapping and runner isolation
 launch_game() {
     local gdir="$1"
@@ -518,6 +730,17 @@ launch_game() {
     # Attempt CPU scaling governor if permitted
     if [ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
         echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+    fi
+
+    # Resolve wrappers and extra flags
+    declare -a GAMECTL_WRAPPER_PREFIX=()
+    declare -a GAMECTL_REMAINING_ARGS=()
+    build_wrapper_command "$gdir" "$@"
+    local wrappers=("${GAMECTL_WRAPPER_PREFIX[@]}")
+    local game_args=("${GAMECTL_REMAINING_ARGS[@]}")
+
+    if [ ${#wrappers[@]} -gt 0 ]; then
+        echo "[INFO] Wrapper aktif: ${wrappers[*]}"
     fi
 
     cd "$gdir"
@@ -555,23 +778,25 @@ launch_game() {
 
             case "$runner_bin" in
                 umu-run)
-                    WINEPREFIX="$pfx_dir" GAMEID="$appid" umu-run "$gdir/$gbin" "$@" || exit_code=$?
+                    WINEPREFIX="$pfx_dir" GAMEID="$appid" \
+                    "${wrappers[@]}" umu-run "$gdir/$gbin" "${game_args[@]}" || exit_code=$?
                     ;;
                 *proton*)
                     STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_INSTALL_PATH:-$HOME/.local/share/Steam}" \
                     STEAM_COMPAT_DATA_PATH="$gdir" \
                     STEAM_COMPAT_APP_ID="$appid" \
                     WINEPREFIX="$pfx_dir" \
-                    "$runner_bin" waitforexitandrun "$gdir/$gbin" "$@" || exit_code=$?
+                    "${wrappers[@]}" "$runner_bin" waitforexitandrun "$gdir/$gbin" "${game_args[@]}" || exit_code=$?
                     ;;
                 *)
-                    WINEPREFIX="$pfx_dir" "$runner_bin" "$gdir/$gbin" "$@" || exit_code=$?
+                    WINEPREFIX="$pfx_dir" \
+                    "${wrappers[@]}" "$runner_bin" "$gdir/$gbin" "${game_args[@]}" || exit_code=$?
                     ;;
             esac
         fi
     else
         echo "[INFO] Menjalankan $title (Native Linux)..."
-        ./"$gbin" "$@" || exit_code=$?
+        "${wrappers[@]}" ./"$gbin" "${game_args[@]}" || exit_code=$?
     fi
 
     [ "$exit_code" -ne 0 ] && echo "[WARN] Game exited with code $exit_code"
@@ -1279,10 +1504,11 @@ library_menu() {
         selection=$(scan_installed_games | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
-            --header="GAMECTL LIBRARY (Enter: Launch | Ctrl-I: Inject GBE & Sync | Ctrl-S: Sync Remote | Ctrl-B: Backup)" \
+            --header="GAMECTL LIBRARY (Enter: Launch | Ctrl-O: Wrappers | Ctrl-I: Inject GBE | Ctrl-S: Sync | Ctrl-B: Backup)" \
             --prompt="Game > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:wrap \
+            --bind="ctrl-o:execute($SELF_BIN configure-wrappers {4} {2})+reload($SELF_BIN --list)" \
             --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk kembali ke pustaka...')+reload($SELF_BIN --list)" \
             --bind="ctrl-s:execute($SELF_BIN --sync {4} {2}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
             --bind="ctrl-b:execute($SELF_BIN --backup {4}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
@@ -1476,27 +1702,64 @@ search_steam() {
     fi
 }
 
+# CLI helper for launching games with wrappers and options
+cli_launch() {
+    local l_dir="${1:-}"
+    shift || true
+    local l_bin=""
+    local l_title=""
+    local l_flags=()
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --hud|--mangohud|--no-hud|--no-mangohud|--gamemode|--no-gamemode|--gamescope|--no-gamescope|--fsr|--no-fsr)
+                l_flags+=("$1")
+                shift
+                ;;
+            *)
+                if [ -z "$l_bin" ]; then
+                    l_bin="$1"
+                elif [ -z "$l_title" ]; then
+                    l_title="$1"
+                else
+                    l_flags+=("$1")
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    [ -z "$l_title" ] && l_title="$(basename "$l_dir")"
+    if [ -z "$l_bin" ]; then
+        l_bin=$(find_game_binary "$l_dir" 2>/dev/null || echo "")
+    fi
+
+    if [ -n "$l_bin" ]; then
+        launch_game "$l_dir" "$l_bin" "$l_title" "${l_flags[@]}"
+    else
+        echo "[ERROR] Biner eksekutabel tidak ditemukan di: $l_dir" >&2
+        return 1
+    fi
+}
+
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads unlock_game get_remote_host get_gbe_template find_game_binary find_runner launch_game
+export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads unlock_game get_remote_host get_gbe_template find_game_binary find_runner launch_game build_wrapper_command configure_wrappers cli_launch
 
 # Top-level Menu
 case "${1:-}" in
     launch|run|--launch)
         if [ -n "${2:-}" ]; then
-            l_dir="$2"
-            l_bin="${3:-}"
-            l_title="${4:-$(basename "$l_dir")}"
-            if [ -z "$l_bin" ]; then
-                l_bin=$(find_game_binary "$l_dir" 2>/dev/null || echo "")
-            fi
-            if [ -n "$l_bin" ]; then
-                launch_game "$l_dir" "$l_bin" "$l_title" "${@:5}"
-            else
-                echo "[ERROR] Biner eksekutabel tidak ditemukan di: $l_dir" >&2
-                exit 1
-            fi
+            cli_launch "${@:2}"
         else
-            echo "Usage: gamectl launch <game_dir> [binary] [title]"
+            echo "Usage: gamectl launch <game_dir> [binary] [title] [--hud] [--gamemode] [--gamescope] [--fsr]"
+            exit 1
+        fi
+        ;;
+    configure-wrappers)
+        if [ -n "${2:-}" ]; then
+            configure_wrappers "$2" "${3:-}"
+        else
+            echo "Usage: gamectl configure-wrappers <game_dir> [title]"
             exit 1
         fi
         ;;
@@ -1576,6 +1839,10 @@ gamectl - Sovereign TUI Game Manager & Launcher (Zero-Bloat)
 
 Usage:
   gamectl             Buka antarmuka TUI library game
+  gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr]
+                      Jalankan game dengan prefix mandiri dan opsi wrapper performa
+  gamectl configure-wrappers <dir> [title]
+                      Buka menu konfigurasi wrapper (GameMode/MangoHud/Gamescope FSR)
   gamectl download <appid> [dir] [title] [--raw|--inject-only|--all] [-f]
                       Unduh game headless via DepotDownloader (pilihan paket fleksibel)
   gamectl downloads   Pantau status & log unduhan aktif

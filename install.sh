@@ -89,9 +89,34 @@ else
     echo "       Tempatkan GE-Proton di ~/.local/share/Steam/compatibilitytools.d/ untuk menjalankan game .exe"
 fi
 
+# Audit performance & display wrappers (GameMode, MangoHud, Gamescope)
+WRAPPER_STATUS=()
+command -v gamemoderun >/dev/null 2>&1 && WRAPPER_STATUS+=("gamemode: [READY]") || WRAPPER_STATUS+=("gamemode: [N/A]")
+command -v mangohud >/dev/null 2>&1 && WRAPPER_STATUS+=("mangohud: [READY]") || WRAPPER_STATUS+=("mangohud: [N/A]")
+command -v gamescope >/dev/null 2>&1 && WRAPPER_STATUS+=("gamescope: [READY]") || WRAPPER_STATUS+=("gamescope: [N/A]")
+echo "[INFO] Tooling wrappers: ${WRAPPER_STATUS[*]}"
+
 # Scaffold user configuration directory and templates
 CONFIG_DIR="$HOME/.config/gamectl"
 mkdir -p "$CONFIG_DIR"
+
+if [ ! -f "$CONFIG_DIR/wrappers.example" ]; then
+    cat <<'EOF' > "$CONFIG_DIR/wrappers.example"
+# ==============================================================================
+# gamectl - Default Runtime Performance & Display Wrappers
+# ==============================================================================
+# Salin file ini menjadi 'wrappers' di ~/.config/gamectl/wrappers untuk mengaktifkan
+# opsi wrapper default secara global untuk seluruh game.
+# Nilai: 1 (aktif), 0 (nonaktif)
+#
+gamemode=0
+hud=0
+gamescope=0
+fsr=0
+gamescope_args=-W 1280 -H 720 -w 1920 -h 1080 -F fsr -f
+EOF
+    echo "[INFO] Template konfigurasi dibuat: $CONFIG_DIR/wrappers.example"
+fi
 
 if [ ! -f "$CONFIG_DIR/libraries.example" ]; then
     cat <<'EOF' > "$CONFIG_DIR/libraries.example"

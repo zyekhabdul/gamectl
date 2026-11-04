@@ -24,7 +24,7 @@ Memperluas kapabilitas `gamectl` agar mendukung ekosistem game Windows (.exe) da
   - Perbarui `find_game_binary` dan `launch_game` agar mampu meluncurkan biner `.exe` melalui runner terpilih dengan prefix terisolasi.
   - DoD: Menjalankan game Windows mengeksekusi runner yang valid dengan prefix lokal tanpa mengotori `~/.wine` di sistem host.
 
-- [ ] **Chunk 3: Runtime Performance & Display Wrappers (GameMode, MangoHud, Gamescope)**
+- [x] **Chunk 3: Runtime Performance & Display Wrappers (GameMode, MangoHud, Gamescope)**
   - Deteksi ketersediaan `gamemoderun`, `mangohud`, dan `gamescope` pada sistem host.
   - Tambahkan argumen peluncuran fleksibel di CLI/TUI (`--hud`, `--fsr`, `--gamescope`, `--gamemode`).
   - Sediakan konfigurasi default persist di `~/.config/gamectl/wrappers`.
