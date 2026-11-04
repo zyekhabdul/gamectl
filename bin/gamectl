@@ -233,18 +233,37 @@ scan_installed_games() {
             gbin=$(find_game_binary "$gdir") || continue
             [ -z "$gbin" ] && continue
 
+            local is_win_bin=false
+            case "$gbin" in
+                *.exe|*.EXE) is_win_bin=true ;;
+            esac
+
             local status="STANDALONE"
             local api_file=""
-            if [ -f "$gdir/libsteam_api.so" ]; then
-                api_file="$gdir/libsteam_api.so"
-            elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
-                api_file="$gdir/lib64/libsteam_api.so"
-            elif [ -f "$gdir/steam_api64.dll" ]; then
-                api_file="$gdir/steam_api64.dll"
-            elif [ -f "$gdir/steam_api.dll" ]; then
-                api_file="$gdir/steam_api.dll"
+            if [ "$is_win_bin" = true ]; then
+                if [ -f "$gdir/steam_api64.dll" ]; then
+                    api_file="$gdir/steam_api64.dll"
+                elif [ -f "$gdir/steam_api.dll" ]; then
+                    api_file="$gdir/steam_api.dll"
+                elif [ -f "$gdir/libsteam_api.so" ]; then
+                    api_file="$gdir/libsteam_api.so"
+                elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
+                    api_file="$gdir/lib64/libsteam_api.so"
+                else
+                    api_file=$(find "$gdir" -maxdepth 3 \( -name "steam_api64.dll" -o -name "steam_api.dll" -o -name "libsteam_api.so" \) 2>/dev/null | head -n 1)
+                fi
             else
-                api_file=$(find "$gdir" -maxdepth 3 \( -name "libsteam_api.so" -o -name "steam_api64.dll" -o -name "steam_api.dll" \) 2>/dev/null | head -n 1)
+                if [ -f "$gdir/libsteam_api.so" ]; then
+                    api_file="$gdir/libsteam_api.so"
+                elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
+                    api_file="$gdir/lib64/libsteam_api.so"
+                elif [ -f "$gdir/steam_api64.dll" ]; then
+                    api_file="$gdir/steam_api64.dll"
+                elif [ -f "$gdir/steam_api.dll" ]; then
+                    api_file="$gdir/steam_api.dll"
+                else
+                    api_file=$(find "$gdir" -maxdepth 3 \( -name "libsteam_api.so" -o -name "steam_api64.dll" -o -name "steam_api.dll" \) 2>/dev/null | head -n 1)
+                fi
             fi
 
             if [ -n "$api_file" ]; then
@@ -315,18 +334,37 @@ scan_installed_games() {
                 title=$(head -n 1 "$gdir/.gamectl_title")
             fi
 
+            local is_win_bin=false
+            case "$gbin" in
+                *.exe|*.EXE) is_win_bin=true ;;
+            esac
+
             local status="STANDALONE"
             local api_file=""
-            if [ -f "$gdir/libsteam_api.so" ]; then
-                api_file="$gdir/libsteam_api.so"
-            elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
-                api_file="$gdir/lib64/libsteam_api.so"
-            elif [ -f "$gdir/steam_api64.dll" ]; then
-                api_file="$gdir/steam_api64.dll"
-            elif [ -f "$gdir/steam_api.dll" ]; then
-                api_file="$gdir/steam_api.dll"
+            if [ "$is_win_bin" = true ]; then
+                if [ -f "$gdir/steam_api64.dll" ]; then
+                    api_file="$gdir/steam_api64.dll"
+                elif [ -f "$gdir/steam_api.dll" ]; then
+                    api_file="$gdir/steam_api.dll"
+                elif [ -f "$gdir/libsteam_api.so" ]; then
+                    api_file="$gdir/libsteam_api.so"
+                elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
+                    api_file="$gdir/lib64/libsteam_api.so"
+                else
+                    api_file=$(find "$gdir" -maxdepth 3 \( -name "steam_api64.dll" -o -name "steam_api.dll" -o -name "libsteam_api.so" \) 2>/dev/null | head -n 1)
+                fi
             else
-                api_file=$(find "$gdir" -maxdepth 3 \( -name "libsteam_api.so" -o -name "steam_api64.dll" -o -name "steam_api.dll" \) 2>/dev/null | head -n 1)
+                if [ -f "$gdir/libsteam_api.so" ]; then
+                    api_file="$gdir/libsteam_api.so"
+                elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
+                    api_file="$gdir/lib64/libsteam_api.so"
+                elif [ -f "$gdir/steam_api64.dll" ]; then
+                    api_file="$gdir/steam_api64.dll"
+                elif [ -f "$gdir/steam_api.dll" ]; then
+                    api_file="$gdir/steam_api.dll"
+                else
+                    api_file=$(find "$gdir" -maxdepth 3 \( -name "libsteam_api.so" -o -name "steam_api64.dll" -o -name "steam_api.dll" \) 2>/dev/null | head -n 1)
+                fi
             fi
 
             if [ -n "$api_file" ]; then
@@ -1176,25 +1214,7 @@ inject_game() {
     found_win32=$(find "$target_dir" -maxdepth 4 -name "steam_api.dll" 2>/dev/null | head -n 1)
     found_linux=$(find "$target_dir" -maxdepth 4 -name "libsteam_api.so" 2>/dev/null | head -n 1)
 
-    if [ -n "$found_win64" ] || [ -n "$found_win32" ]; then
-        target_platform="windows"
-        if [ -n "$found_win64" ]; then
-            arch="x64"
-            is_32bit=false
-        else
-            arch="x86"
-            is_32bit=true
-        fi
-    elif [ -n "$found_linux" ]; then
-        target_platform="linux"
-        if file -b "$found_linux" | grep -qi "32-bit"; then
-            arch="x86"
-            is_32bit=true
-        else
-            arch="x64"
-            is_32bit=false
-        fi
-    elif [ -n "$gbin" ] && [ -f "$target_dir/$gbin" ]; then
+    if [ -n "$gbin" ] && [ -f "$target_dir/$gbin" ]; then
         local btype
         btype=$(file -b "$target_dir/$gbin" 2>/dev/null || echo "")
         if echo "$btype" | grep -qi -E "PE32|MS Windows|\.exe"; then
@@ -1219,12 +1239,31 @@ inject_game() {
                 is_32bit=false
             fi
         fi
+    elif [ -n "$found_linux" ]; then
+        target_platform="linux"
+        if file -b "$found_linux" | grep -qi "32-bit"; then
+            arch="x86"
+            is_32bit=true
+        else
+            arch="x64"
+            is_32bit=false
+        fi
+    elif [ -n "$found_win64" ] || [ -n "$found_win32" ]; then
+        target_platform="windows"
+        if [ -n "$found_win64" ]; then
+            arch="x64"
+            is_32bit=false
+        else
+            arch="x86"
+            is_32bit=true
+        fi
     fi
 
     # 2. Perform Shim Injections (with backup of originals)
     local primary_shim_dir="$target_dir"
 
-    if [ "$target_platform" = "windows" ]; then
+    # 2a. Windows Shim Injection (if windows steam files exist or target is windows)
+    if [ -n "$found_win64" ] || [ -n "$found_win32" ] || [ "$target_platform" = "windows" ]; then
         local win_targets=()
         if [ -n "$found_win64" ]; then
             win_targets+=("$found_win64:x64")
@@ -1233,8 +1272,8 @@ inject_game() {
             win_targets+=("$found_win32:x86")
         fi
 
-        # If neither found, determine destination based on detected arch or gbin location
-        if [ ${#win_targets[@]} -eq 0 ]; then
+        # If neither found but target is windows, determine destination based on detected arch or gbin location
+        if [ ${#win_targets[@]} -eq 0 ] && [ "$target_platform" = "windows" ]; then
             local bin_subdir="$target_dir"
             [ -n "$gbin" ] && [ -f "$target_dir/$gbin" ] && bin_subdir="$(dirname "$target_dir/$gbin")"
             if [ "$is_32bit" = true ]; then
@@ -1251,9 +1290,8 @@ inject_game() {
             t_template=$(get_gbe_template "windows" "$t_arch") || true
 
             if [ -z "$t_template" ] || [ ! -f "$t_template" ]; then
-                echo "[ERROR] Template GBE Fork Windows ($t_arch) tidak ditemukan." >&2
-                echo "        Pastikan steam_api(64).dll tersedia di ~/.local/share/gbe-fork/windows/..." >&2
-                return 1
+                echo "[WARN] Template GBE Fork Windows ($t_arch) tidak ditemukan." >&2
+                continue
             fi
 
             # Backup original Valve DLL if present (<7MB and .orig not existing)
@@ -1272,38 +1310,49 @@ inject_game() {
             primary_shim_dir="$(dirname "$t_dll")"
             echo "[INFO] GBE Fork Windows DLL ($t_arch) terpasang di: $t_dll"
         done
-    else
+    fi
+
+    # 2b. Linux Shim Injection (if linux steam files exist or target is linux)
+    if [ -n "$found_linux" ] || [ "$target_platform" = "linux" ]; then
+        local linux_arch="x64"
+        if [ -n "$found_linux" ]; then
+            if file -b "$found_linux" | grep -qi "32-bit"; then
+                linux_arch="x86"
+            fi
+        elif [ "$is_32bit" = true ]; then
+            linux_arch="x86"
+        fi
+
         local target_so="$target_dir/libsteam_api.so"
         if [ -n "$found_linux" ]; then
             target_so="$found_linux"
-        elif [ -d "$target_dir/lib64" ] && [ "$is_32bit" = false ]; then
+        elif [ -d "$target_dir/lib64" ] && [ "$linux_arch" = "x64" ]; then
             target_so="$target_dir/lib64/libsteam_api.so"
-        elif [ -d "$target_dir/lib32" ] && [ "$is_32bit" = true ]; then
+        elif [ -d "$target_dir/lib32" ] && [ "$linux_arch" = "x86" ]; then
             target_so="$target_dir/lib32/libsteam_api.so"
         fi
 
         local src_so
-        src_so=$(get_gbe_template "linux" "$arch") || true
-        if [ -z "$src_so" ] || [ ! -f "$src_so" ]; then
-            echo "[ERROR] Template GBE Fork Linux ($arch) tidak ditemukan di: ${src_so:-empty}" >&2
-            return 1
-        fi
-
-        # Backup original Valve SO if present (<7MB and .orig not existing)
-        if [ -f "$target_so" ]; then
-            local sz
-            sz=$(stat -c%s "$target_so" 2>/dev/null || echo 0)
-            if [ "$sz" -lt 7000000 ] && [ ! -f "$target_so.orig" ]; then
-                cp -a "$target_so" "$target_so.orig"
-                echo "[INFO] Backup libsteam_api.so asli tersimpan di: $target_so.orig"
+        src_so=$(get_gbe_template "linux" "$linux_arch") || true
+        if [ -n "$src_so" ] && [ -f "$src_so" ]; then
+            # Backup original Valve SO if present (<7MB and .orig not existing)
+            if [ -f "$target_so" ]; then
+                local sz
+                sz=$(stat -c%s "$target_so" 2>/dev/null || echo 0)
+                if [ "$sz" -lt 7000000 ] && [ ! -f "$target_so.orig" ]; then
+                    cp -a "$target_so" "$target_so.orig"
+                    echo "[INFO] Backup libsteam_api.so asli tersimpan di: $target_so.orig"
+                fi
             fi
-        fi
 
-        mkdir -p "$(dirname "$target_so")"
-        cp "$src_so" "$target_so"
-        chmod +x "$target_so"
-        primary_shim_dir="$(dirname "$target_so")"
-        echo "[INFO] GBE Fork Linux ELF ($arch) terpasang di: $target_so"
+            mkdir -p "$(dirname "$target_so")"
+            cp "$src_so" "$target_so"
+            chmod +x "$target_so"
+            primary_shim_dir="$(dirname "$target_so")"
+            echo "[INFO] GBE Fork Linux ELF ($linux_arch) terpasang di: $target_so"
+        else
+            [ "$target_platform" = "linux" ] && echo "[WARN] Template GBE Fork Linux ($linux_arch) tidak ditemukan di: ${src_so:-empty}" >&2
+        fi
     fi
 
     # 3. Setup steam_settings and configs.user.ini
