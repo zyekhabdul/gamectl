@@ -8,6 +8,14 @@ BIN_DIR="$HOME/.local/bin"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_BIN="$SRC_DIR/bin/gamectl"
 
+# Ensure binary is compiled from modular sources if available
+if [ -f "$SRC_DIR/scripts/build.sh" ] && [ -d "$SRC_DIR/src" ]; then
+    if [ ! -f "$SRC_BIN" ] || ! "$SRC_DIR/scripts/build.sh" --check >/dev/null 2>&1; then
+        echo "[INFO] Mengompilasi modul sumber ke bin/gamectl..."
+        "$SRC_DIR/scripts/build.sh"
+    fi
+fi
+
 echo "[INFO] Memeriksa dependensi sistem..."
 for cmd in fzf jq curl rsync ssh file unzip python3; do
     if ! command -v "$cmd" >/dev/null 2>&1; then

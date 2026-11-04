@@ -1,72 +1,62 @@
-# WORK PACKET 7: SOVEREIGN SYSTEM DYNAMIC RESOLUTION & HARDCODED REMEDIATION
+# WORK PACKET 8: SOURCE-TO-BUNDLE MODULAR ARCHITECTURE TRANSITION
 
 ## 1. Objective & Scope
-Eliminate all developer-specific, local-machine, and static hardcoded values across `bin/gamectl` and `install.sh`. Replace them with dynamic runtime detection mechanisms: hierarchical SteamID resolution, native display resolution detection for Gamescope FSR scaling, dynamic GPU architecture evaluation in UI menus, pre-launch CPU governor state preservation, multi-architecture headless downloader provisioning, neutral companion host variables, and multi-path Steam library discovery.
+Transition `gamectl` codebase from a monolithic 3,440-line script (`bin/gamectl`) to a clean, maintainable modular structure (`src/`) with a native, zero-dependency bundling engine (`scripts/build.sh`). The output remains a single standalone executable (`bin/gamectl`), preserving 100% backward compatibility, zero-dependency deployment, and instantaneous subshell performance in `fzf`.
 
 ---
 
 ## 2. Granular Chunks & Definition of Done (DoD)
 
-### Chunk 1: Dynamic SteamID Resolution & SSoT Identity Gate [VERIFIED]
-- **Target**: `bin/gamectl` (`sync_steam()`, `get_game_persona()`, `inject_game()`)
+### Chunk 1: Build Engine & Source Scaffolding [VERIFIED]
+- **Target**: `scripts/build.sh`, `src/` directory tree
 - **DoD**:
-  1. Hapus nilai statis pribadi `local steamid="${GAMECTL_STEAMID:-76561198609877617}"` dari `sync_steam()`. [DONE]
-  2. Implementasikan fungsi resolusi SteamID berjenjang (`resolve_active_steamid()`): [DONE]
-     - Priority 1: Environment variable `GAMECTL_STEAMID` (jika disetel). [DONE]
-     - Priority 2: File konfigurasi `$HOME/.config/gamectl/persona` (`account_steamid`). [DONE]
-     - Priority 3: Auto-detect dari file Steam client aktif (`loginusers.vdf` atau direktori `userdata/`). [DONE]
-     - Priority 4: Dynamic fallback ke `generate_steamid64()`. [DONE]
-  3. Sinkronkan penggunaan fungsi ini pada `sync_steam()`, `inject_game()`, dan `get_game_persona()`. [DONE]
+  1. Buat direktori: `src/core`, `src/steam`, `src/runners`, `src/diagnostics`, `src/tui`. [DONE]
+  2. Implementasikan `scripts/build.sh` (POSIX/Bash native) yang merangkai modul sesuai urutan deklarasi, menyuntikkan header build stamp, menjalankan `bash -n`, dan menghasilkan `bin/gamectl` executable (`chmod +x`). [DONE]
+  3. Pastikan `scripts/build.sh` memiliki mode `--check` untuk memverifikasi apakah `bin/gamectl` sinkron dengan `src/`. [DONE]
 
-### Chunk 2: Dynamic Display Resolution & Gamescope Scaling [VERIFIED]
-- **Target**: `bin/gamectl` (`get_native_resolution()`, `build_wrapper_command()`, `configure_wrappers()`, `configure_global()`), `install.sh`
+### Chunk 2: Extract Core Modul (`src/core/`) [VERIFIED]
+- **Target**: `src/core/00_header.sh`, `src/core/10_utils.sh`
 - **DoD**:
-  1. Implementasikan fungsi `get_native_resolution()` untuk mendeteksi lebar dan tinggi native display via `/sys/class/drm/card*-*/modes`, `hyprctl`, atau `xrandr`. [DONE]
-  2. Hitung resolusi render FSR (`-W -H`) dan resolusi display native (`-w -h`) secara dinamis berdasarkan native resolution host. [DONE]
-  3. Ganti hardcoded `-W 1280 -H 720 -w 1920 -h 1080` pada default wrappers, submenu global configuration, per-game configuration, dan template `install.sh`. [DONE]
+  1. Pindahkan shebang, constants, theme palette (Tokyo Night ANSI), dan SSoT configs ke `src/core/00_header.sh`. [DONE]
+  2. Pindahkan helper functions dasar (`get_gbe_template`, `get_remote_host`, `clean_stale_locks`, `backup_save`, `find_game_binary`) ke `src/core/10_utils.sh`. [DONE]
 
-### Chunk 3: Dynamic Hardware & Mesa GPU Audit in UI Menus [VERIFIED]
-- **Target**: `bin/gamectl` (`configure_wrappers()`, `configure_global()`, `doctor_audit()`)
+### Chunk 3: Extract Steam Subsystems (`src/steam/`) [VERIFIED]
+- **Target**: `src/steam/20_discovery.sh`, `src/steam/25_identity.sh`, `src/steam/30_downloader.sh`
 - **DoD**:
-  1. Buat helper `is_haswell_gpu()` untuk mendeteksi apakah GPU host bertipe Intel Haswell / 4th Gen Core. [DONE]
-  2. Modifikasi teks toggle Mesa GL Threading di `configure_wrappers()` dan `configure_global()`: tampilkan `(Intel Haswell: Keep OFF)` hanya jika Haswell terdeteksi; tampilkan `(Opt-in Performance)` jika bukan Haswell. [DONE]
-  3. Pastikan `doctor_audit()` tetap memberikan advisory proteksi yang akurat tanpa hardcode statis pada layer visual. [DONE]
+  1. `20_discovery.sh`: `get_steam_root`, `get_steam_primary_apps`, `get_steam_libraries`, `scan_installed_games`, `search_steam`. [DONE]
+  2. `25_identity.sh`: `generate_steamid64`, `resolve_active_steamid`, `get_game_persona`, `set_id`, `set_id_interactive`. [DONE]
+  3. `30_downloader.sh`: `fetch_dlc`, `ensure_downloader`, `download_game`, `list_downloads`, `list_downloads_interactive`, `sync_steam`, `unlock_game`, `unlock_interactive`. [DONE]
 
-### Chunk 4: Dynamic CPU Scaling Governor Preservation [VERIFIED]
-- **Target**: `bin/gamectl` (`launch_game()`)
+### Chunk 4: Extract Runners & Wrappers (`src/runners/`) [VERIFIED]
+- **Target**: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`
 - **DoD**:
-  1. Di awal fungsi `launch_game()`, simpan nilai governor aktif host saat ini dari `/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor` ke variabel lokal `prev_governor`. [DONE]
-  2. Jika governor diubah ke `performance`, pulihkan kembali ke `prev_governor` saat game ditutup, bukan memaksakan `powersave`. [DONE]
+  1. `40_wrappers.sh`: `find_runner`, `is_haswell_gpu`, `get_native_resolution`, `get_default_gamescope_args`, `build_wrapper_command`, `configure_wrappers`, `configure_global`. [DONE]
+  2. `50_launcher.sh`: `launch_game`, `cli_launch`, `inject_game`, `sync_save_remote`, `sync_to_companion`, `sync_to_tuf`. [DONE]
 
-### Chunk 5: Dynamic Multi-Arch DepotDownloader Engine [VERIFIED]
-- **Target**: `bin/gamectl` (`ensure_downloader()`)
+### Chunk 5: Extract Diagnostics & TUI Dashboard (`src/diagnostics/`, `src/tui/`) [VERIFIED]
+- **Target**: `src/diagnostics/60_doctor.sh`, `src/tui/70_dashboard.sh`
 - **DoD**:
-  1. Periksa arsitektur sistem menggunakan `uname -m`. [DONE]
-  2. Petakan `x86_64 -> linux-x64` dan `aarch64|arm64 -> linux-arm64`. [DONE]
-  3. Gunakan URL download DepotDownloader yang sesuai dengan arsitektur host. [DONE]
+  1. `60_doctor.sh`: `doctor_audit` (7-layer diagnostic health suite). [DONE]
+  2. `70_dashboard.sh`: `preview_game`, `preview_dashboard`, `dashboard_menu`, `library_menu`. [DONE]
 
-### Chunk 6: Neutral Companion Host & Remote Synchronization [VERIFIED]
-- **Target**: `bin/gamectl` (`get_remote_host()`, `sync_save_remote()`, exports)
+### Chunk 6: Extract Entrypoint & Dispatcher (`src/main.sh`) [VERIFIED]
+- **Target**: `src/main.sh`
 - **DoD**:
-  1. Ganti variabel utama menjadi `GAMECTL_REMOTE_HOST` / `GAMECTL_COMPANION_HOST` (pertahankan `GAMECTL_TUF_HOST` sebagai fallback backward compatibility). [DONE]
-  2. Sediakan alias fungsi generik `sync_to_companion` di samping `sync_to_tuf`. [DONE]
+  1. Pindahkan registrasi `export -f` untuk subshells fzf. [DONE]
+  2. Pindahkan CLI command parser & top-level case statement (`case "${1:-}" in ...`). [DONE]
 
-### Chunk 7: Dynamic Multi-Path Steam Library Detection [VERIFIED]
-- **Target**: `bin/gamectl` (`get_steam_root()`, `get_steam_primary_apps()`, `get_steam_libraries()`, `sync_steam()`, `doctor_audit()`)
+### Chunk 7: Build & Functional Verification Gate [VERIFIED]
+- **Target**: `scripts/build.sh`, `bin/gamectl`
 - **DoD**:
-  1. Perluas pencarian direktori Steam root: `$HOME/.local/share/Steam`, `$HOME/.steam/steam`, `$HOME/.steam/root`, Flatpak (`$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam`), Snap (`$HOME/snap/steam/common/.local/share/Steam`). [DONE]
-  2. Implementasikan fungsi `get_steam_root()` dan `get_steam_primary_apps()`. [DONE]
-  3. Deduplikasi scan direktori Steam library pada `get_steam_libraries()` via `realpath` dan associative array. [DONE]
-  4. Gunakan Steam primary library dinamis pada `sync_steam()` alih-alih hardcoded `$HOME/.local/share/Steam/steamapps`. [DONE]
-  5. Sediakan CLI subcommands `get-steam-root` dan `get-steam-libraries` (`steam-libs`). [DONE]
+  1. Eksekusi `scripts/build.sh` menghasilkan `bin/gamectl`. [DONE]
+  2. Verifikasi deterministik:
+     - `bash -n bin/gamectl` (Exit 0). [DONE]
+     - Test CLI output: `bin/gamectl doctor`, `bin/gamectl get-resolution`, `bin/gamectl get-steam-root`. [DONE]
+     - Bandingkan fungsionalitas dan pastikan 0% breaking changes. [DONE]
 
-### Chunk 8: Machine Verification & Quality Gate [VERIFIED]
-- **Target**: `bin/gamectl`, `install.sh`, deterministic test harness
+### Chunk 8: Documentation, ADR-011 & Local Commit [VERIFIED]
+- **Target**: `DEVELOPMENT.md`, Obsidian RAG `DECISIONS.md`, `STATE.md`, git commit
 - **DoD**:
-  1. Jalankan static syntax check: `bash -n bin/gamectl && bash -n install.sh && bash -n completions/gamectl.bash` (Exit 0). [DONE]
-  2. Verifikasi empiris:
-     - Tes resolusi SteamID (pastikan bukan `76561198609877617` statis). [DONE]
-     - Tes kalkulasi resolusi display Gamescope (sesuai layar host saat ini `1600x900`). [DONE]
-     - Tes fallback governor saat launch exit. [DONE]
-     - Tes `bin/gamectl doctor` (Exit 0, 17 pass, 0 missing). [DONE]
-  3. Local git checkpoint dan sinkronisasi Obsidian RAG `STATE.md`. [DONE]
+  1. Perbarui `DEVELOPMENT.md` menjelaskan arsitektur baru (`src/` -> `scripts/build.sh` -> `bin/gamectl`). [DONE]
+  2. Catat ADR-011 di Obsidian RAG namespace `00-AGY-Memory/gamectl/DECISIONS.md`. [DONE]
+  3. Sinkronkan `STATE.md` dan buat local git checkpoint. [DONE]
