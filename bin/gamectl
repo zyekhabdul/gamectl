@@ -1976,7 +1976,7 @@ EOF
                     1)
                         echo -n "  Enter path (e.g. ~/Games): "; read -r new_path
                         if [ -n "$new_path" ]; then
-                            eval new_path="$new_path"
+                            new_path="${new_path/#\~/$HOME}"
                             echo "$new_path" >> "$HOME/.config/gamectl/libraries"
                             echo "  ${UI_GREEN}[SUCCESS] Path '$new_path' added.${UI_RST}"
                         fi
