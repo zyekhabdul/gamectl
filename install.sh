@@ -101,7 +101,12 @@ CONFIG_DIR="$HOME/.config/gamectl"
 mkdir -p "$CONFIG_DIR"
 
 if [ ! -f "$CONFIG_DIR/wrappers.example" ]; then
-    cat <<'EOF' > "$CONFIG_DIR/wrappers.example"
+    DEF_GSCOPE_ARGS="-W 1280 -H 720 -w 1920 -h 1080 -F fsr -f"
+    if [ -x "$SRC_BIN" ]; then
+        D_ARGS=$("$SRC_BIN" get-gamescope-args 2>/dev/null || true)
+        [ -n "$D_ARGS" ] && DEF_GSCOPE_ARGS="$D_ARGS"
+    fi
+    cat <<EOF > "$CONFIG_DIR/wrappers.example"
 # ==============================================================================
 # gamectl - Default Runtime Performance & Display Wrappers
 # ==============================================================================
@@ -113,9 +118,9 @@ gamemode=0
 hud=0
 gamescope=0
 fsr=0
-gamescope_args=-W 1280 -H 720 -w 1920 -h 1080 -F fsr -f
+gamescope_args=$DEF_GSCOPE_ARGS
 EOF
-    echo "[INFO] Template konfigurasi dibuat: $CONFIG_DIR/wrappers.example"
+    echo "[INFO] Template konfigurasi dibuat: $CONFIG_DIR/wrappers.example (Resolusi native: $DEF_GSCOPE_ARGS)"
 fi
 
 if [ ! -f "$CONFIG_DIR/persona.example" ]; then
