@@ -2507,7 +2507,7 @@ EOF
 
         case "$sel_key" in
             1)
-                library_menu
+                library_menu false
                 ;;
             2)
                 search_steam
@@ -2534,6 +2534,7 @@ EOF
 
 # Main Library View
 library_menu() {
+    local standalone="${1:-false}"
     clean_stale_locks
 
     while true; do
@@ -2541,10 +2542,12 @@ library_menu() {
         selection=$(scan_installed_games | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
-            --header="GAMECTL LIBRARY (Enter: Launch | Ctrl-O: Wrappers | Ctrl-P: Persona | Ctrl-I: Inject | Ctrl-S: Sync | Ctrl-B: Backup)" \
+            --header=$'GAMECTL LIBRARY (Enter: Launch | Esc: Dashboard Hub)\nHotkeys: Ctrl-F (Cari Steam) | Ctrl-D (Unduhan) | Ctrl-I (Inject) | Ctrl-O (Wrappers) | Ctrl-P (ID) | Ctrl-S (Sync) | Ctrl-B (Backup)' \
             --prompt="Game > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:wrap \
+            --bind="ctrl-f:execute($SELF_BIN --search)+reload($SELF_BIN --list)" \
+            --bind="ctrl-d:execute($SELF_BIN downloads)+reload($SELF_BIN --list)" \
             --bind="ctrl-o:execute($SELF_BIN configure-wrappers {4} {2})+reload($SELF_BIN --list)" \
             --bind="ctrl-p:execute($SELF_BIN set-id-interactive {4} {2})+reload($SELF_BIN --list)" \
             --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk kembali ke pustaka...')+reload($SELF_BIN --list)" \
@@ -2561,6 +2564,10 @@ library_menu() {
             read -r -p "Tekan [ENTER] untuk kembali ke Library..."
         fi
     done
+
+    if [ "$standalone" = "true" ]; then
+        dashboard_menu
+    fi
 }
 
 # Live Steam Search View (Actionable TUI Search)
@@ -2801,7 +2808,7 @@ case "${1:-}" in
         dashboard_menu
         ;;
     library|list-ui)
-        library_menu
+        library_menu true
         ;;
     config|config-global|configure)
         configure_global
