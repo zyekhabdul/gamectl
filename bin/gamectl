@@ -1702,6 +1702,98 @@ list_downloads() {
     fi
 }
 
+# Interactive Download Monitor TUI
+list_downloads_interactive() {
+    while true; do
+        local logs=(/tmp/gamectl_dl_*.log)
+        local valid_logs=()
+        for l in "${logs[@]}"; do
+            [ -f "$l" ] && valid_logs+=("$l")
+        done
+
+        if [ ${#valid_logs[@]} -eq 0 ]; then
+            clear
+            echo "=========================================="
+            echo " PEMANTAU UNDUHAN (DepotDownloader)"
+            echo "=========================================="
+            echo "[INFO] Tidak ada proses atau riwayat unduhan di /tmp/."
+            read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
+            return 0
+        fi
+
+        local entries=""
+        for log in "${valid_logs[@]}"; do
+            local appid
+            appid=$(basename "$log" | sed -E 's/gamectl_dl_([0-9]+)\.log/\1/')
+            local pid
+            pid=$(pgrep -f "DepotDownloader.*-app ${appid}" 2>/dev/null | head -n 1 || true)
+            local status="SELESAI"
+            [ -n "$pid" ] && status="MENGUNDUH (PID: $pid)"
+            local last_line
+            last_line=$(tail -n 1 "$log" 2>/dev/null | tr -d '\r\n\t' | cut -c1-60)
+            [ -z "$last_line" ] && last_line="Belum ada log output"
+            entries+="${appid}\t${status}\t${log}\t${last_line}\n"
+        done
+
+        local selection
+        selection=$(printf "%b" "$entries" | fzf \
+            --delimiter=$'\t' \
+            --with-nth=1,2,4 \
+            --header="UNDUHAN DEPOTDOWNLOADER (Enter: Menu Aksi / Stream Log | Ctrl-K: Stop | Esc: Kembali)" \
+            --prompt="Unduhan > " \
+            --preview="echo 'File Log: {3}'; echo '------------------------------------------'; tail -n 30 {3}" \
+            --preview-window=right:60%:wrap \
+            --bind="ctrl-k:execute(appid={1}; pid=\$(pgrep -f \"DepotDownloader.*-app \${appid}\" 2>/dev/null | head -n 1); if [ -n \"\$pid\" ]; then kill \"\$pid\" 2>/dev/null && echo \"[INFO] Proses AppID \$appid (PID \$pid) dihentikan.\"; else echo \"[INFO] Proses unduhan AppID \$appid tidak aktif.\"; fi; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
+        ) || break
+
+        if [ -n "$selection" ]; then
+            local sel_appid sel_log sel_status
+            sel_appid=$(echo "$selection" | awk -F'\t' '{print $1}')
+            sel_log=$(echo "$selection" | awk -F'\t' '{print $3}')
+            sel_status=$(echo "$selection" | awk -F'\t' '{print $2}')
+
+            clear
+            echo "========================================================"
+            echo " KONTROL UNDUHAN: AppID $sel_appid ($sel_status)"
+            echo " Log: $sel_log"
+            echo "========================================================"
+            echo "  1) Streaming live log (tail -f)"
+            echo "  2) Hentikan proses unduhan ini (Kill Process)"
+            echo "  3) Hapus file log riwayat ini"
+            echo "  4) Kembali ke daftar unduhan"
+            read -r -p "Pilihan [1-4]: " dl_opt
+
+            case "$dl_opt" in
+                1)
+                    clear
+                    echo "========================================================"
+                    echo " STREAMING LOG AppID $sel_appid (Tekan Ctrl-C untuk selesai)"
+                    echo "========================================================"
+                    tail -f "$sel_log" || true
+                    read -r -p "Tekan [ENTER] untuk kembali..."
+                    ;;
+                2)
+                    local k_pid
+                    k_pid=$(pgrep -f "DepotDownloader.*-app ${sel_appid}" 2>/dev/null | head -n 1 || true)
+                    if [ -n "$k_pid" ]; then
+                        kill "$k_pid" 2>/dev/null && echo "[SUCCESS] Proses unduhan AppID $sel_appid (PID $k_pid) berhasil dihentikan."
+                    else
+                        echo "[INFO] Proses unduhan AppID $sel_appid tidak sedang aktif."
+                    fi
+                    read -r -p "Tekan [ENTER] untuk lanjut..."
+                    ;;
+                3)
+                    rm -f "$sel_log"
+                    echo "[INFO] File log $sel_log telah dihapus."
+                    read -r -p "Tekan [ENTER] untuk lanjut..."
+                    ;;
+                *)
+                    ;;
+            esac
+        fi
+    done
+}
+
 # Dual-Mode Steam Client & SLSsteam Full DLC Sync
 sync_steam() {
     local appid="$1"
@@ -1868,6 +1960,46 @@ unlock_game() {
 
     sync_steam "$appid" "$title" ""
     echo "[SUCCESS] Game '$title' ($appid) telah dibuka di Steam resmi dengan Full DLC tanpa download."
+}
+
+# Interactive Steam Unlock Wizard
+unlock_interactive() {
+    clear
+    echo "========================================================"
+    echo " UNLOCK GAME STEAM RESMI (Zero-Download Full DLC)"
+    echo "========================================================"
+    echo " Mendaftarkan kepemilikan game dan seluruh DLC ke SLSsteam"
+    echo " serta membuat appmanifest_<appid>.acf di direktori Steam."
+    echo "--------------------------------------------------------"
+    echo -n " Masukkan Steam AppID (contoh: 105600): "
+    read -r u_appid
+
+    if [ -z "$u_appid" ]; then
+        echo "[INFO] AppID kosong. Membatalkan proses unlock."
+        read -r -p "Tekan [ENTER] untuk kembali..."
+        return 0
+    fi
+
+    if [[ ! "$u_appid" =~ ^[0-9]+$ ]]; then
+        echo "[ERROR] AppID harus berupa karakter angka numerik (misal: 105600)."
+        read -r -p "Tekan [ENTER] untuk kembali..."
+        return 1
+    fi
+
+    echo -n " Masukkan Judul Game (kosongkan untuk deteksi otomatis): "
+    read -r u_title
+
+    if [ -z "$u_title" ]; then
+        echo "[INFO] Mengambil judul dari Steam Store API untuk AppID $u_appid..."
+        u_title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${u_appid}&filters=basic" | jq -r ".\"${u_appid}\".data.name // empty" 2>/dev/null || true)
+        [ -z "$u_title" ] && u_title="AppID_${u_appid}"
+    fi
+
+    echo "--------------------------------------------------------"
+    echo " Mendaftarkan: $u_title ($u_appid)..."
+    unlock_game "$u_appid" "$u_title"
+    echo "========================================================"
+    read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
 }
 
 # Preview pane generator for Master Dashboard
@@ -2314,7 +2446,7 @@ cli_launch() {
 }
 
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads unlock_game get_remote_host get_gbe_template find_game_binary find_runner launch_game build_wrapper_command configure_wrappers cli_launch generate_steamid64 get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu
+export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive get_remote_host get_gbe_template find_game_binary find_runner launch_game build_wrapper_command configure_wrappers cli_launch generate_steamid64 get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -2391,12 +2523,20 @@ case "${1:-}" in
         if [ -n "${2:-}" ]; then
             unlock_game "$2" "${3:-}"
         else
-            echo "Usage: gamectl unlock <appid> [title]"
-            exit 1
+            if [ -t 0 ]; then
+                unlock_interactive
+            else
+                echo "Usage: gamectl unlock <appid> [title]"
+                exit 1
+            fi
         fi
         ;;
     downloads|--downloads)
-        list_downloads
+        if [ -t 0 ]; then
+            list_downloads_interactive
+        else
+            list_downloads
+        fi
         ;;
     sync-steam|--sync-steam)
         if [ -n "${2:-}" ]; then
