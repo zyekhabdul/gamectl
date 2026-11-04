@@ -21,8 +21,8 @@ GBE_WIN_X86="${GAMECTL_GBE_WIN_X86:-$HOME/.local/share/gbe-fork/windows/release/
 
 # Resolve GBE template file based on platform and architecture
 get_gbe_template() {
-    local platform="$1" # "linux" or "windows"
-    local arch="$2"     # "x64" or "x86"
+    local platform="${1:-linux}" # "linux" or "windows"
+    local arch="${2:-x64}"       # "x64" or "x86"
     local p=""
     if [ "$platform" = "windows" ]; then
         if [ "$arch" = "x64" ]; then
