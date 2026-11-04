@@ -130,8 +130,37 @@ gamectl set-id "MyGamerTag" auto --global
 
 ### 3.7 Shell Completion & Desktop Launcher
 Installer otomatis memasang integrasi sistem:
-- **Bash Completion**: Terpasang di `~/.local/share/bash-completion/completions/gamectl`. Tekan `<TAB>` untuk melengkapi subcommand dan flag.
-- **Desktop Launcher**: Terpasang di `~/.local/share/applications/gamectl.desktop`. Game manager dapat dicari dan diluncurkan via application launcher Wayland/Niri (fuzzel, rofi, wofi).
+
+#### A. Shell Autocompletion (Bash & Zsh)
+- **Lokasi Symlink Live**: Terpasang di `~/.local/share/bash-completion/completions/gamectl` dan di-symlink ke alias `game`.
+- **Fitur Autocompletion**:
+  1. **Top-Level Subcommands**:
+     Ketik `gamectl <TAB><TAB>` atau `game <TAB><TAB>` untuk menampilkan seluruh sub-perintah:
+     `launch`, `run`, `configure-wrappers`, `set-id`, `set-id-interactive`, `generate-steamid`, `download`, `downloads`, `unlock`, `inject`, `fetch-dlc`, `sync-steam`, `ensure-downloader`, `--search`, `--list`, `--sync`, `--backup`, `--help`, `--version`.
+  2. **Flag Konfigurasi Runtime Wrappers**:
+     Ketik `gamectl launch <dir> --<TAB>` untuk melengkapi flag:
+     `--hud`, `--no-hud`, `--mangohud`, `--no-mangohud`, `--gamemode`, `--no-gamemode`, `--gamescope`, `--no-gamescope`, `--fsr`, `--no-fsr`.
+  3. **Identitas LAN & SteamID**:
+     Ketik `gamectl set-id PlayerName <TAB>` untuk melengkapi keyword generator (`auto`, `random`) atau flag `--broadcast`, `--global`.
+  4. **Pilihan Paket Download & Injeksi**:
+     `gamectl download <appid> <dir> <title> --<TAB>` melengkapi `--raw`, `--inject-only`, `--all`, `--foreground`, `-f`.
+     `gamectl inject <dir> <appid> --<TAB>` melengkapi `--all`, `--no-sync`.
+  5. **Auto-Path Completion**:
+     Melengkapi path folder direktori game (`_filedir -d`) dengan fallback cerdas `compgen -d`/`compgen -f` bahkan pada instalasi Linux minimal tanpa package `bash-completion`.
+- **Aktivasi Manual pada Sesi Shell Aktif**:
+  ```bash
+  source ~/.local/share/bash-completion/completions/gamectl
+  ```
+- **Integrasi Zsh**:
+  Bagi pengguna Zsh, tambahkan baris berikut ke `~/.zshrc`:
+  ```zsh
+  autoload -U +X bashcompinit && bashcompinit
+  source ~/.local/share/bash-completion/completions/gamectl
+  ```
+
+#### B. Desktop Application Launcher
+- **XDG Desktop Entry**: Terpasang di `~/.local/share/applications/gamectl.desktop`.
+- **Integrasi Wayland / Application Launcher**: Game manager dapat dicari dan diluncurkan langsung melalui app launcher seperti **fuzzel**, **rofi**, **wofi**, atau **tofi** pada Wayland (Niri, Sway, Hyprland).
 
 ---
 

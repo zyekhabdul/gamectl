@@ -18,7 +18,20 @@ _gamectl_completions() {
     local download_opts="--raw --inject-only --all --foreground -f"
     local inject_opts="--all --no-sync"
     local launch_opts="--hud --no-hud --mangohud --no-mangohud --gamemode --no-gamemode --gamescope --no-gamescope --fsr --no-fsr"
-    local set_id_opts="--broadcast --global auto random"
+    local set_id_opts="--broadcast --global"
+
+    _complete_path() {
+        if declare -F _filedir >/dev/null 2>&1; then
+            _filedir -d 2>/dev/null || _filedir
+        else
+            local matches=()
+            mapfile -t matches < <(compgen -d -- "$cur")
+            if [ ${#matches[@]} -eq 0 ]; then
+                mapfile -t matches < <(compgen -f -- "$cur")
+            fi
+            COMPREPLY=("${matches[@]}")
+        fi
+    }
 
     # Complete top-level subcommands
     if [ "$cword" -eq 1 ]; then
@@ -32,15 +45,13 @@ _gamectl_completions() {
         launch|run|--launch)
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=( $(compgen -W "$launch_opts" -- "$cur") )
-            elif declare -F _filedir >/dev/null 2>&1; then
-                _filedir -d 2>/dev/null || _filedir
+            else
+                _complete_path
             fi
             return 0
             ;;
         configure-wrappers|set-id-interactive)
-            if declare -F _filedir >/dev/null 2>&1; then
-                _filedir -d 2>/dev/null || _filedir
-            fi
+            _complete_path
             return 0
             ;;
         set-id)
@@ -48,36 +59,34 @@ _gamectl_completions() {
                 COMPREPLY=( $(compgen -W "$set_id_opts" -- "$cur") )
             elif [ "$cword" -eq 3 ] && [[ "$cur" == a* || "$cur" == r* ]]; then
                 COMPREPLY=( $(compgen -W "auto random" -- "$cur") )
-            elif declare -F _filedir >/dev/null 2>&1; then
-                _filedir -d 2>/dev/null || _filedir
+            else
+                _complete_path
             fi
             return 0
             ;;
         download|--download)
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=( $(compgen -W "$download_opts" -- "$cur") )
-            elif declare -F _filedir >/dev/null 2>&1; then
-                _filedir -d 2>/dev/null || _filedir
+            else
+                _complete_path
             fi
             return 0
             ;;
         inject|--inject)
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=( $(compgen -W "$inject_opts" -- "$cur") )
-            elif declare -F _filedir >/dev/null 2>&1; then
-                _filedir -d 2>/dev/null || _filedir
+            else
+                _complete_path
             fi
             return 0
             ;;
         fetch-dlc|--fetch-dlc|--sync|--backup)
-            if declare -F _filedir >/dev/null 2>&1; then
-                _filedir -d 2>/dev/null || _filedir
-            fi
+            _complete_path
             return 0
             ;;
         sync-steam|--sync-steam)
-            if [ "$cword" -eq 4 ] && declare -F _filedir >/dev/null 2>&1; then
-                _filedir -d 2>/dev/null || _filedir
+            if [ "$cword" -eq 4 ]; then
+                _complete_path
             fi
             return 0
             ;;

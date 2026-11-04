@@ -198,9 +198,9 @@ fi
 COMPLETION_DIR="$HOME/.local/share/bash-completion/completions"
 mkdir -p "$COMPLETION_DIR"
 if [ -f "$SRC_DIR/completions/gamectl.bash" ]; then
-    cp "$SRC_DIR/completions/gamectl.bash" "$COMPLETION_DIR/gamectl"
+    ln -sf "$SRC_DIR/completions/gamectl.bash" "$COMPLETION_DIR/gamectl"
     ln -sf "$COMPLETION_DIR/gamectl" "$COMPLETION_DIR/game"
-    echo "[VERIFIED] Shell completion terpasang di: $COMPLETION_DIR/gamectl"
+    echo "[VERIFIED] Shell completion tersinkronisasi di: $COMPLETION_DIR/gamectl"
 fi
 
 # Install desktop application entry
