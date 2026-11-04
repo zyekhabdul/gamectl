@@ -1181,7 +1181,7 @@ list_downloads_interactive() {
             local appid
             appid=$(basename "$log" | sed -E 's/gamectl_dl_([0-9]+)\.log/\1/')
             local pid
-            pid=$(pgrep -f "DepotDownloader.*-app ${appid}" 2>/dev/null | head -n 1 || true)
+            pid=$(pgrep -f "DepotDownloader.*-app[[:space:]]+${appid}([[:space:]]|$)" 2>/dev/null | head -n 1 || true)
             local status="${UI_ICE}[COMPLETED]${UI_RST}"
             [ -n "$pid" ] && status="${UI_GREEN}[RUNNING PID:$pid]${UI_RST}"
             local last_line
@@ -1200,7 +1200,7 @@ list_downloads_interactive() {
             --prompt="Downloads > " \
             --preview="echo -e '\033[38;5;60mLog: {3}\033[0m\n──────────────────────────────────────────'; tail -n 30 {3}" \
             --preview-window=right:60%:border-rounded:wrap \
-            --bind="ctrl-k:execute(appid={1}; pid=\$(pgrep -f \"DepotDownloader.*-app \${appid}\" 2>/dev/null | head -n 1); if [ -n \"\$pid\" ]; then kill \"\$pid\" 2>/dev/null && echo \"[INFO] AppID \$appid (PID \$pid) terminated.\"; else echo \"[INFO] AppID \$appid not active.\"; fi; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
+            --bind="ctrl-k:execute(appid={1}; pid=\$(pgrep -f \"DepotDownloader.*-app[[:space:]]+\${appid}([[:space:]]|$)\" 2>/dev/null | head -n 1); if [ -n \"\$pid\" ]; then kill \"\$pid\" 2>/dev/null && echo \"[INFO] AppID \$appid (PID \$pid) terminated.\"; else echo \"[INFO] AppID \$appid not active.\"; fi; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
         ) || break
 
         if [ -n "$selection" ]; then
@@ -1231,7 +1231,7 @@ list_downloads_interactive() {
                     ;;
                 2)
                     local k_pid
-                    k_pid=$(pgrep -f "DepotDownloader.*-app ${sel_appid}" 2>/dev/null | head -n 1 || true)
+                    k_pid=$(pgrep -f "DepotDownloader.*-app[[:space:]]+${sel_appid}([[:space:]]|$)" 2>/dev/null | head -n 1 || true)
                     if [ -n "$k_pid" ]; then
                         kill "$k_pid" 2>/dev/null && echo "  ${UI_GREEN}[SUCCESS] Download process AppID $sel_appid (PID $k_pid) stopped.${UI_RST}"
                     else
