@@ -2181,6 +2181,198 @@ unlock_interactive() {
     read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
 }
 
+# System Diagnostics & Health Audit
+doctor_audit() {
+    local pass_cnt=0 warn_cnt=0 miss_cnt=0
+
+    echo "========================================================"
+    echo " GAMECTL SYSTEM DIAGNOSTICS & HEALTH AUDIT (Doctor)"
+    echo "========================================================"
+    local os_str="Linux"
+    [ -f /etc/os-release ] && os_str=$(grep -E '^PRETTY_NAME=' /etc/os-release | cut -d'=' -f2 | tr -d '"')
+    echo " Host OS      : $os_str ($(uname -s) $(uname -r) $(uname -m))"
+    echo " Display      : ${WAYLAND_DISPLAY:+Wayland ($WAYLAND_DISPLAY)}${DISPLAY:+ X11 ($DISPLAY)}"
+    echo "--------------------------------------------------------"
+
+    # Layer 1: CLI Fundamental Tools
+    echo "[LAYER 1] Dependensi CLI Fundamental"
+    local cli_tool
+    for cli_tool in fzf jq curl file unzip rsync ssh; do
+        if command -v "$cli_tool" >/dev/null 2>&1; then
+            echo "  • $cli_tool : [READY] ($(command -v "$cli_tool"))"
+            pass_cnt=$((pass_cnt + 1))
+        else
+            echo "  • $cli_tool : [MISSING] Harap instal melalui package manager distro"
+            miss_cnt=$((miss_cnt + 1))
+        fi
+    done
+    echo "--------------------------------------------------------"
+
+    # Layer 2: Python Runtime & YAML Engine
+    echo "[LAYER 2] Python Runtime & YAML Engine"
+    if command -v python3 >/dev/null 2>&1; then
+        echo "  • python3   : [READY] ($(python3 --version 2>&1))"
+        pass_cnt=$((pass_cnt + 1))
+        if python3 -c "import ruamel.yaml" 2>/dev/null; then
+            echo "  • YAML Parser: [READY] ruamel.yaml (Preserve formatting SLSsteam)"
+            pass_cnt=$((pass_cnt + 1))
+        elif python3 -c "import yaml" 2>/dev/null; then
+            echo "  • YAML Parser: [READY] PyYAML terpasang"
+            pass_cnt=$((pass_cnt + 1))
+        else
+            echo "  • YAML Parser: [WARN] ruamel.yaml / PyYAML belum ada (pip install ruamel.yaml)"
+            warn_cnt=$((warn_cnt + 1))
+        fi
+    else
+        echo "  • python3   : [MISSING] Python 3 tidak ditemukan"
+        miss_cnt=$((miss_cnt + 1))
+    fi
+    echo "--------------------------------------------------------"
+
+    # Layer 3: GBE Fork Templates
+    echo "[LAYER 3] Integritas Binary Template GBE Fork"
+    local gbe_targets=(
+        "Linux x64:linux:x64"
+        "Linux x86:linux:x86"
+        "Windows x64:windows:x64"
+        "Windows x86:windows:x86"
+    )
+    for gt in "${gbe_targets[@]}"; do
+        local g_label="${gt%%:*}"
+        local g_rest="${gt#*:}"
+        local g_plat="${g_rest%%:*}"
+        local g_arch="${g_rest##*:}"
+        local g_path
+        g_path=$(get_gbe_template "$g_plat" "$g_arch" 2>/dev/null || true)
+        if [ -n "$g_path" ] && [ -f "$g_path" ]; then
+            echo "  • $g_label : [READY] ($g_path)"
+            pass_cnt=$((pass_cnt + 1))
+        else
+            echo "  • $g_label : [MISSING] Letakkan template di ~/.local/share/gbe-fork/"
+            miss_cnt=$((miss_cnt + 1))
+        fi
+    done
+    echo "--------------------------------------------------------"
+
+    # Layer 4: Windows Game Runner
+    echo "[LAYER 4] Ketersediaan Windows Game Runner"
+    local r_found=0
+    if command -v umu-run >/dev/null 2>&1; then
+        echo "  • umu-run   : [READY] ($(command -v umu-run))"
+        r_found=1
+    else
+        echo "  • umu-run   : [MISSING] (Opsional: Unified Proton Runner)"
+    fi
+
+    local ge_proton
+    ge_proton=$(find "$HOME/.local/share/Steam/compatibilitytools.d" -maxdepth 2 -name "proton" 2>/dev/null | head -n 1 || true)
+    if [ -n "$ge_proton" ]; then
+        echo "  • GE-Proton : [READY] ($ge_proton)"
+        r_found=1
+    else
+        echo "  • GE-Proton : [MISSING] (~/.local/share/Steam/compatibilitytools.d/)"
+    fi
+
+    if command -v wine >/dev/null 2>&1; then
+        echo "  • Wine      : [READY] ($(wine --version 2>/dev/null || echo 'wine'))"
+        r_found=1
+    else
+        echo "  • Wine      : [MISSING] (System Wine fallback)"
+    fi
+
+    if [ "$r_found" -eq 1 ]; then
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "  • [WARN] Tidak ada runner Windows terdeteksi. Hanya game native Linux yang dapat dijalankan."
+        warn_cnt=$((warn_cnt + 1))
+    fi
+    echo "--------------------------------------------------------"
+
+    # Layer 5: Performance & Display Wrappers
+    echo "[LAYER 5] Wrapper Performa Grafis"
+    for w_tool in "gamemoderun:Feral GameMode" "mangohud:MangoHud FPS/Stats" "gamescope:Gamescope FSR Micro-compositor"; do
+        local wt_cmd="${w_tool%%:*}"
+        local wt_name="${w_tool##*:}"
+        if command -v "$wt_cmd" >/dev/null 2>&1; then
+            echo "  • $wt_name : [READY] ($(command -v "$wt_cmd"))"
+            pass_cnt=$((pass_cnt + 1))
+        else
+            echo "  • $wt_name : [WARN] Belum terpasang ($wt_cmd tidak ditemukan)"
+            warn_cnt=$((warn_cnt + 1))
+        fi
+    done
+    echo "--------------------------------------------------------"
+
+    # Layer 6: Headless Downloader Engine
+    echo "[LAYER 6] Headless Downloader Engine"
+    local dl_bin=""
+    if command -v depotdownloader >/dev/null 2>&1; then
+        dl_bin="$(command -v depotdownloader)"
+    elif [ -x "$HOME/.local/share/gamectl/bin/DepotDownloader" ]; then
+        dl_bin="$HOME/.local/share/gamectl/bin/DepotDownloader"
+    elif [ -x "$HOME/.local/bin/depotdownloader" ]; then
+        dl_bin="$HOME/.local/bin/depotdownloader"
+    fi
+    if [ -n "$dl_bin" ]; then
+        echo "  • DepotDownloader : [READY] ($dl_bin)"
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "  • DepotDownloader : [MISSING] Jalankan 'gamectl ensure-downloader' untuk unduh otomatis"
+        miss_cnt=$((miss_cnt + 1))
+    fi
+    echo "--------------------------------------------------------"
+
+    # Layer 7: Direktori Steam Client & SLSsteam
+    echo "[LAYER 7] Integrasi Steam Client & SLSsteam"
+    local s_root="$HOME/.local/share/Steam"
+    [ ! -d "$s_root" ] && [ -d "$HOME/.steam/steam" ] && s_root="$HOME/.steam/steam"
+    if [ -d "$s_root" ]; then
+        echo "  • Steam Root : [READY] ($s_root)"
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "  • Steam Root : [WARN] Direktori Steam resmi tidak ditemukan"
+        warn_cnt=$((warn_cnt + 1))
+    fi
+
+    local sls_file="$HOME/.config/SLSsteam/config.yaml"
+    if [ -f "$sls_file" ]; then
+        echo "  • SLSsteam   : [READY] ($sls_file)"
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "  • SLSsteam   : [WARN] ~/.config/SLSsteam/config.yaml belum ditemukan (Dibutuhkan untuk full DLC unlock)"
+        warn_cnt=$((warn_cnt + 1))
+    fi
+    echo "--------------------------------------------------------"
+
+    # Deteksi Hardware GPU & Driver Grafis
+    echo "[HARDWARE] Deteksi GPU & Driver Grafis"
+    local gpu_line
+    gpu_line=$(lspci 2>/dev/null | grep -E "VGA|3D" | head -n 1 | sed -E 's/^[0-9a-f:.]+ (VGA compatible controller|3D controller): //' || true)
+    [ -z "$gpu_line" ] && gpu_line="Tidak terdeteksi via lspci"
+    echo "  • GPU Controller : $gpu_line"
+    if echo "$gpu_line" | grep -qi -E "Haswell|4th Gen Core"; then
+        echo "  • Status Vulkan  : [WARN] Driver hasvk memiliki dukungan Vulkan tidak lengkap."
+        echo "  • Panduan        : Game berbasis FNA3D/SDL3 native (e.g. Terraria) disarankan memakai:"
+        echo "                     export FNA3D_FORCE_DRIVER=OpenGL"
+        warn_cnt=$((warn_cnt + 1))
+    else
+        echo "  • Status Driver  : [READY] GPU didukung oleh stack Mesa standar."
+        pass_cnt=$((pass_cnt + 1))
+    fi
+    echo "========================================================"
+    echo " REKAP HASIL AUDIT: $pass_cnt passed | $warn_cnt warnings | $miss_cnt missing"
+    if [ "$miss_cnt" -eq 0 ] && [ "$warn_cnt" -eq 0 ]; then
+        echo " Status Sistem    : [READY] 100% optimal untuk gaming sovereign standalone."
+    elif [ "$miss_cnt" -eq 0 ]; then
+        echo " Status Sistem    : [READY] Seluruh dependensi utama siap. Tinjau rekomendasi [WARN] di atas."
+    else
+        echo " Status Sistem    : [WARN] Terdapat dependensi wajib yang belum terpasang [MISSING]."
+    fi
+    echo "========================================================"
+
+    return $(( miss_cnt > 0 ? 1 : 0 ))
+}
+
 # Preview pane generator for Master Dashboard
 preview_dashboard() {
     local item_key="${1:-1}"
@@ -2321,42 +2513,17 @@ EOF
                 search_steam
                 ;;
             3)
-                if declare -F list_downloads_interactive >/dev/null 2>&1; then
-                    list_downloads_interactive
-                else
-                    list_downloads
-                    read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
-                fi
+                list_downloads_interactive
                 ;;
             4)
-                if declare -F unlock_interactive >/dev/null 2>&1; then
-                    unlock_interactive
-                else
-                    echo -n "Masukkan AppID yang ingin di-unlock: "
-                    read -r u_appid
-                    if [ -n "$u_appid" ]; then
-                        echo -n "Masukkan Judul Game (opsional): "
-                        read -r u_title
-                        unlock_game "$u_appid" "${u_title:-Game $u_appid}"
-                    fi
-                    read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
-                fi
+                unlock_interactive
                 ;;
             5)
-                if declare -F configure_global >/dev/null 2>&1; then
-                    configure_global
-                else
-                    echo "[INFO] Modul Konfigurasi Global akan dimuat pada Chunk 3."
-                    read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
-                fi
+                configure_global
                 ;;
             6)
-                if declare -F doctor_audit >/dev/null 2>&1; then
-                    doctor_audit
-                else
-                    echo "[INFO] Modul Diagnostik Sistem akan dimuat pada Chunk 4."
-                    read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
-                fi
+                doctor_audit
+                read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
                 ;;
             *)
                 break
@@ -2625,7 +2792,7 @@ cli_launch() {
 }
 
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive get_remote_host get_gbe_template find_game_binary find_runner launch_game build_wrapper_command configure_wrappers configure_global cli_launch generate_steamid64 get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu
+export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive get_remote_host get_gbe_template find_game_binary find_runner launch_game build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -2638,6 +2805,9 @@ case "${1:-}" in
         ;;
     config|config-global|configure)
         configure_global
+        ;;
+    doctor|audit)
+        doctor_audit
         ;;
     --preview-dashboard)
         preview_dashboard "${2:-1}" "${3:-}"
@@ -2763,6 +2933,7 @@ Usage:
   gamectl [menu]      Buka antarmuka Master Dashboard TUI
   gamectl library     Buka antarmuka TUI library game langsung
   gamectl config      Buka menu konfigurasi global (~/.config/gamectl/)
+  gamectl doctor      Jalankan diagnostik kesehatan sistem (7 layer)
   gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr]
                       Jalankan game dengan prefix mandiri dan opsi wrapper performa
   gamectl configure-wrappers <dir> [title]
