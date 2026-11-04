@@ -45,12 +45,12 @@ Memperbaiki 6 inkonsistensi visual, false-positive state, dan UX disconnect pada
      - Jika `$gdir/saves` ada: Tampilkan `Save Path: $gdir/saves (PORTABLE - AKTIF)`.
      - Jika `$gdir/saves` belum ada: Tampilkan `Save Path: Default OS (~/.local/share atau ~/.config - Belum Terisolasi)` dan `Snapshots: Tidak aktif (Memerlukan GBE Fork ./saves)`.
 
-### Chunk 5: Single Source of Truth for Installed Game Detection in Steam Search
+### Chunk 5: Single Source of Truth for Installed Game Detection in Steam Search [COMPLETED]
 - **Target**: `bin/gamectl` (`search_steam()`)
 - **DoD**:
-  1. Refactor deteksi `is_installed` di `search_steam()` agar membaca seluruh library yang dipindai oleh `scan_installed_games` (termasuk Steam libraries, `~/Games`, `~/.local/share/lutris/games`, dan custom libraries di `~/.config/gamectl/libraries`).
-  2. Gunakan lookup associative array (`installed_appids` dan `installed_titles`).
-  3. Hilangkan false-negative `[BELUM TERPASANG]` pada game yang berada di direktori kustom.
+  1. [x] Refactor deteksi `is_installed` di `search_steam()` agar membaca seluruh library yang dipindai oleh `scan_installed_games` (termasuk Steam libraries, `~/Games`, `~/.local/share/lutris/games`, dan custom libraries di `~/.config/gamectl/libraries`).
+  2. [x] Gunakan lookup associative array (`installed_appids` dan `installed_titles`).
+  3. [x] Hilangkan false-negative `[BELUM TERPASANG]` pada game yang berada di direktori kustom.
 
 ### Chunk 6: Non-GBE Awareness Gate on LAN Persona Configurator [COMPLETED]
 - **Target**: `bin/gamectl` (`set_id_interactive()`)

@@ -1922,23 +1922,34 @@ search_steam() {
         return
     fi
 
-    # Build list with local installed status across all libraries
+    # Build list with local installed status across all libraries via scan_installed_games
     local results=""
-    local steam_libs=()
-    mapfile -t steam_libs < <(get_steam_libraries)
+    declare -A installed_by_id=()
+    declare -A installed_by_title=()
+    declare -A installed_dir=()
+
+    local sc_id sc_name sc_st sc_dir sc_bin
+    while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
+        sc_id=$(echo "$sc_id" | tr -d '[:space:]')
+        sc_name=$(echo "$sc_name" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        sc_dir=$(echo "$sc_dir" | tr -d '\r')
+        if [ -n "$sc_id" ] && [ "$sc_id" != "STANDALONE" ]; then
+            installed_by_id["$sc_id"]=1
+            installed_dir["$sc_id"]="$sc_dir"
+        fi
+        if [ -n "$sc_name" ]; then
+            local clean_title="${sc_name,,}"
+            installed_by_title["$clean_title"]=1
+            [ -z "${installed_dir["$clean_title"]:-}" ] && installed_dir["$clean_title"]="$sc_dir"
+        fi
+    done < <(scan_installed_games)
 
     while IFS=$'\t' read -r appid name; do
         [ -z "$appid" ] && continue
         local is_installed=0
-        if [ -d "$HOME/Games/$name" ]; then
+        local clean_name="${name,,}"
+        if [[ -v installed_by_id["$appid"] ]] || [[ -v installed_by_title["$clean_name"] ]]; then
             is_installed=1
-        else
-            for slib in "${steam_libs[@]}"; do
-                if [ -f "$slib/appmanifest_${appid}.acf" ]; then
-                    is_installed=1
-                    break
-                fi
-            done
         fi
         local status="[BELUM TERPASANG]"
         [ "$is_installed" -eq 1 ] && status="[TERPASANG]"
@@ -2003,14 +2014,14 @@ search_steam() {
         echo " STATUS: $sel_status"
         echo "=========================================="
         if [ "$sel_status" = "[TERPASANG]" ]; then
-            local gdir="$HOME/Games/$sel_name"
-            if [ ! -d "$gdir" ]; then
-                for slib in "${steam_libs[@]}"; do
-                    if [ -d "$slib/common/$sel_name" ]; then
-                        gdir="$slib/common/$sel_name"
-                        break
-                    fi
-                done
+            local gdir=""
+            local clean_sel_name="${sel_name,,}"
+            if [ -n "${installed_dir["$sel_id"]:-}" ] && [ -d "${installed_dir["$sel_id"]}" ]; then
+                gdir="${installed_dir["$sel_id"]}"
+            elif [ -n "${installed_dir["$clean_sel_name"]:-}" ] && [ -d "${installed_dir["$clean_sel_name"]}" ]; then
+                gdir="${installed_dir["$clean_sel_name"]}"
+            elif [ -d "$HOME/Games/$sel_name" ]; then
+                gdir="$HOME/Games/$sel_name"
             fi
 
             echo "Pilih aksi untuk game terpasang:"
