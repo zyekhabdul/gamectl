@@ -351,7 +351,14 @@ preview_game() {
     echo "========================================================"
     echo " Judul        : $title"
     echo " AppID        : $appid"
-    echo " Status       : $status"
+    local status_desc="$status"
+    case "$status" in
+        *VALVE_SO*)   status_desc="$status (Valve DRM Linux - Butuh Steam Client)" ;;
+        *VALVE_DLL*)  status_desc="$status (Valve DRM Windows - Butuh Steam + Runner)" ;;
+        *GBE_FORK*)   status_desc="$status (Goldberg Fork - Bebas Steam, Full DLC, LAN Ready)" ;;
+        *STANDALONE*) status_desc="$status (DRM-Free Standalone)" ;;
+    esac
+    echo " Status       : $status_desc"
     echo " Direktori    : $gdir"
     echo " Executable   : $gdir/$gbin"
 

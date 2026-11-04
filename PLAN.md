@@ -16,15 +16,15 @@ Memperbaiki 6 inkonsistensi visual, false-positive state, dan UX disconnect pada
      - Jika status non-GBE: `<CTRL-I> : Inject GBE Fork (Bebas Steam, Portable Saves & LAN)`
   3. [x] Pastikan urutan tombol konsisten dengan fzf keybindings.
 
-### Chunk 2: Human-Readable Status Tag Annotation
+### Chunk 2: Human-Readable Status Tag Annotation [COMPLETED]
 - **Target**: `bin/gamectl` (`preview_game()`)
 - **DoD**:
-  1. Tambahkan penjelasan semantik tepat di samping nilai `Status`:
+  1. [x] Tambahkan penjelasan semantik tepat di samping nilai `Status`:
      - `[VALVE_SO]`: `Valve Linux Library (DRM Steam Resmi - Butuh Client)`
      - `[VALVE_DLL]`: `Valve Windows DLL (DRM Steam Resmi - Butuh Client + Runner)`
      - `[GBE_FORK]`: `Goldberg Emulator Fork (Bebas Client, Full DLC, LAN Ready)`
      - `[STANDALONE]`: `DRM-Free Standalone Game`
-  2. Hilangkan ambiguitas istilah teknis bagi pengguna.
+  2. [x] Hilangkan ambiguitas istilah teknis bagi pengguna.
 
 ### Chunk 3: Conditional GBE LAN Multiplayer & Identity Section
 - **Target**: `bin/gamectl` (`preview_game()`)
