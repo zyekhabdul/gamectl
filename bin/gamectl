@@ -454,6 +454,11 @@ preview_game() {
     echo "--------------------------------------------------------"
     echo " ACTION KEYS:"
     echo " <ENTER>       : Launch Game"
+    if [[ "$status" =~ GBE_FORK ]]; then
+        echo " <CTRL-I>      : Re-Inject / Update GBE Fork & Full DLC"
+    else
+        echo " <CTRL-I>      : Inject GBE Fork (Bebas Steam, Portable Saves & LAN)"
+    fi
     echo " <CTRL-O>      : Configure Runtime Wrappers (GameMode/HUD/FSR)"
     echo " <CTRL-P>      : Configure LAN Player Persona & SteamID"
     local rhost

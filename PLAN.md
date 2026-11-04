@@ -7,14 +7,14 @@ Memperbaiki 6 inkonsistensi visual, false-positive state, dan UX disconnect pada
 
 ## 2. Granular Chunks & Definition of Done (DoD)
 
-### Chunk 1: ACTION KEYS Alignment & Keybinding Visibility
+### Chunk 1: ACTION KEYS Alignment & Keybinding Visibility [COMPLETED]
 - **Target**: `bin/gamectl` (`preview_game()`)
 - **DoD**:
-  1. Daftarkan `<CTRL-I>` ke dalam blok `ACTION KEYS:` pada panel kanan preview.
-  2. Berikan label dinamis berdasarkan status game:
+  1. [x] Daftarkan `<CTRL-I>` ke dalam blok `ACTION KEYS:` pada panel kanan preview.
+  2. [x] Berikan label dinamis berdasarkan status game:
      - Jika status `[GBE_FORK]`: `<CTRL-I> : Re-Inject / Update GBE Fork & Full DLC`
      - Jika status non-GBE: `<CTRL-I> : Inject GBE Fork (Bebas Steam, Portable Saves & LAN)`
-  3. Pastikan urutan tombol konsisten dengan fzf keybindings.
+  3. [x] Pastikan urutan tombol konsisten dengan fzf keybindings.
 
 ### Chunk 2: Human-Readable Status Tag Annotation
 - **Target**: `bin/gamectl` (`preview_game()`)
