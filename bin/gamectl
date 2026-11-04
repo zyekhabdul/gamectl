@@ -650,6 +650,8 @@ build_wrapper_command() {
             local active_args="$gscope_args"
             if [ "$use_fsr" = "1" ] && [[ ! "$active_args" =~ (-F|fsr|-U) ]]; then
                 active_args="-F fsr $active_args"
+            elif [ "$use_fsr" = "0" ]; then
+                active_args=$(echo "$active_args" | sed -E 's/-F[[:space:]]+fsr//g' | xargs)
             fi
             if [ -n "$active_args" ]; then
                 read -r -a parsed_args <<< "$active_args"
@@ -2050,6 +2052,7 @@ cli_launch() {
 export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads unlock_game get_remote_host get_gbe_template find_game_binary find_runner launch_game build_wrapper_command configure_wrappers cli_launch generate_steamid64 get_game_persona set_id set_id_interactive
 
 # Top-level Menu
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
 case "${1:-}" in
     set-id)
         if [ -n "${2:-}" ]; then
@@ -2189,3 +2192,4 @@ EOF
         library_menu
         ;;
 esac
+fi

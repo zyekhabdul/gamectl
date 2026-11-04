@@ -41,7 +41,7 @@ Memperluas kapabilitas `gamectl` agar mendukung ekosistem game Windows (.exe) da
   - Perbarui `README.md` dan `docs/GUIDE.md` dengan panduan penggunaan runner Windows, template GBE DLL, dan integrasi wrapper.
   - DoD: `gamectl --help` menampilkan panduan perintah baru dan bash completion merespons input dengan presisi.
 
-- [ ] **Chunk 6: Verifikasi Empiris & RAG Checkpoint**
+- [x] **Chunk 6: Verifikasi Empiris & RAG Checkpoint**
   - Jalankan audit sintaks (`bash -n bin/gamectl install.sh completions/gamectl.bash`).
   - Lakukan dry-run verifikasi injeksi DLL dan eksekusi runner wrapper.
   - Catat checkpoint aktif ke `00-AGY-Memory/gamectl/STATE.md` via `agy-guard checkpoint`.
