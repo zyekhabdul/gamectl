@@ -1922,7 +1922,7 @@ list_downloads_interactive() {
             --prompt="Unduhan > " \
             --preview="echo 'File Log: {3}'; echo '------------------------------------------'; tail -n 30 {3}" \
             --preview-window=right:60%:wrap \
-            --bind="ctrl-k:execute(appid={1}; pid=\$(pgrep -f \"DepotDownloader.*-app \${appid}\" 2>/dev/null | head -n 1); if [ -n \"\$pid\" ]; then kill \"\$pid\" 2>/dev/null && echo \"[INFO] Proses AppID \$appid (PID \$pid) dihentikan.\"; else echo \"[INFO] Proses unduhan AppID \$appid tidak aktif.\"; fi; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
+            --bind="ctrl-k:execute(appid={1}; pid=\$(pgrep -f \"DepotDownloader.*-app \${appid}\" 2>/dev/null | head -n 1); if [ -n \"\$pid\" ]; then kill \"\$pid\" 2>/dev/null && echo \"[INFO] Proses AppID \$appid (PID \$pid) dihentikan.\"; else echo \"[INFO] Proses unduhan AppID \$appid tidak aktif.\"; fi; bash -c 'read -n 1 -s -r -p \"Tekan tombol apa saja untuk lanjut...\"')" \
         ) || break
 
         if [ -n "$selection" ]; then
@@ -2550,9 +2550,9 @@ library_menu() {
             --bind="ctrl-d:execute($SELF_BIN downloads)+reload($SELF_BIN --list)" \
             --bind="ctrl-o:execute($SELF_BIN configure-wrappers {4} {2})+reload($SELF_BIN --list)" \
             --bind="ctrl-p:execute($SELF_BIN set-id-interactive {4} {2})+reload($SELF_BIN --list)" \
-            --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk kembali ke pustaka...')+reload($SELF_BIN --list)" \
-            --bind="ctrl-s:execute($SELF_BIN --sync {4} {2}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
-            --bind="ctrl-b:execute($SELF_BIN --backup {4}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
+            --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; bash -c 'read -n 1 -s -r -p \"Tekan tombol apa saja untuk kembali ke pustaka...\"')+reload($SELF_BIN --list)" \
+            --bind="ctrl-s:execute($SELF_BIN --sync {4} {2}; bash -c 'read -n 1 -s -r -p \"Tekan tombol apa saja untuk lanjut...\"')" \
+            --bind="ctrl-b:execute($SELF_BIN --backup {4}; bash -c 'read -n 1 -s -r -p \"Tekan tombol apa saja untuk lanjut...\"')" \
         ) || break
 
         if [ -n "$selection" ]; then
