@@ -762,6 +762,185 @@ EOF
     sleep 1
 }
 
+# Global Configuration Manager TUI
+configure_global() {
+    mkdir -p "$HOME/.config/gamectl"
+
+    while true; do
+        clear
+        echo "========================================================"
+        echo " KONFIGURASI GLOBAL GAMECTL (~/.config/gamectl/)"
+        echo "========================================================"
+        local p_name="Player" p_id=""
+        if [ -f "$HOME/.config/gamectl/persona" ]; then
+            p_name=$(grep -E '^[[:space:]]*account_name[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_name[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+            p_id=$(grep -E '^[[:space:]]*account_steamid[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_steamid[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+        fi
+        [ -z "$p_name" ] && p_name="${USER:-Player}"
+
+        local w_desc="Default (Semua Nonaktif)"
+        if [ -f "$HOME/.config/gamectl/wrappers" ]; then
+            local act_w=()
+            grep -q "^gamemode=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("GameMode")
+            grep -q -E "^(hud|mangohud)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("MangoHud")
+            grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("Gamescope")
+            grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("FSR")
+            [ ${#act_w[@]} -gt 0 ] && w_desc="${act_w[*]}"
+        fi
+
+        local lib_count=0
+        [ -f "$HOME/.config/gamectl/libraries" ] && lib_count=$(grep -v -E '^[[:space:]]*(#|$)' "$HOME/.config/gamectl/libraries" 2>/dev/null | wc -l || echo 0)
+
+        local r_host="Belum diatur"
+        if [ -f "$HOME/.config/gamectl/remote_host" ]; then
+            r_host=$(head -n 1 "$HOME/.config/gamectl/remote_host" 2>/dev/null | tr -d '[:space:]')
+            [ -z "$r_host" ] && r_host="Belum diatur"
+        fi
+
+        echo " 1) Persona LAN Global    : $p_name | ${p_id:-Otomatis}"
+        echo " 2) Default Wrappers      : $w_desc"
+        echo " 3) Custom Game Libraries : $lib_count direktori terdaftar"
+        echo " 4) Remote Sync Host      : $r_host"
+        echo " 5) Kembali ke Dashboard"
+        echo "========================================================"
+        read -r -p "Pilihan konfigurasi [1-5]: " cfg_opt
+
+        case "$cfg_opt" in
+            1)
+                echo "--------------------------------------------------------"
+                echo " PENGATURAN PERSONA LAN GLOBAL"
+                echo "--------------------------------------------------------"
+                echo -n " Nama Pemain [$p_name]: "; read -r new_name
+                [ -n "$new_name" ] && p_name="$new_name"
+                echo -n " SteamID64 [${p_id:-Otomatis}] ('gen' untuk ID baru): "; read -r new_id
+                if [ "$new_id" = "gen" ]; then
+                    p_id=$(generate_steamid64)
+                    echo "[INFO] Generated SteamID64: $p_id"
+                elif [ -n "$new_id" ]; then
+                    p_id="$new_id"
+                fi
+                cat <<EOF > "$HOME/.config/gamectl/persona"
+[user::general]
+account_name=$p_name
+account_steamid=$p_id
+language=english
+EOF
+                echo "[SUCCESS] Persona tersimpan: $p_name | $p_id"
+                sleep 1
+                ;;
+            2)
+                local gm=0 hud=0 scope=0 fsr=0
+                if [ -f "$HOME/.config/gamectl/wrappers" ]; then
+                    grep -q "^gamemode=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && gm=1
+                    grep -q -E "^(hud|mangohud)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && hud=1
+                    grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && scope=1
+                    grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && fsr=1
+                fi
+                while true; do
+                    clear
+                    echo "========================================================"
+                    echo " PENGATURAN DEFAULT RUNTIME WRAPPERS (GLOBAL)"
+                    echo "========================================================"
+                    echo " 1) GameMode (gamemoderun) : $([ "$gm" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
+                    echo " 2) MangoHud (FPS/HUD)     : $([ "$hud" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
+                    echo " 3) Gamescope Windowing    : $([ "$scope" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
+                    echo " 4) Gamescope FSR Upscale  : $([ "$fsr" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
+                    echo " 5) Preset: Full Performance (GameMode + MangoHud)"
+                    echo " 6) Preset: Handheld / FSR (GameMode + MangoHud + Gamescope FSR)"
+                    echo " 7) Reset ke Default (Semua Nonaktif)"
+                    echo " 8) Simpan & Selesai"
+                    read -r -p "Pilihan toggle [1-8]: " w_opt
+                    case "$w_opt" in
+                        1) gm=$((1 - gm)) ;;
+                        2) hud=$((1 - hud)) ;;
+                        3) scope=$((1 - scope)) ;;
+                        4) fsr=$((1 - fsr)); [ "$fsr" = 1 ] && scope=1 ;;
+                        5) gm=1; hud=1; scope=0; fsr=0 ;;
+                        6) gm=1; hud=1; scope=1; fsr=1 ;;
+                        7) gm=0; hud=0; scope=0; fsr=0 ;;
+                        8)
+                            cat <<EOF > "$HOME/.config/gamectl/wrappers"
+gamemode=$gm
+hud=$hud
+gamescope=$scope
+fsr=$fsr
+gamescope_args=-W 1280 -H 720 -w 1920 -h 1080 -F fsr -f
+EOF
+                            echo "[SUCCESS] Default wrappers global tersimpan."
+                            sleep 1
+                            break
+                            ;;
+                        *) break ;;
+                    esac
+                done
+                ;;
+            3)
+                clear
+                echo "========================================================"
+                echo " MANAJEMEN PATH PUSTAKA TAMBAHAN (libraries)"
+                echo " File: ~/.config/gamectl/libraries"
+                echo "========================================================"
+                [ -f "$HOME/.config/gamectl/libraries" ] && grep -v -E '^[[:space:]]*(#|$)' "$HOME/.config/gamectl/libraries" 2>/dev/null | nl -w2 -s'. ' || echo " (Belum ada direktori terdaftar)"
+                echo "--------------------------------------------------------"
+                echo " 1) Tambah direktori baru | 2) Hapus direktori | 3) Kembali"
+                read -r -p "Pilihan [1-3]: " lib_opt
+                case "$lib_opt" in
+                    1)
+                        echo -n " Masukkan path direktori (contoh: ~/Games): "; read -r new_path
+                        if [ -n "$new_path" ]; then
+                            echo "$new_path" >> "$HOME/.config/gamectl/libraries"
+                            echo "[SUCCESS] Direktori '$new_path' ditambahkan ke libraries."
+                        fi
+                        read -r -p "Tekan [ENTER] untuk lanjut..."
+                        ;;
+                    2)
+                        if [ -f "$HOME/.config/gamectl/libraries" ]; then
+                            echo -n " Masukkan nomor baris yang ingin dihapus: "; read -r del_num
+                            if [[ "$del_num" =~ ^[0-9]+$ ]]; then
+                                local target_line
+                                target_line=$(grep -v -E '^[[:space:]]*(#|$)' "$HOME/.config/gamectl/libraries" 2>/dev/null | sed -n "${del_num}p")
+                                if [ -n "$target_line" ]; then
+                                    grep -v -F "$target_line" "$HOME/.config/gamectl/libraries" > "$HOME/.config/gamectl/libraries.tmp" && mv "$HOME/.config/gamectl/libraries.tmp" "$HOME/.config/gamectl/libraries"
+                                    echo "[SUCCESS] '$target_line' dihapus dari libraries."
+                                fi
+                            fi
+                        fi
+                        read -r -p "Tekan [ENTER] untuk lanjut..."
+                        ;;
+                    *) ;;
+                esac
+                ;;
+            4)
+                echo "--------------------------------------------------------"
+                echo " PENGATURAN REMOTE COMPANION HOST (remote_host)"
+                echo "--------------------------------------------------------"
+                echo " Host saat ini: $r_host"
+                echo -n " Masukkan hostname / SSH alias baru ('-' untuk hapus): "; read -r new_rhost
+                if [ "$new_rhost" = "-" ]; then
+                    rm -f "$HOME/.config/gamectl/remote_host"
+                    echo "[INFO] Konfigurasi remote host dihapus."
+                elif [ -n "$new_rhost" ]; then
+                    echo "$new_rhost" > "$HOME/.config/gamectl/remote_host"
+                    echo "[SUCCESS] Remote host '$new_rhost' tersimpan."
+                    echo -n " Uji koneksi SSH ke '$new_rhost'? [y/N]: "; read -r test_ssh
+                    if [[ "$test_ssh" =~ ^[yY] ]]; then
+                        echo "[INFO] Menguji SSH ke $new_rhost (timeout 3s)..."
+                        if ssh -q -o BatchMode=yes -o ConnectTimeout=3 "$new_rhost" exit 2>/dev/null; then
+                            echo "[VERIFIED] Koneksi SSH ke $new_rhost berhasil (exit 0)!"
+                        else
+                            echo "[WARN] Host tidak merespons SSH key. Pastikan host terdaftar di ~/.ssh/config."
+                        fi
+                    fi
+                fi
+                read -r -p "Tekan [ENTER] untuk lanjut..."
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+}
+
 # Launch game with performance wrapping and runner isolation
 launch_game() {
     local gdir="$1"
@@ -2446,7 +2625,7 @@ cli_launch() {
 }
 
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive get_remote_host get_gbe_template find_game_binary find_runner launch_game build_wrapper_command configure_wrappers cli_launch generate_steamid64 get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu
+export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive get_remote_host get_gbe_template find_game_binary find_runner launch_game build_wrapper_command configure_wrappers configure_global cli_launch generate_steamid64 get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -2456,6 +2635,9 @@ case "${1:-}" in
         ;;
     library|list-ui)
         library_menu
+        ;;
+    config|config-global|configure)
+        configure_global
         ;;
     --preview-dashboard)
         preview_dashboard "${2:-1}" "${3:-}"
@@ -2580,6 +2762,7 @@ gamectl - Sovereign TUI Game Manager & Launcher (Zero-Bloat)
 Usage:
   gamectl [menu]      Buka antarmuka Master Dashboard TUI
   gamectl library     Buka antarmuka TUI library game langsung
+  gamectl config      Buka menu konfigurasi global (~/.config/gamectl/)
   gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr]
                       Jalankan game dengan prefix mandiri dan opsi wrapper performa
   gamectl configure-wrappers <dir> [title]
