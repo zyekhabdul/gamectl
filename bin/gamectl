@@ -19,6 +19,33 @@ GBE_X86="${GAMECTL_GBE_X86:-$HOME/.local/share/gbe-fork/regular/x86/libsteam_api
 GBE_WIN_X64="${GAMECTL_GBE_WIN_X64:-$HOME/.local/share/gbe-fork/windows/release/regular/x64/steam_api64.dll}"
 GBE_WIN_X86="${GAMECTL_GBE_WIN_X86:-$HOME/.local/share/gbe-fork/windows/release/regular/x86/steam_api.dll}"
 
+# ANSI Styling Tokens (Gamer Dark / Tokyo Night Theme)
+UI_RST=$'\033[0m'
+UI_BOLD=$'\033[1m'
+UI_DIM=$'\033[38;5;244m'
+UI_CYAN=$'\033[1;38;5;117m'
+UI_ICE=$'\033[1;38;5;153m'
+UI_PURPLE=$'\033[1;38;5;141m'
+UI_GREEN=$'\033[1;38;5;120m'
+UI_AMBER=$'\033[1;38;5;221m'
+UI_RED=$'\033[1;38;5;203m'
+UI_BOX=$'\033[38;5;60m'
+
+# Pill badges for hotkeys
+UI_PILL_ENTER=$'\033[1;38;5;232;48;5;117m ENTER \033[0m'
+UI_PILL_CTRLI=$'\033[1;38;5;232;48;5;141m CTRL-I \033[0m'
+UI_PILL_CTRLO=$'\033[1;38;5;232;48;5;221m CTRL-O \033[0m'
+UI_PILL_CTRLP=$'\033[1;38;5;232;48;5;120m CTRL-P \033[0m'
+UI_PILL_CTRLF=$'\033[1;38;5;232;48;5;153m CTRL-F \033[0m'
+UI_PILL_CTRLD=$'\033[1;38;5;232;48;5;141m CTRL-D \033[0m'
+UI_PILL_CTRLS=$'\033[1;38;5;232;48;5;117m CTRL-S \033[0m'
+UI_PILL_CTRLB=$'\033[1;38;5;232;48;5;221m CTRL-B \033[0m'
+UI_PILL_CTRLK=$'\033[1;38;5;232;48;5;203m CTRL-K \033[0m'
+UI_PILL_ESC=$'\033[1;38;5;232;48;5;248m ESC \033[0m'
+
+# Central Modern FZF Configuration (Seamless transparent theme with rounded borders)
+export FZF_DEFAULT_OPTS="--ansi --layout=reverse --border=rounded --info=inline-right --scrollbar=│ --prompt=' > ' --pointer='▶' --marker='*' --color='bg+:#282a36,bg:-1,spinner:#bd93f9,hl:#ff79c6' --color='fg:#f8f8f2,header:#8be9fd,info:#bd93f9,pointer:#50fa7b' --color='marker:#50fa7b,fg+:#ffffff,prompt:#bd93f9,hl+:#ff79c6' --color='border:#6272a4,label:#bd93f9,header-border:#6272a4,preview-border:#6272a4'"
+
 # Resolve GBE template file based on platform and architecture
 get_gbe_template() {
     local platform="${1:-linux}" # "linux" or "windows"
@@ -206,6 +233,8 @@ get_steam_libraries() {
 
 # Scan installed games dynamically in standard & custom paths
 scan_installed_games() {
+    local is_formatted=false
+    [ "${1:-}" = "--formatted" ] || [ "${1:-}" = "-f" ] && is_formatted=true
     declare -A seen_dirs
 
     # 1. Scan Steam Libraries
@@ -279,7 +308,18 @@ scan_installed_games() {
                 fi
             fi
 
-            printf "%-8s\t%-22s\t%-12s\t%s\t%s\n" "$appid" "$name" "[$status]" "$gdir" "$gbin"
+            if [ "$is_formatted" = true ]; then
+                local c_status=""
+                case "$status" in
+                    *GBE_FORK*)   c_status="${UI_GREEN}[GBE_FORK]  ${UI_RST}" ;;
+                    *VALVE_SO*)   c_status="${UI_AMBER}[VALVE_SO]  ${UI_RST}" ;;
+                    *VALVE_DLL*)  c_status="${UI_CYAN}[VALVE_DLL] ${UI_RST}" ;;
+                    *STANDALONE*) c_status="${UI_ICE}[STANDALONE]${UI_RST}" ;;
+                esac
+                printf "%b\t%b\t%b\t%s\t%s\n" "${UI_DIM}${appid}${UI_RST}" "${UI_BOLD}${name}${UI_RST}" "$c_status" "$gdir" "$gbin"
+            else
+                printf "%-8s\t%-22s\t%-12s\t%s\t%s\n" "$appid" "$name" "[$status]" "$gdir" "$gbin"
+            fi
         done
     done < <(get_steam_libraries)
 
@@ -380,37 +420,63 @@ scan_installed_games() {
                 fi
             fi
 
-            printf "%-8s\t%-22s\t%-12s\t%s\t%s\n" "$appid" "$title" "[$status]" "$gdir" "$gbin"
+            if [ "$is_formatted" = true ]; then
+                local c_status=""
+                case "$status" in
+                    *GBE_FORK*)   c_status="${UI_GREEN}[GBE_FORK]  ${UI_RST}" ;;
+                    *VALVE_SO*)   c_status="${UI_AMBER}[VALVE_SO]  ${UI_RST}" ;;
+                    *VALVE_DLL*)  c_status="${UI_CYAN}[VALVE_DLL] ${UI_RST}" ;;
+                    *STANDALONE*) c_status="${UI_ICE}[STANDALONE]${UI_RST}" ;;
+                esac
+                printf "%b\t%b\t%b\t%s\t%s\n" "${UI_DIM}${appid}${UI_RST}" "${UI_BOLD}${title}${UI_RST}" "$c_status" "$gdir" "$gbin"
+            else
+                printf "%-8s\t%-22s\t%-12s\t%s\t%s\n" "$appid" "$title" "[$status]" "$gdir" "$gbin"
+            fi
         done
     done
 }
 
 # Preview pane generator for installed games
 preview_game() {
-    local appid="$1"
-    local title="$2"
-    local status="$3"
-    local gdir="$4"
-    local gbin="$5"
+    local appid title status gdir gbin
+    appid=$(echo "$1" | sed -r 's/\x1b\[[0-9;]*m//g' | tr -d '[:space:]')
+    title=$(echo "$2" | sed -r 's/\x1b\[[0-9;]*m//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    status=$(echo "$3" | sed -r 's/\x1b\[[0-9;]*m//g' | tr -d '[]:space:')
+    gdir="$4"
+    gbin="$5"
 
-    echo "========================================================"
-    echo " GAME DETAILS & RUNTIME STATUS"
-    echo "========================================================"
-    echo " Judul        : $title"
-    echo " AppID        : $appid"
-    local status_desc="$status"
+    local status_badge="${UI_CYAN}[${status}]${UI_RST}"
+    local status_desc=""
     case "$status" in
-        *VALVE_SO*)   status_desc="$status (Valve DRM Linux - Butuh Steam Client)" ;;
-        *VALVE_DLL*)  status_desc="$status (Valve DRM Windows - Butuh Steam + Runner)" ;;
-        *GBE_FORK*)   status_desc="$status (Goldberg Fork - Bebas Steam, Full DLC, LAN Ready)" ;;
-        *STANDALONE*) status_desc="$status (DRM-Free Standalone)" ;;
+        *VALVE_SO*)
+            status_badge="${UI_AMBER}[VALVE_SO]${UI_RST}"
+            status_desc="${UI_DIM}(Official Steam DRM - Requires Steam Client)${UI_RST}"
+            ;;
+        *VALVE_DLL*)
+            status_badge="${UI_CYAN}[VALVE_DLL]${UI_RST}"
+            status_desc="${UI_DIM}(Windows Steam DRM - Requires Steam + Runner)${UI_RST}"
+            ;;
+        *GBE_FORK*)
+            status_badge="${UI_GREEN}[GBE_FORK]${UI_RST}"
+            status_desc="${UI_DIM}(Goldberg Fork - Steam-Free, Full DLC, LAN Ready)${UI_RST}"
+            ;;
+        *STANDALONE*)
+            status_badge="${UI_ICE}[STANDALONE]${UI_RST}"
+            status_desc="${UI_DIM}(DRM-Free Standalone)${UI_RST}"
+            ;;
     esac
-    echo " Status       : $status_desc"
-    echo " Direktori    : $gdir"
-    echo " Executable   : $gdir/$gbin"
+
+    echo "${UI_BOX}╭─ GAME INFORMATION ───────────────────────────────────╮${UI_RST}"
+    echo "│ ${UI_BOLD}${title}${UI_RST} ${UI_DIM}(AppID: ${appid})${UI_RST}"
+    echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
+    echo "  ${UI_CYAN}Status      ${UI_RST}: $status_badge $status_desc"
+    echo "  ${UI_CYAN}Directory   ${UI_RST}: ${UI_DIM}$gdir${UI_RST}"
+    echo "  ${UI_CYAN}Executable  ${UI_RST}: ${UI_BOLD}$gbin${UI_RST}"
 
     if [ -f "$gdir/$gbin" ]; then
-        echo " Arsitektur   : $(file -b "$gdir/$gbin" | cut -d',' -f1,2)"
+        local arch_info
+        arch_info=$(file -b "$gdir/$gbin" | cut -d',' -f1,2)
+        echo "  ${UI_CYAN}Architecture${UI_RST}: ${UI_DIM}$arch_info${UI_RST}"
         local is_win=false
         case "$gbin" in *.exe|*.EXE) is_win=true ;; esac
         if [ "$is_win" = false ] && file -b "$gdir/$gbin" 2>/dev/null | grep -qi "PE32"; then
@@ -420,54 +486,57 @@ preview_game() {
             local r_path
             r_path=$(find_runner "$gdir" 2>/dev/null || true)
             if [ -n "$r_path" ]; then
-                echo " Runner       : $(basename "$r_path") ($r_path)"
+                echo "  ${UI_CYAN}Runner      ${UI_RST}: ${UI_PURPLE}$(basename "$r_path")${UI_RST} ${UI_DIM}($r_path)${UI_RST}"
             else
-                echo " Runner       : Belum terpasang (umu-run/Proton/wine)"
+                echo "  ${UI_CYAN}Runner      ${UI_RST}: ${UI_RED}[MISSING] No Windows runner found (umu-run/Proton/wine)${UI_RST}"
             fi
-            echo " Wine Prefix  : $gdir/pfx (ISOLATED)"
+            echo "  ${UI_CYAN}Prefix      ${UI_RST}: ${UI_DIM}$gdir/pfx (ISOLATED)${UI_RST}"
         else
-            echo " Runner       : Native Linux (Direct ELF/Script)"
+            echo "  ${UI_CYAN}Runner      ${UI_RST}: ${UI_GREEN}Native Linux${UI_RST} ${UI_DIM}(Direct ELF/Script)${UI_RST}"
         fi
     fi
 
-    echo "--------------------------------------------------------"
-    echo " SAVEGAME & STORAGE"
+    echo
+    echo "${UI_BOX}╭─ STORAGE & SAVEGAMES ────────────────────────────────╮${UI_RST}"
     if [ -d "$gdir/saves" ]; then
-        echo " Save Path    : $gdir/saves (PORTABLE - AKTIF)"
-        echo " Save Size    : $(du -sh "$gdir/saves" 2>/dev/null | cut -f1)"
+        local save_sz
+        save_sz=$(du -sh "$gdir/saves" 2>/dev/null | cut -f1)
+        echo "  ${UI_CYAN}Save Path   ${UI_RST}: ${UI_GREEN}./saves${UI_RST} ${UI_DIM}(PORTABLE - ACTIVE | Size: $save_sz)${UI_RST}"
         if [ -d "$gdir/.save_snapshots" ]; then
             local snaps
             snaps=$(ls -d "$gdir/.save_snapshots"/slot* 2>/dev/null | wc -l)
-            echo " Snapshots    : $snaps slot aktif"
+            echo "  ${UI_CYAN}Snapshots   ${UI_RST}: ${UI_BOLD}$snaps active recovery slots${UI_RST}"
         else
-            echo " Snapshots    : 0 slot (Akan dibuat saat launch atau Ctrl-B)"
+            echo "  ${UI_CYAN}Snapshots   ${UI_RST}: ${UI_DIM}0 slots (Auto-created before launch)${UI_RST}"
         fi
     else
-        echo " Save Path    : Default OS (Global Steam/Home - Belum terisolasi)"
-        echo " Snapshots    : Nonaktif (Memerlukan GBE Fork ./saves)"
+        echo "  ${UI_CYAN}Save Path   ${UI_RST}: ${UI_AMBER}Default OS (Global Steam/Home - Not Isolated)${UI_RST}"
+        echo "  ${UI_CYAN}Snapshots   ${UI_RST}: ${UI_DIM}Disabled (Requires GBE Fork ./saves)${UI_RST}"
     fi
 
     if [ -f "$gdir/steam_settings/DLC.txt" ]; then
         local dlc_count
         dlc_count=$(grep -c "=" "$gdir/steam_settings/DLC.txt" 2>/dev/null || echo 0)
-        echo " DLC Unlocked : $dlc_count item"
+        echo "  ${UI_CYAN}DLC State   ${UI_RST}: ${UI_GREEN}$dlc_count items unlocked (Full DLC)${UI_RST}"
     fi
+    echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
 
-    echo "--------------------------------------------------------"
-    echo " RUNTIME WRAPPERS & PERFORMANCE"
-    local w_gm="[OFF]" w_hud="[OFF]" w_scope="[OFF]"
-    command -v gamemoderun >/dev/null 2>&1 && w_gm="[READY]" || w_gm="[N/A]"
-    command -v mangohud >/dev/null 2>&1 && w_hud="[READY]" || w_hud="[N/A]"
-    command -v gamescope >/dev/null 2>&1 && w_scope="[READY]" || w_scope="[N/A]"
-    echo " Host Tools   : GameMode $w_gm | MangoHud $w_hud | Gamescope $w_scope"
+    echo
+    echo "${UI_BOX}╭─ RUNTIME WRAPPERS & PERFORMANCE ─────────────────────╮${UI_RST}"
+    local w_gm="${UI_DIM}[N/A]${UI_RST}" w_hud="${UI_DIM}[N/A]${UI_RST}" w_scope="${UI_DIM}[N/A]${UI_RST}"
+    command -v gamemoderun >/dev/null 2>&1 && w_gm="${UI_GREEN}[READY]${UI_RST}"
+    command -v mangohud >/dev/null 2>&1 && w_hud="${UI_GREEN}[READY]${UI_RST}"
+    command -v gamescope >/dev/null 2>&1 && w_scope="${UI_GREEN}[READY]${UI_RST}"
+    echo "  ${UI_CYAN}Host Tools  ${UI_RST}: GameMode $w_gm • MangoHud $w_hud • Gamescope $w_scope"
 
     local act_w=()
-    local c_gm=0 c_hud=0 c_scope=0 c_fsr=0
+    local c_gm=0 c_hud=0 c_scope=0 c_fsr=0 c_glt=0
     if [ -f "$HOME/.config/gamectl/wrappers" ]; then
         grep -q "^gamemode=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_gm=1
         grep -q -E "^(hud|mangohud)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_hud=1
         grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_scope=1
         grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_fsr=1
+        grep -q -E "^(glthread|mesa_glthread)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_glt=1
     fi
     if [ -f "$gdir/.wrappers" ]; then
         grep -q "^gamemode=1" "$gdir/.wrappers" 2>/dev/null && c_gm=1
@@ -478,60 +547,58 @@ preview_game() {
         grep -q "^gamescope=0" "$gdir/.wrappers" 2>/dev/null && c_scope=0
         grep -q "^fsr=1" "$gdir/.wrappers" 2>/dev/null && c_fsr=1
         grep -q "^fsr=0" "$gdir/.wrappers" 2>/dev/null && c_fsr=0
+        grep -q -E "^(glthread|mesa_glthread)=1" "$gdir/.wrappers" 2>/dev/null && c_glt=1
+        grep -q -E "^(glthread|mesa_glthread)=0" "$gdir/.wrappers" 2>/dev/null && c_glt=0
     fi
     [ "$c_gm" = 1 ] && act_w+=("GameMode")
     [ "$c_hud" = 1 ] && act_w+=("MangoHud")
     [ "$c_scope" = 1 ] && act_w+=("Gamescope")
     [ "$c_fsr" = 1 ] && act_w+=("FSR")
+    [ "$c_glt" = 1 ] && act_w+=("MesaGL")
     if [ ${#act_w[@]} -gt 0 ]; then
-        echo " Active Profile: ${act_w[*]}"
+        echo "  ${UI_CYAN}Game Profile${UI_RST}: ${UI_BOLD}${act_w[*]}${UI_RST}"
     else
-        echo " Active Profile: Default (Native / Mesa GL Thread)"
+        echo "  ${UI_CYAN}Game Profile${UI_RST}: ${UI_DIM}Clean Native (Zero Wrappers)${UI_RST}"
     fi
+    echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
 
-    echo "--------------------------------------------------------"
+    echo
+    echo "${UI_BOX}╭─ LAN MULTIPLAYER & IDENTITY ─────────────────────────╮${UI_RST}"
     if [[ "$status" =~ GBE_FORK ]]; then
-        echo " LAN MULTIPLAYER & IDENTITY (GBE FORK: AKTIF)"
-        local p_info
+        local p_info p_name p_id
         p_info=$(get_game_persona "$gdir")
-        local p_name p_id
         p_name=$(echo "$p_info" | cut -d'|' -f1)
         p_id=$(echo "$p_info" | cut -d'|' -f2)
-        echo " Player Name  : ${p_name:-Player}"
-        echo " SteamID64    : ${p_id:-Auto-Generated / Default}"
+        echo "  ${UI_CYAN}Player Name ${UI_RST}: ${UI_BOLD}${p_name:-Player}${UI_RST} ${UI_DIM}(SteamID64: ${p_id:-Default})${UI_RST}"
         if [ -f "$gdir/steam_settings/custom_broadcasts.txt" ]; then
             local bc_count
             bc_count=$(grep -v -E '^[[:space:]]*(#|$)' "$gdir/steam_settings/custom_broadcasts.txt" 2>/dev/null | wc -l)
-            echo " Broadcast IPs: $bc_count peer terkonfigurasi"
+            echo "  ${UI_CYAN}Broadcast   ${UI_RST}: ${UI_BOLD}$bc_count peers configured${UI_RST}"
         else
-            echo " Broadcast IPs: Subnet default (127.0.0.1, 255.255.255.255)"
+            echo "  ${UI_CYAN}Broadcast   ${UI_RST}: ${UI_DIM}Subnet default (127.0.0.1, 255.255.255.255)${UI_RST}"
         fi
     else
-        echo " LAN MULTIPLAYER & IDENTITY (GBE FORK: NONAKTIF)"
-        echo " Status       : Belum di-inject (Biner Steam/DRM resmi aktif)"
-        echo " Keterangan   : Tekan <CTRL-I> untuk mengaktifkan LAN co-op & profil custom"
+        echo "  ${UI_CYAN}GBE State   ${UI_RST}: ${UI_AMBER}[INACTIVE] (Official Steam/DRM binary)${UI_RST}"
+        echo "  ${UI_CYAN}Note        ${UI_RST}: ${UI_DIM}Press <CTRL-I> to enable LAN co-op & custom persona${UI_RST}"
     fi
+    local total_sz
+    total_sz=$(du -sh "$gdir" 2>/dev/null | cut -f1)
+    echo "  ${UI_CYAN}Disk Size   ${UI_RST}: ${UI_BOLD}$total_sz${UI_RST}"
+    echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
 
-    echo " Total Size   : $(du -sh "$gdir" 2>/dev/null | cut -f1)"
-    echo "--------------------------------------------------------"
-    echo " ACTION KEYS:"
-    echo " <ENTER>       : Launch Game"
-    if [[ "$status" =~ GBE_FORK ]]; then
-        echo " <CTRL-I>      : Re-Inject / Update GBE Fork & Full DLC"
-    else
-        echo " <CTRL-I>      : Inject GBE Fork (Bebas Steam, Portable Saves & LAN)"
-    fi
-    echo " <CTRL-O>      : Configure Runtime Wrappers (GameMode/HUD/FSR)"
-    echo " <CTRL-P>      : Configure LAN Player Persona & SteamID"
+    echo
+    echo "${UI_BOX}╭─ KEYBOARD SHORTCUTS ─────────────────────────────────╮${UI_RST}"
+    echo "  ${UI_PILL_ENTER} ${UI_BOLD}Launch Game${UI_RST}       ${UI_PILL_CTRLI} ${UI_BOLD}Inject GBE Fork${UI_RST}"
+    echo "  ${UI_PILL_CTRLO} ${UI_BOLD}Setup Wrappers${UI_RST}    ${UI_PILL_CTRLP} ${UI_BOLD}Configure LAN Persona${UI_RST}"
     local rhost
     rhost=$(get_remote_host)
     if [ -n "$rhost" ]; then
-        echo " <CTRL-S>      : Sync Savegame to $rhost"
+        echo "  ${UI_PILL_CTRLS} ${UI_BOLD}Sync to $rhost${UI_RST}   ${UI_PILL_CTRLB} ${UI_BOLD}Manual Save Snapshot${UI_RST}"
     else
-        echo " <CTRL-S>      : Sync Savegame to Remote (Belum dikonfigurasi)"
+        echo "  ${UI_PILL_CTRLS} ${UI_BOLD}Cloud Sync (N/A)${UI_RST}   ${UI_PILL_CTRLB} ${UI_BOLD}Manual Save Snapshot${UI_RST}"
     fi
-    echo " <CTRL-B>      : Trigger Manual Save Snapshot"
-    echo " <ESC>         : Back to Menu"
+    echo "  ${UI_PILL_ESC}   ${UI_BOLD}Back to Master Dashboard Hub${UI_RST}"
+    echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
     echo "========================================================"
 }
 
@@ -640,13 +707,15 @@ build_wrapper_command() {
             --no-gamescope) opt_gamescope=0; shift ;;
             --fsr) opt_fsr=1; opt_gamescope=1; shift ;;
             --no-fsr) opt_fsr=0; shift ;;
+            --glthread) opt_glthread=1; shift ;;
+            --no-glthread) opt_glthread=0; shift ;;
             --) shift; remaining_args+=("$@"); break ;;
             *) remaining_args+=("$1"); shift ;;
         esac
     done
 
     # 1. Base defaults
-    local use_gm=0 use_hud=0 use_scope=0 use_fsr=0
+    local use_gm=0 use_hud=0 use_scope=0 use_fsr=0 use_glthread=0
     local gscope_args="-W 1280 -H 720 -w 1920 -h 1080 -F fsr -f"
 
     # 2. Global configuration (~/.config/gamectl/wrappers)
@@ -660,6 +729,7 @@ build_wrapper_command() {
                 hud|mangohud) use_hud="$v" ;;
                 gamescope) use_scope="$v" ;;
                 fsr) use_fsr="$v" ;;
+                glthread|mesa_glthread) use_glthread="$v" ;;
                 gamescope_args) gscope_args="$v" ;;
             esac
         done < "$HOME/.config/gamectl/wrappers"
@@ -676,6 +746,7 @@ build_wrapper_command() {
                 hud|mangohud) use_hud="$v" ;;
                 gamescope) use_scope="$v" ;;
                 fsr) use_fsr="$v" ;;
+                glthread|mesa_glthread) use_glthread="$v" ;;
                 gamescope_args) gscope_args="$v" ;;
             esac
         done < "$gdir/.wrappers"
@@ -686,6 +757,7 @@ build_wrapper_command() {
     [ -n "${GAMECTL_HUD:-${GAMECTL_MANGOHUD:-}}" ] && use_hud="${GAMECTL_HUD:-$GAMECTL_MANGOHUD}"
     [ -n "${GAMECTL_GAMESCOPE:-}" ] && use_scope="$GAMECTL_GAMESCOPE"
     [ -n "${GAMECTL_FSR:-}" ] && use_fsr="$GAMECTL_FSR"
+    [ -n "${GAMECTL_GLTHREAD:-}" ] && use_glthread="$GAMECTL_GLTHREAD"
     [ -n "${GAMECTL_GAMESCOPE_ARGS:-}" ] && gscope_args="$GAMECTL_GAMESCOPE_ARGS"
 
     # 5. CLI flag overrides
@@ -693,6 +765,9 @@ build_wrapper_command() {
     [ -n "$opt_hud" ] && use_hud="$opt_hud"
     [ -n "$opt_gamescope" ] && use_scope="$opt_gamescope"
     [ -n "$opt_fsr" ] && use_fsr="$opt_fsr"
+    [ -n "${opt_glthread:-}" ] && use_glthread="$opt_glthread"
+
+    GAMECTL_ACTIVE_GLTHREAD="$use_glthread"
 
     local prefix=()
     if [ "$use_gm" = "1" ]; then
@@ -740,13 +815,14 @@ configure_wrappers() {
     local title="${2:-$(basename "$gdir")}"
     local w_file="$gdir/.wrappers"
 
-    local gm=0 hud=0 scope=0 fsr=0
+    local gm=0 hud=0 scope=0 fsr=0 glt=0
     local gscope_args="-W 1280 -H 720 -w 1920 -h 1080 -F fsr -f"
     if [ -f "$HOME/.config/gamectl/wrappers" ]; then
         grep -q "^gamemode=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && gm=1
         grep -q -E "^(hud|mangohud)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && hud=1
         grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && scope=1
         grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && fsr=1
+        grep -q -E "^(glthread|mesa_glthread)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && glt=1
     fi
     if [ -f "$w_file" ]; then
         grep -q "^gamemode=1" "$w_file" 2>/dev/null && gm=1
@@ -757,47 +833,71 @@ configure_wrappers() {
         grep -q "^gamescope=0" "$w_file" 2>/dev/null && scope=0
         grep -q "^fsr=1" "$w_file" 2>/dev/null && fsr=1
         grep -q "^fsr=0" "$w_file" 2>/dev/null && fsr=0
+        grep -q -E "^(glthread|mesa_glthread)=1" "$w_file" 2>/dev/null && glt=1
+        grep -q -E "^(glthread|mesa_glthread)=0" "$w_file" 2>/dev/null && glt=0
     fi
 
-    echo "========================================================"
-    echo " KONFIGURASI RUNTIME WRAPPERS: $title"
-    echo "========================================================"
-    echo " Status Host:"
-    echo "  • GameMode  : $(command -v gamemoderun >/dev/null 2>&1 && echo 'Tersedia' || echo 'Tidak terpasang')"
-    echo "  • MangoHud  : $(command -v mangohud >/dev/null 2>&1 && echo 'Tersedia' || echo 'Tidak terpasang')"
-    echo "  • Gamescope : $(command -v gamescope >/dev/null 2>&1 && echo 'Tersedia' || echo 'Tidak terpasang')"
-    echo "--------------------------------------------------------"
-    echo " Opsi Toggle:"
-    echo "  1) GameMode (gamemoderun) : $([ "$gm" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
-    echo "  2) MangoHud (FPS/Stats)   : $([ "$hud" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
-    echo "  3) Gamescope Windowing    : $([ "$scope" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
-    echo "  4) Gamescope FSR Upscale  : $([ "$fsr" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
-    echo "  5) Preset: Full Performance (GameMode + MangoHud)"
-    echo "  6) Preset: Handheld / FSR (GameMode + MangoHud + Gamescope FSR)"
-    echo "  7) Reset ke Default (Semua Nonaktif)"
-    echo "  8) Batal / Keluar"
-    read -r -p "Pilihan toggle [1-8]: " opt
-    case "$opt" in
-        1) gm=$((1 - gm)) ;;
-        2) hud=$((1 - hud)) ;;
-        3) scope=$((1 - scope)) ;;
-        4) fsr=$((1 - fsr)); [ "$fsr" = 1 ] && scope=1 ;;
-        5) gm=1; hud=1; scope=0; fsr=0 ;;
-        6) gm=1; hud=1; scope=1; fsr=1 ;;
-        7) gm=0; hud=0; scope=0; fsr=0 ;;
-        *) return 0 ;;
-    esac
+    while true; do
+        local b_gm="${UI_DIM}[OFF]${UI_RST}" b_hud="${UI_DIM}[OFF]${UI_RST}"
+        local b_scope="${UI_DIM}[OFF]${UI_RST}" b_fsr="${UI_DIM}[OFF]${UI_RST}" b_glt="${UI_DIM}[OFF]${UI_RST}"
+        [ "$gm" = 1 ] && b_gm="${UI_GREEN}[ACTIVE]${UI_RST}"
+        [ "$hud" = 1 ] && b_hud="${UI_GREEN}[ACTIVE]${UI_RST}"
+        [ "$scope" = 1 ] && b_scope="${UI_GREEN}[ACTIVE]${UI_RST}"
+        [ "$fsr" = 1 ] && b_fsr="${UI_GREEN}[ACTIVE]${UI_RST}"
+        [ "$glt" = 1 ] && b_glt="${UI_GREEN}[ACTIVE]${UI_RST}"
 
-    cat <<EOF > "$w_file"
+        local h_gm="${UI_DIM}[N/A]${UI_RST}" h_hud="${UI_DIM}[N/A]${UI_RST}" h_scope="${UI_DIM}[N/A]${UI_RST}"
+        command -v gamemoderun >/dev/null 2>&1 && h_gm="${UI_GREEN}[READY]${UI_RST}"
+        command -v mangohud >/dev/null 2>&1 && h_hud="${UI_GREEN}[READY]${UI_RST}"
+        command -v gamescope >/dev/null 2>&1 && h_scope="${UI_GREEN}[READY]${UI_RST}"
+
+        clear
+        echo "${UI_BOX}╭─ CONFIGURE RUNTIME WRAPPERS: ${UI_BOLD}${title}${UI_RST}${UI_BOX} ────────────╮${UI_RST}"
+        echo "│ ${UI_CYAN}Host Tools${UI_RST}: GameMode $h_gm • MangoHud $h_hud • Gamescope $h_scope"
+        echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+        echo "  ${UI_PURPLE}1)${UI_RST} GameMode (gamemoderun)       : $b_gm"
+        echo "  ${UI_PURPLE}2)${UI_RST} MangoHud (FPS & Telemetry)   : $b_hud"
+        echo "  ${UI_PURPLE}3)${UI_RST} Gamescope (Isolated Window)  : $b_scope"
+        echo "  ${UI_PURPLE}4)${UI_RST} Gamescope FSR Upscaling      : $b_fsr"
+        echo "  ${UI_PURPLE}5)${UI_RST} Mesa GL Threading (mesa_gl)  : $b_glt ${UI_DIM}(Intel Haswell: Keep OFF)${UI_RST}"
+        echo "${UI_BOX}  ─────────────────────────────────────────────────────────────${UI_RST}"
+        echo "  ${UI_CYAN}6)${UI_RST} Preset: Balanced Performance (GameMode + MangoHud)"
+        echo "  ${UI_CYAN}7)${UI_RST} Preset: Handheld / FSR (GameMode + MangoHud + Gamescope FSR)"
+        echo "  ${UI_CYAN}8)${UI_RST} Reset: Safe Defaults (All Disabled)"
+        echo "  ${UI_GREEN}9)${UI_RST} Save & Return to Library"
+        echo "  ${UI_RED}0)${UI_RST} Cancel / Discard Changes"
+        echo
+        read -r -p "Select option [0-9]: " opt
+        case "$opt" in
+            1) gm=$((1 - gm)) ;;
+            2) hud=$((1 - hud)) ;;
+            3) scope=$((1 - scope)) ;;
+            4) fsr=$((1 - fsr)); [ "$fsr" = 1 ] && scope=1 ;;
+            5) glt=$((1 - glt)) ;;
+            6) gm=1; hud=1; scope=0; fsr=0; glt=0 ;;
+            7) gm=1; hud=1; scope=1; fsr=1; glt=0 ;;
+            8) gm=0; hud=0; scope=0; fsr=0; glt=0 ;;
+            9)
+                cat <<EOF > "$w_file"
 # Runtime wrappers for $title
 gamemode=$gm
 hud=$hud
 gamescope=$scope
 fsr=$fsr
+glthread=$glt
 gamescope_args=$gscope_args
 EOF
-    echo "[VERIFIED] Konfigurasi wrapper tersimpan di: $w_file"
-    sleep 1
+                echo "[VERIFIED] Wrapper configuration saved to: $w_file"
+                sleep 0.8
+                break
+                ;;
+            0|q|Q)
+                return 0
+                ;;
+            *)
+                ;;
+        esac
+    done
 }
 
 # Global Configuration Manager TUI
@@ -806,9 +906,9 @@ configure_global() {
 
     while true; do
         clear
-        echo "========================================================"
-        echo " KONFIGURASI GLOBAL GAMECTL (~/.config/gamectl/)"
-        echo "========================================================"
+        echo "${UI_BOX}╭─ GLOBAL SETTINGS (~/.config/gamectl/) ──────────────────────╮${UI_RST}"
+        echo "│ ${UI_CYAN}Default Persona, Runtime Wrappers, Libraries & Companion${UI_RST}"
+        echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
         local p_name="Player" p_id=""
         if [ -f "$HOME/.config/gamectl/persona" ]; then
             p_name=$(grep -E '^[[:space:]]*account_name[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_name[[:space:]]*=[[:space:]]*//' | tr -d '\r')
@@ -823,37 +923,38 @@ configure_global() {
             grep -q -E "^(hud|mangohud)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("MangoHud")
             grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("Gamescope")
             grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("FSR")
+            grep -q -E "^(glthread|mesa_glthread)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("MesaGL")
             [ ${#act_w[@]} -gt 0 ] && w_desc="${act_w[*]}"
         fi
 
         local lib_count=0
         [ -f "$HOME/.config/gamectl/libraries" ] && lib_count=$(grep -v -E '^[[:space:]]*(#|$)' "$HOME/.config/gamectl/libraries" 2>/dev/null | wc -l || echo 0)
 
-        local r_host="Belum diatur"
+        local r_host="Not Configured"
         if [ -f "$HOME/.config/gamectl/remote_host" ]; then
             r_host=$(head -n 1 "$HOME/.config/gamectl/remote_host" 2>/dev/null | tr -d '[:space:]')
-            [ -z "$r_host" ] && r_host="Belum diatur"
+            [ -z "$r_host" ] && r_host="Not Configured"
         fi
 
-        echo " 1) Persona LAN Global    : $p_name | ${p_id:-Otomatis}"
-        echo " 2) Default Wrappers      : $w_desc"
-        echo " 3) Custom Game Libraries : $lib_count direktori terdaftar"
-        echo " 4) Remote Sync Host      : $r_host"
-        echo " 5) Kembali ke Dashboard"
-        echo "========================================================"
-        read -r -p "Pilihan konfigurasi [1-5]: " cfg_opt
+        echo "  ${UI_PURPLE}1)${UI_RST} Global LAN Persona     : ${UI_BOLD}$p_name${UI_RST} ${UI_DIM}(SteamID: ${p_id:-Auto})${UI_RST}"
+        echo "  ${UI_PURPLE}2)${UI_RST} Default Wrappers       : ${UI_BOLD}$w_desc${UI_RST}"
+        echo "  ${UI_PURPLE}3)${UI_RST} Custom Game Libraries  : ${UI_BOLD}$lib_count${UI_RST} ${UI_DIM}paths registered${UI_RST}"
+        echo "  ${UI_PURPLE}4)${UI_RST} Remote Companion Host  : ${UI_BOLD}$r_host${UI_RST}"
+        echo "${UI_BOX}  ─────────────────────────────────────────────────────────────${UI_RST}"
+        echo "  ${UI_GREEN}5)${UI_RST} Return to Master Dashboard Hub"
+        echo
+        read -r -p "Select option [1-5]: " cfg_opt
 
         case "$cfg_opt" in
             1)
-                echo "--------------------------------------------------------"
-                echo " PENGATURAN PERSONA LAN GLOBAL"
-                echo "--------------------------------------------------------"
-                echo -n " Nama Pemain [$p_name]: "; read -r new_name
+                echo
+                echo "${UI_BOX}╭─ GLOBAL LAN PERSONA SETTINGS ───────────────────────────────╮${UI_RST}"
+                echo -n "  Player Name [$p_name]: "; read -r new_name
                 [ -n "$new_name" ] && p_name="$new_name"
-                echo -n " SteamID64 [${p_id:-Otomatis}] ('gen' untuk ID baru): "; read -r new_id
+                echo -n "  SteamID64 [${p_id:-Auto}] ('gen' for random ID): "; read -r new_id
                 if [ "$new_id" = "gen" ]; then
                     p_id=$(generate_steamid64)
-                    echo "[INFO] Generated SteamID64: $p_id"
+                    echo "  [INFO] Generated SteamID64: $p_id"
                 elif [ -n "$new_id" ]; then
                     p_id="$new_id"
                 fi
@@ -863,49 +964,63 @@ account_name=$p_name
 account_steamid=$p_id
 language=english
 EOF
-                echo "[SUCCESS] Persona tersimpan: $p_name | $p_id"
-                sleep 1
+                echo "  ${UI_GREEN}[SUCCESS] Persona saved: $p_name | $p_id${UI_RST}"
+                sleep 0.8
                 ;;
             2)
-                local gm=0 hud=0 scope=0 fsr=0
+                local gm=0 hud=0 scope=0 fsr=0 glt=0
                 if [ -f "$HOME/.config/gamectl/wrappers" ]; then
                     grep -q "^gamemode=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && gm=1
                     grep -q -E "^(hud|mangohud)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && hud=1
                     grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && scope=1
                     grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && fsr=1
+                    grep -q -E "^(glthread|mesa_glthread)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && glt=1
                 fi
                 while true; do
+                    local b_gm="${UI_DIM}[OFF]${UI_RST}" b_hud="${UI_DIM}[OFF]${UI_RST}"
+                    local b_scope="${UI_DIM}[OFF]${UI_RST}" b_fsr="${UI_DIM}[OFF]${UI_RST}" b_glt="${UI_DIM}[OFF]${UI_RST}"
+                    [ "$gm" = 1 ] && b_gm="${UI_GREEN}[ACTIVE]${UI_RST}"
+                    [ "$hud" = 1 ] && b_hud="${UI_GREEN}[ACTIVE]${UI_RST}"
+                    [ "$scope" = 1 ] && b_scope="${UI_GREEN}[ACTIVE]${UI_RST}"
+                    [ "$fsr" = 1 ] && b_fsr="${UI_GREEN}[ACTIVE]${UI_RST}"
+                    [ "$glt" = 1 ] && b_glt="${UI_GREEN}[ACTIVE]${UI_RST}"
+
                     clear
-                    echo "========================================================"
-                    echo " PENGATURAN DEFAULT RUNTIME WRAPPERS (GLOBAL)"
-                    echo "========================================================"
-                    echo " 1) GameMode (gamemoderun) : $([ "$gm" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
-                    echo " 2) MangoHud (FPS/HUD)     : $([ "$hud" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
-                    echo " 3) Gamescope Windowing    : $([ "$scope" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
-                    echo " 4) Gamescope FSR Upscale  : $([ "$fsr" = 1 ] && echo '[AKTIF]' || echo '[NONAKTIF]')"
-                    echo " 5) Preset: Full Performance (GameMode + MangoHud)"
-                    echo " 6) Preset: Handheld / FSR (GameMode + MangoHud + Gamescope FSR)"
-                    echo " 7) Reset ke Default (Semua Nonaktif)"
-                    echo " 8) Simpan & Selesai"
-                    read -r -p "Pilihan toggle [1-8]: " w_opt
+                    echo "${UI_BOX}╭─ DEFAULT GLOBAL RUNTIME WRAPPERS ───────────────────────────╮${UI_RST}"
+                    echo "│ ${UI_CYAN}These wrappers apply to all games unless overridden per-game${UI_RST}"
+                    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+                    echo "  ${UI_PURPLE}1)${UI_RST} GameMode (gamemoderun)       : $b_gm"
+                    echo "  ${UI_PURPLE}2)${UI_RST} MangoHud (FPS & Telemetry)   : $b_hud"
+                    echo "  ${UI_PURPLE}3)${UI_RST} Gamescope (Isolated Window)  : $b_scope"
+                    echo "  ${UI_PURPLE}4)${UI_RST} Gamescope FSR Upscaling      : $b_fsr"
+                    echo "  ${UI_PURPLE}5)${UI_RST} Mesa GL Threading (mesa_gl)  : $b_glt ${UI_DIM}(Intel Haswell: Keep OFF)${UI_RST}"
+                    echo "${UI_BOX}  ─────────────────────────────────────────────────────────────${UI_RST}"
+                    echo "  ${UI_CYAN}6)${UI_RST} Preset: Balanced Performance (GameMode + MangoHud)"
+                    echo "  ${UI_CYAN}7)${UI_RST} Preset: Handheld / FSR (GameMode + MangoHud + Gamescope FSR)"
+                    echo "  ${UI_CYAN}8)${UI_RST} Reset: Safe Defaults (All Disabled)"
+                    echo "  ${UI_GREEN}9)${UI_RST} Save & Return"
+                    echo
+                    read -r -p "Select option [1-9]: " w_opt
                     case "$w_opt" in
                         1) gm=$((1 - gm)) ;;
                         2) hud=$((1 - hud)) ;;
                         3) scope=$((1 - scope)) ;;
                         4) fsr=$((1 - fsr)); [ "$fsr" = 1 ] && scope=1 ;;
-                        5) gm=1; hud=1; scope=0; fsr=0 ;;
-                        6) gm=1; hud=1; scope=1; fsr=1 ;;
-                        7) gm=0; hud=0; scope=0; fsr=0 ;;
-                        8)
+                        5) glt=$((1 - glt)) ;;
+                        6) gm=1; hud=1; scope=0; fsr=0; glt=0 ;;
+                        7) gm=1; hud=1; scope=1; fsr=1; glt=0 ;;
+                        8) gm=0; hud=0; scope=0; fsr=0; glt=0 ;;
+                        9)
                             cat <<EOF > "$HOME/.config/gamectl/wrappers"
 gamemode=$gm
 hud=$hud
 gamescope=$scope
 fsr=$fsr
+glthread=$glt
 gamescope_args=-W 1280 -H 720 -w 1920 -h 1080 -F fsr -f
 EOF
-                            echo "[SUCCESS] Default wrappers global tersimpan."
-                            sleep 1
+                            echo "  ${UI_GREEN}[SUCCESS] Global wrappers saved.${UI_RST}"
+                            sleep 0.8
                             break
                             ;;
                         *) break ;;
@@ -914,63 +1029,64 @@ EOF
                 ;;
             3)
                 clear
-                echo "========================================================"
-                echo " MANAJEMEN PATH PUSTAKA TAMBAHAN (libraries)"
-                echo " File: ~/.config/gamectl/libraries"
-                echo "========================================================"
-                [ -f "$HOME/.config/gamectl/libraries" ] && grep -v -E '^[[:space:]]*(#|$)' "$HOME/.config/gamectl/libraries" 2>/dev/null | nl -w2 -s'. ' || echo " (Belum ada direktori terdaftar)"
-                echo "--------------------------------------------------------"
-                echo " 1) Tambah direktori baru | 2) Hapus direktori | 3) Kembali"
-                read -r -p "Pilihan [1-3]: " lib_opt
+                echo "${UI_BOX}╭─ CUSTOM GAME LIBRARIES (~/.config/gamectl/libraries) ───────╮${UI_RST}"
+                echo "│ ${UI_CYAN}Direct scan paths for game binaries and appmanifests${UI_RST}"
+                echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+                [ -f "$HOME/.config/gamectl/libraries" ] && grep -v -E '^[[:space:]]*(#|$)' "$HOME/.config/gamectl/libraries" 2>/dev/null | nl -w2 -s'. ' || echo "  ${UI_DIM}(No custom libraries registered)${UI_RST}"
+                echo "${UI_BOX}  ─────────────────────────────────────────────────────────────${UI_RST}"
+                echo "  ${UI_CYAN}1)${UI_RST} Add Directory | ${UI_CYAN}2)${UI_RST} Remove Directory | ${UI_CYAN}3)${UI_RST} Back"
+                read -r -p "Select option [1-3]: " lib_opt
                 case "$lib_opt" in
                     1)
-                        echo -n " Masukkan path direktori (contoh: ~/Games): "; read -r new_path
+                        echo -n "  Enter path (e.g. ~/Games): "; read -r new_path
                         if [ -n "$new_path" ]; then
+                            eval new_path="$new_path"
                             echo "$new_path" >> "$HOME/.config/gamectl/libraries"
-                            echo "[SUCCESS] Direktori '$new_path' ditambahkan ke libraries."
+                            echo "  ${UI_GREEN}[SUCCESS] Path '$new_path' added.${UI_RST}"
                         fi
-                        read -r -p "Tekan [ENTER] untuk lanjut..."
+                        read -r -p "Press [ENTER] to continue..."
                         ;;
                     2)
                         if [ -f "$HOME/.config/gamectl/libraries" ]; then
-                            echo -n " Masukkan nomor baris yang ingin dihapus: "; read -r del_num
+                            echo -n "  Enter line number to remove: "; read -r del_num
                             if [[ "$del_num" =~ ^[0-9]+$ ]]; then
                                 local target_line
                                 target_line=$(grep -v -E '^[[:space:]]*(#|$)' "$HOME/.config/gamectl/libraries" 2>/dev/null | sed -n "${del_num}p")
                                 if [ -n "$target_line" ]; then
                                     grep -v -F "$target_line" "$HOME/.config/gamectl/libraries" > "$HOME/.config/gamectl/libraries.tmp" && mv "$HOME/.config/gamectl/libraries.tmp" "$HOME/.config/gamectl/libraries"
-                                    echo "[SUCCESS] '$target_line' dihapus dari libraries."
+                                    echo "  ${UI_GREEN}[SUCCESS] '$target_line' removed.${UI_RST}"
                                 fi
                             fi
                         fi
-                        read -r -p "Tekan [ENTER] untuk lanjut..."
+                        read -r -p "Press [ENTER] to continue..."
                         ;;
                     *) ;;
                 esac
                 ;;
             4)
-                echo "--------------------------------------------------------"
-                echo " PENGATURAN REMOTE COMPANION HOST (remote_host)"
-                echo "--------------------------------------------------------"
-                echo " Host saat ini: $r_host"
-                echo -n " Masukkan hostname / SSH alias baru ('-' untuk hapus): "; read -r new_rhost
+                echo
+                echo "${UI_BOX}╭─ REMOTE COMPANION HOST (~/.config/gamectl/remote_host) ─────╮${UI_RST}"
+                echo "│ ${UI_CYAN}Target SSH server for savegame synchronization${UI_RST}"
+                echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+                echo "  Current Host: ${UI_BOLD}$r_host${UI_RST}"
+                echo -n "  Enter new hostname or SSH alias ('-' to clear): "; read -r new_rhost
                 if [ "$new_rhost" = "-" ]; then
                     rm -f "$HOME/.config/gamectl/remote_host"
-                    echo "[INFO] Konfigurasi remote host dihapus."
+                    echo "  [INFO] Remote host configuration cleared."
                 elif [ -n "$new_rhost" ]; then
                     echo "$new_rhost" > "$HOME/.config/gamectl/remote_host"
-                    echo "[SUCCESS] Remote host '$new_rhost' tersimpan."
-                    echo -n " Uji koneksi SSH ke '$new_rhost'? [y/N]: "; read -r test_ssh
+                    echo "  ${UI_GREEN}[SUCCESS] Remote host '$new_rhost' saved.${UI_RST}"
+                    echo -n "  Test SSH connectivity to '$new_rhost'? [y/N]: "; read -r test_ssh
                     if [[ "$test_ssh" =~ ^[yY] ]]; then
-                        echo "[INFO] Menguji SSH ke $new_rhost (timeout 3s)..."
+                        echo "  [INFO] Testing SSH connection to $new_rhost (3s timeout)..."
                         if ssh -q -o BatchMode=yes -o ConnectTimeout=3 "$new_rhost" exit 2>/dev/null; then
-                            echo "[VERIFIED] Koneksi SSH ke $new_rhost berhasil (exit 0)!"
+                            echo "  ${UI_GREEN}[VERIFIED] SSH connection successful!${UI_RST}"
                         else
-                            echo "[WARN] Host tidak merespons SSH key. Pastikan host terdaftar di ~/.ssh/config."
+                            echo "  ${UI_AMBER}[WARN] Host did not respond with public key auth. Ensure host is in ~/.ssh/config.${UI_RST}"
                         fi
                     fi
                 fi
-                read -r -p "Tekan [ENTER] untuk lanjut..."
+                read -r -p "Press [ENTER] to continue..."
                 ;;
             *)
                 break
@@ -989,21 +1105,26 @@ launch_game() {
     echo "[INFO] Menyiapkan peluncuran: $title..."
     backup_save "$gdir" true || true
 
-    # Set Mesa performance env
-    export mesa_glthread=true
+    # Resolve wrappers and extra flags
+    declare -a GAMECTL_WRAPPER_PREFIX=()
+    declare -a GAMECTL_REMAINING_ARGS=()
+    GAMECTL_ACTIVE_GLTHREAD=0
+    build_wrapper_command "$gdir" "$@"
+    local wrappers=("${GAMECTL_WRAPPER_PREFIX[@]}")
+    local game_args=("${GAMECTL_REMAINING_ARGS[@]}")
+
+    # Set Mesa performance env safely (only enable glthread if explicitly opted in)
+    if [ "${GAMECTL_ACTIVE_GLTHREAD:-0}" = "1" ]; then
+        export mesa_glthread=true
+    else
+        unset mesa_glthread
+    fi
     export vblank_mode=0
 
     # Attempt CPU scaling governor if permitted
     if [ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
         echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
     fi
-
-    # Resolve wrappers and extra flags
-    declare -a GAMECTL_WRAPPER_PREFIX=()
-    declare -a GAMECTL_REMAINING_ARGS=()
-    build_wrapper_command "$gdir" "$@"
-    local wrappers=("${GAMECTL_WRAPPER_PREFIX[@]}")
-    local game_args=("${GAMECTL_REMAINING_ARGS[@]}")
 
     if [ ${#wrappers[@]} -gt 0 ]; then
         echo "[INFO] Wrapper aktif: ${wrappers[*]}"
@@ -1633,42 +1754,39 @@ set_id_interactive() {
         fi
     fi
 
-    echo ""
-    echo "========================================================"
-    echo " KONFIGURASI IDENTITAS LAN & STEAMID (GBE FORK)"
-    echo "========================================================"
-    echo " Target Game   : $title"
-    echo " Direktori     : $target_dir"
-    echo " Nama Pemain   : ${cur_name:-[Belum diset]}"
-    echo " SteamID64     : ${cur_id:-[Belum diset]}"
-    echo "--------------------------------------------------------"
+    echo
+    echo "${UI_BOX}╭─ CONFIGURE LAN IDENTITY & STEAMID (GBE FORK) ───────────────╮${UI_RST}"
+    echo "│ ${UI_CYAN}Target Game  ${UI_RST}: ${UI_BOLD}$title${UI_RST}"
+    echo "│ ${UI_CYAN}Directory    ${UI_RST}: ${UI_DIM}$target_dir${UI_RST}"
+    echo "│ ${UI_CYAN}Player Name  ${UI_RST}: ${UI_BOLD}${cur_name:-[Unset]}${UI_RST}"
+    echo "│ ${UI_CYAN}SteamID64    ${UI_RST}: ${UI_BOLD}${cur_id:-[Unset]}${UI_RST}"
+    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
 
     if [ "$is_gbe" = false ]; then
-        echo ""
-        echo "[PERINGATAN] Game ini ($title) belum di-inject GBE Fork (masih biner Steam resmi/DRM)."
-        echo "             Pengaturan persona ini akan disimpan ke steam_settings/configs.user.ini,"
-        echo "             tetapi baru akan AKTIF setelah kamu menjalankan injeksi via <CTRL-I>."
-        echo ""
+        echo "  ${UI_AMBER}[NOTE] This game is not injected with GBE Fork yet.${UI_RST}"
+        echo "         Persona will be saved to steam_settings/configs.user.ini"
+        echo "         and activates automatically once injected (<CTRL-I>)."
+        echo
     fi
 
-    read -r -p "Nama Pemain LAN [${cur_name}]: " in_name
+    echo -n "  Player Name [${cur_name:-Player}]: "; read -r in_name
     [ -z "$in_name" ] && in_name="$cur_name"
     [ -z "$in_name" ] && in_name="${USER:-Player}"
 
     local suggested_id
     suggested_id=$(generate_steamid64)
-    read -r -p "SteamID64 (Ketik 'random' untuk acak baru) [${cur_id:-$suggested_id}]: " in_id
+    echo -n "  SteamID64 ('gen' or 'random' to generate) [${cur_id:-$suggested_id}]: "; read -r in_id
     [ -z "$in_id" ] && in_id="${cur_id:-$suggested_id}"
-    if [ "$in_id" = "random" ] || [ "$in_id" = "auto" ]; then
+    if [ "$in_id" = "random" ] || [ "$in_id" = "auto" ] || [ "$in_id" = "gen" ]; then
         in_id=$(generate_steamid64)
     fi
 
-    echo ""
-    echo "Konfigurasi Peer Broadcast LAN (Opsional):"
-    echo "Ketik IP LAN teman (misal: 192.168.1.50) atau tekan Enter untuk lewati."
-    read -r -p "Peer/Broadcast IP: " in_bc
+    echo
+    echo "  LAN Custom Broadcast Peers (Optional):"
+    echo "  Enter friend's LAN IP (e.g. 192.168.1.50) or press Enter to skip."
+    echo -n "  Peer/Broadcast IP: "; read -r in_bc
 
-    read -r -p "Simpan juga sebagai identitas default global? (y/N): " in_glob
+    echo -n "  Also save as global default persona? (y/N): "; read -r in_glob
 
     local extra_args=()
     [ -n "$in_bc" ] && extra_args+=(--broadcast "$in_bc")
@@ -1677,8 +1795,8 @@ set_id_interactive() {
     esac
 
     set_id "$in_name" "$in_id" "$target_dir" "${extra_args[@]}"
-    echo ""
-    read -r -p "Tekan [ENTER] untuk kembali ke pustaka..."
+    echo
+    read -r -p "Press [ENTER] to return to Library..."
 }
 
 # Fetch and generate steam_settings/DLC.txt for GBE Fork
@@ -1941,11 +2059,10 @@ list_downloads_interactive() {
 
         if [ ${#valid_logs[@]} -eq 0 ]; then
             clear
-            echo "=========================================="
-            echo " PEMANTAU UNDUHAN (DepotDownloader)"
-            echo "=========================================="
-            echo "[INFO] Tidak ada proses atau riwayat unduhan di /tmp/."
-            read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
+            echo "${UI_BOX}╭─ DOWNLOAD MANAGER (DepotDownloader) ────────────────────────╮${UI_RST}"
+            echo "│ ${UI_CYAN}No active or recent download tasks found in /tmp/${UI_RST}"
+            echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+            read -r -p "Press [ENTER] to return to Dashboard..."
             return 0
         fi
 
@@ -1955,11 +2072,11 @@ list_downloads_interactive() {
             appid=$(basename "$log" | sed -E 's/gamectl_dl_([0-9]+)\.log/\1/')
             local pid
             pid=$(pgrep -f "DepotDownloader.*-app ${appid}" 2>/dev/null | head -n 1 || true)
-            local status="SELESAI"
-            [ -n "$pid" ] && status="MENGUNDUH (PID: $pid)"
+            local status="${UI_ICE}[COMPLETED]${UI_RST}"
+            [ -n "$pid" ] && status="${UI_GREEN}[RUNNING PID:$pid]${UI_RST}"
             local last_line
             last_line=$(tail -n 1 "$log" 2>/dev/null | tr -d '\r\n\t' | cut -c1-60)
-            [ -z "$last_line" ] && last_line="Belum ada log output"
+            [ -z "$last_line" ] && last_line="Waiting for output..."
             entries+="${appid}\t${status}\t${log}\t${last_line}\n"
         done
 
@@ -1967,11 +2084,13 @@ list_downloads_interactive() {
         selection=$(printf "%b" "$entries" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,4 \
-            --header="UNDUHAN DEPOTDOWNLOADER (Enter: Menu Aksi / Stream Log | Ctrl-K: Stop | Esc: Kembali)" \
-            --prompt="Unduhan > " \
-            --preview="echo 'File Log: {3}'; echo '------------------------------------------'; tail -n 30 {3}" \
-            --preview-window=right:60%:wrap \
-            --bind="ctrl-k:execute(appid={1}; pid=\$(pgrep -f \"DepotDownloader.*-app \${appid}\" 2>/dev/null | head -n 1); if [ -n \"\$pid\" ]; then kill \"\$pid\" 2>/dev/null && echo \"[INFO] Proses AppID \$appid (PID \$pid) dihentikan.\"; else echo \"[INFO] Proses unduhan AppID \$appid tidak aktif.\"; fi; bash -c 'read -n 1 -s -r -p \"Tekan tombol apa saja untuk lanjut...\"')" \
+            --border-label="  ╢ gamectl :: Download Manager ╟  " \
+            --border-label-pos=2 \
+            --header="ACTIVE DOWNLOADS (Enter: Actions & Stream │ Ctrl-K: Stop │ Esc: Back)" \
+            --prompt="Downloads > " \
+            --preview="echo -e '\033[38;5;60mLog: {3}\033[0m\n──────────────────────────────────────────'; tail -n 30 {3}" \
+            --preview-window=right:60%:border-rounded:wrap \
+            --bind="ctrl-k:execute(appid={1}; pid=\$(pgrep -f \"DepotDownloader.*-app \${appid}\" 2>/dev/null | head -n 1); if [ -n \"\$pid\" ]; then kill \"\$pid\" 2>/dev/null && echo \"[INFO] AppID \$appid (PID \$pid) terminated.\"; else echo \"[INFO] AppID \$appid not active.\"; fi; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
         ) || break
 
         if [ -n "$selection" ]; then
@@ -1981,39 +2100,39 @@ list_downloads_interactive() {
             sel_status=$(echo "$selection" | awk -F'\t' '{print $2}')
 
             clear
-            echo "========================================================"
-            echo " KONTROL UNDUHAN: AppID $sel_appid ($sel_status)"
-            echo " Log: $sel_log"
-            echo "========================================================"
-            echo "  1) Streaming live log (tail -f)"
-            echo "  2) Hentikan proses unduhan ini (Kill Process)"
-            echo "  3) Hapus file log riwayat ini"
-            echo "  4) Kembali ke daftar unduhan"
-            read -r -p "Pilihan [1-4]: " dl_opt
+            echo "${UI_BOX}╭─ DOWNLOAD ACTIONS: AppID ${UI_BOLD}$sel_appid${UI_RST} $sel_status ─────────────╮${UI_RST}"
+            echo "│ ${UI_CYAN}Log file${UI_RST}: ${UI_DIM}$sel_log${UI_RST}"
+            echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+            echo "  ${UI_PURPLE}1)${UI_RST} Stream live output (tail -f)"
+            echo "  ${UI_PURPLE}2)${UI_RST} Terminate this process (Kill task)"
+            echo "  ${UI_PURPLE}3)${UI_RST} Remove this log history file"
+            echo "  ${UI_DIM}4)${UI_RST} Return to download list"
+            echo
+            read -r -p "Select option [1-4]: " dl_opt
 
             case "$dl_opt" in
                 1)
                     clear
-                    echo "========================================================"
-                    echo " STREAMING LOG AppID $sel_appid (Tekan Ctrl-C untuk selesai)"
-                    echo "========================================================"
+                    echo "${UI_BOX}╭─ LIVE STREAM: AppID $sel_appid ─────────────────────────────╮${UI_RST}"
+                    echo "│ ${UI_CYAN}Press Ctrl-C when done to return${UI_RST}"
+                    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
                     tail -f "$sel_log" || true
-                    read -r -p "Tekan [ENTER] untuk kembali..."
+                    read -r -p "Press [ENTER] to return..."
                     ;;
                 2)
                     local k_pid
                     k_pid=$(pgrep -f "DepotDownloader.*-app ${sel_appid}" 2>/dev/null | head -n 1 || true)
                     if [ -n "$k_pid" ]; then
-                        kill "$k_pid" 2>/dev/null && echo "[SUCCESS] Proses unduhan AppID $sel_appid (PID $k_pid) berhasil dihentikan."
+                        kill "$k_pid" 2>/dev/null && echo "  ${UI_GREEN}[SUCCESS] Download process AppID $sel_appid (PID $k_pid) stopped.${UI_RST}"
                     else
-                        echo "[INFO] Proses unduhan AppID $sel_appid tidak sedang aktif."
+                        echo "  [INFO] AppID $sel_appid is not currently running."
                     fi
-                    read -r -p "Tekan [ENTER] untuk lanjut..."
+                    read -r -p "Press [ENTER] to continue..."
                     ;;
                 3)
                     rm -f "$sel_log"
-                    echo "[INFO] File log $sel_log telah dihapus."
-                    read -r -p "Tekan [ENTER] untuk lanjut..."
+                    echo "  [INFO] Log file $sel_log deleted."
+                    read -r -p "Press [ENTER] to continue..."
                     ;;
                 *)
                     ;;
@@ -2174,112 +2293,104 @@ unlock_game() {
     fi
 
     if [ -z "$title" ]; then
-        echo "[INFO] Mengambil judul game untuk AppID $appid dari Steam Store API..."
+        echo "[INFO] Fetching game title for AppID $appid from Steam Store API..."
         title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
         [ -z "$title" ] && title="AppID_${appid}"
     fi
 
-    echo "=========================================="
-    echo " UNLOCK STEAM TANPA DOWNLOAD (Full DLC)"
-    echo "=========================================="
-    echo " AppID : $appid"
-    echo " Judul : $title"
-    echo "=========================================="
+    echo "${UI_BOX}╭─ STEAM ZERO-DOWNLOAD UNLOCK (FULL DLC) ─────────────────────╮${UI_RST}"
+    echo "│ ${UI_CYAN}Target Game${UI_RST}: ${UI_BOLD}$title${UI_RST} ${UI_DIM}(AppID: $appid)${UI_RST}"
+    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
 
     sync_steam "$appid" "$title" ""
-    echo "[SUCCESS] Game '$title' ($appid) telah dibuka di Steam resmi dengan Full DLC tanpa download."
+    echo "  ${UI_GREEN}[SUCCESS] Game '$title' ($appid) entitled in Steam Client with Full DLC.${UI_RST}"
 }
 
 # Interactive Steam Unlock Wizard
 unlock_interactive() {
     clear
-    echo "========================================================"
-    echo " UNLOCK GAME STEAM RESMI (Zero-Download Full DLC)"
-    echo "========================================================"
-    echo " Mendaftarkan kepemilikan game dan seluruh DLC ke SLSsteam"
-    echo " serta membuat appmanifest_<appid>.acf di direktori Steam."
-    echo "--------------------------------------------------------"
-    echo -n " Masukkan Steam AppID (contoh: 105600): "
+    echo "${UI_BOX}╭─ STEAM ZERO-DOWNLOAD UNLOCK WIZARD ─────────────────────────╮${UI_RST}"
+    echo "│ ${UI_CYAN}Registers ownership & Full DLC directly to SLSsteam & Steam ACF${UI_RST}"
+    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+    echo -n "  Enter Steam AppID (e.g. 105600): "
     read -r u_appid
 
     if [ -z "$u_appid" ]; then
-        echo "[INFO] AppID kosong. Membatalkan proses unlock."
-        read -r -p "Tekan [ENTER] untuk kembali..."
+        echo "  [INFO] AppID empty. Cancelling unlock wizard."
+        read -r -p "Press [ENTER] to return..."
         return 0
     fi
 
     if [[ ! "$u_appid" =~ ^[0-9]+$ ]]; then
-        echo "[ERROR] AppID harus berupa karakter angka numerik (misal: 105600)."
-        read -r -p "Tekan [ENTER] untuk kembali..."
+        echo "  ${UI_RED}[ERROR] AppID must be numeric characters (e.g. 105600).${UI_RST}"
+        read -r -p "Press [ENTER] to return..."
         return 1
     fi
 
-    echo -n " Masukkan Judul Game (kosongkan untuk deteksi otomatis): "
+    echo -n "  Enter Game Title (leave blank for automatic lookup): "
     read -r u_title
 
     if [ -z "$u_title" ]; then
-        echo "[INFO] Mengambil judul dari Steam Store API untuk AppID $u_appid..."
+        echo "  [INFO] Fetching title from Steam Store API for AppID $u_appid..."
         u_title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${u_appid}&filters=basic" | jq -r ".\"${u_appid}\".data.name // empty" 2>/dev/null || true)
         [ -z "$u_title" ] && u_title="AppID_${u_appid}"
     fi
 
-    echo "--------------------------------------------------------"
-    echo " Mendaftarkan: $u_title ($u_appid)..."
+    echo "  Registering: $u_title ($u_appid)..."
     unlock_game "$u_appid" "$u_title"
-    echo "========================================================"
-    read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
+    echo
+    read -r -p "Press [ENTER] to return to Dashboard..."
 }
 
 # System Diagnostics & Health Audit
 doctor_audit() {
     local pass_cnt=0 warn_cnt=0 miss_cnt=0
 
-    echo "========================================================"
-    echo " GAMECTL SYSTEM DIAGNOSTICS & HEALTH AUDIT (Doctor)"
-    echo "========================================================"
+    echo "${UI_BOX}╭─ GAMECTL SYSTEM DIAGNOSTICS & HEALTH AUDIT ─────────────────╮${UI_RST}"
     local os_str="Linux"
     [ -f /etc/os-release ] && os_str=$(grep -E '^PRETTY_NAME=' /etc/os-release | cut -d'=' -f2 | tr -d '"')
-    echo " Host OS      : $os_str ($(uname -s) $(uname -r) $(uname -m))"
-    echo " Display      : ${WAYLAND_DISPLAY:+Wayland ($WAYLAND_DISPLAY)}${DISPLAY:+ X11 ($DISPLAY)}"
-    echo "--------------------------------------------------------"
+    echo "│ ${UI_CYAN}Host OS     ${UI_RST}: ${UI_BOLD}$os_str${UI_RST} ${UI_DIM}($(uname -sr) $(uname -m))${UI_RST}"
+    echo "│ ${UI_CYAN}Display     ${UI_RST}: ${WAYLAND_DISPLAY:+Wayland ($WAYLAND_DISPLAY)}${DISPLAY:+ X11 ($DISPLAY)}"
+    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
 
     # Layer 1: CLI Fundamental Tools
-    echo "[LAYER 1] Dependensi CLI Fundamental"
+    echo
+    echo "  ${UI_PURPLE}[LAYER 1] Fundamental CLI Tools${UI_RST}"
     local cli_tool
     for cli_tool in fzf jq curl file unzip rsync ssh; do
         if command -v "$cli_tool" >/dev/null 2>&1; then
-            echo "  • $cli_tool : [READY] ($(command -v "$cli_tool"))"
+            echo "    • $(printf '%-10s' "$cli_tool") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(command -v "$cli_tool"))${UI_RST}"
             pass_cnt=$((pass_cnt + 1))
         else
-            echo "  • $cli_tool : [MISSING] Harap instal melalui package manager distro"
+            echo "    • $(printf '%-10s' "$cli_tool") : ${UI_RED}[MISSING]${UI_RST} Install via distro package manager"
             miss_cnt=$((miss_cnt + 1))
         fi
     done
-    echo "--------------------------------------------------------"
 
     # Layer 2: Python Runtime & YAML Engine
-    echo "[LAYER 2] Python Runtime & YAML Engine"
+    echo
+    echo "  ${UI_PURPLE}[LAYER 2] Python Runtime & YAML Engine${UI_RST}"
     if command -v python3 >/dev/null 2>&1; then
-        echo "  • python3   : [READY] ($(python3 --version 2>&1))"
+        echo "    • $(printf '%-10s' "python3") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(python3 --version 2>&1))${UI_RST}"
         pass_cnt=$((pass_cnt + 1))
         if python3 -c "import ruamel.yaml" 2>/dev/null; then
-            echo "  • YAML Parser: [READY] ruamel.yaml (Preserve formatting SLSsteam)"
+            echo "    • $(printf '%-10s' "YAML") : ${UI_GREEN}[READY]${UI_RST} ruamel.yaml (Preserves SLSsteam layout)"
             pass_cnt=$((pass_cnt + 1))
         elif python3 -c "import yaml" 2>/dev/null; then
-            echo "  • YAML Parser: [READY] PyYAML terpasang"
+            echo "    • $(printf '%-10s' "YAML") : ${UI_GREEN}[READY]${UI_RST} PyYAML fallback installed"
             pass_cnt=$((pass_cnt + 1))
         else
-            echo "  • YAML Parser: [WARN] ruamel.yaml / PyYAML belum ada (pip install ruamel.yaml)"
+            echo "    • $(printf '%-10s' "YAML") : ${UI_AMBER}[WARN]${UI_RST} Neither ruamel.yaml nor pyyaml found"
             warn_cnt=$((warn_cnt + 1))
         fi
     else
-        echo "  • python3   : [MISSING] Python 3 tidak ditemukan"
+        echo "    • $(printf '%-10s' "python3") : ${UI_RED}[MISSING]${UI_RST} Python 3 runtime not found"
         miss_cnt=$((miss_cnt + 1))
     fi
-    echo "--------------------------------------------------------"
 
     # Layer 3: GBE Fork Templates
-    echo "[LAYER 3] Integritas Binary Template GBE Fork"
+    echo
+    echo "  ${UI_PURPLE}[LAYER 3] GBE Fork Binary Templates${UI_RST}"
     local gbe_targets=(
         "Linux x64:linux:x64"
         "Linux x86:linux:x86"
@@ -2294,66 +2405,66 @@ doctor_audit() {
         local g_path
         g_path=$(get_gbe_template "$g_plat" "$g_arch" 2>/dev/null || true)
         if [ -n "$g_path" ] && [ -f "$g_path" ]; then
-            echo "  • $g_label : [READY] ($g_path)"
+            echo "    • $(printf '%-11s' "$g_label") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($g_path)${UI_RST}"
             pass_cnt=$((pass_cnt + 1))
         else
-            echo "  • $g_label : [MISSING] Letakkan template di ~/.local/share/gbe-fork/"
+            echo "    • $(printf '%-11s' "$g_label") : ${UI_RED}[MISSING]${UI_RST} Place template in ~/.local/share/gbe-fork/"
             miss_cnt=$((miss_cnt + 1))
         fi
     done
-    echo "--------------------------------------------------------"
 
     # Layer 4: Windows Game Runner
-    echo "[LAYER 4] Ketersediaan Windows Game Runner"
+    echo
+    echo "  ${UI_PURPLE}[LAYER 4] Windows Game Runners${UI_RST}"
     local r_found=0
     if command -v umu-run >/dev/null 2>&1; then
-        echo "  • umu-run   : [READY] ($(command -v umu-run))"
+        echo "    • $(printf '%-10s' "umu-run") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(command -v umu-run))${UI_RST}"
         r_found=1
     else
-        echo "  • umu-run   : [MISSING] (Opsional: Unified Proton Runner)"
+        echo "    • $(printf '%-10s' "umu-run") : ${UI_DIM}[N/A]${UI_RST} (Optional Unified Proton Runner)"
     fi
 
     local ge_proton
     ge_proton=$(find "$HOME/.local/share/Steam/compatibilitytools.d" -maxdepth 2 -name "proton" 2>/dev/null | head -n 1 || true)
     if [ -n "$ge_proton" ]; then
-        echo "  • GE-Proton : [READY] ($ge_proton)"
+        echo "    • $(printf '%-10s' "GE-Proton") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($ge_proton)${UI_RST}"
         r_found=1
     else
-        echo "  • GE-Proton : [MISSING] (~/.local/share/Steam/compatibilitytools.d/)"
+        echo "    • $(printf '%-10s' "GE-Proton") : ${UI_DIM}[N/A]${UI_RST} (In ~/.local/share/Steam/compatibilitytools.d/)"
     fi
 
     if command -v wine >/dev/null 2>&1; then
-        echo "  • Wine      : [READY] ($(wine --version 2>/dev/null || echo 'wine'))"
+        echo "    • $(printf '%-10s' "Wine") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(wine --version 2>/dev/null || echo 'wine'))${UI_RST}"
         r_found=1
     else
-        echo "  • Wine      : [MISSING] (System Wine fallback)"
+        echo "    • $(printf '%-10s' "Wine") : ${UI_DIM}[N/A]${UI_RST} (System Wine fallback)"
     fi
 
     if [ "$r_found" -eq 1 ]; then
         pass_cnt=$((pass_cnt + 1))
     else
-        echo "  • [WARN] Tidak ada runner Windows terdeteksi. Hanya game native Linux yang dapat dijalankan."
+        echo "    • ${UI_AMBER}[WARN] No Windows runners detected. Only Native Linux games can launch.${UI_RST}"
         warn_cnt=$((warn_cnt + 1))
     fi
-    echo "--------------------------------------------------------"
 
     # Layer 5: Performance & Display Wrappers
-    echo "[LAYER 5] Wrapper Performa Grafis"
-    for w_tool in "gamemoderun:Feral GameMode" "mangohud:MangoHud FPS/Stats" "gamescope:Gamescope FSR Micro-compositor"; do
+    echo
+    echo "  ${UI_PURPLE}[LAYER 5] Performance & Display Wrappers${UI_RST}"
+    for w_tool in "gamemoderun:GameMode" "mangohud:MangoHud" "gamescope:Gamescope"; do
         local wt_cmd="${w_tool%%:*}"
         local wt_name="${w_tool##*:}"
         if command -v "$wt_cmd" >/dev/null 2>&1; then
-            echo "  • $wt_name : [READY] ($(command -v "$wt_cmd"))"
+            echo "    • $(printf '%-10s' "$wt_name") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(command -v "$wt_cmd"))${UI_RST}"
             pass_cnt=$((pass_cnt + 1))
         else
-            echo "  • $wt_name : [WARN] Belum terpasang ($wt_cmd tidak ditemukan)"
+            echo "    • $(printf '%-10s' "$wt_name") : ${UI_DIM}[OFF]${UI_RST} Not installed ($wt_cmd missing)"
             warn_cnt=$((warn_cnt + 1))
         fi
     done
-    echo "--------------------------------------------------------"
 
     # Layer 6: Headless Downloader Engine
-    echo "[LAYER 6] Headless Downloader Engine"
+    echo
+    echo "  ${UI_PURPLE}[LAYER 6] Headless Downloader Engine${UI_RST}"
     local dl_bin=""
     if command -v depotdownloader >/dev/null 2>&1; then
         dl_bin="$(command -v depotdownloader)"
@@ -2363,61 +2474,62 @@ doctor_audit() {
         dl_bin="$HOME/.local/bin/depotdownloader"
     fi
     if [ -n "$dl_bin" ]; then
-        echo "  • DepotDownloader : [READY] ($dl_bin)"
+        echo "    • $(printf '%-15s' "DepotDownloader") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($dl_bin)${UI_RST}"
         pass_cnt=$((pass_cnt + 1))
     else
-        echo "  • DepotDownloader : [MISSING] Jalankan 'gamectl ensure-downloader' untuk unduh otomatis"
+        echo "    • $(printf '%-15s' "DepotDownloader") : ${UI_RED}[MISSING]${UI_RST} Run 'gamectl ensure-downloader' to install"
         miss_cnt=$((miss_cnt + 1))
     fi
-    echo "--------------------------------------------------------"
 
-    # Layer 7: Direktori Steam Client & SLSsteam
-    echo "[LAYER 7] Integrasi Steam Client & SLSsteam"
+    # Layer 7: Steam Client & SLSsteam Integration
+    echo
+    echo "  ${UI_PURPLE}[LAYER 7] Steam Client & SLSsteam Integration${UI_RST}"
     local s_root="$HOME/.local/share/Steam"
     [ ! -d "$s_root" ] && [ -d "$HOME/.steam/steam" ] && s_root="$HOME/.steam/steam"
     if [ -d "$s_root" ]; then
-        echo "  • Steam Root : [READY] ($s_root)"
+        echo "    • $(printf '%-12s' "Steam Root") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($s_root)${UI_RST}"
         pass_cnt=$((pass_cnt + 1))
     else
-        echo "  • Steam Root : [WARN] Direktori Steam resmi tidak ditemukan"
+        echo "    • $(printf '%-12s' "Steam Root") : ${UI_AMBER}[WARN]${UI_RST} Steam client directory not found"
         warn_cnt=$((warn_cnt + 1))
     fi
 
     local sls_file="$HOME/.config/SLSsteam/config.yaml"
     if [ -f "$sls_file" ]; then
-        echo "  • SLSsteam   : [READY] ($sls_file)"
+        echo "    • $(printf '%-12s' "SLSsteam") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($sls_file)${UI_RST}"
         pass_cnt=$((pass_cnt + 1))
     else
-        echo "  • SLSsteam   : [WARN] ~/.config/SLSsteam/config.yaml belum ditemukan (Dibutuhkan untuk full DLC unlock)"
+        echo "    • $(printf '%-12s' "SLSsteam") : ${UI_AMBER}[WARN]${UI_RST} SLSsteam config.yaml not found (needed for zero-download unlock)"
         warn_cnt=$((warn_cnt + 1))
     fi
-    echo "--------------------------------------------------------"
 
-    # Deteksi Hardware GPU & Driver Grafis
-    echo "[HARDWARE] Deteksi GPU & Driver Grafis"
+    # Hardware GPU & Mesa Driver Health
+    echo
+    echo "  ${UI_PURPLE}[HARDWARE] GPU Controller & Mesa Driver Health${UI_RST}"
     local gpu_line
     gpu_line=$(lspci 2>/dev/null | grep -E "VGA|3D" | head -n 1 | sed -E 's/^[0-9a-f:.]+ (VGA compatible controller|3D controller): //' || true)
-    [ -z "$gpu_line" ] && gpu_line="Tidak terdeteksi via lspci"
-    echo "  • GPU Controller : $gpu_line"
+    [ -z "$gpu_line" ] && gpu_line="Not detected via lspci"
+    echo "    • GPU Controller : ${UI_BOLD}$gpu_line${UI_RST}"
     if echo "$gpu_line" | grep -qi -E "Haswell|4th Gen Core"; then
-        echo "  • Status Vulkan  : [WARN] Driver hasvk memiliki dukungan Vulkan tidak lengkap."
-        echo "  • Panduan        : Game berbasis FNA3D/SDL3 native (e.g. Terraria) disarankan memakai:"
-        echo "                     export FNA3D_FORCE_DRIVER=OpenGL"
+        echo "    • Mesa Driver    : ${UI_AMBER}[WARN]${UI_RST} Intel Haswell has incomplete Vulkan (hasvk)."
+        echo "    • Driver Safety  : ${UI_ICE}Mesa GL Threading is disabled by default to prevent FNA/XNA asset decompression crashes.${UI_RST}"
         warn_cnt=$((warn_cnt + 1))
     else
-        echo "  • Status Driver  : [READY] GPU didukung oleh stack Mesa standar."
+        echo "    • Driver Status  : ${UI_GREEN}[READY]${UI_RST} GPU supported by standard Mesa driver stack."
         pass_cnt=$((pass_cnt + 1))
     fi
-    echo "========================================================"
-    echo " REKAP HASIL AUDIT: $pass_cnt passed | $warn_cnt warnings | $miss_cnt missing"
+
+    echo
+    echo "${UI_BOX}╭─ DIAGNOSTIC AUDIT SUMMARY ──────────────────────────────────╮${UI_RST}"
+    echo "│ ${UI_GREEN}Passed: $pass_cnt${UI_RST}  •  ${UI_AMBER}Warnings: $warn_cnt${UI_RST}  •  ${UI_RED}Missing: $miss_cnt${UI_RST}"
     if [ "$miss_cnt" -eq 0 ] && [ "$warn_cnt" -eq 0 ]; then
-        echo " Status Sistem    : [READY] 100% optimal untuk gaming sovereign standalone."
+        echo "│ System Status: ${UI_GREEN}[READY] 100% optimal for sovereign offline gaming.${UI_RST}"
     elif [ "$miss_cnt" -eq 0 ]; then
-        echo " Status Sistem    : [READY] Seluruh dependensi utama siap. Tinjau rekomendasi [WARN] di atas."
+        echo "│ System Status: ${UI_GREEN}[READY] Core dependencies satisfied. Review warnings above.${UI_RST}"
     else
-        echo " Status Sistem    : [WARN] Terdapat dependensi wajib yang belum terpasang [MISSING]."
+        echo "│ System Status: ${UI_AMBER}[WARN] Essential dependencies missing. Install missing tools.${UI_RST}"
     fi
-    echo "========================================================"
+    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
 
     return $(( miss_cnt > 0 ? 1 : 0 ))
 }
@@ -2427,16 +2539,12 @@ preview_dashboard() {
     local item_key="${1:-1}"
     local gcount="${2:-}"
 
-    echo "========================================================"
-    echo " GAMECTL SOVEREIGN COCKPIT - SYSTEM STATUS"
-    echo "========================================================"
-
     local os_name="Linux"
     if [ -f /etc/os-release ]; then
         os_name=$(grep -E '^PRETTY_NAME=' /etc/os-release | cut -d'=' -f2 | tr -d '"')
     fi
-    echo " Host OS      : $os_name"
-    echo " Kernel       : $(uname -s) $(uname -r) ($(uname -m))"
+    local kernel_info
+    kernel_info=$(uname -sr)
 
     local disp_info="Headless/Unknown"
     if [ -n "${WAYLAND_DISPLAY:-}" ]; then
@@ -2445,81 +2553,102 @@ preview_dashboard() {
     elif [ -n "${DISPLAY:-}" ]; then
         disp_info="X11 ($DISPLAY)"
     fi
-    echo " Display      : $disp_info"
 
     [ -z "$gcount" ] && gcount=$(scan_installed_games 2>/dev/null | wc -l || echo "0")
-    echo " Games Loaded : $gcount judul terdeteksi"
 
     local def_runner
     def_runner=$(find_runner "$HOME" 2>/dev/null || true)
+    local runner_str="${UI_DIM}[MISSING] Belum terpasang${UI_RST}"
     if [ -n "$def_runner" ]; then
-        echo " Win Runner   : $(basename "$def_runner") ($def_runner)"
-    else
-        echo " Win Runner   : [MISSING] Belum terpasang (umu-run/Proton/wine)"
+        runner_str="${UI_PURPLE}$(basename "$def_runner")${UI_RST} ${UI_DIM}($def_runner)${UI_RST}"
     fi
 
     local gbe_l64 gbe_w64
     gbe_l64=$(get_gbe_template "linux" "x64" 2>/dev/null || true)
     gbe_w64=$(get_gbe_template "windows" "x64" 2>/dev/null || true)
-    local gbe_status="[READY]"
-    [ -z "$gbe_l64" ] || [ -z "$gbe_w64" ] && gbe_status="[PARTIAL]"
-    echo " GBE Fork     : $gbe_status (Linux x64: $([ -n "$gbe_l64" ] && echo "OK" || echo "MISSING") | Win x64: $([ -n "$gbe_w64" ] && echo "OK" || echo "MISSING"))"
+    local gbe_status="${UI_GREEN}[READY]${UI_RST}"
+    [ -z "$gbe_l64" ] || [ -z "$gbe_w64" ] && gbe_status="${UI_AMBER}[PARTIAL]${UI_RST}"
 
-    local w_gm="[N/A]" w_hud="[N/A]" w_scope="[N/A]"
-    command -v gamemoderun >/dev/null 2>&1 && w_gm="[READY]"
-    command -v mangohud >/dev/null 2>&1 && w_hud="[READY]"
-    command -v gamescope >/dev/null 2>&1 && w_scope="[READY]"
-    echo " Tooling      : GameMode $w_gm | MangoHud $w_hud | Gamescope $w_scope"
+    local w_gm="${UI_DIM}[N/A]${UI_RST}" w_hud="${UI_DIM}[N/A]${UI_RST}" w_scope="${UI_DIM}[N/A]${UI_RST}"
+    command -v gamemoderun >/dev/null 2>&1 && w_gm="${UI_GREEN}[READY]${UI_RST}"
+    command -v mangohud >/dev/null 2>&1 && w_hud="${UI_GREEN}[READY]${UI_RST}"
+    command -v gamescope >/dev/null 2>&1 && w_scope="${UI_GREEN}[READY]${UI_RST}"
 
-    local dl_status="[MISSING]" sls_status="[N/A]"
+    local dl_status="${UI_RED}[MISSING]${UI_RST}" sls_status="${UI_DIM}[N/A]${UI_RST}"
     if command -v depotdownloader >/dev/null 2>&1 || [ -x "$HOME/.local/share/gamectl/bin/DepotDownloader" ] || [ -x "$HOME/.local/bin/depotdownloader" ]; then
-        dl_status="[READY]"
+        dl_status="${UI_GREEN}[READY]${UI_RST}"
     fi
-    [ -f "$HOME/.config/SLSsteam/config.yaml" ] && sls_status="[READY]"
-    echo " Integrasi    : DepotDownloader $dl_status | SLSsteam $sls_status"
+    [ -f "$HOME/.config/SLSsteam/config.yaml" ] && sls_status="${UI_GREEN}[READY]${UI_RST}"
 
-    echo "--------------------------------------------------------"
-    echo " INFORMASI MODUL & AKSI TERPILIH"
-    echo "--------------------------------------------------------"
+    echo "${UI_BOX}╭─ GAMECTL SOVEREIGN COCKPIT ───────────────────────────╮${UI_RST}"
+    echo "│ ${UI_BOLD}SYSTEM STATUS & HARDWARE RUNTIME${UI_RST}"
+    echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
+    echo "  ${UI_CYAN}Host OS     ${UI_RST}: ${UI_BOLD}$os_name${UI_RST} ${UI_DIM}($kernel_info)${UI_RST}"
+    echo "  ${UI_CYAN}Display     ${UI_RST}: ${UI_BOLD}$disp_info${UI_RST}"
+    echo "  ${UI_CYAN}Games Loaded${UI_RST}: ${UI_GREEN}$gcount titles detected${UI_RST}"
+    echo "  ${UI_CYAN}Win Runner  ${UI_RST}: $runner_str"
+    echo "  ${UI_CYAN}GBE Fork    ${UI_RST}: $gbe_status ${UI_DIM}(Linux x64: $([ -n "$gbe_l64" ] && echo "OK" || echo "MISSING") | Win x64: $([ -n "$gbe_w64" ] && echo "OK" || echo "MISSING"))${UI_RST}"
+    echo "  ${UI_CYAN}Tooling     ${UI_RST}: GameMode $w_gm • MangoHud $w_hud • Gamescope $w_scope"
+    echo "  ${UI_CYAN}Integration ${UI_RST}: DepotDownloader $dl_status • SLSsteam $sls_status"
+    echo
+
     case "$item_key" in
-        *1*|*PUSTAKA*)
-            echo " [1] PUSTAKA GAME (LIBRARY)"
-            echo " - Jelajahi koleksi game Linux Native & Windows terpasang."
-            echo " - Peluncuran instan dengan Mesa GL Threading & isolasi runner."
-            echo " - Proteksi otomatis 3-slot savegame snapshot sebelum launch."
+        *1*|*PUSTAKA*|*LIBRARY*)
+            echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
+            echo "│ ${UI_BOLD}[01] GAME LIBRARY${UI_RST}"
+            echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
+            echo "  • Browse installed Native Linux and Windows Proton/Wine games."
+            echo "  • One-click launch with runtime wrappers & isolated runner prefix."
+            echo "  • Automatic 3-slot savegame snapshot protection before launch."
+            echo "  • Action shortcuts: ${UI_CYAN}Ctrl-I${UI_RST} (Inject), ${UI_CYAN}Ctrl-O${UI_RST} (Wrappers), ${UI_CYAN}Ctrl-P${UI_RST} (Persona)."
             ;;
         *2*|*PENCARIAN*|*SEARCH*)
-            echo " [2] PENCARIAN STEAM STORE & PROTONDB"
-            echo " - Cari game langsung via Steam Store Web API publik."
-            echo " - Audit tier kompatibilitas Linux resmi dari ProtonDB."
-            echo " - Integrasi unduhan headless langsung via DepotDownloader."
+            echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
+            echo "│ ${UI_BOLD}[02] STEAM STORE SEARCH & PROTONDB${UI_RST}"
+            echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
+            echo "  • Search public Steam Store catalog via official web API."
+            echo "  • Instant Linux compatibility tier audit from ProtonDB."
+            echo "  • One-click background or foreground headless download."
             ;;
         *3*|*UNDUHAN*|*DOWNLOAD*)
-            echo " [3] PEMANTAU UNDUHAN (DOWNLOAD MONITOR)"
-            echo " - Pantau status proses unduhan DepotDownloader di background."
-            echo " - Live progress status, streaming log, dan terminasi proses."
+            echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
+            echo "│ ${UI_BOLD}[03] DOWNLOAD MONITOR${UI_RST}"
+            echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
+            echo "  • Monitor active background DepotDownloader tasks."
+            echo "  • Real-time log streaming (tail -f) and stuck process termination."
             ;;
         *4*|*UNLOCK*)
-            echo " [4] UNLOCK STEAM RESMI (ZERO-DOWNLOAD)"
-            echo " - Daftarkan kepemilikan AppID & Full DLC ke SLSsteam."
-            echo " - Buat appmanifest_<appid>.acf otomatis tanpa unduh aset."
+            echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
+            echo "│ ${UI_BOLD}[04] STEAM UNLOCK (ZERO-DOWNLOAD FULL DLC)${UI_RST}"
+            echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
+            echo "  • Register AppID & full DLC entitlements directly to SLSsteam."
+            echo "  • Generate appmanifest_<appid>.acf automatically without downloading."
             ;;
         *5*|*KONFIGURASI*|*CONFIG*)
-            echo " [5] KONFIGURASI GLOBAL"
-            echo " - Kelola Persona LAN (Player Name & SteamID64 default)."
-            echo " - Atur default wrappers (GameMode, MangoHud, Gamescope FSR)."
-            echo " - Manajemen path direktori pustaka & host sync savegame."
+            echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
+            echo "│ ${UI_BOLD}[05] GLOBAL CONFIGURATION${UI_RST}"
+            echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
+            echo "  • Manage global LAN Persona (Player Name & default SteamID64)."
+            echo "  • Set default runtime wrappers (GameMode, MangoHud, Gamescope FSR)."
+            echo "  • Configure additional library paths & remote companion sync host."
             ;;
         *6*|*DIAGNOSTIK*|*DOCTOR*|*AUDIT*)
-            echo " [6] DIAGNOSTIK SISTEM (HEALTH AUDIT)"
-            echo " - Verifikasi 7 layer kesiapan sistem, runner, driver, dan CLI."
-            echo " - Deteksi dini batasan hardware GPU & driver grafis."
+            echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
+            echo "│ ${UI_BOLD}[06] SYSTEM DIAGNOSTICS (HEALTH AUDIT)${UI_RST}"
+            echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
+            echo "  • Verify 7-layer system readiness: CLI tools, runners, drivers, templates."
+            echo "  • Early detection of GPU hardware limitations & Mesa driver advice."
             ;;
         *)
-            echo " Pilih menu pada panel kiri menggunakan tombol panah atau angka."
-            echo " Tekan <ENTER> untuk membuka modul, atau <ESC> untuk keluar."
+            echo "${UI_BOX}╭─ NAVIGATION INSTRUCTIONS ─────────────────────────────╮${UI_RST}"
+            echo "  Select a module from the left panel using arrow keys or numbers."
+            echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
             ;;
     esac
+    echo
+    echo "${UI_BOX}╭─ HUB CONTROLS ────────────────────────────────────────╮${UI_RST}"
+    echo "  ${UI_PILL_ENTER} ${UI_BOLD}Open Selected Module${UI_RST}    ${UI_PILL_ESC} ${UI_BOLD}Exit / Close gamectl${UI_RST}"
+    echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
 }
 
 # Master Dashboard Hub (Two-Panel Interactive TUI)
@@ -2532,23 +2661,25 @@ dashboard_menu() {
 
         local menu_entries
         menu_entries=$(cat <<EOF
-1	PUSTAKA GAME	Koleksi game lokal, peluncuran & snapshot save
-2	PENCARIAN STEAM	Cari game di Steam Store & cek rating ProtonDB
-3	PANTAU UNDUHAN	Pantau proses background DepotDownloader
-4	UNLOCK STEAM	Daftarkan AppID ke SLSsteam (Full DLC tanpa unduh)
-5	KONFIGURASI GLOBAL	Kelola Persona LAN, Wrappers & path pustaka
-6	DIAGNOSTIK SISTEM	Audit kesehatan 7 layer dependensi & driver
+1	${UI_PURPLE}[01]${UI_RST} ${UI_BOLD}GAME LIBRARY${UI_RST}	${UI_DIM}Browse, inject and launch installed games${UI_RST}
+2	${UI_PURPLE}[02]${UI_RST} ${UI_BOLD}STEAM STORE SEARCH${UI_RST}	${UI_DIM}Search games & check ProtonDB compatibility${UI_RST}
+3	${UI_PURPLE}[03]${UI_RST} ${UI_BOLD}DOWNLOAD MONITOR${UI_RST}	${UI_DIM}Track background DepotDownloader logs${UI_RST}
+4	${UI_PURPLE}[04]${UI_RST} ${UI_BOLD}UNLOCK STEAM (DLC)${UI_RST}	${UI_DIM}Entitle games & DLC in Steam without downloading${UI_RST}
+5	${UI_PURPLE}[05]${UI_RST} ${UI_BOLD}GLOBAL SETTINGS${UI_RST}	${UI_DIM}Configure LAN persona, default wrappers & remote host${UI_RST}
+6	${UI_PURPLE}[06]${UI_RST} ${UI_BOLD}SYSTEM DIAGNOSTICS${UI_RST}	${UI_DIM}Audit 7-layer dependencies, runners & GPU health${UI_RST}
 EOF
 )
 
         local selection
         selection=$(echo "$menu_entries" | fzf \
             --delimiter=$'\t' \
-            --with-nth=1,2,3 \
-            --header="GAMECTL MASTER DASHBOARD (Pilih menu dengan panah/angka, Enter: Buka, Esc: Keluar)" \
+            --with-nth=2,3 \
+            --border-label="  ╢ gamectl :: Master Dashboard Hub ╟  " \
+            --border-label-pos=2 \
+            --header="MASTER DASHBOARD (Arrows/Numbers: Select │ Enter: Open │ Esc: Exit)" \
             --prompt="Dashboard > " \
             --preview="$SELF_BIN --preview-dashboard {1} $game_count" \
-            --preview-window=right:55%:wrap \
+            --preview-window=right:55%:border-rounded:wrap \
         ) || break
 
         local sel_key
@@ -2572,7 +2703,7 @@ EOF
                 ;;
             6)
                 doctor_audit
-                read -r -p "Tekan [ENTER] untuk kembali ke Dashboard..."
+                read -r -p "Press [ENTER] to return to Dashboard..."
                 ;;
             *)
                 break
@@ -2588,20 +2719,22 @@ library_menu() {
 
     while true; do
         local selection
-        selection=$(scan_installed_games | fzf \
+        selection=$(scan_installed_games --formatted | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
-            --header=$'GAMECTL LIBRARY (Enter: Launch | Esc: Dashboard Hub)\nHotkeys: Ctrl-F (Cari Steam) | Ctrl-D (Unduhan) | Ctrl-I (Inject) | Ctrl-O (Wrappers) | Ctrl-P (ID) | Ctrl-S (Sync) | Ctrl-B (Backup)' \
-            --prompt="Game > " \
+            --border-label="  ╢ gamectl :: Game Library ╟  " \
+            --border-label-pos=2 \
+            --header=$'GAME LIBRARY (Enter: Launch │ Esc: Dashboard Hub)\nShortcuts: Ctrl-F (Search Store) │ Ctrl-D (Downloads) │ Ctrl-I (Inject GBE) │ Ctrl-O (Wrappers) │ Ctrl-P (LAN ID) │ Ctrl-S (Sync) │ Ctrl-B (Backup)' \
+            --prompt="Library > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
-            --preview-window=right:55%:wrap \
-            --bind="ctrl-f:execute($SELF_BIN --search)+reload($SELF_BIN --list)" \
-            --bind="ctrl-d:execute($SELF_BIN downloads)+reload($SELF_BIN --list)" \
-            --bind="ctrl-o:execute($SELF_BIN configure-wrappers {4} {2})+reload($SELF_BIN --list)" \
-            --bind="ctrl-p:execute($SELF_BIN set-id-interactive {4} {2})+reload($SELF_BIN --list)" \
-            --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; bash -c 'read -n 1 -s -r -p \"Tekan tombol apa saja untuk kembali ke pustaka...\"')+reload($SELF_BIN --list)" \
-            --bind="ctrl-s:execute($SELF_BIN --sync {4} {2}; bash -c 'read -n 1 -s -r -p \"Tekan tombol apa saja untuk lanjut...\"')" \
-            --bind="ctrl-b:execute($SELF_BIN --backup {4}; bash -c 'read -n 1 -s -r -p \"Tekan tombol apa saja untuk lanjut...\"')" \
+            --preview-window=right:55%:border-rounded:wrap \
+            --bind="ctrl-f:execute($SELF_BIN --search)+reload($SELF_BIN list-formatted)" \
+            --bind="ctrl-d:execute($SELF_BIN downloads)+reload($SELF_BIN list-formatted)" \
+            --bind="ctrl-o:execute($SELF_BIN configure-wrappers {4} {2})+reload($SELF_BIN list-formatted)" \
+            --bind="ctrl-p:execute($SELF_BIN set-id-interactive {4} {2})+reload($SELF_BIN list-formatted)" \
+            --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; bash -c 'read -n 1 -s -r -p \"Press any key to return to library...\"')+reload($SELF_BIN list-formatted)" \
+            --bind="ctrl-s:execute($SELF_BIN --sync {4} {2}; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
+            --bind="ctrl-b:execute($SELF_BIN --backup {4}; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
         ) || break
 
         if [ -n "$selection" ]; then
@@ -2610,7 +2743,7 @@ library_menu() {
             sel_bin=$(echo "$selection" | awk -F'\t' '{print $5}')
             sel_title=$(echo "$selection" | awk -F'\t' '{print $2}')
             launch_game "$sel_dir" "$sel_bin" "$sel_title"
-            read -r -p "Tekan [ENTER] untuk kembali ke Library..."
+            read -r -p "Press [ENTER] to return to Library..."
         fi
     done
 
@@ -2669,8 +2802,8 @@ search_steam() {
         if [[ -v installed_by_id["$appid"] ]] || [[ -v installed_by_title["$clean_name"] ]]; then
             is_installed=1
         fi
-        local status="[BELUM TERPASANG]"
-        [ "$is_installed" -eq 1 ] && status="[TERPASANG]"
+        local status="${UI_DIM}[NOT INSTALLED]${UI_RST}"
+        [ "$is_installed" -eq 1 ] && status="${UI_GREEN}[INSTALLED]    ${UI_RST}"
         results+="${appid}"$'\t'"${name}"$'\t'"${status}"$'\n'
     done <<< "$items"
 
@@ -2678,46 +2811,54 @@ search_steam() {
     selection=$(echo -n "$results" | fzf \
         --delimiter=$'\t' \
         --with-nth=1,2,3 \
-        --header="HASIL PENCARIAN STEAM (Enter: Pasang/Aksi | Esc: Batal)" \
+        --border-label="  ╢ gamectl :: Steam Store Catalog ╟  " \
+        --border-label-pos=2 \
+        --header="STEAM CATALOG (Enter: Actions & Install │ Esc: Back)" \
         --prompt="Steam Store > " \
         --preview='
             appid={1}
             title={2}
             status={3}
-            echo "=========================================="
-            echo " STEAM METADATA & PROTONDB AUDIT"
-            echo "=========================================="
-            echo " AppID    : $appid"
-            echo " Judul    : $title"
-            echo " Status   : $status"
-            echo "------------------------------------------"
+            echo -e "\033[38;5;60m╭─ STEAM METADATA & PROTONDB AUDIT ───────────────────╮\033[0m"
+            echo -e "│ \033[1m$title\033[0m \033[38;5;244m(AppID: $appid)\033[0m"
+            echo -e "\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m"
+            echo -e "  \033[1;38;5;117mLocal State\033[0m : $status"
             details=$(curl -s --connect-timeout 2 "https://store.steampowered.com/api/appdetails?appids=$appid&filters=platforms,genres" | jq -r ".\"$appid\".data // empty" 2>/dev/null)
             if [ -n "$details" ]; then
                 is_linux=$(echo "$details" | jq -r ".platforms.linux // false" 2>/dev/null)
                 is_win=$(echo "$details" | jq -r ".platforms.windows // false" 2>/dev/null)
                 genres=$(echo "$details" | jq -r "[.genres[]?.description] | join(\", \")" 2>/dev/null)
-                [ -n "$genres" ] && echo " Genre    : $genres"
+                [ -n "$genres" ] && echo -e "  \033[1;38;5;117mGenres     \033[0m : \033[38;5;244m$genres\033[0m"
                 if [ "$is_linux" = "true" ]; then
-                    echo " Runner   : Native Linux (Depot ELF tersedia)"
+                    echo -e "  \033[1;38;5;117mPlatform   \033[0m : \033[1;38;5;120mNative Linux ELF available\033[0m"
                 elif [ "$is_win" = "true" ]; then
-                    echo " Runner   : Windows Only (Memerlukan Proton/WINE)"
+                    echo -e "  \033[1;38;5;117mPlatform   \033[0m : \033[1;38;5;141mWindows PE (Requires Proton/Wine)\033[0m"
                 fi
-                echo "------------------------------------------"
             fi
+            echo
+            echo -e "\033[38;5;60m╭─ COMMUNITY COMPATIBILITY ───────────────────────────╮\033[0m"
             pdb=$(curl -s --connect-timeout 2 "https://www.protondb.com/api/v1/reports/summaries/$appid.json" 2>/dev/null)
             if [ -n "$pdb" ] && [ "$pdb" != "null" ]; then
                 tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null)
                 score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null)
                 conf=$(echo "$pdb" | jq -r ".confidence // \"-\"" 2>/dev/null)
-                echo " ProtonDB Tier       : $tier"
-                echo " ProtonDB Score      : $score"
-                echo " Confidence          : $conf"
+                tier_upper="${tier^^}"
+                c_tier="\033[1;38;5;120m[$tier_upper]\033[0m"
+                case "$tier_upper" in
+                    *PLATINUM*) c_tier="\033[1;38;5;153m[PLATINUM]\033[0m" ;;
+                    *GOLD*)     c_tier="\033[1;38;5;221m[GOLD]\033[0m" ;;
+                    *SILVER*)   c_tier="\033[1;38;5;248m[SILVER]\033[0m" ;;
+                    *BRONZE*)   c_tier="\033[1;38;5;173m[BRONZE]\033[0m" ;;
+                    *BORKED*)   c_tier="\033[1;38;5;203m[BORKED]\033[0m" ;;
+                esac
+                echo -e "  \033[1;38;5;117mProtonDB Tier \033[0m: $c_tier"
+                echo -e "  \033[1;38;5;117mRating Score  \033[0m: \033[1m$score\033[0m \033[38;5;244m(Confidence: $conf)\033[0m"
             else
-                echo " ProtonDB Rating     : Belum ada laporan komunitas"
+                echo -e "  \033[1;38;5;117mProtonDB Tier \033[0m: \033[38;5;244m[NO REPORTS YET]\033[0m"
             fi
-            echo "=========================================="
+            echo -e "\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m"
         ' \
-        --preview-window=right:50%:wrap
+        --preview-window=right:52%:border-rounded:wrap \
     ) || return
 
     if [ -n "$selection" ]; then
@@ -2726,12 +2867,11 @@ search_steam() {
         sel_name=$(echo "$selection" | awk -F'\t' '{print $2}')
         sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
 
-        echo ""
-        echo "=========================================="
-        echo " TARGET: $sel_name (AppID: $sel_id)"
-        echo " STATUS: $sel_status"
-        echo "=========================================="
-        if [ "$sel_status" = "[TERPASANG]" ]; then
+        echo
+        echo "${UI_BOX}╭─ SELECTED TARGET ───────────────────────────────────╮${UI_RST}"
+        echo "│ ${UI_BOLD}$sel_name${UI_RST} ${UI_DIM}(AppID: $sel_id)${UI_RST}"
+        echo "${UI_BOX}╰─────────────────────────────────────────────────────╯${UI_RST}"
+        if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
             local gdir=""
             local clean_sel_name="${sel_name,,}"
             if [ -n "${installed_dir["$sel_id"]:-}" ] && [ -d "${installed_dir["$sel_id"]}" ]; then
@@ -2742,13 +2882,13 @@ search_steam() {
                 gdir="$HOME/Games/$sel_name"
             fi
 
-            echo "Pilih aksi untuk game terpasang:"
-            echo "  1) Luncurkan game langsung"
-            echo "  2) Injeksi GBE Fork saja (Standalone ./saves & DLC.txt)"
-            echo "  3) Injeksi GBE + Sync Steam Client (All-in-One full DLC)"
-            echo "  4) Sync ke Steam Client resmi saja"
-            echo "  5) Batal / Kembali"
-            read -r -p "Pilihan [1-5]: " act_opt
+            echo "  ${UI_PURPLE}1)${UI_RST} Launch game directly"
+            echo "  ${UI_PURPLE}2)${UI_RST} Inject GBE Fork only (Standalone ./saves & DLC.txt)"
+            echo "  ${UI_PURPLE}3)${UI_RST} Inject GBE + Sync Steam Client (All-in-One full DLC)"
+            echo "  ${UI_PURPLE}4)${UI_RST} Sync to Steam Client entitlement only"
+            echo "  ${UI_DIM}5)${UI_RST} Cancel / Return"
+            echo
+            read -r -p "Select action [1-5]: " act_opt
 
             case "$act_opt" in
                 1)
@@ -2757,7 +2897,7 @@ search_steam() {
                     if [ -n "$gbin" ]; then
                         launch_game "$gdir" "$gbin" "$sel_name"
                     else
-                        echo "[ERROR] Biner eksekutabel tidak ditemukan di $gdir."
+                        echo "[ERROR] Binary executable not found in $gdir."
                     fi
                     ;;
                 2)
@@ -2770,18 +2910,18 @@ search_steam() {
                     sync_steam "$sel_id" "$sel_name" "$gdir"
                     ;;
                 *)
-                    echo "[INFO] Aksi dibatalkan."
+                    echo "[INFO] Action cancelled."
                     ;;
             esac
         else
-            echo "Pilih paket instalasi untuk $sel_name:"
-            echo "  1) [All-in-One] Unduh + Injeksi GBE + Sync Steam (Background)"
-            echo "  2) [All-in-One] Unduh + Injeksi GBE + Sync Steam (Foreground Stream)"
-            echo "  3) [Standalone] Unduh + Injeksi GBE saja (Tanpa Client Steam)"
-            echo "  4) [Unlock Steam Saja] Buka di Steam resmi tanpa unduh game (Full DLC)"
-            echo "  5) [Raw Download] Unduh aset mentah saja (Tanpa Injeksi)"
-            echo "  6) Batal"
-            read -r -p "Pilihan [1-6]: " opt
+            echo "  ${UI_PURPLE}1)${UI_RST} [All-in-One] Download + Inject GBE + Sync Steam (Background)"
+            echo "  ${UI_PURPLE}2)${UI_RST} [All-in-One] Download + Inject GBE + Sync Steam (Live Stream)"
+            echo "  ${UI_PURPLE}3)${UI_RST} [Standalone] Download + Inject GBE only (Steam-free)"
+            echo "  ${UI_PURPLE}4)${UI_RST} [Unlock Steam DLC] Zero-Download Steam entitlement (Full DLC)"
+            echo "  ${UI_PURPLE}5)${UI_RST} [Raw Download] Download raw depot assets only"
+            echo "  ${UI_DIM}6)${UI_RST} Cancel"
+            echo
+            read -r -p "Select package [1-6]: " opt
             case "$opt" in
                 1)
                     download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --all --background
@@ -2799,11 +2939,11 @@ search_steam() {
                     download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --raw --background
                     ;;
                 *)
-                    echo "[INFO] Aksi dibatalkan."
+                    echo "[INFO] Action cancelled."
                     ;;
             esac
         fi
-        read -r -p "Tekan [ENTER] untuk melanjutkan..."
+        read -r -p "Press [ENTER] to continue..."
     fi
 }
 
@@ -2848,7 +2988,7 @@ cli_launch() {
 }
 
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive get_remote_host get_gbe_template find_game_binary find_runner launch_game build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu
+export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive get_remote_host get_gbe_template find_game_binary find_runner launch_game build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -2978,6 +3118,9 @@ case "${1:-}" in
     --list)
         scan_installed_games
         ;;
+    list-formatted|--list-formatted)
+        scan_installed_games --formatted
+        ;;
     --version|-v)
         echo "gamectl v1.2.0 (sovereign native TUI)"
         ;;
@@ -2986,31 +3129,32 @@ case "${1:-}" in
 gamectl - Sovereign TUI Game Manager & Launcher (Zero-Bloat)
 
 Usage:
-  gamectl [menu]      Buka antarmuka Master Dashboard TUI (alias: dashboard)
-  gamectl library     Buka antarmuka TUI library game langsung (alias: list-ui)
-  gamectl config      Buka menu konfigurasi global (~/.config/gamectl/) (alias: configure)
-  gamectl doctor      Jalankan diagnostik kesehatan sistem (7 layer) (alias: audit)
-  gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr]
-                      Jalankan game dengan prefix mandiri dan opsi wrapper performa
+  gamectl [menu]      Open Master Dashboard Hub TUI (alias: dashboard)
+  gamectl library     Open Game Library TUI directly (alias: list-ui)
+  gamectl config      Open global configuration menu (~/.config/gamectl/) (alias: configure)
+  gamectl doctor      Run 7-layer system & GPU health diagnostics (alias: audit)
+  gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread]
+                      Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]
-                      Buka menu konfigurasi wrapper (GameMode/MangoHud/Gamescope FSR)
+                      Configure per-game wrappers (GameMode/MangoHud/Gamescope FSR/MesaGL)
   gamectl download <appid> [dir] [title] [--raw|--inject-only|--all] [-f]
-                      Unduh game headless via DepotDownloader (pilihan paket fleksibel)
-  gamectl downloads   Pantau status & log unduhan aktif
+                      Headless game downloader via DepotDownloader
+  gamectl downloads   Monitor active & recent download processes
   gamectl unlock <appid> [title]
-                      Buka game di Steam resmi tanpa unduh file (Full DLC)
+                      Zero-download Steam Client & SLSsteam Full DLC entitlement
   gamectl inject <dir> [appid] [--no-sync|--all]
-                      Injeksi GBE Fork standalone & portable save
+                      Inject GBE Fork standalone & portable saves
   gamectl set-id <player> [steamid] [dir] [--broadcast <ip>] [--global]
-                      Atur nama akun & SteamID LAN untuk co-op offline tanpa bentrok
-  gamectl fetch-dlc <dir> [appid] Unduh & tulis daftar DLC ke steam_settings/DLC.txt
-  gamectl sync-steam <appid> [title] [dir] Sinkronisasi Steam Client & SLSsteam full DLC
-  gamectl --search    Cari game di Steam Store & audit ProtonDB rating
-  gamectl --list      Tampilkan daftar game yang terdeteksi
-  gamectl --sync <dir> [title] [host]  Sinkronisasi savegame ke remote companion host
-  gamectl --backup <dir>        Buat snapshot backup savegame
-  gamectl --help      Tampilkan panduan ini
-  gamectl --version   Tampilkan versi aktif
+                      Configure LAN player name & SteamID for offline co-op
+  gamectl fetch-dlc <dir> [appid] Fetch & generate steam_settings/DLC.txt
+  gamectl sync-steam <appid> [title] [dir] Sync Steam Client & SLSsteam entitlements
+  gamectl --search    Search Steam Store catalog & audit ProtonDB rating
+  gamectl --list      Print detected installed games list
+  gamectl list-formatted  Print formatted games list with ANSI badges
+  gamectl --sync <dir> [title] [host]  Sync saves to remote companion host
+  gamectl --backup <dir>        Create manual savegame backup snapshot
+  gamectl --help      Show this help documentation
+  gamectl --version   Print active version
 EOF
         ;;
     *)

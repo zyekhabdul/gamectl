@@ -14,10 +14,10 @@ _gamectl_completions() {
         cword=$COMP_CWORD
     fi
 
-    local commands="menu dashboard library list-ui config configure doctor audit launch run configure-wrappers set-id set-id-interactive generate-steamid download downloads unlock inject fetch-dlc sync-steam ensure-downloader --search --list --sync --backup --help --version -h -v"
+    local commands="menu dashboard library list-ui config configure doctor audit launch run configure-wrappers set-id set-id-interactive generate-steamid download downloads unlock inject fetch-dlc sync-steam ensure-downloader list-formatted --list-formatted --search --list --sync --backup --help --version -h -v"
     local download_opts="--raw --inject-only --all --foreground -f"
     local inject_opts="--all --no-sync"
-    local launch_opts="--hud --no-hud --mangohud --no-mangohud --gamemode --no-gamemode --gamescope --no-gamescope --fsr --no-fsr"
+    local launch_opts="--hud --no-hud --mangohud --no-mangohud --gamemode --no-gamemode --gamescope --no-gamescope --fsr --no-fsr --glthread --no-glthread"
     local set_id_opts="--broadcast --global"
 
     _complete_path() {
