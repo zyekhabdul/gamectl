@@ -180,6 +180,12 @@ test_pgrep_regex_strictness() {
 }
 run_test "Process Invariant: Strict word-boundary pgrep queries" test_pgrep_regex_strictness
 
+test_game_controller_hud() {
+    grep -q "game_controller_hud" "$REPO_ROOT/src/runners/50_launcher.sh" && \
+    grep -q "Kembali ke Master Dashboard" "$REPO_ROOT/src/runners/50_launcher.sh"
+}
+run_test "Launcher Invariant: Detached Live Controller HUD" test_game_controller_hud
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

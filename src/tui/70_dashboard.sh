@@ -28,6 +28,30 @@ preview_game() {
             ;;
     esac
 
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local is_running=false
+    local run_pid=""
+    if [ -d "$run_dir/active_games" ]; then
+        for inf in "$run_dir/active_games"/*.info; do
+            [ -f "$inf" ] || continue
+            local inf_dir
+            inf_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+            if [ "$inf_dir" = "$gdir" ]; then
+                local check_pid
+                check_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2)
+                if [ -n "$check_pid" ] && kill -0 "$check_pid" 2>/dev/null; then
+                    is_running=true
+                    run_pid="$check_pid"
+                    break
+                fi
+            fi
+        done
+    fi
+    if [ "$is_running" = true ]; then
+        status_badge="${UI_GREEN}[RUNNING PID:$run_pid]${UI_RST}"
+        status_desc="${UI_DIM}(Game window active in background)${UI_RST}"
+    fi
+
     echo "${UI_BOX}╭─ GAME INFORMATION ───────────────────────────────────╮${UI_RST}"
     echo "│ ${UI_BOLD}${title}${UI_RST} ${UI_DIM}(AppID: ${appid})${UI_RST}"
     echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
@@ -211,12 +235,35 @@ preview_dashboard() {
     fi
     [ -f "$HOME/.config/SLSsteam/config.yaml" ] && sls_status="${UI_GREEN}[READY]${UI_RST}"
 
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local active_count=0
+    local active_titles=()
+    if [ -d "$run_dir/active_games" ]; then
+        for inf in "$run_dir/active_games"/*.info; do
+            [ -f "$inf" ] || continue
+            local a_pid a_title
+            a_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2)
+            a_title=$(grep -E '^TITLE=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2)
+            if [ -n "$a_pid" ] && kill -0 "$a_pid" 2>/dev/null; then
+                active_count=$((active_count + 1))
+                active_titles+=("$a_title [PID:$a_pid]")
+            else
+                rm -f "$inf" 2>/dev/null || true
+            fi
+        done
+    fi
+    local active_desc="${UI_DIM}None${UI_RST}"
+    if [ "$active_count" -gt 0 ]; then
+        active_desc="${UI_GREEN}$active_count running${UI_RST} ${UI_DIM}(${active_titles[*]})${UI_RST}"
+    fi
+
     echo "${UI_BOX}╭─ GAMECTL SOVEREIGN COCKPIT ───────────────────────────╮${UI_RST}"
     echo "│ ${UI_BOLD}SYSTEM STATUS & HARDWARE RUNTIME${UI_RST}"
     echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
     echo "  ${UI_CYAN}Host OS     ${UI_RST}: ${UI_BOLD}$os_name${UI_RST} ${UI_DIM}($kernel_info)${UI_RST}"
     echo "  ${UI_CYAN}Display     ${UI_RST}: ${UI_BOLD}$disp_info${UI_RST}"
     echo "  ${UI_CYAN}Games Loaded${UI_RST}: ${UI_GREEN}$gcount titles detected${UI_RST}"
+    echo "  ${UI_CYAN}Active Game ${UI_RST}: $active_desc"
     echo "  ${UI_CYAN}Win Runner  ${UI_RST}: $runner_str"
     echo "  ${UI_CYAN}GBE Fork    ${UI_RST}: $gbe_status ${UI_DIM}(Linux x64: $([ -n "$gbe_l64" ] && echo "OK" || echo "MISSING") | Win x64: $([ -n "$gbe_w64" ] && echo "OK" || echo "MISSING"))${UI_RST}"
     echo "  ${UI_CYAN}Tooling     ${UI_RST}: GameMode $w_gm • MangoHud $w_hud • Gamescope $w_scope"
@@ -373,8 +420,12 @@ library_menu() {
             sel_dir=$(echo "$selection" | awk -F'\t' '{print $4}')
             sel_bin=$(echo "$selection" | awk -F'\t' '{print $5}')
             sel_title=$(echo "$selection" | awk -F'\t' '{print $2}')
-            launch_game "$sel_dir" "$sel_bin" "$sel_title"
-            read -r -p "Press [ENTER] to return to Library..."
+            local launch_rc=0
+            launch_game "$sel_dir" "$sel_bin" "$sel_title" || launch_rc=$?
+            if [ "$launch_rc" -eq 10 ]; then
+                # User selected return directly to Master Dashboard
+                break
+            fi
         fi
     done
 
@@ -574,7 +625,7 @@ search_steam() {
                     ;;
             esac
         fi
-        read -r -p "Press [ENTER] to continue..."
+        [ "${act_opt:-}" != "1" ] && read -r -p "Press [ENTER] to continue..."
     fi
 }
 

@@ -1,3 +1,110 @@
+# Interactive Live HUD for running game process
+game_controller_hud() {
+    local game_pid="$1"
+    local title="$2"
+    local log_file="$3"
+    local gdir="$4"
+    local gbin="$5"
+    local info_file="$6"
+    local run_type="$7"
+
+    while true; do
+        local is_alive=0
+        if kill -0 "$game_pid" 2>/dev/null; then
+            is_alive=1
+        fi
+
+        clear
+        echo "${UI_BOX}╭─ GAME CONTROLLER HUD ───────────────────────────────────────╮${UI_RST}"
+        echo "│ ${UI_CYAN}Target Game ${UI_RST}: ${UI_BOLD}$title${UI_RST}"
+        echo "│ ${UI_CYAN}Process PID ${UI_RST}: ${UI_BOLD}$game_pid${UI_RST} ${UI_DIM}($run_type)${UI_RST}"
+        if [ "$is_alive" -eq 1 ]; then
+            echo "│ ${UI_CYAN}Status      ${UI_RST}: ${UI_GREEN}[RUNNING]${UI_RST} ${UI_DIM}(Window aktif di layar desktop)${UI_RST}"
+        else
+            echo "│ ${UI_CYAN}Status      ${UI_RST}: ${UI_ICE}[TERMINATED / SELESAI]${UI_RST}"
+        fi
+        echo "│ ${UI_CYAN}Log Stream  ${UI_RST}: ${UI_DIM}$log_file${UI_RST}"
+        echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+
+        if [ "$is_alive" -eq 1 ]; then
+            echo "  ${UI_PURPLE}1)${UI_RST} Kembali ke Game Library ${UI_DIM}(Game tetap berjalan di background)${UI_RST}"
+            echo "  ${UI_PURPLE}2)${UI_RST} Kembali ke Master Dashboard ${UI_DIM}(Game tetap berjalan di background)${UI_RST}"
+            echo "  ${UI_PURPLE}3)${UI_RST} Stream Log Game Langsung ${UI_DIM}(tail -f)${UI_RST}"
+            echo "  ${UI_AMBER}4)${UI_RST} Matikan Game ${UI_DIM}(Graceful Shutdown / SIGTERM)${UI_RST}"
+            echo "  ${UI_RED}5)${UI_RST} Paksa Matikan Game ${UI_DIM}(Force Kill / SIGKILL)${UI_RST}"
+            echo
+            read -r -p "Pilih aksi [1-5]: " hud_opt
+
+            case "$hud_opt" in
+                1)
+                    return 0
+                    ;;
+                2)
+                    return 10
+                    ;;
+                3)
+                    clear
+                    echo "${UI_BOX}╭─ LIVE LOG STREAM: $title (PID: $game_pid) ─────────────╮${UI_RST}"
+                    echo "│ ${UI_CYAN}Tekan sembarang tombol untuk kembali ke Menu Kontrol Game     ${UI_RST}"
+                    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+                    tail -n 25 "$log_file" 2>/dev/null || true
+                    echo "${UI_DIM}─── Live Output (tekan sembarang tombol untuk berhenti) ───────${UI_RST}"
+                    local t_pid=""
+                    tail -f "$log_file" 2>/dev/null &
+                    t_pid=$!
+                    ( read -r -s -n 1 </dev/tty || true ) 2>/dev/null
+                    kill "$t_pid" 2>/dev/null || true
+                    wait "$t_pid" 2>/dev/null || true
+                    ;;
+                4)
+                    echo "  [INFO] Mengirim sinyal SIGTERM ke proses PID $game_pid..."
+                    kill "$game_pid" 2>/dev/null || true
+                    local wait_cnt=0
+                    while kill -0 "$game_pid" 2>/dev/null && [ "$wait_cnt" -lt 6 ]; do
+                        sleep 0.3
+                        wait_cnt=$((wait_cnt + 1))
+                    done
+                    if ! kill -0 "$game_pid" 2>/dev/null; then
+                        echo "  ${UI_GREEN}[SUCCESS] Game '$title' (PID $game_pid) berhasil dimatikan.${UI_RST}"
+                        rm -f "$info_file" 2>/dev/null || true
+                    else
+                        echo "  ${UI_AMBER}[WARN] Game belum tertutup. Anda dapat memilih opsi 5 (Force Kill).${UI_RST}"
+                    fi
+                    sleep 0.8
+                    ;;
+                5)
+                    echo "  [INFO] Mengirim sinyal SIGKILL ke proses PID $game_pid..."
+                    kill -9 "$game_pid" 2>/dev/null || true
+                    sleep 0.3
+                    echo "  ${UI_GREEN}[SUCCESS] Game '$title' (PID $game_pid) dimatikan secara paksa.${UI_RST}"
+                    rm -f "$info_file" 2>/dev/null || true
+                    sleep 0.8
+                    ;;
+                *)
+                    ;;
+            esac
+        else
+            echo "  ${UI_PURPLE}1)${UI_RST} Kembali ke Game Library"
+            echo "  ${UI_PURPLE}2)${UI_RST} Kembali ke Master Dashboard"
+            echo "  ${UI_PURPLE}3)${UI_RST} Periksa Log Terakhir (tail -n 25)"
+            echo
+            read -r -p "Pilih aksi [1-3]: " hud_opt
+            case "$hud_opt" in
+                1) return 0 ;;
+                2) return 10 ;;
+                3)
+                    echo
+                    echo "${UI_DIM}──────────────────────────────────────────${UI_RST}"
+                    tail -n 25 "$log_file" 2>/dev/null || echo "[No logs available]"
+                    echo "${UI_DIM}──────────────────────────────────────────${UI_RST}"
+                    read -r -p "Tekan [ENTER] untuk kembali..."
+                    ;;
+                *) return 0 ;;
+            esac
+        fi
+    done
+}
+
 # Launch game with performance wrapping and runner isolation
 launch_game() {
     local gdir="$1"
@@ -65,57 +172,108 @@ launch_game() {
         fi
     fi
 
-    local exit_code=0
+    # Prepare runtime directory and log stream
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    mkdir -p -m 700 "$run_dir/active_games"
+    local safe_gbin
+    safe_gbin=$(basename "$gbin" | tr -cd '[:alnum:]_-')
+    local log_file="$run_dir/game_${safe_gbin}.log"
+    : > "$log_file"
+
+    local game_pid=""
+    local run_type="Native Linux"
+
     if [ "$is_win" = true ]; then
         local runner_bin
         runner_bin=$(find_runner "$gdir" 2>/dev/null || true)
         if [ -z "$runner_bin" ]; then
             echo "[ERROR] Runner Windows tidak ditemukan (umu-run, Proton, atau Wine belum terpasang)." >&2
             echo "        Pasang GE-Proton di ~/.local/share/Steam/compatibilitytools.d/ atau install wine." >&2
-            exit_code=1
-        else
-            local pfx_dir="$gdir/pfx"
-            mkdir -p "$pfx_dir"
-            local appid=""
-            if [ -f "$gdir/steam_appid.txt" ]; then
-                appid=$(tr -dc '0-9' < "$gdir/steam_appid.txt")
-            fi
-            [ -z "$appid" ] && appid="0"
+            _restore_launch_state
+            return 1
+        fi
 
-            echo "[INFO] Meluncurkan game Windows via $(basename "$runner_bin")..."
-            echo "[INFO] Wine Prefix terisolasi: $pfx_dir"
+        local pfx_dir="$gdir/pfx"
+        mkdir -p "$pfx_dir"
+        local appid=""
+        if [ -f "$gdir/steam_appid.txt" ]; then
+            appid=$(tr -dc '0-9' < "$gdir/steam_appid.txt")
+        fi
+        [ -z "$appid" ] && appid="0"
 
-            case "$runner_bin" in
-                umu-run)
+        run_type="Windows ($(basename "$runner_bin"))"
+        echo "[INFO] Meluncurkan game Windows via $(basename "$runner_bin") di background..."
+        echo "[INFO] Wine Prefix terisolasi: $pfx_dir"
+        echo "[INFO] Log stream: $log_file"
+
+        case "$runner_bin" in
+            umu-run)
+                (
                     WINEPREFIX="$pfx_dir" GAMEID="$appid" \
-                    "${wrappers[@]}" umu-run "$gdir/$gbin" "${game_args[@]}" || exit_code=$?
-                    ;;
-                *proton*)
+                    exec "${wrappers[@]}" umu-run "$gdir/$gbin" "${game_args[@]}"
+                ) > "$log_file" 2>&1 &
+                game_pid=$!
+                ;;
+            *proton*)
+                (
                     STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_INSTALL_PATH:-$(get_steam_root 2>/dev/null || echo "$HOME/.local/share/Steam")}" \
                     STEAM_COMPAT_DATA_PATH="$gdir" \
                     STEAM_COMPAT_APP_ID="$appid" \
                     WINEPREFIX="$pfx_dir" \
-                    "${wrappers[@]}" "$runner_bin" waitforexitandrun "$gdir/$gbin" "${game_args[@]}" || exit_code=$?
-                    ;;
-                *)
+                    exec "${wrappers[@]}" "$runner_bin" waitforexitandrun "$gdir/$gbin" "${game_args[@]}"
+                ) > "$log_file" 2>&1 &
+                game_pid=$!
+                ;;
+            *)
+                (
                     WINEPREFIX="$pfx_dir" \
-                    "${wrappers[@]}" "$runner_bin" "$gdir/$gbin" "${game_args[@]}" || exit_code=$?
-                    ;;
-            esac
-        fi
+                    exec "${wrappers[@]}" "$runner_bin" "$gdir/$gbin" "${game_args[@]}"
+                ) > "$log_file" 2>&1 &
+                game_pid=$!
+                ;;
+        esac
     else
-        echo "[INFO] Menjalankan $title (Native Linux)..."
-        "${wrappers[@]}" ./"$gbin" "${game_args[@]}" || exit_code=$?
+        echo "[INFO] Meluncurkan $title (Native Linux) di background..."
+        echo "[INFO] Log stream: $log_file"
+        (
+            exec "${wrappers[@]}" ./"$gbin" "${game_args[@]}"
+        ) > "$log_file" 2>&1 &
+        game_pid=$!
     fi
 
-    [ "$exit_code" -ne 0 ] && echo "[WARN] Game exited with code $exit_code"
+    if [ -z "$game_pid" ] || ! kill -0 "$game_pid" 2>/dev/null; then
+        echo "[ERROR] Gagal meluncurkan game ke background." >&2
+        _restore_launch_state
+        return 1
+    fi
 
-    # Restore CPU governor to pre-launch state and clean locks
-    _restore_launch_state
+    local info_file="$run_dir/active_games/${game_pid}.info"
+    cat <<EOF > "$info_file"
+PID=$game_pid
+TITLE=$title
+DIR=$gdir
+BIN=$gbin
+LOG=$log_file
+START=$(date +%s)
+EOF
+
+    # Detached background watchdog to restore CPU governor and cleanup when process exits
+    (
+        wait "$game_pid" 2>/dev/null
+        rm -f "$info_file" 2>/dev/null || true
+        _restore_launch_state
+    ) &
+
+    echo "[VERIFIED] Game '$title' aktif di background (PID: $game_pid)."
+
+    # If running interactively, invoke Game Controller HUD
+    local hud_exit=0
+    if [ -t 0 ]; then
+        game_controller_hud "$game_pid" "$title" "$log_file" "$gdir" "$gbin" "$info_file" "$run_type" || hud_exit=$?
+    fi
+
     trap - INT TERM EXIT
-
-    echo "[INFO] Game ditutup. Sesi bersih."
-    return $exit_code
+    return "$hud_exit"
 }
 
 # Sync savegame to remote companion host
