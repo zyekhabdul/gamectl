@@ -357,6 +357,23 @@ preview_game() {
 
     if [ -f "$gdir/$gbin" ]; then
         echo " Arsitektur   : $(file -b "$gdir/$gbin" | cut -d',' -f1,2)"
+        local is_win=false
+        case "$gbin" in *.exe|*.EXE) is_win=true ;; esac
+        if [ "$is_win" = false ] && file -b "$gdir/$gbin" 2>/dev/null | grep -qi "PE32"; then
+            is_win=true
+        fi
+        if [ "$is_win" = true ]; then
+            local r_path
+            r_path=$(find_runner "$gdir" 2>/dev/null || true)
+            if [ -n "$r_path" ]; then
+                echo " Runner       : $(basename "$r_path") ($r_path)"
+            else
+                echo " Runner       : Belum terpasang (umu-run/Proton/wine)"
+            fi
+            echo " Wine Prefix  : $gdir/pfx (ISOLATED)"
+        else
+            echo " Runner       : Native Linux (Direct ELF/Script)"
+        fi
     fi
 
     echo "--------------------------------------------------------"
@@ -396,11 +413,100 @@ preview_game() {
     echo "========================================================"
 }
 
-# Launch game with performance wrapping
+# Discover runner for Windows games (priority: umu-run -> GE-Proton / Proton Steam -> wine)
+find_runner() {
+    local target_dir="${1:-}"
+
+    # Priority 0: Per-game runner override or environment override
+    if [ -n "$target_dir" ] && [ -f "$target_dir/.runner" ]; then
+        local g_runner
+        g_runner=$(head -n 1 "$target_dir/.runner" | tr -d '[:space:]')
+        if [ -n "$g_runner" ] && { [ -x "$g_runner" ] || command -v "$g_runner" >/dev/null 2>&1; }; then
+            echo "$g_runner"
+            return 0
+        fi
+    fi
+    if [ -n "${GAMECTL_RUNNER:-}" ]; then
+        if [ -x "$GAMECTL_RUNNER" ] || command -v "$GAMECTL_RUNNER" >/dev/null 2>&1; then
+            echo "$GAMECTL_RUNNER"
+            return 0
+        fi
+    fi
+    if [ -f "$HOME/.config/gamectl/runner" ]; then
+        local user_runner
+        user_runner=$(head -n 1 "$HOME/.config/gamectl/runner" | tr -d '[:space:]')
+        if [ -n "$user_runner" ] && { [ -x "$user_runner" ] || command -v "$user_runner" >/dev/null 2>&1; }; then
+            echo "$user_runner"
+            return 0
+        fi
+    fi
+
+    # Priority 1: umu-run
+    if command -v umu-run >/dev/null 2>&1; then
+        echo "umu-run"
+        return 0
+    fi
+
+    # Priority 2: GE-Proton / Proton in Steam compatibilitytools.d or common
+    local compat_dirs=(
+        "$HOME/.local/share/Steam/compatibilitytools.d"
+        "$HOME/.steam/root/compatibilitytools.d"
+    )
+    for cdir in "${compat_dirs[@]}"; do
+        [ -d "$cdir" ] || continue
+        local p
+        while read -r p; do
+            [ -z "$p" ] && continue
+            if [ -x "$p/proton" ]; then
+                echo "$p/proton"
+                return 0
+            fi
+        done < <(find "$cdir" -mindepth 1 -maxdepth 1 -type d -name "*Proton*" 2>/dev/null | sort -Vr)
+    done
+
+    # Check Proton in Steam common libraries
+    local steam_lib
+    while read -r steam_lib; do
+        [ -d "$steam_lib/common" ] || continue
+        local p
+        while read -r p; do
+            [ -z "$p" ] && continue
+            if [ -x "$p/proton" ]; then
+                echo "$p/proton"
+                return 0
+            fi
+        done < <(find "$steam_lib/common" -mindepth 1 -maxdepth 1 -type d -name "Proton*" 2>/dev/null | sort -Vr)
+    done < <(get_steam_libraries 2>/dev/null || true)
+
+    # Priority 3: System Wine
+    if command -v wine64 >/dev/null 2>&1; then
+        echo "wine64"
+        return 0
+    elif command -v wine >/dev/null 2>&1; then
+        echo "wine"
+        return 0
+    fi
+
+    # Priority 4: Internal wine binary inside GE-Proton files/bin
+    for cdir in "${compat_dirs[@]}"; do
+        [ -d "$cdir" ] || continue
+        local w
+        w=$(find "$cdir" -type f -name "wine64" -o -name "wine" 2>/dev/null | head -n 1)
+        if [ -n "$w" ] && [ -x "$w" ]; then
+            echo "$w"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Launch game with performance wrapping and runner isolation
 launch_game() {
     local gdir="$1"
     local gbin="$2"
     local title="$3"
+    shift 3 || true
 
     echo "[INFO] Menyiapkan peluncuran: $title..."
     backup_save "$gdir"
@@ -414,9 +520,61 @@ launch_game() {
         echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
     fi
 
-    echo "[INFO] Menjalankan $title di Wayland..."
     cd "$gdir"
-    ./"$gbin" "$@" || echo "[WARN] Game exited with code $?"
+
+    # Check if target is a Windows executable (.exe / PE)
+    local is_win=false
+    case "$gbin" in
+        *.exe|*.EXE) is_win=true ;;
+    esac
+    if [ "$is_win" = false ] && [ -f "$gdir/$gbin" ]; then
+        if file -b "$gdir/$gbin" 2>/dev/null | grep -qi -E "PE32|MS Windows"; then
+            is_win=true
+        fi
+    fi
+
+    local exit_code=0
+    if [ "$is_win" = true ]; then
+        local runner_bin
+        runner_bin=$(find_runner "$gdir" 2>/dev/null || true)
+        if [ -z "$runner_bin" ]; then
+            echo "[ERROR] Runner Windows tidak ditemukan (umu-run, Proton, atau Wine belum terpasang)." >&2
+            echo "        Pasang GE-Proton di ~/.local/share/Steam/compatibilitytools.d/ atau install wine." >&2
+            exit_code=1
+        else
+            local pfx_dir="$gdir/pfx"
+            mkdir -p "$pfx_dir"
+            local appid=""
+            if [ -f "$gdir/steam_appid.txt" ]; then
+                appid=$(tr -dc '0-9' < "$gdir/steam_appid.txt")
+            fi
+            [ -z "$appid" ] && appid="0"
+
+            echo "[INFO] Meluncurkan game Windows via $(basename "$runner_bin")..."
+            echo "[INFO] Wine Prefix terisolasi: $pfx_dir"
+
+            case "$runner_bin" in
+                umu-run)
+                    WINEPREFIX="$pfx_dir" GAMEID="$appid" umu-run "$gdir/$gbin" "$@" || exit_code=$?
+                    ;;
+                *proton*)
+                    STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_INSTALL_PATH:-$HOME/.local/share/Steam}" \
+                    STEAM_COMPAT_DATA_PATH="$gdir" \
+                    STEAM_COMPAT_APP_ID="$appid" \
+                    WINEPREFIX="$pfx_dir" \
+                    "$runner_bin" waitforexitandrun "$gdir/$gbin" "$@" || exit_code=$?
+                    ;;
+                *)
+                    WINEPREFIX="$pfx_dir" "$runner_bin" "$gdir/$gbin" "$@" || exit_code=$?
+                    ;;
+            esac
+        fi
+    else
+        echo "[INFO] Menjalankan $title (Native Linux)..."
+        ./"$gbin" "$@" || exit_code=$?
+    fi
+
+    [ "$exit_code" -ne 0 ] && echo "[WARN] Game exited with code $exit_code"
 
     # Restore CPU governor to powersave
     if [ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
@@ -425,6 +583,7 @@ launch_game() {
 
     clean_stale_locks
     echo "[INFO] Game ditutup. Sesi bersih."
+    return $exit_code
 }
 
 # Sync savegame to remote companion host
@@ -1318,10 +1477,29 @@ search_steam() {
 }
 
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads unlock_game get_remote_host get_gbe_template find_game_binary
+export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads unlock_game get_remote_host get_gbe_template find_game_binary find_runner launch_game
 
 # Top-level Menu
 case "${1:-}" in
+    launch|run|--launch)
+        if [ -n "${2:-}" ]; then
+            l_dir="$2"
+            l_bin="${3:-}"
+            l_title="${4:-$(basename "$l_dir")}"
+            if [ -z "$l_bin" ]; then
+                l_bin=$(find_game_binary "$l_dir" 2>/dev/null || echo "")
+            fi
+            if [ -n "$l_bin" ]; then
+                launch_game "$l_dir" "$l_bin" "$l_title" "${@:5}"
+            else
+                echo "[ERROR] Biner eksekutabel tidak ditemukan di: $l_dir" >&2
+                exit 1
+            fi
+        else
+            echo "Usage: gamectl launch <game_dir> [binary] [title]"
+            exit 1
+        fi
+        ;;
     inject|--inject)
         if [ -n "${2:-}" ]; then
             inject_game "$2" "${3:-}" "${4:-all}"

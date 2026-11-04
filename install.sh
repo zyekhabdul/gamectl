@@ -69,6 +69,26 @@ else
     echo "       Tempatkan biner di ~/.local/share/gbe-fork/windows/release/regular/x86/steam_api.dll"
 fi
 
+# Audit Windows runner compatibility (umu-run, GE-Proton, or Wine)
+RUNNER_INFO=""
+if command -v umu-run >/dev/null 2>&1; then
+    RUNNER_INFO="umu-run ($(command -v umu-run))"
+elif [ -d "$HOME/.local/share/Steam/compatibilitytools.d" ] && find "$HOME/.local/share/Steam/compatibilitytools.d" -mindepth 1 -maxdepth 1 -type d -name "*Proton*" 2>/dev/null | grep -q .; then
+    p_name=$(find "$HOME/.local/share/Steam/compatibilitytools.d" -mindepth 1 -maxdepth 1 -type d -name "*Proton*" | head -n 1 | xargs basename)
+    RUNNER_INFO="Steam GE-Proton ($p_name)"
+elif command -v wine64 >/dev/null 2>&1; then
+    RUNNER_INFO="System Wine ($(command -v wine64))"
+elif command -v wine >/dev/null 2>&1; then
+    RUNNER_INFO="System Wine ($(command -v wine))"
+fi
+
+if [ -n "$RUNNER_INFO" ]; then
+    echo "[VERIFIED] Runner game Windows terdeteksi: $RUNNER_INFO"
+else
+    echo "[WARN] Runner game Windows belum ditemukan (umu-run, GE-Proton, atau wine)."
+    echo "       Tempatkan GE-Proton di ~/.local/share/Steam/compatibilitytools.d/ untuk menjalankan game .exe"
+fi
+
 # Scaffold user configuration directory and templates
 CONFIG_DIR="$HOME/.config/gamectl"
 mkdir -p "$CONFIG_DIR"

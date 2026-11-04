@@ -18,7 +18,7 @@ Memperluas kapabilitas `gamectl` agar mendukung ekosistem game Windows (.exe) da
   - Lakukan backup `.dll` asli ke `.dll.orig` dan pasang shim GBE Windows yang sesuai.
   - DoD: `gamectl inject` berhasil mendeteksi dan menginjeksi game berbasis biner Windows di samping binary Linux native.
 
-- [ ] **Chunk 2: Isolated Proton / Wine Prefix & Headless Runner Wrapper**
+- [x] **Chunk 2: Isolated Proton / Wine Prefix & Headless Runner Wrapper**
   - Implementasikan fungsi pencarian runner di `bin/gamectl` (prioritas: `umu-run` -> `GE-Proton` / `Proton` Steam -> `wine`).
   - Konfigurasikan inisialisasi Wine prefix terisolasi di direktori lokal game (`$GAME_DIR/pfx`).
   - Perbarui `find_game_binary` dan `launch_game` agar mampu meluncurkan biner `.exe` melalui runner terpilih dengan prefix terisolasi.
