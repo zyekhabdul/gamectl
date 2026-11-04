@@ -118,6 +118,23 @@ EOF
     echo "[INFO] Template konfigurasi dibuat: $CONFIG_DIR/wrappers.example"
 fi
 
+if [ ! -f "$CONFIG_DIR/persona.example" ]; then
+    cat <<'EOF' > "$CONFIG_DIR/persona.example"
+# ==============================================================================
+# gamectl - Default LAN Multi-Identity & SteamID Persona
+# ==============================================================================
+# Salin file ini menjadi 'persona' di ~/.config/gamectl/persona untuk mengatur
+# profil default (Nama Pemain & SteamID) saat injeksi GBE Fork.
+#
+account_name=Player
+account_steamid=76561198000000001
+language=english
+# IP broadcast atau IP teman bermain untuk pencarian server LAN/ad-hoc (dipisahkan koma)
+# broadcasts=127.0.0.1,255.255.255.255,192.168.1.50
+EOF
+    echo "[INFO] Template konfigurasi dibuat: $CONFIG_DIR/persona.example"
+fi
+
 if [ ! -f "$CONFIG_DIR/libraries.example" ]; then
     cat <<'EOF' > "$CONFIG_DIR/libraries.example"
 # ==============================================================================

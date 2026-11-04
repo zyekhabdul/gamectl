@@ -30,7 +30,7 @@ Memperluas kapabilitas `gamectl` agar mendukung ekosistem game Windows (.exe) da
   - Sediakan konfigurasi default persist di `~/.config/gamectl/wrappers`.
   - DoD: `launch_game` mampu merangkai wrapper (contoh: `gamemoderun mangohud gamescope -- <runner> <binary>`) secara deterministik saat diaktifkan.
 
-- [ ] **Chunk 4: LAN Multi-Identity & SteamID Manager (`gamectl set-id`)**
+- [x] **Chunk 4: LAN Multi-Identity & SteamID Manager (`gamectl set-id`)**
   - Buat subcommand `gamectl set-id <player_name> [steamid]` dan helper generator SteamID acak yang valid.
   - Mutasi otomatis `steam_settings/configs.user.ini` pada game target atau direktori aktif.
   - Sediakan opsi scaffolding `steam_settings/custom_broadcasts.txt` untuk deteksi IP LAN teman bermain.

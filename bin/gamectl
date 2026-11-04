@@ -433,11 +433,29 @@ preview_game() {
         echo " Active Profile: Default (Native / Mesa GL Thread)"
     fi
 
+    echo "--------------------------------------------------------"
+    echo " LAN MULTIPLAYER & IDENTITY (GBE FORK)"
+    local p_info
+    p_info=$(get_game_persona "$gdir")
+    local p_name p_id
+    p_name=$(echo "$p_info" | cut -d'|' -f1)
+    p_id=$(echo "$p_info" | cut -d'|' -f2)
+    echo " Player Name  : ${p_name:-Player}"
+    echo " SteamID64    : ${p_id:-Auto-Generated / Default}"
+    if [ -f "$gdir/steam_settings/custom_broadcasts.txt" ]; then
+        local bc_count
+        bc_count=$(grep -v -E '^[[:space:]]*(#|$)' "$gdir/steam_settings/custom_broadcasts.txt" 2>/dev/null | wc -l)
+        echo " Broadcast IPs: $bc_count peer terkonfigurasi"
+    else
+        echo " Broadcast IPs: Subnet default (127.0.0.1, 255.255.255.255)"
+    fi
+
     echo " Total Size   : $(du -sh "$gdir" 2>/dev/null | cut -f1)"
     echo "--------------------------------------------------------"
     echo " ACTION KEYS:"
     echo " <ENTER>       : Launch Game"
     echo " <CTRL-O>      : Configure Runtime Wrappers (GameMode/HUD/FSR)"
+    echo " <CTRL-P>      : Configure LAN Player Persona & SteamID"
     local rhost
     rhost=$(get_remote_host)
     if [ -n "$rhost" ]; then
@@ -849,6 +867,51 @@ sync_to_tuf() {
     sync_save_remote "$@"
 }
 
+# Generate a valid 17-digit SteamID64 for individual accounts (76561197960265728 + 31-bit random int)
+generate_steamid64() {
+    local base=76561197960265728
+    local rand=""
+    if [ -r /dev/urandom ] && command -v od >/dev/null 2>&1; then
+        local raw
+        raw=$(od -An -N4 -tu4 /dev/urandom 2>/dev/null | tr -d ' ')
+        if [ -n "$raw" ] && [ "$raw" -gt 0 ] 2>/dev/null; then
+            rand=$(( raw % 2000000000 + 100000 ))
+        fi
+    fi
+    if [ -z "$rand" ]; then
+        local r1=$(( (RANDOM << 16) | RANDOM ))
+        rand=$(( (r1 & 0x7FFFFFFF) % 2000000000 + 100000 ))
+    fi
+    echo $(( base + rand ))
+}
+
+# Resolve game LAN persona (account_name, account_steamid, language)
+get_game_persona() {
+    local gdir="$1"
+    local p_name=""
+    local p_id=""
+    local p_lang="english"
+
+    if [ -f "$gdir/steam_settings/configs.user.ini" ]; then
+        p_name=$(grep -E '^[[:space:]]*account_name[[:space:]]*=' "$gdir/steam_settings/configs.user.ini" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_name[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+        p_id=$(grep -E '^[[:space:]]*account_steamid[[:space:]]*=' "$gdir/steam_settings/configs.user.ini" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_steamid[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+        p_lang=$(grep -E '^[[:space:]]*language[[:space:]]*=' "$gdir/steam_settings/configs.user.ini" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*language[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+    fi
+
+    if [ -z "$p_name" ] && [ -f "$HOME/.config/gamectl/persona" ]; then
+        p_name=$(grep -E '^[[:space:]]*account_name[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_name[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+    fi
+    if [ -z "$p_id" ] && [ -f "$HOME/.config/gamectl/persona" ]; then
+        p_id=$(grep -E '^[[:space:]]*account_steamid[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_steamid[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+    fi
+
+    [ -z "$p_name" ] && p_name="${USER:-Player}"
+    [ -z "$p_id" ] && p_id="${GAMECTL_STEAMID:-}"
+    [ -z "$p_lang" ] && p_lang="english"
+
+    echo "$p_name|$p_id|$p_lang"
+}
+
 # Inject GBE Fork emulator and portable saves into a game folder
 inject_game() {
     local target_dir="$1"
@@ -1035,8 +1098,29 @@ inject_game() {
 
     # 3. Setup steam_settings and configs.user.ini
     mkdir -p "$target_dir/steam_settings"
-    local steamid="${GAMECTL_STEAMID:-76561198609877617}"
-    local user_name="${USER:-Player}"
+    local user_name=""
+    local steamid=""
+
+    # Check existing game persona or global persona
+    if [ -f "$target_dir/steam_settings/configs.user.ini" ]; then
+        user_name=$(grep -E '^[[:space:]]*account_name[[:space:]]*=' "$target_dir/steam_settings/configs.user.ini" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_name[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+        steamid=$(grep -E '^[[:space:]]*account_steamid[[:space:]]*=' "$target_dir/steam_settings/configs.user.ini" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_steamid[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+    fi
+    if [ -z "$user_name" ] && [ -f "$HOME/.config/gamectl/persona" ]; then
+        user_name=$(grep -E '^[[:space:]]*account_name[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_name[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+    fi
+    if [ -z "$steamid" ] && [ -f "$HOME/.config/gamectl/persona" ]; then
+        steamid=$(grep -E '^[[:space:]]*account_steamid[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_steamid[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+    fi
+    [ -z "$user_name" ] && user_name="${USER:-Player}"
+    if [ -z "$steamid" ]; then
+        if [ -n "${GAMECTL_STEAMID:-}" ]; then
+            steamid="$GAMECTL_STEAMID"
+        else
+            steamid=$(generate_steamid64)
+        fi
+    fi
+
     cat <<EOF > "$target_dir/steam_settings/configs.user.ini"
 [user::general]
 account_name=$user_name
@@ -1046,6 +1130,16 @@ language=english
 [user::saves]
 local_save_path=./saves
 EOF
+
+    # Scaffold custom_broadcasts.txt if missing
+    if [ ! -f "$target_dir/steam_settings/custom_broadcasts.txt" ]; then
+        cat <<EOF > "$target_dir/steam_settings/custom_broadcasts.txt"
+# GBE Fork LAN Custom Broadcast IP list
+# Tambahkan IP peer atau broadcast subnet (satu IP per baris)
+127.0.0.1
+255.255.255.255
+EOF
+    fi
 
     # If shim is in a subfolder, link steam_settings beside it as per GBE specification
     if [ "$primary_shim_dir" != "$target_dir" ] && [ -d "$primary_shim_dir" ]; then
@@ -1076,6 +1170,215 @@ EOF
     fi
 
     echo "[VERIFIED] Game berhasil diinjeksi GBE Fork (Platform: $target_platform, Arsitektur: $arch, Save: ./saves, AppID: ${appid:-None})"
+}
+
+# Set LAN Player Name, SteamID, and broadcast IPs for GBE Fork co-op
+set_id() {
+    local player_name="${1:-}"
+    shift || true
+
+    if [ -z "$player_name" ]; then
+        echo "Usage: gamectl set-id <player_name> [steamid] [target_dir] [--broadcast <ip>] [--global]" >&2
+        return 1
+    fi
+
+    local steamid=""
+    local target_dir=""
+    local broadcast_ips=()
+    local save_global=false
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --global)
+                save_global=true
+                shift
+                ;;
+            --broadcast)
+                if [ -n "${2:-}" ]; then
+                    broadcast_ips+=("$2")
+                    shift 2
+                else
+                    shift
+                fi
+                ;;
+            --broadcast=*)
+                broadcast_ips+=("${1#*=}")
+                shift
+                ;;
+            *)
+                if [ -z "$steamid" ] && { [[ "$1" =~ ^7656119[0-9]{10}$ ]] || [ "$1" = "auto" ] || [ "$1" = "random" ]; }; then
+                    if [ "$1" = "auto" ] || [ "$1" = "random" ]; then
+                        steamid=$(generate_steamid64)
+                    else
+                        steamid="$1"
+                    fi
+                elif [ -z "$target_dir" ] && [ -d "$1" ]; then
+                    target_dir="$1"
+                elif [ -z "$steamid" ] && [[ "$1" =~ ^[0-9]+$ ]] && [ ${#1} -eq 17 ]; then
+                    steamid="$1"
+                else
+                    if [ -z "$target_dir" ]; then
+                        target_dir="$1"
+                    fi
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    # Generate steamid if still empty
+    if [ -z "$steamid" ]; then
+        steamid=$(generate_steamid64)
+    fi
+
+    # Determine target directory
+    if [ -z "$target_dir" ]; then
+        if [ -d "./steam_settings" ] || [ -f "./steam_appid.txt" ]; then
+            target_dir="."
+        else
+            save_global=true
+        fi
+    fi
+
+    # Save to global config if requested or if no game directory identified
+    if [ "$save_global" = true ]; then
+        mkdir -p "$HOME/.config/gamectl"
+        cat <<EOF > "$HOME/.config/gamectl/persona"
+# gamectl global persona
+account_name=$player_name
+account_steamid=$steamid
+language=english
+EOF
+        echo "[INFO] Identitas global tersimpan di ~/.config/gamectl/persona ($player_name | $steamid)"
+    fi
+
+    if [ -n "$target_dir" ] && [ -d "$target_dir" ]; then
+        target_dir="$(cd "$target_dir" && pwd)"
+        mkdir -p "$target_dir/steam_settings"
+
+        local ini_file="$target_dir/steam_settings/configs.user.ini"
+        if [ -f "$ini_file" ]; then
+            if grep -q -E '^[[:space:]]*account_name[[:space:]]*=' "$ini_file"; then
+                sed -i -E "s/^[[:space:]]*account_name[[:space:]]*=.*/account_name=$player_name/" "$ini_file"
+            else
+                echo "account_name=$player_name" >> "$ini_file"
+            fi
+            if grep -q -E '^[[:space:]]*account_steamid[[:space:]]*=' "$ini_file"; then
+                sed -i -E "s/^[[:space:]]*account_steamid[[:space:]]*=.*/account_steamid=$steamid/" "$ini_file"
+            else
+                echo "account_steamid=$steamid" >> "$ini_file"
+            fi
+        else
+            cat <<EOF > "$ini_file"
+[user::general]
+account_name=$player_name
+account_steamid=$steamid
+language=english
+
+[user::saves]
+local_save_path=./saves
+EOF
+        fi
+
+        # Handle custom_broadcasts.txt
+        local bc_file="$target_dir/steam_settings/custom_broadcasts.txt"
+        if [ ! -f "$bc_file" ]; then
+            cat <<EOF > "$bc_file"
+# GBE Fork LAN Custom Broadcast IP list
+# Tambahkan IP peer atau broadcast subnet (satu IP per baris)
+127.0.0.1
+255.255.255.255
+EOF
+        fi
+
+        if [ ${#broadcast_ips[@]} -gt 0 ]; then
+            for ip in "${broadcast_ips[@]}"; do
+                IFS=',' read -ra split_ips <<< "$ip"
+                for s_ip in "${split_ips[@]}"; do
+                    s_ip=$(echo "$s_ip" | tr -d ' ')
+                    [ -z "$s_ip" ] && continue
+                    if ! grep -q -F "$s_ip" "$bc_file" 2>/dev/null; then
+                        echo "$s_ip" >> "$bc_file"
+                        echo "[INFO] Ditambahkan broadcast IP: $s_ip"
+                    fi
+                done
+            done
+        fi
+
+        # Ensure symlinks to subfolders if shim exists in subdirectory
+        for shim_candidate in "$target_dir"/*/*.dll "$target_dir"/*/*/*.dll "$target_dir"/*/*.so "$target_dir"/*/*/*.so; do
+            if [ -f "$shim_candidate" ]; then
+                local s_dir
+                s_dir="$(dirname "$shim_candidate")"
+                if [ "$s_dir" != "$target_dir" ] && [ -d "$s_dir" ]; then
+                    ln -sfn "$target_dir/steam_settings" "$s_dir/steam_settings" 2>/dev/null || true
+                fi
+            fi
+        done
+
+        echo "[VERIFIED] Identitas LAN game diperbarui di $target_dir:"
+        echo "           Nama Pemain : $player_name"
+        echo "           SteamID64   : $steamid"
+        echo "           Config File : $ini_file"
+    fi
+}
+
+# Interactive TUI configurator for LAN persona & SteamID
+set_id_interactive() {
+    local target_dir="${1:-}"
+    local title="${2:-}"
+    if [ -z "$target_dir" ] || [ ! -d "$target_dir" ]; then
+        echo "[ERROR] Direktori game tidak valid: $target_dir" >&2
+        return 1
+    fi
+    target_dir="$(cd "$target_dir" && pwd)"
+    [ -z "$title" ] && title="$(basename "$target_dir")"
+
+    local p_info
+    p_info=$(get_game_persona "$target_dir")
+    local cur_name cur_id cur_lang
+    cur_name=$(echo "$p_info" | cut -d'|' -f1)
+    cur_id=$(echo "$p_info" | cut -d'|' -f2)
+    cur_lang=$(echo "$p_info" | cut -d'|' -f3)
+
+    echo ""
+    echo "========================================================"
+    echo " KONFIGURASI IDENTITAS LAN & STEAMID (GBE FORK)"
+    echo "========================================================"
+    echo " Target Game   : $title"
+    echo " Direktori     : $target_dir"
+    echo " Nama Pemain   : ${cur_name:-[Belum diset]}"
+    echo " SteamID64     : ${cur_id:-[Belum diset]}"
+    echo "--------------------------------------------------------"
+
+    read -r -p "Nama Pemain LAN [${cur_name}]: " in_name
+    [ -z "$in_name" ] && in_name="$cur_name"
+    [ -z "$in_name" ] && in_name="${USER:-Player}"
+
+    local suggested_id
+    suggested_id=$(generate_steamid64)
+    read -r -p "SteamID64 (Ketik 'random' untuk acak baru) [${cur_id:-$suggested_id}]: " in_id
+    [ -z "$in_id" ] && in_id="${cur_id:-$suggested_id}"
+    if [ "$in_id" = "random" ] || [ "$in_id" = "auto" ]; then
+        in_id=$(generate_steamid64)
+    fi
+
+    echo ""
+    echo "Konfigurasi Peer Broadcast LAN (Opsional):"
+    echo "Ketik IP LAN teman (misal: 192.168.1.50) atau tekan Enter untuk lewati."
+    read -r -p "Peer/Broadcast IP: " in_bc
+
+    read -r -p "Simpan juga sebagai identitas default global? (y/N): " in_glob
+
+    local extra_args=()
+    [ -n "$in_bc" ] && extra_args+=(--broadcast "$in_bc")
+    case "$in_glob" in
+        y|Y|yes|YES) extra_args+=(--global) ;;
+    esac
+
+    set_id "$in_name" "$in_id" "$target_dir" "${extra_args[@]}"
+    echo ""
+    read -r -p "Tekan [ENTER] untuk kembali ke pustaka..."
 }
 
 # Fetch and generate steam_settings/DLC.txt for GBE Fork
@@ -1504,11 +1807,12 @@ library_menu() {
         selection=$(scan_installed_games | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
-            --header="GAMECTL LIBRARY (Enter: Launch | Ctrl-O: Wrappers | Ctrl-I: Inject GBE | Ctrl-S: Sync | Ctrl-B: Backup)" \
+            --header="GAMECTL LIBRARY (Enter: Launch | Ctrl-O: Wrappers | Ctrl-P: Persona | Ctrl-I: Inject | Ctrl-S: Sync | Ctrl-B: Backup)" \
             --prompt="Game > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:wrap \
             --bind="ctrl-o:execute($SELF_BIN configure-wrappers {4} {2})+reload($SELF_BIN --list)" \
+            --bind="ctrl-p:execute($SELF_BIN set-id-interactive {4} {2})+reload($SELF_BIN --list)" \
             --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk kembali ke pustaka...')+reload($SELF_BIN --list)" \
             --bind="ctrl-s:execute($SELF_BIN --sync {4} {2}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
             --bind="ctrl-b:execute($SELF_BIN --backup {4}; read -n 1 -s -r -p 'Tekan tombol apa saja untuk lanjut...')" \
@@ -1743,10 +2047,29 @@ cli_launch() {
 }
 
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads unlock_game get_remote_host get_gbe_template find_game_binary find_runner launch_game build_wrapper_command configure_wrappers cli_launch
+export -f preview_game sync_save_remote sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads unlock_game get_remote_host get_gbe_template find_game_binary find_runner launch_game build_wrapper_command configure_wrappers cli_launch generate_steamid64 get_game_persona set_id set_id_interactive
 
 # Top-level Menu
 case "${1:-}" in
+    set-id)
+        if [ -n "${2:-}" ]; then
+            set_id "${@:2}"
+        else
+            echo "Usage: gamectl set-id <player_name> [steamid] [game_dir] [--broadcast <ip>] [--global]"
+            exit 1
+        fi
+        ;;
+    generate-steamid)
+        generate_steamid64
+        ;;
+    set-id-interactive)
+        if [ -n "${2:-}" ]; then
+            set_id_interactive "$2" "${3:-}"
+        else
+            echo "Usage: gamectl set-id-interactive <game_dir> [title]"
+            exit 1
+        fi
+        ;;
     launch|run|--launch)
         if [ -n "${2:-}" ]; then
             cli_launch "${@:2}"
@@ -1850,6 +2173,8 @@ Usage:
                       Buka game di Steam resmi tanpa unduh file (Full DLC)
   gamectl inject <dir> [appid] [--no-sync|--all]
                       Injeksi GBE Fork standalone & portable save
+  gamectl set-id <player> [steamid] [dir] [--broadcast <ip>] [--global]
+                      Atur nama akun & SteamID LAN untuk co-op offline tanpa bentrok
   gamectl fetch-dlc <dir> [appid] Unduh & tulis daftar DLC ke steam_settings/DLC.txt
   gamectl sync-steam <appid> [title] [dir] Sinkronisasi Steam Client & SLSsteam full DLC
   gamectl --search    Cari game di Steam Store & audit ProtonDB rating
