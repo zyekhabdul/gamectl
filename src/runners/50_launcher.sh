@@ -37,6 +37,17 @@ launch_game() {
         fi
     fi
 
+    # Local state cleanup helper & signal trap
+    _restore_launch_state() {
+        if [ -n "$prev_governor" ] && [ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
+            echo "$prev_governor" | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+        fi
+        clean_stale_locks
+    }
+    trap '_restore_launch_state; trap - INT TERM EXIT; return 130 2>/dev/null || exit 130' INT
+    trap '_restore_launch_state; trap - INT TERM EXIT; return 143 2>/dev/null || exit 143' TERM
+    trap '_restore_launch_state' EXIT
+
     if [ ${#wrappers[@]} -gt 0 ]; then
         echo "[INFO] Wrapper aktif: ${wrappers[*]}"
     fi
@@ -99,12 +110,10 @@ launch_game() {
 
     [ "$exit_code" -ne 0 ] && echo "[WARN] Game exited with code $exit_code"
 
-    # Restore CPU governor to pre-launch state
-    if [ -n "$prev_governor" ] && [ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
-        echo "$prev_governor" | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
-    fi
+    # Restore CPU governor to pre-launch state and clean locks
+    _restore_launch_state
+    trap - INT TERM EXIT
 
-    clean_stale_locks
     echo "[INFO] Game ditutup. Sesi bersih."
     return $exit_code
 }
