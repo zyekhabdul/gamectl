@@ -52,6 +52,11 @@ src/
 for f in src/*/*.sh src/main.sh bin/gamectl scripts/build.sh; do bash -n "$f" || exit 1; done
 ```
 
+### Jalankan Test Suite Otomatis (Regression & Integrity Harness)
+```bash
+./tests/test_cli.sh
+```
+
 ### Jalankan Diagnostik Sistem
 ```bash
 bin/gamectl doctor
