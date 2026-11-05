@@ -40,7 +40,7 @@ Scope of Work:
   3. Refactor `unlock_interactive` di `src/steam/30_downloader.sh`: hilangkan raw `clear` dan `read -p`, sediakan validasi numeric AppID yang bersih tanpa screen flashing.
   4. Perbarui CLI command dispatcher di `src/main.sh`: tambahkan alias deskriptif `entitle` dan `adopt-steam` di samping `unlock`, serta perbarui pesan help CLI.
 
-### Chunk 3: Catalog Direct Action Shortcuts & Ergonomic Hotkeys
+### Chunk 3: Catalog Direct Action Shortcuts & Ergonomic Hotkeys [DONE] (`4412c5f`)
 - Target File: `src/tui/70_dashboard.sh`
 - Runtutan Eksekusi Teknis:
   1. Tambahkan binding `--bind` pada `fzf` Steam Catalog:
