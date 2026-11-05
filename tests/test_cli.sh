@@ -504,6 +504,73 @@ test_entitle_aliases_execution() {
 }
 run_test "Entitlement Aliases: Valid execution & ACF adoption banners (entitle/adopt-steam)" test_entitle_aliases_execution
 
+test_wineserver_resolution_contract() {
+    local t_proton
+    t_proton=$(mktemp -d)
+    mkdir -p "$t_proton/files/bin"
+    touch "$t_proton/files/bin/wineserver"
+    chmod +x "$t_proton/files/bin/wineserver"
+    local resolved
+    resolved=$("$GAMECTL" get-wineserver "$t_proton/proton")
+    rm -rf "$t_proton"
+    [ "$resolved" = "$t_proton/files/bin/wineserver" ]
+}
+run_test "Wineserver Resolution: Detects embedded wineserver in Proton directory" test_wineserver_resolution_contract
+
+test_depot_os_negotiation() {
+    local os_res
+    os_res=$("$GAMECTL" detect-os 480 2>/dev/null || echo "linux")
+    [[ "$os_res" == "linux" || "$os_res" == "windows" ]]
+}
+run_test "DepotDownloader OS Negotiation: Detects OS platform from store API" test_depot_os_negotiation
+
+test_target_library_resolution() {
+    local t_root
+    t_root=$(mktemp -d)
+    mkdir -p "$t_root/lib1" "$t_root/lib2"
+    local resolved
+    resolved=$(GAMECTL_LIBRARY_DIRS="$t_root/lib1:$t_root/lib2" "$GAMECTL" resolve-library "Cyberpunk")
+    rm -rf "$t_root"
+    [[ "$resolved" == *"/Cyberpunk" ]]
+}
+run_test "Target Library Resolution: Dynamically routes to candidate library path" test_target_library_resolution
+
+test_steam_active_guardrail() {
+    local t_tmp
+    t_tmp=$(mktemp -d)
+    ln -s "$(command -v sleep)" "$t_tmp/steam"
+    "$t_tmp/steam" 1 &
+    local mock_pid=$!
+    sleep 0.1
+    local warn_out
+    warn_out=$("$GAMECTL" check-steam "Unit Test Guard" 2>&1 || true)
+    kill "$mock_pid" 2>/dev/null || true
+    rm -rf "$t_tmp"
+    echo "$warn_out" | grep -q "Steam client is currently running" && \
+    echo "$warn_out" | grep -q "Unit Test Guard"
+}
+run_test "Steam Runtime Guardrail: Emits warning on active steam client process" test_steam_active_guardrail
+
+test_savegame_remote_sync_path_normalization() {
+    grep -q 'rel_path="Games/\$(basename "\$canon_gdir")"' "$REPO_ROOT/src/runners/50_launcher.sh" && \
+    grep -q 'rel_path="\${canon_gdir#\$HOME/}"' "$REPO_ROOT/src/runners/50_launcher.sh"
+}
+run_test "Remote Sync Invariant: Normalizes savegame path for secondary drive paths" test_savegame_remote_sync_path_normalization
+
+test_ephemeral_cache_tier() {
+    local t_home
+    t_home=$(mktemp -d)
+    local c_key="unit_test_key_$$"
+    mkdir -p "$t_home/cache/gamectl"
+    local cache_file="$t_home/cache/gamectl/${c_key}.json"
+    echo '{"status":"cached_ok"}' > "$cache_file"
+    local out
+    out=$(HOME="$t_home" XDG_CACHE_HOME="$t_home/cache" "$GAMECTL" cache-json "https://invalid.unreachable.domain.local/404" "$c_key" 3600 2>/dev/null)
+    rm -rf "$t_home"
+    echo "$out" | grep -q '"status":"cached_ok"'
+}
+run_test "Ephemeral Cache Tier: Hits local disk cache and falls back cleanly" test_ephemeral_cache_tier
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

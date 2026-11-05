@@ -51,24 +51,27 @@ A forensic systems audit of the `gamectl` codebase demonstrates fundamental supe
 ---
 
 ### DEFECT-02: Wineserver Lingering & Prefix Lock Contention
-- **Status**: `[ RESOLVED in Work Packet 9 ]`
+- **Status**: `[ RESOLVED in Work Packet 9 & HARDENED in Work Packet 11 ]`
 - **Severity**: `HIGH`
-- **Source Location**: `src/runners/50_launcher.sh` (`launch_game`, `game_controller_hud`)
+- **Source Location**: `src/runners/40_wrappers.sh` (`get_wineserver_bin`), `src/runners/50_launcher.sh` (`launch_game`, `game_controller_hud`)
 - **Failure Mechanism**:
   When a Windows game runs with an isolated prefix `$gdir/pfx`, Wine spawns a local `wineserver` daemon that manages the registry and file locking. When `game_controller_hud` killed the process via SIGKILL or upon crash:
   ```bash
   kill -9 "$game_pid"
   ```
-  `wineserver` frequently lingered in the background for 3-10 seconds or hung indefinitely.
+  `wineserver` frequently lingered in the background for 3-10 seconds or hung indefinitely. Furthermore, calling bare `/usr/bin/wineserver` failed on Proton-exclusive gaming distros (Bazzite, SteamOS, ChimeraOS) where host wine packages are not installed.
 - **Impact**:
-  Save backups or subsequent `gamectl launch` executions failed due to locked or corrupted registry hives.
+  Save backups or subsequent `gamectl launch` executions failed due to locked or corrupted registry hives, or wineserver commands silently failed to execute.
 - **Remediation Implemented**:
-  Integrated explicit `wineserver` synchronization and termination in launcher exit traps and HUD:
+  1. Built `get_wineserver_bin` in `src/runners/40_wrappers.sh` resolving embedded wineserver directly from active Proton runtimes (`files/bin/wineserver`, `dist/bin/wineserver`, `bin/wineserver`), host `$PATH`, or highest local GE-Proton directory.
+  2. Integrated explicit `wineserver` synchronization and termination in launcher exit traps and HUD using the resolved binary:
   ```bash
-  if [ "$is_win" = true ]; then
-      WINEPREFIX="$gdir/pfx" wineserver -w 2>/dev/null || true # Graceful flush
+  local ws_bin
+  ws_bin="$(get_wineserver_bin "${runner_bin:-}" 2>/dev/null || true)"
+  if [ -n "$ws_bin" ] && [ "$is_win" = true ]; then
+      WINEPREFIX="$gdir/pfx" "$ws_bin" -w 2>/dev/null || true # Graceful flush
       if [ "$force_kill" = true ]; then
-          WINEPREFIX="$gdir/pfx" wineserver -k 2>/dev/null || true # Hard terminate
+          WINEPREFIX="$gdir/pfx" "$ws_bin" -k 2>/dev/null || true # Hard terminate
       fi
   fi
   ```
@@ -141,16 +144,23 @@ A forensic systems audit of the `gamectl` codebase demonstrates fundamental supe
   ├─ Action 1.2: Inject PipeWire & PulseAudio latency environment [RESOLVED]
   └─ Action 1.3: P2P multiplayer compatibility & DLL overrides engine [RESOLVED]
 
-[ Phase 2: Handheld Expansion & Legal Shielding ] - [ ACTIVE ]
-  ├─ Action 2.1: Legal shielding & defensive technical nomenclature
-  ├─ Action 2.2: Turnkey web installer & Arch AUR packaging
-  └─ Action 2.3: Steam Deck shortcuts.vdf & artwork pipeline
+[ Phase 2: Handheld Expansion & Legal Shielding ] - [ COMPLETED ]
+  ├─ Action 2.1: Legal shielding & defensive technical nomenclature [RESOLVED]
+  ├─ Action 2.2: Turnkey web installer & Arch AUR packaging [RESOLVED]
+  └─ Action 2.3: Steam Deck shortcuts.vdf & artwork pipeline [RESOLVED]
 
-[ Phase 3: Linux Systems Remediation (Stage 2) ] - [ PLANNED ]
-  ├─ Action 3.1: systemd-run / cgroups v2 scope process tree isolation
-  ├─ Action 3.2: PRIME dGPU auto-detection & wrapper flags
-  ├─ Action 3.3: Bubblewrap (bwrap) sandboxing profile
-  └─ Action 3.4: Single-pass batching for library scanner
+[ Phase 3: Global Ecosystem & Multi-Drive Hardening (Work Packet 11) ] - [ COMPLETED ]
+  ├─ Action 3.1: Unified Wineserver lifecycle resolution from Proton runtimes [RESOLVED]
+  ├─ Action 3.2: Dual-OS DepotDownloader negotiation & target library routing [RESOLVED]
+  ├─ Action 3.3: Active Steam runtime memory lock guardrail [RESOLVED]
+  ├─ Action 3.4: Savegame remote sync path normalization for secondary drives [RESOLVED]
+  └─ Action 3.5: Ephemeral caching tier for Steam Store & ProtonDB [RESOLVED]
+
+[ Phase 4: Linux Systems Remediation (Stage 2) ] - [ PLANNED ]
+  ├─ Action 4.1: systemd-run / cgroups v2 scope process tree isolation
+  ├─ Action 4.2: PRIME dGPU auto-detection & wrapper flags
+  ├─ Action 4.3: Bubblewrap (bwrap) sandboxing profile
+  └─ Action 4.4: Single-pass batching for library scanner
 ```
 
 ---
@@ -162,7 +172,7 @@ A forensic systems audit of the `gamectl` codebase demonstrates fundamental supe
 | **Wineserver Teardown** | Terminate game via `game_controller_hud` | `pgrep -f wineserver` for target game prefix returns empty. |
 | **Audio Latency** | `pw-top` during game runtime | Audio driver quantum locked to `256` or `512` samples. |
 | **Mod Overrides Hook** | `gamectl mod-overrides <dir>` | DLL overrides detected and Spacewar AppID 480 verified. |
-| **Regression Suite** | `./tests/test_cli.sh` | All 36+ automated tests pass with `Exit code 0`. |
+| **Regression Suite** | `./tests/test_cli.sh` | All 50+ automated tests pass with `Exit code 0`. |
 
 ---
 **Document Status**: `[ RATIFIED & MAINTAINED ]`  

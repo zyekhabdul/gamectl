@@ -18,18 +18,18 @@
 src/
 ├── core/
 │   ├── 00_header.sh       # SSoT Constants, Tokyo Night ANSI styling palette, FZF base configuration
-│   └── 10_utils.sh        # Decentralized LAN templates, remote host, save snapshots, binary discovery
+│   └── 10_utils.sh        # Decentralized LAN templates, remote host, save snapshots, binary discovery, ephemeral cache tier
 ├── steam/
-│   ├── 20_discovery.sh    # Multi-path Steam root discovery, manifest scanning, and desktop launcher generation
+│   ├── 20_discovery.sh    # Multi-path Steam root discovery, manifest scanning, active steam process guard, desktop launcher
 │   ├── 25_identity.sh     # SteamID64 generation, active SteamID resolution, persona configuration, set-id
-│   └── 30_downloader.sh   # Asset fetching, multi-arch DepotDownloader engine, downloads monitor, entitlement sync
+│   └── 30_downloader.sh   # Dynamic multi-drive library routing, dual-OS DepotDownloader negotiation, entitlement sync
 ├── runners/
-│   ├── 40_wrappers.sh     # Windows runner, detect_dll_overrides, GE-Proton manager, manage_prefix (pfx)
-│   └── 50_launcher.sh     # Prefix isolation, P2P compatibility (setup_onlinefix), PipeWire audio, wineserver guard
+│   ├── 40_wrappers.sh     # Windows runner, wineserver resolver, detect_dll_overrides, GE-Proton manager, manage_prefix
+│   └── 50_launcher.sh     # Prefix isolation, normalized remote sync, P2P compatibility, PipeWire audio, wineserver guard
 ├── diagnostics/
-│   └── 60_doctor.sh       # 7-layer health diagnostics, hardware audit, and query_protondb
+│   └── 60_doctor.sh       # 7-layer health diagnostics, hardware audit, and cached query_protondb
 ├── tui/
-│   └── 70_dashboard.sh    # Terminal previews, interactive dashboard hub, library menu, Steam Store search
+│   └── 70_dashboard.sh    # Terminal previews with cache tier, interactive dashboard hub, library menu, Steam Store search
 └── main.sh                # Subshell exports (export -f) and top-level CLI command dispatcher
 ```
 
@@ -71,3 +71,25 @@ The Entitlement & ACF adoption engine (`src/steam/30_downloader.sh`, CLI: `gamec
 2. **Community Steam Input**: Activates Steam Input mapping, enabling native gyro, trackpad, and custom community controller layouts on handhelds (Steam Deck, ROG Ally, Legion Go).
 3. **Vulkan Shader Pre-Caching**: Instructs Steam to pull and pre-compile official Vulkan pipeline shaders from Valve CDN, preventing runtime stutter during gameplay.
 4. **Full DLC Activation**: Automatically resolves and registers DLC IDs via Steam Web API into `~/.config/SLSsteam/config.yaml` and creates atomic `appmanifest_<appid>.acf` manifests.
+
+---
+
+## 5. Global Ecosystem & Multi-Drive Hardening Architecture
+
+1. **Unified Wineserver Resolution (`get_wineserver_bin`)**:
+   Automatically detects embedded `wineserver` executables from active Proton releases (`files/bin/wineserver`, `dist/bin/wineserver`, `bin/wineserver`) and local GE-Proton installations. Operates with 100% independence from host package availability on immutable/Proton-only gaming distros (Bazzite, SteamOS, ChimeraOS).
+
+2. **Dual-OS DepotDownloader Negotiation (`detect_app_platform_os`)**:
+   Interrogates Steam Store metadata for target AppIDs. When `platforms.windows == true && platforms.linux == false`, automatically routes downloads with `-os windows`, resolving the "no depots found" error for Windows-exclusive titles.
+
+3. **Dynamic Multi-Drive Library Routing (`resolve_target_library_dir`)**:
+   Scans configured paths in `~/.config/gamectl/libraries`, `$GAMECTL_LIBRARY_DIRS`, and `$HOME/Games`. Dynamically measures available storage using `df -PB 1M` and routes installations to the drive partition with the largest free capacity.
+
+4. **Active Steam Process Guardrail (`check_steam_active`)**:
+   Verifies whether the `steam` client is active prior to mutating binary `shortcuts.vdf` or `appmanifest_*.acf` files, preventing memory lock conflicts and silent client overwrites.
+
+5. **Normalized Secondary Drive Remote Sync (`sync_save_remote`)**:
+   Normalizes game directory paths stored on secondary drives (`/mnt/*`, `/media/*`) into clean remote relative paths (`Games/<Title>/saves/`), preventing malformed path creation on remote companion hosts.
+
+6. **Ephemeral High-Throughput JSON Cache Tier (`fetch_cached_json`)**:
+   Implements disk-backed TTL-controlled (default 3600s) atomic JSON caching for Steam Store details and ProtonDB summaries at `${XDG_CACHE_HOME:-$HOME/.cache}/gamectl/`, eliminating network latency and fzf preview stutter.

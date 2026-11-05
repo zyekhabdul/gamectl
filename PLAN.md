@@ -76,24 +76,27 @@ Scope of Work:
   3. Integrasikan `fetch_cached_json` ke `query_protondb` di `src/diagnostics/60_doctor.sh`.
 - DoD: Navigasi preview store katalog instan (<10ms) untuk item ter-cache dan tidak freeze saat offline.
 
-### Chunk 6: Machine Verification & Automated Regression Suite [PENDING]
-- Target Files: `tests/test_cli.sh`, `scripts/build.sh`, `README.md`, `DEVELOPMENT.md`
+### Chunk 6: Machine Verification & Automated Regression Suite [DONE]
+- Target Files: `tests/test_cli.sh`, `scripts/build.sh`, `README.md`, `DEVELOPMENT.md`, `remediation.md`
 - Runtutan Eksekusi Teknis:
-  1. Tambahkan 5 test assertions baru di `tests/test_cli.sh`:
+  1. Tambahkan 6 test assertions baru di `tests/test_cli.sh`:
      - Assertion 1: `get_wineserver_bin` mengembalikan path executable Proton wineserver.
-     - Assertion 2: `download_game` menerima dan meneruskan parameter `--os windows` dan `--os linux`.
+     - Assertion 2: `detect_app_platform_os` mengenali platform OS dari Steam Store API.
      - Assertion 3: `resolve_target_library_dir` merutekan folder ke library berkapasitas terbesar.
-     - Assertion 4: `sync_save_remote` menormalisasi path non-$HOME dengan benar.
-     - Assertion 5: `fetch_cached_json` membaca cache lokal pada pemanggilan kedua dalam jendela TTL.
+     - Assertion 4: `check_steam_active` memberikan warning pada proses aktif Steam client.
+     - Assertion 5: `sync_save_remote` menormalisasi path non-$HOME dengan benar.
+     - Assertion 6: `fetch_cached_json` membaca cache lokal pada pemanggilan kedua dalam jendela TTL.
   2. Jalankan `./scripts/build.sh` dan `./scripts/build.sh --check`.
-  3. Jalankan regression suite `./tests/test_cli.sh` dan pastikan seluruh test assertions (49/49) lulus dengan Exit Code 0.
+  3. Jalankan regression suite `./tests/test_cli.sh` dan pastikan seluruh test assertions (50/50) lulus dengan Exit Code 0.
 - DoD: Seluruh rangkaian tes deterministik lulus 100% tanpa regresi.
 
 ---
 
-## 3. Matriks Milestone Selesai (Work Packet 10.5 & History)
-- [x] WP 10.5 Chunk 1: TUI Modal Action Palette & Query Input Refactor (`07501fd`) [DONE]
-- [x] WP 10.5 Chunk 2: Entitlement Engine Nomenclature & ACF Semantics Overhaul (`efce9fd`) [DONE]
-- [x] WP 10.5 Chunk 3: Catalog Direct Action Shortcuts & Ergonomic Hotkeys (`4412c5f`) [DONE]
-- [x] WP 10.5 Chunk 4: Machine Verification & Automated Regression Suite (`c2fb6b7`) [DONE]
-- [x] Checkpoint Verifikasi: 44/44 tests passing with Exit 0. [DONE]
+## 3. Matriks Milestone Selesai (Work Packet 11 & History)
+- [x] WP 11 Chunk 1: Unified Wineserver Lifecycle Resolution (`2769c0c`) [DONE]
+- [x] WP 11 Chunk 2: Dual-OS DepotDownloader Negotiation & Target Library Selection (`79c3f74`) [DONE]
+- [x] WP 11 Chunk 3: Steam Runtime Active Guardrail (`c837b10`) [DONE]
+- [x] WP 11 Chunk 4: Savegame Remote Sync Path Normalization (`aa7f332`) [DONE]
+- [x] WP 11 Chunk 5: Ephemeral Store & ProtonDB Cache Tier (`12857a9`) [DONE]
+- [x] WP 11 Chunk 6: Machine Verification & Automated Regression Suite [DONE]
+- [x] Checkpoint Verifikasi: 50/50 tests passing with Exit 0. [DONE]
