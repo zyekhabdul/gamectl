@@ -1,7 +1,7 @@
 # WORK PACKET 10.5: TUI MODALITY UNIFICATION & STEAM ENTITLEMENT SEMANTICS [ACTIVE]
 
 ## 1. Objective & Technical Scope
-Eliminate modality thrashing and screen flicker caused by raw shell `read -p` prompts and numbered transitions. Standardize the TUI around continuous alternate-screen modal action palettes. Reclassify the shallow and misleading term "[Unlock Steam DLC]" into its true technical utility: "[Steam Entitlement & ACF] Register local assets, Steam Input & Shader Cache".
+Eliminate modality thrashing and screen flicker caused by raw shell `read -p` prompts and numbered transitions. Standardize the TUI around continuous alternate-screen modal action palettes. Reclassify the shallow and misleading term "[Unlock Steam DLC]" into its true technical utility: "[Steam Entitlement & ACF] Adopt files, Steam Input & Shaders (Full DLC)".
 
 Scope of Work:
 1. **TUI Modality Unification (`src/tui/70_dashboard.sh`)**: Replace raw `echo` and `read -p` numbered prompts (`1-5`, `1-6`) with TokyoNight-styled modal `fzf` action sheets, preserving the alternate screen buffer (`tput smcup`) without screen clears or cursor desync.
@@ -27,7 +27,7 @@ Scope of Work:
      - [All-in-One] Download + Inject GBE + Sync Steam (Background)
      - [All-in-One] Download + Inject GBE + Sync Steam (Live Stream)
      - [Standalone] Download + Inject GBE only (Steam-free)
-     - [Steam Entitlement & ACF] Register local assets, Steam Input & Shader Cache
+     - [Steam Entitlement & ACF] Adopt files, Steam Input & Shaders (Full DLC)
      - [Raw Download] Download raw depot assets only
      - Cancel / Return
   4. Hapus seluruh prompt pasif `read -r -p "Press [ENTER] to continue..."` dan gantikan dengan transisi status kembali ke catalog atau dashboard.
@@ -35,7 +35,7 @@ Scope of Work:
 ### Chunk 2: Entitlement Engine Nomenclature & ACF Semantics Overhaul
 - Target Files: `src/tui/70_dashboard.sh`, `src/steam/30_downloader.sh`, `src/main.sh`
 - Runtutan Eksekusi Teknis:
-  1. Perbarui Master Dashboard Hub (`dashboard_menu` di `src/tui/70_dashboard.sh`): ubah item `[04] UNLOCK STEAM (DLC)` menjadi `[04] STEAM ENTITLEMENT & ACF  Adopt local files, unlock Steam Input, shader cache & DLC`.
+  1. Perbarui Master Dashboard Hub (`dashboard_menu` di `src/tui/70_dashboard.sh`): ubah item `[04] UNLOCK STEAM (DLC)` menjadi `[04] STEAM ENTITLEMENT & ACF  Adopt files, Steam Input & shaders (Full DLC)`.
   2. Perbarui fungsi `unlock_game` di `src/steam/30_downloader.sh`: ubah teks banner dari `STEAM ZERO-DOWNLOAD UNLOCK (FULL DLC)` menjadi `STEAM ENTITLEMENT & ACF ADOPTION ENGINE`, sertakan deskripsi adopsi ACF dan Steam Input.
   3. Refactor `unlock_interactive` di `src/steam/30_downloader.sh`: hilangkan raw `clear` dan `read -p`, sediakan validasi numeric AppID yang bersih tanpa screen flashing.
   4. Perbarui CLI command dispatcher di `src/main.sh`: tambahkan alias deskriptif `entitle` dan `adopt-steam` di samping `unlock`, serta perbarui pesan help CLI.
