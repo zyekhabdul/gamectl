@@ -241,6 +241,38 @@ test_dll_overrides_user_precedence() {
 }
 run_test "DLL Overrides: User environment precedence & deduplication" test_dll_overrides_user_precedence
 
+test_onlinefix_no_sig() {
+    local tdir
+    tdir=$(mktemp -d)
+    local exit_code=0
+    "$GAMECTL" onlinefix "$tdir" >/dev/null 2>&1 || exit_code=$?
+    rm -rf "$tdir"
+    [ "$exit_code" -ne 0 ]
+}
+run_test "OnlineFix CLI: Reject directory without OnlineFix signatures" test_onlinefix_no_sig
+
+test_onlinefix_detection_flow() {
+    local tdir
+    tdir=$(mktemp -d)
+    touch "$tdir/OnlineFix64.dll"
+    cat <<EOF > "$tdir/OnlineFix.ini"
+[Main]
+PlayerName = DefaultPlayer
+EOF
+    local out
+    out=$("$GAMECTL" onlinefix "$tdir" --yes 2>&1 || true)
+    rm -rf "$tdir"
+    echo "$out" | grep -q "Signature OnlineFix terdeteksi" && \
+    echo "$out" | grep -q "OnlineFix.ini terdeteksi"
+}
+run_test "OnlineFix CLI: Valid signature detection & INI audit" test_onlinefix_detection_flow
+
+test_audio_latency_env() {
+    grep -q 'export PIPEWIRE_LATENCY=' "$REPO_ROOT/src/runners/50_launcher.sh" && \
+    grep -q 'export PULSE_LATENCY_MSEC=' "$REPO_ROOT/src/runners/50_launcher.sh"
+}
+run_test "Audio Invariant (DEFECT-03): PipeWire & Pulse latency env export" test_audio_latency_env
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

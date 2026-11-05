@@ -105,6 +105,102 @@ game_controller_hud() {
     done
 }
 
+# Setup OnlineFix DLL overrides & Spacewar (AppID 480) entitlement
+setup_onlinefix() {
+    local gdir="${1:-}"
+    shift || true
+    local auto_yes=false
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -y|--yes|--non-interactive) auto_yes=true; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
+        echo "[ERROR] Direktori game tidak ditemukan: $gdir" >&2
+        return 1
+    fi
+    gdir="$(cd "$gdir" && pwd)"
+
+    echo "[INFO] Menjalankan setup OnlineFix & audit Spacewar di: $gdir..."
+
+    # 1. Deteksi file OnlineFix
+    local of_files
+    of_files=$(find "$gdir" -maxdepth 3 \( -name "pfx" -o -name ".git" -o -name ".save_snapshots" -o -name "saves" \) -prune -o \( \
+        -iname "OnlineFix64.dll" -o -iname "OnlineFix.dll" -o -iname "OnlineFix.ini" -o \
+        -iname "dnet.dll" -o -iname "SteamOverlay64.dll" \
+    \) -print 2>/dev/null || true)
+
+    if [ -z "$of_files" ]; then
+        echo "[WARN] Signature OnlineFix tidak ditemukan di direktori game ini." >&2
+        echo "       Tidak ditemukan OnlineFix64.dll, OnlineFix.dll, atau OnlineFix.ini." >&2
+        return 1
+    fi
+    echo "[VERIFIED] Signature OnlineFix terdeteksi."
+
+    # 2. Spacewar (AppID 480) Entitlement & ACF Check
+    local s_primary
+    s_primary="$(get_steam_primary_apps 2>/dev/null || echo "$HOME/.local/share/Steam/steamapps")"
+    local has_spacewar=0
+    if [ -f "$s_primary/appmanifest_480.acf" ]; then
+        has_spacewar=1
+    fi
+    local sls_cfg="$HOME/.config/SLSsteam/config.yaml"
+    if [ -f "$sls_cfg" ] && grep -q -E '^[[:space:]]*480:' "$sls_cfg" 2>/dev/null; then
+        has_spacewar=1
+    fi
+
+    if [ "$has_spacewar" -eq 1 ]; then
+        echo "[VERIFIED] Spacewar (AppID 480) sudah terdaftar di library Steam/SLSsteam."
+    else
+        echo "[INFO] Spacewar (AppID 480) belum terdaftar. Menjalankan registrasi otomatis..."
+        sync_steam 480 "Spacewar" "$gdir"
+        echo "[VERIFIED] Spacewar (AppID 480) berhasil didaftarkan ke Steam/SLSsteam."
+    fi
+
+    # 3. Audit & Sync OnlineFix.ini PlayerName
+    local ini_file
+    ini_file=$(find "$gdir" -maxdepth 3 \( -name "pfx" -o -name ".git" \) -prune -o -iname "OnlineFix.ini" -print 2>/dev/null | head -n 1)
+    if [ -n "$ini_file" ] && [ -f "$ini_file" ]; then
+        local curr_pname
+        curr_pname=$(grep -E '^[[:space:]]*PlayerName[[:space:]]*=' "$ini_file" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*PlayerName[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+        echo "[INFO] OnlineFix.ini terdeteksi: $ini_file"
+        echo "       PlayerName saat ini: ${curr_pname:-[Tidak diatur]}"
+
+        local persona_name=""
+        if [ -f "$HOME/.config/gamectl/persona" ]; then
+            persona_name=$(grep -E '^[[:space:]]*account_name[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_name[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+        fi
+        [ -z "$persona_name" ] && persona_name="${USER:-Player}"
+
+        if [ -n "$persona_name" ] && [ "$persona_name" != "$curr_pname" ]; then
+            local should_sync=false
+            if [ "$auto_yes" = true ]; then
+                should_sync=true
+            elif [ -t 0 ]; then
+                echo -n "       Sinkronkan PlayerName ke '$persona_name'? [Y/n] (Auto-yes in 5s): "
+                local confirm_sync=""
+                read -t 5 -r confirm_sync || confirm_sync="y"
+                echo
+                if [[ ! "$confirm_sync" =~ ^[nN] ]]; then
+                    should_sync=true
+                fi
+            else
+                should_sync=true
+            fi
+
+            if [ "$should_sync" = true ]; then
+                sed -i -E "s/^[[:space:]]*PlayerName[[:space:]]*=.*/PlayerName = $persona_name/" "$ini_file"
+                echo "       ${UI_GREEN}[SUCCESS] PlayerName di OnlineFix.ini disinkronkan ke: $persona_name${UI_RST}"
+            fi
+        fi
+    fi
+
+    echo "[VERIFIED] Setup OnlineFix selesai untuk: $(basename "$gdir")"
+    return 0
+}
+
 # Launch game with performance wrapping and runner isolation
 launch_game() {
     local gdir="$1"
@@ -130,6 +226,10 @@ launch_game() {
         unset mesa_glthread
     fi
     export vblank_mode=0
+
+    # Remedi Audio (DEFECT-03): Set buffer latency environment safely (PipeWire / PulseAudio)
+    export PIPEWIRE_LATENCY="${GAMECTL_PIPEWIRE_LATENCY:-256/48000}"
+    export PULSE_LATENCY_MSEC="${GAMECTL_PULSE_LATENCY:-60}"
 
     # Capture current CPU scaling governor for clean restoration
     local prev_governor=""
@@ -184,6 +284,13 @@ launch_game() {
     local run_type="Native Linux"
 
     if [ "$is_win" = true ]; then
+        local detected_overrides
+        detected_overrides=$(detect_dll_overrides "$gdir")
+        if [ -n "$detected_overrides" ]; then
+            export WINEDLLOVERRIDES="$detected_overrides"
+            echo "[INFO] DLL Overrides aktif: $WINEDLLOVERRIDES"
+        fi
+
         local runner_bin
         runner_bin=$(find_runner "$gdir" 2>/dev/null || true)
         if [ -z "$runner_bin" ]; then
@@ -209,7 +316,7 @@ launch_game() {
         case "$runner_bin" in
             umu-run)
                 (
-                    WINEPREFIX="$pfx_dir" GAMEID="$appid" \
+                    WINEPREFIX="$pfx_dir" GAMEID="$appid" WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
                     exec "${wrappers[@]}" umu-run "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
@@ -220,6 +327,7 @@ launch_game() {
                     STEAM_COMPAT_DATA_PATH="$gdir" \
                     STEAM_COMPAT_APP_ID="$appid" \
                     WINEPREFIX="$pfx_dir" \
+                    WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
                     exec "${wrappers[@]}" "$runner_bin" waitforexitandrun "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
@@ -227,6 +335,7 @@ launch_game() {
             *)
                 (
                     WINEPREFIX="$pfx_dir" \
+                    WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
                     exec "${wrappers[@]}" "$runner_bin" "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
