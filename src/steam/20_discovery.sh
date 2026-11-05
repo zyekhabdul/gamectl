@@ -600,6 +600,17 @@ get_steam_shortcuts_vdf() {
     echo "$HOME/.local/share/Steam/userdata/0/config/shortcuts.vdf"
 }
 
+# Check if Steam client process is actively running and warn about memory lock
+check_steam_active() {
+    local context="${1:-Steam operations}"
+    if pgrep -x steam >/dev/null 2>&1; then
+        echo "[WARN] Steam client is currently running! $context while Steam is active may cause file lock conflicts or get overwritten upon client exit." >&2
+        echo "[WARN] Recommendation: Exit Steam or restart it after this operation to reload shortcuts and manifests cleanly." >&2
+        return 0
+    fi
+    return 1
+}
+
 # Add or update a non-Steam shortcut in Steam Deck Game Mode (binary shortcuts.vdf)
 add_steam_shortcut() {
     local game_dir="${1:-}"
@@ -614,6 +625,9 @@ add_steam_shortcut() {
         echo "[ERROR] Game directory does not exist: $game_dir" >&2
         return 1
     fi
+
+    # Guard against concurrent Steam client memory lock on shortcuts.vdf
+    check_steam_active "Registering non-Steam shortcut in shortcuts.vdf" || true
 
     game_dir="$(cd "$game_dir" && pwd)"
 

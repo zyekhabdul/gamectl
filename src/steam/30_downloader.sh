@@ -550,6 +550,9 @@ except Exception as e:
     local steam_apps
     steam_apps="$(get_steam_primary_apps)"
     if [ -d "$steam_apps" ]; then
+        # Guard against concurrent Steam client memory lock on manifests
+        check_steam_active "Writing appmanifest_${appid}.acf" || true
+
         local acf_file="$steam_apps/appmanifest_${appid}.acf"
         local install_name="$safe_title"
         local size_bytes="1000000000"

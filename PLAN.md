@@ -42,7 +42,7 @@ Scope of Work:
      - Ganti hardcoded `$HOME/Games/$sel_name` dengan hasil `resolve_target_library_dir`.
 - DoD: Game ber-platform Windows PE diunduh dengan `-os windows`, dan file masuk ke partisi library yang memiliki kapasitas memadai.
 
-### Chunk 3: Steam Runtime Active Guardrail [PENDING]
+### Chunk 3: Steam Runtime Active Guardrail [DONE]
 - Target Files: `src/steam/20_discovery.sh`, `src/steam/30_downloader.sh`
 - Runtutan Eksekusi Teknis:
   1. Buat helper `check_steam_active` di `src/steam/20_discovery.sh`:
