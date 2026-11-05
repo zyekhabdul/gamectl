@@ -53,7 +53,7 @@ Scope of Work:
      - `add_steam_shortcut` sebelum membaca/menulis `shortcuts.vdf`.
 - DoD: User mendapatkan notifikasi pencegahan inkonsistensi cache saat Steam client sedang berjalan tanpa crash atau aborting script.
 
-### Chunk 4: Savegame Remote Sync Path Normalization [PENDING]
+### Chunk 4: Savegame Remote Sync Path Normalization [DONE]
 - Target Files: `src/runners/50_launcher.sh`
 - Runtutan Eksekusi Teknis:
   1. Perbarui fungsi `sync_save_remote` di `src/runners/50_launcher.sh`:

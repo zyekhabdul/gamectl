@@ -435,7 +435,18 @@ sync_save_remote() {
     fi
 
     echo "[INFO] Synchronizing savegame $title to $rhost..."
-    local rel_path="${gdir#$HOME/}"
+    local canon_gdir
+    canon_gdir="$(cd "$gdir" 2>/dev/null && pwd || echo "$gdir")"
+
+    local rel_path
+    if [[ "$canon_gdir" == "$HOME/"* ]]; then
+        rel_path="${canon_gdir#$HOME/}"
+    else
+        # For games stored on secondary drives (/mnt, /media, /data, etc.)
+        rel_path="Games/$(basename "$canon_gdir")"
+    fi
+    rel_path="${rel_path#/}"
+
     ssh "$rhost" "mkdir -p ~/$rel_path"
     rsync -avzP --exclude="*.tmp" "$sdir/" "$rhost:~/$rel_path/saves/"
     echo "[VERIFIED] Savegame synchronization to $rhost completed."
