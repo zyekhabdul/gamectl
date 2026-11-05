@@ -1,3 +1,132 @@
+# Detect OnlineFix, mod loaders, and custom DLL overrides for a game directory
+detect_dll_overrides() {
+    local gdir="${1:-}"
+    [ -n "$gdir" ] && [ -d "$gdir" ] || return 0
+
+    local has_onlinefix=0
+    local has_bepinex=0
+    local has_ue4ss=0
+    local has_reframework=0
+    local has_reshade=0
+    local custom_overrides=""
+
+    # 1. Check custom declarative .dll_overrides file
+    if [ -f "$gdir/.dll_overrides" ]; then
+        custom_overrides=$(grep -v -E '^[[:space:]]*(#|$)' "$gdir/.dll_overrides" 2>/dev/null | tr '\n' ';' || true)
+    fi
+
+    # 2. Scan root and subdirectories (up to depth 3) excluding runtime/save folders
+    local found_signatures
+    found_signatures=$(find "$gdir" -maxdepth 3 \( \
+        -name "pfx" -o -name ".git" -o -name ".save_snapshots" -o -name "saves" \
+    \) -prune -o \( \
+        -iname "OnlineFix64.dll" -o -iname "OnlineFix.dll" -o -iname "dnet.dll" -o \
+        -iname "SteamOverlay64.dll" -o -iname "winmm.dll" -o -iname "version.dll" -o \
+        -iname "BepInEx" -o -iname "doorstop_config.ini" -o -iname "winhttp.dll" -o \
+        -iname "ue4ss" -o -iname "UE4SS.dll" -o -iname "dwmapi.dll" -o \
+        -iname "dinput8.dll" -o \
+        -iname "ReShade.ini" -o -iname "dxgi.dll" \
+    \) -print 2>/dev/null || true)
+
+    if [ -n "$found_signatures" ]; then
+        while IFS= read -r item; do
+            [ -z "$item" ] && continue
+            local base
+            base=$(basename "$item")
+            case "${base,,}" in
+                onlinefix64.dll|onlinefix.dll|dnet.dll|steamoverlay64.dll|winmm.dll|version.dll)
+                    has_onlinefix=1 ;;
+                bepinex|doorstop_config.ini|winhttp.dll)
+                    has_bepinex=1 ;;
+                ue4ss|ue4ss.dll|dwmapi.dll)
+                    has_ue4ss=1 ;;
+                dinput8.dll)
+                    has_reframework=1 ;;
+                reshade.ini|dxgi.dll)
+                    has_reshade=1 ;;
+            esac
+        done <<< "$found_signatures"
+    fi
+
+    # Return empty string if no mod/OnlineFix signatures or custom overrides found
+    if [ "$has_onlinefix" -eq 0 ] && [ "$has_bepinex" -eq 0 ] && \
+       [ "$has_ue4ss" -eq 0 ] && [ "$has_reframework" -eq 0 ] && \
+       [ "$has_reshade" -eq 0 ] && [ -z "$custom_overrides" ]; then
+        return 0
+    fi
+
+    local detected_tokens=""
+    if [ "$has_onlinefix" -eq 1 ]; then
+        detected_tokens="${detected_tokens:+${detected_tokens};}onlinefix=n;onlinefix64=n;steamoverlay64=n;dnet=n;winmm=n,b;version=n,b;steam_api64=n;steam_api=n"
+    fi
+    if [ "$has_bepinex" -eq 1 ]; then
+        detected_tokens="${detected_tokens:+${detected_tokens};}winhttp=n,b"
+    fi
+    if [ "$has_ue4ss" -eq 1 ]; then
+        detected_tokens="${detected_tokens:+${detected_tokens};}dwmapi=n,b"
+    fi
+    if [ "$has_reframework" -eq 1 ]; then
+        detected_tokens="${detected_tokens:+${detected_tokens};}dinput8=n,b"
+    fi
+    if [ "$has_reshade" -eq 1 ]; then
+        detected_tokens="${detected_tokens:+${detected_tokens};}dxgi=n,b"
+    fi
+    if [ -n "$custom_overrides" ]; then
+        detected_tokens="${detected_tokens:+${detected_tokens};}${custom_overrides}"
+    fi
+
+    local user_env_overrides="${2:-${WINEDLLOVERRIDES:-}}"
+    declare -A seen=()
+    declare -A values=()
+    local ordered_keys=()
+
+    # 1. Process user environment overrides first to preserve user precedence
+    if [ -n "$user_env_overrides" ]; then
+        local u_arr=()
+        IFS=';' read -r -a u_arr <<< "$user_env_overrides"
+        for item in "${u_arr[@]}"; do
+            [ -z "$item" ] && continue
+            local k="${item%%=*}"
+            local v="${item#*=}"
+            [ "$item" = "$k" ] && v="n"
+            k=$(echo "$k" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+            v=$(echo "$v" | tr -d '[:space:]')
+            [ -z "$k" ] && continue
+            if [ -z "${seen["$k"]:-}" ]; then
+                seen["$k"]=1
+                ordered_keys+=("$k")
+                values["$k"]="$v"
+            fi
+        done
+    fi
+
+    # 2. Process detected mod tokens (add only if not overridden by user)
+    local d_arr=()
+    IFS=';' read -r -a d_arr <<< "$detected_tokens"
+    for item in "${d_arr[@]}"; do
+        [ -z "$item" ] && continue
+        local k="${item%%=*}"
+        local v="${item#*=}"
+        [ "$item" = "$k" ] && v="n"
+        k=$(echo "$k" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+        v=$(echo "$v" | tr -d '[:space:]')
+        [ -z "$k" ] && continue
+        if [ -z "${seen["$k"]:-}" ]; then
+            seen["$k"]=1
+            ordered_keys+=("$k")
+            values["$k"]="$v"
+        fi
+    done
+
+    # 3. Format normalized semicolon-separated output
+    local result=""
+    for k in "${ordered_keys[@]}"; do
+        local entry="${k}=${values["$k"]}"
+        result="${result:+${result};}${entry}"
+    done
+    echo "$result"
+}
+
 # Discover runner for Windows games (priority: umu-run -> GE-Proton / Proton Steam -> wine)
 find_runner() {
     local target_dir="${1:-}"

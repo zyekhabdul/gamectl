@@ -187,6 +187,61 @@ test_game_controller_hud() {
 run_test "Launcher Invariant: Detached Live Controller HUD" test_game_controller_hud
 
 # ------------------------------------------------------------------------------
+# Test Suite 5: Global Features & Remediation Contracts
+# ------------------------------------------------------------------------------
+echo
+echo "${C_BOLD}>>> [SUITE 5] Global Features & Remediation Contracts${C_RST}"
+
+test_dll_overrides_clean() {
+    local tdir
+    tdir=$(mktemp -d)
+    local out
+    out=$("$GAMECTL" detect-overrides "$tdir")
+    rm -rf "$tdir"
+    [ -z "$out" ]
+}
+run_test "DLL Overrides: Clean directory produces empty string" test_dll_overrides_clean
+
+test_dll_overrides_onlinefix() {
+    local tdir
+    tdir=$(mktemp -d)
+    touch "$tdir/OnlineFix64.dll"
+    local out
+    out=$("$GAMECTL" detect-overrides "$tdir")
+    rm -rf "$tdir"
+    echo "$out" | grep -q "onlinefix=n" && \
+    echo "$out" | grep -q "winmm=n,b" && \
+    echo "$out" | grep -q "steamoverlay64=n"
+}
+run_test "DLL Overrides: OnlineFix signature auto-detection" test_dll_overrides_onlinefix
+
+test_dll_overrides_bepinex_custom() {
+    local tdir
+    tdir=$(mktemp -d)
+    mkdir -p "$tdir/BepInEx"
+    echo "custom_mod=n,b" > "$tdir/.dll_overrides"
+    local out
+    out=$("$GAMECTL" detect-overrides "$tdir")
+    rm -rf "$tdir"
+    echo "$out" | grep -q "winhttp=n,b" && \
+    echo "$out" | grep -q "custom_mod=n,b"
+}
+run_test "DLL Overrides: BepInEx & .dll_overrides detection" test_dll_overrides_bepinex_custom
+
+test_dll_overrides_user_precedence() {
+    local tdir
+    tdir=$(mktemp -d)
+    touch "$tdir/OnlineFix64.dll"
+    local out
+    out=$("$GAMECTL" detect-overrides "$tdir" "winmm=b;my_dll=d")
+    rm -rf "$tdir"
+    echo "$out" | grep -q "winmm=b" && \
+    echo "$out" | grep -q "my_dll=d" && \
+    ! echo "$out" | grep -q "winmm=n,b"
+}
+run_test "DLL Overrides: User environment precedence & deduplication" test_dll_overrides_user_precedence
+
+# ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
 echo
