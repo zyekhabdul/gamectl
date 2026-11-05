@@ -1,94 +1,86 @@
-# WORK PACKET 11: GLOBAL ECOSYSTEM REMEDIATION & MULTI-DRIVE HARDENING [ACTIVE]
+# WORK PACKET 12: LINUX KERNEL ISOLATION, HYBRID PRIME & SECURITY SANDBOXING [ACTIVE]
 
 ## 1. Objective & Technical Scope
-Eliminate systemic assumptions tied to local $HOME directories, provide unified embedded wineserver resolution for Proton-only Linux gaming distributions, negotiate dual-OS (Linux/Windows) game depot downloads dynamically, guard Steam client runtime state, normalize cross-drive savegame sync paths, and introduce an ephemeral caching tier for Steam Store and ProtonDB API requests.
-
-Scope of Work:
-1. **Unified Wineserver Resolution (`src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`)**: Replace bare `wineserver` calls with dynamic path resolution from active Proton runtimes to harden DEFECT-02 across minimal distros (SteamOS, Bazzite, ChimeraOS).
-2. **Dual-OS DepotDownloader Negotiation & Target Library Routing (`src/steam/30_downloader.sh`, `src/tui/70_dashboard.sh`)**: Dynamically negotiate `-os linux` vs `-os windows` based on store metadata and route downloads to libraries with maximum available capacity.
-3. **Steam Runtime Guardrail (`src/steam/20_discovery.sh`, `src/steam/30_downloader.sh`)**: Warn when Steam client process is active to prevent clobbering of `shortcuts.vdf` and `appmanifest_*.acf`.
-4. **Savegame Path Normalization (`src/runners/50_launcher.sh`)**: Clean directory sanitization for non-$HOME mounts (`/mnt/`, `/media/`) during remote companion synchronization.
-5. **Ephemeral Store & ProtonDB Cache Tier (`src/core/10_utils.sh`, `src/tui/70_dashboard.sh`, `src/diagnostics/60_doctor.sh`)**: 3600-second TTL disk cache in `$XDG_CACHE_HOME/gamectl/` for zero-stutter TUI browsing and offline resilience.
-6. **Machine Verification & Regression Suite (`tests/test_cli.sh`, `./scripts/build.sh`)**: Automated assertions for cache hits, wineserver resolution, library routing, and path normalization with Exit Code 0.
+Implement Linux systems architectural remediation (Phase 4 / Actions 4.1-4.4):
+1. **cgroups v2 / systemd-run Scope Isolation (Action 4.1)**: Eliminate process tree leaks and zombie reparenting to PID 1 by binding launches to isolated `systemd-run --user --scope` units with automatic fallback.
+2. **Automated PRIME dGPU Hybrid Offloading (Action 4.2)**: Auto-detect discrete NVIDIA / AMD GPUs and synthesize dynamic offload flags (`--prime`) to prevent games from defaulting to low-power integrated GPUs.
+3. **Bubblewrap (`bwrap`) Security Sandboxing (Action 4.3)**: Implement an opt-in rootless sandbox (`--sandbox`) restricting filesystem visibility to necessary system runtimes and the game prefix, protecting sensitive host directories (`~/.ssh`, `~/.gnupg`, browser data, `.env`).
+4. **Single-Pass Library Scanner Optimization (Action 4.4)**: Refactor `scan_installed_games` to minimize redundant subshell forks (`file`, `stat`, `grep`) on large game collections (>500 games).
+5. **Machine Verification & Automated Regression Suite**: Add black-box unit tests in `tests/test_cli.sh`, compile via `./scripts/build.sh`, and verify exit code 0 across the entire test suite.
 
 ---
 
-## 2. Granular Technical Execution Plan (Work Packet 11)
+## 2. Granular Technical Execution Plan (Work Packet 12)
 
-### Chunk 1: Unified Wineserver Lifecycle Resolution (DEFECT-02 Hardening) [DONE]
+### Chunk 1: cgroups v2 / systemd-run Scope Process Isolation (Action 4.1) [PENDING]
 - Target Files: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/main.sh`
 - Runtutan Eksekusi Teknis:
-  1. Buat fungsi helper `get_wineserver_bin "$runner_bin"` di `src/runners/40_wrappers.sh` yang memeriksa:
-     - Jika `$runner_bin` mengandung `proton`: cari executable `files/bin/wineserver`, `dist/bin/wineserver`, atau `bin/wineserver` di direktori Proton.
-     - Jika tidak ada: periksa `command -v wineserver`.
-     - Fallback: cari wineserver dari direktori GE-Proton lokal tertinggi.
-  2. Ekspor `get_wineserver_bin` di `src/main.sh`.
-  3. Perbarui `src/runners/50_launcher.sh` pada 4 titik pemanggilan wineserver (lines 68, 83, 261, 385) agar menggunakan binari wineserver yang teresolusi (`"$ws_bin" -w` dan `"$ws_bin" -k`) dan abaikan pemanggilan jika tidak ditemukan binari yang valid.
-  4. Perbarui `manage_prefix` di `src/runners/40_wrappers.sh` agar menggunakan `get_wineserver_bin` secara konsisten.
-- DoD: Pemanggilan flush (`-w`) dan terminate (`-k`) berjalan sukses pada environment tanpa `/usr/bin/wineserver` host.
+  1. Buat helper `check_systemd_scope_support` di `src/runners/40_wrappers.sh`:
+     - Uji apakah `systemd-run --user --scope true` berhasil dieksekusi tanpa error.
+  2. Perbarui `launch_game` di `src/runners/50_launcher.sh`:
+     - Tambahkan flag CLI `--scope` / `--no-scope` (default: auto-enable jika didukung).
+     - Jika aktif, luncurkan execution string di bawah scope:
+       `systemd-run --user --scope --unit="gamectl-${safe_title}-${game_pid}" --description="gamectl runner: ${title}" "${wrappers[@]}" "$runner_bin" "$gdir/$gbin"`
+     - Simpan unit name ke metadata info file `${XDG_RUNTIME_DIR:-/tmp}/gamectl-$UID/active_game_${game_pid}.info`.
+  3. Perbarui fungsi cleanup dan `game_controller_hud`:
+     - Saat terminasi paksa (kill), jalankan `systemctl --user stop "$unit_name" 2>/dev/null || true` untuk membunuh seluruh child process tree secara atomik via kernel cgroup v2.
+  4. Sediakan fallback transparan ke subshell standar jika systemd tidak aktif (distro non-systemd/chroot/container).
+- DoD: Seluruh child process game (crash reporters, explorer.exe, winedevice.exe) terisolasi dalam satu cgroup slice dan berhenti seketika saat game ditutup tanpa meninggalkan zombie processes.
 
-### Chunk 2: Dual-OS DepotDownloader Negotiation & Target Library Selection [DONE]
-- Target Files: `src/steam/30_downloader.sh`, `src/tui/70_dashboard.sh`
+### Chunk 2: Automated PRIME dGPU Hybrid Offloading (Action 4.2) [PENDING]
+- Target Files: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/diagnostics/60_doctor.sh`, `src/main.sh`
 - Runtutan Eksekusi Teknis:
-  1. Tambahkan fungsi `resolve_target_library_dir "$safe_title"` di `src/steam/30_downloader.sh`:
-     - Pindai custom libraries dari `~/.config/gamectl/libraries` dan fallback ke `$HOME/Games`.
-     - Gunakan `df -PB 1M "$dir"` untuk memilih direktori dengan ruang bebas terbesar.
-     - Kembalikan path lengkap direktori game target.
-  2. Perbarui `download_game` di `src/steam/30_downloader.sh` untuk menerima flag `--os <linux|windows|all>` (default: `linux`).
-  3. Ganti hardcoded `-os linux` pada DepotDownloader dengan nilai flag `--os` yang dinegosiasikan.
-  4. Di `search_steam` (`src/tui/70_dashboard.sh`):
-     - Evaluasi metadata `platforms.linux` dan `platforms.windows`.
-     - Jika `platforms.linux == false` dan `platforms.windows == true`, tetapkan opsi download dengan `--os windows`.
-     - Ganti hardcoded `$HOME/Games/$sel_name` dengan hasil `resolve_target_library_dir`.
-- DoD: Game ber-platform Windows PE diunduh dengan `-os windows`, dan file masuk ke partisi library yang memiliki kapasitas memadai.
+  1. Buat fungsi helper `detect_dgpu_vendor` di `src/runners/40_wrappers.sh`:
+     - Periksa perangkat PCI display di `/sys/bus/pci/devices/*/class` (class `0x030000` / `0x030200`).
+     - Deteksi vendor diskrit: vendor ID `0x10de` (NVIDIA) vs `0x1002` (AMD) vs `0x8086` (Intel Arc).
+     - Kembalikan `nvidia`, `amd`, `intel`, atau `none`.
+  2. Perbarui `build_wrapper_command` di `src/runners/40_wrappers.sh`:
+     - Tambahkan parsing opsi `prime=0|1` dari konfigurasi game dan flag CLI `--prime`.
+     - Jika diaktifkan:
+       - NVIDIA: inject `__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only`.
+       - AMD: inject `DRI_PRIME=1`.
+       - Intel Arc: inject `DRI_PRIME=1`.
+  3. Tambahkan audit hybrid GPU pada Layer Hardware di `src/diagnostics/60_doctor.sh` (`doctor_audit`).
+  4. Ekspor dan daftarkan perintah `gamectl detect-gpu` di `src/main.sh`.
+- DoD: Flag `--prime` secara otomatis mengarahkan rendering ke GPU diskrit yang terdeteksi tanpa konfigurasi manual user.
 
-### Chunk 3: Steam Runtime Active Guardrail [DONE]
-- Target Files: `src/steam/20_discovery.sh`, `src/steam/30_downloader.sh`
+### Chunk 3: Bubblewrap (bwrap) Rootless Security Sandbox Profile (Action 4.3) [PENDING]
+- Target Files: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/main.sh`
 - Runtutan Eksekusi Teknis:
-  1. Buat helper `check_steam_active` di `src/steam/20_discovery.sh`:
-     - Periksa apakah proses `steam` sedang aktif via `pgrep -x steam`.
-     - Jika aktif, cetak pesan `[WARN]` informatif ke stderr bahwa Steam sedang memegang lock memori pada shortcuts dan manifest.
-  2. Pasang `check_steam_active` pada:
-     - `sync_steam` sebelum menulis `appmanifest_${appid}.acf`.
-     - `add_steam_shortcut` sebelum membaca/menulis `shortcuts.vdf`.
-- DoD: User mendapatkan notifikasi pencegahan inkonsistensi cache saat Steam client sedang berjalan tanpa crash atau aborting script.
+  1. Buat fungsi helper `build_sandbox_command "$gdir"` di `src/runners/40_wrappers.sh`:
+     - Periksa ketersediaan binari `bwrap`. Jika tidak ada, cetak peringatan `[WARN]` dan lewati sandboxing dengan aman.
+     - Susun parameter isolasi rootless bwrap:
+       - Read-only mounts: `/usr`, `/lib`, `/lib64`, `/bin`, `/etc/resolv.conf`, `/etc/ssl`, `/etc/fonts`, `/dev`, `/proc`, `/sys`.
+       - Sockets & Audio: `/run/user/$UID/pulse`, `/run/user/$UID/pipewire-0`, `/run/user/$UID/wayland-0`, `/tmp/.X11-unix`.
+       - Read-write isolasi: `$gdir` dan `${XDG_RUNTIME_DIR:-/tmp}/gamectl-$UID`.
+       - Unshare namespaces: `--unshare-user --unshare-ipc --unshare-pid`.
+       - Sembunyikan direktori kredensial: isolasi `$HOME` sehingga `~/.ssh`, `~/.gnupg`, `~/.config/google-chrome`, dan file kredensial tidak terlihat oleh binary game.
+  2. Tambahkan opsi per-game `sandbox=0|1` dan flag CLI `--sandbox` pada `launch_game`.
+- DoD: Standalone untrusted binary dapat dieksekusi dengan isolasi penuh terhadap file rahasia host `$HOME` tanpa merusak rendering Wayland/X11 dan audio PipeWire.
 
-### Chunk 4: Savegame Remote Sync Path Normalization [DONE]
-- Target Files: `src/runners/50_launcher.sh`
+### Chunk 4: Single-Pass Library Scanner Optimization (Action 4.4) [PENDING]
+- Target Files: `src/steam/20_discovery.sh`, `src/tui/70_dashboard.sh`
 - Runtutan Eksekusi Teknis:
-  1. Perbarui fungsi `sync_save_remote` di `src/runners/50_launcher.sh`:
-     - Evaluasi path direktori game target `$gdir`.
-     - Jika `$gdir` berada di dalam `$HOME`, gunakan `rel_path="${gdir#$HOME/}"`.
-     - Jika `$gdir` berada di luar `$HOME` (misal `/mnt/games/Title` atau `/data/games/Title`), gunakan `rel_path="Games/$(basename "$gdir")"`.
-     - Bersihkan target destination remote agar tidak menghasilkan path corrupt seperti `~//mnt/...`.
-- DoD: Eksekusi rsync pada direktori game non-$HOME tersinkronisasi rapi ke host remote di direktori `~/Games/<Title>/saves/`.
+  1. Analisa kemacetan I/O pada `scan_installed_games` di `src/steam/20_discovery.sh`:
+     - Hilangkan fork subshell berulang (`stat`, `basename`, `dirname`, `file -b`) di dalam loop direktori game.
+  2. Implementasikan pola batch-probing berbasis bash array / fast globbing:
+     - Deteksi metadata game (`steam_appid.txt`, `pfx`, `saves`, executable utama) dalam satu operan per folder.
+  3. Sediakan opsi cache pemindaian library sementara di `$XDG_RUNTIME_DIR/gamectl-$UID/scancache.tab` dengan waktu validasi mtime direktori library untuk mempercepat render daftar game TUI secara instan.
+- DoD: Kecepatan pemindaian library masif meningkat signifikan (>3x lebih cepat) dengan konsistensi output data yang identik.
 
-### Chunk 5: Ephemeral Store & ProtonDB Cache Tier [DONE]
-- Target Files: `src/core/10_utils.sh`, `src/tui/70_dashboard.sh`, `src/diagnostics/60_doctor.sh`
+### Chunk 5: Machine Verification & Automated Regression Suite (Work Packet 12) [PENDING]
+- Target Files: `tests/test_cli.sh`, `remediation.md`, `DEVELOPMENT.md`
 - Runtutan Eksekusi Teknis:
-  1. Implementasikan fungsi `fetch_cached_json "$url" "$cache_key" [ttl_seconds]` di `src/core/10_utils.sh`:
-     - Lokasi cache: `${XDG_CACHE_HOME:-$HOME/.cache}/gamectl`.
-     - TTL default: 3600 detik (1 jam).
-     - Jika cache valid dan belum kedaluwarsa, baca langsung dari disk.
-     - Jika expired atau belum ada, fetch via curl dengan timeout 2-3s, tulis atomic via `.tmp.$$`, lalu atomik `mv`.
-     - Jika fetch gagal atau offline, fallback ke stale cache jika ada.
-  2. Integrasikan `fetch_cached_json` ke preview pane `search_steam` di `src/tui/70_dashboard.sh` untuk metadata Steam Store dan ProtonDB summary.
-  3. Integrasikan `fetch_cached_json` ke `query_protondb` di `src/diagnostics/60_doctor.sh`.
-- DoD: Navigasi preview store katalog instan (<10ms) untuk item ter-cache dan tidak freeze saat offline.
-
-### Chunk 6: Machine Verification & Automated Regression Suite [DONE]
-- Target Files: `tests/test_cli.sh`, `scripts/build.sh`, `README.md`, `DEVELOPMENT.md`, `remediation.md`
-- Runtutan Eksekusi Teknis:
-  1. Tambahkan 6 test assertions baru di `tests/test_cli.sh`:
-     - Assertion 1: `get_wineserver_bin` mengembalikan path executable Proton wineserver.
-     - Assertion 2: `detect_app_platform_os` mengenali platform OS dari Steam Store API.
-     - Assertion 3: `resolve_target_library_dir` merutekan folder ke library berkapasitas terbesar.
-     - Assertion 4: `check_steam_active` memberikan warning pada proses aktif Steam client.
-     - Assertion 5: `sync_save_remote` menormalisasi path non-$HOME dengan benar.
-     - Assertion 6: `fetch_cached_json` membaca cache lokal pada pemanggilan kedua dalam jendela TTL.
-  2. Jalankan `./scripts/build.sh` dan `./scripts/build.sh --check`.
-  3. Jalankan regression suite `./tests/test_cli.sh` dan pastikan seluruh test assertions (50/50) lulus dengan Exit Code 0.
-- DoD: Seluruh rangkaian tes deterministik lulus 100% tanpa regresi.
+  1. Tambahkan unit test assertions di `tests/test_cli.sh`:
+     - Test dGPU Vendor Detection (`detect_dgpu_vendor`).
+     - Test PRIME Wrapper synthesis (`--prime`).
+     - Test Bubblewrap sandbox argument generation (`--sandbox`).
+     - Test systemd-run scope command synthesis & fallback.
+     - Test optimized library scanner consistency against baseline.
+  2. Jalankan kompilasi `./scripts/build.sh` dan verifikasi integritas bundle `./scripts/build.sh --check`.
+  3. Jalankan regression test suite `./tests/test_cli.sh` (55+ assertions) hingga seluruh tes lulus dengan Exit Code 0.
+  4. Perbarui dokumentasi status di `remediation.md` dan `DEVELOPMENT.md`.
+- DoD: Semua fitur Phase 4 terverifikasi 100% oleh deterministic test runner dengan Exit Code 0.
 
 ---
 
@@ -98,5 +90,5 @@ Scope of Work:
 - [x] WP 11 Chunk 3: Steam Runtime Active Guardrail (`c837b10`) [DONE]
 - [x] WP 11 Chunk 4: Savegame Remote Sync Path Normalization (`aa7f332`) [DONE]
 - [x] WP 11 Chunk 5: Ephemeral Store & ProtonDB Cache Tier (`12857a9`) [DONE]
-- [x] WP 11 Chunk 6: Machine Verification & Automated Regression Suite [DONE]
+- [x] WP 11 Chunk 6: Machine Verification & Automated Regression Suite (`630d10d`, `ab8c9ff`) [DONE]
 - [x] Checkpoint Verifikasi: 50/50 tests passing with Exit 0. [DONE]
