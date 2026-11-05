@@ -35,7 +35,7 @@ Empirical comparisons measured on Arch Linux x86_64 (Linux kernel 6.x, AMD Ryzen
 - **Modular Performance Wrappers**: On-the-fly toggle for `gamemoderun`, `mangohud`, `gamescope` dynamic FSR upscaling, and Mesa multithreaded GL via interactive dialogs (`<Ctrl-O>`) or CLI flags.
 - **LAN Multi-Identity & SteamID Manager (`gamectl set-id`)**: Generates deterministic 17-digit SteamID64 tokens and distinct LAN gamer tags to prevent co-op network collisions, with custom peer discovery (`custom_broadcasts.txt`).
 - **Headless Asset Downloader Engine (`gamectl download`)**: Downloads game files directly from content servers via DepotDownloader CLI in foreground or detached background modes without requiring a GUI client.
-- **Offline Entitlement & AppManifest Synchronizer (`gamectl unlock`, `gamectl sync-steam`)**: Synchronizes local AppID and DLC entitlement records to `~/.config/SLSsteam/config.yaml` and generates native `appmanifest_<appid>.acf` entries.
+- **Steam Entitlement & ACF Adoption Engine (`gamectl entitle`, `gamectl adopt-steam`)**: Adopts local/offline files into the official Steam client, unlocking community Steam Input mappings (gyro/touchpad), Valve CDN Vulkan shader pre-caching, and base-game DLC activation via `~/.config/SLSsteam/config.yaml` and native `appmanifest_<appid>.acf`. (Backward-compatible alias: `gamectl unlock`).
 - **Universal Mod DLL Overrides & P2P Hook Engine (`gamectl mod-overrides`)**: Detects mod loaders and P2P compatibility layers (BepInEx, UE4SS, REFramework, ReShade, OnlineFix), injects deduplicated `WINEDLLOVERRIDES`, and registers Spacewar AppID 480.
 - **Headless GE-Proton Release Manager (`gamectl proton-*`)**: Fetches upstream GitHub releases, streams tarball installation directly into `~/.local/share/Steam/compatibilitytools.d/`, and prunes older versions safely.
 - **Wine Prefix Swiss Army Knife (`gamectl pfx`) & Wineserver Guard**: Dedicated maintenance toolkit (`winecfg`, `regedit`, `cmd`, `shell`, `winetricks`, `kill`, `clean`) with deterministic wineserver teardown (`wineserver -w` / `-k`) to eliminate registry lock contention.
@@ -189,10 +189,12 @@ gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" -f
 gamectl downloads
 ```
 
-### 8. Offline Entitlement & AppManifest Registration
+### 8. Steam Entitlement & ACF Adoption Engine (Zero-Download Full DLC)
+Adopts offline or standalone game files into the official Steam client, enabling community Steam Input (gyro/trackpad profiles), Valve CDN Vulkan shader pre-caching, and full DLC entitlement without re-downloading:
+
 ```bash
-# Register zero-download AppID and full DLC entitlement:
-gamectl unlock 1145360 "Hades II"
+# Entitle AppID, adopt local assets, and register full DLC into Steam:
+gamectl entitle 1145360 "Hades II"     # Aliases: unlock, adopt-steam
 
 # Synchronize installed standalone game files with Steam client:
 gamectl sync-steam 427520 "Factorio" "$HOME/Games/Factorio"

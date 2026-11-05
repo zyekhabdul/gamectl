@@ -481,6 +481,29 @@ assert b'--hud' in d
 }
 run_test "Steam Deck Shortcut: Binary shortcuts.vdf registration & atomic backup" test_steam_shortcut_registration_flow
 
+test_entitle_aliases_missing_args() {
+    local exit1=0 exit2=0
+    "$GAMECTL" entitle </dev/null >/dev/null 2>&1 || exit1=$?
+    "$GAMECTL" adopt-steam </dev/null >/dev/null 2>&1 || exit2=$?
+    [ "$exit1" -ne 0 ] && [ "$exit2" -ne 0 ]
+}
+run_test "Entitlement Aliases: Reject execution without AppID (entitle/adopt-steam)" test_entitle_aliases_missing_args
+
+test_entitle_aliases_execution() {
+    local t_home
+    t_home=$(mktemp -d)
+    local out1 out2
+    out1=$(HOME="$t_home" "$GAMECTL" entitle 48000 "LIMBO" 2>&1)
+    out2=$(HOME="$t_home" "$GAMECTL" adopt-steam 48000 "LIMBO" 2>&1)
+    rm -rf "$t_home"
+
+    echo "$out1" | grep -q "STEAM ENTITLEMENT & ACF ADOPTION ENGINE" && \
+    echo "$out1" | grep -q "Adopts local files, community Steam Input" && \
+    echo "$out2" | grep -q "STEAM ENTITLEMENT & ACF ADOPTION ENGINE" && \
+    echo "$out2" | grep -q "entitled in Steam Client with Full DLC & ACF manifest"
+}
+run_test "Entitlement Aliases: Valid execution & ACF adoption banners (entitle/adopt-steam)" test_entitle_aliases_execution
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
