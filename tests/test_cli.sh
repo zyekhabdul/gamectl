@@ -411,6 +411,36 @@ test_arch_pkgbuild_validation() {
 }
 run_test "Arch Packaging: Valid PKGBUILD syntax and .SRCINFO generation" test_arch_pkgbuild_validation
 
+test_artwork_fetch_missing_target() {
+    local exit_code=0
+    "$GAMECTL" fetch-art >/dev/null 2>&1 || exit_code=$?
+    [ "$exit_code" -ne 0 ]
+}
+run_test "Artwork Pipeline: Reject execution without target directory or AppID" test_artwork_fetch_missing_target
+
+test_artwork_fetch_pipeline() {
+    local t_grid
+    t_grid=$(mktemp -d)
+    local t_game
+    t_game=$(mktemp -d)
+    echo "105600" > "$t_game/steam_appid.txt"
+    touch "$t_game/Terraria.bin.x86_64"
+
+    local exit_code=0
+    GAMECTL_GRID_DIR="$t_grid" "$GAMECTL" fetch-art "$t_game" >/dev/null 2>&1 || exit_code=$?
+
+    local files_ok=0
+    [ -f "$t_grid/105600p.png" ] && \
+    [ -f "$t_grid/105600.png" ] && \
+    [ -f "$t_grid/105600_hero.png" ] && \
+    [ -f "$t_grid/105600_logo.png" ] && \
+    files_ok=1
+
+    rm -rf "$t_grid" "$t_game"
+    [ "$exit_code" -eq 0 ] && [ "$files_ok" -eq 1 ]
+}
+run_test "Artwork Pipeline: Fetch capsule, banner, hero, and logo from Steam CDN" test_artwork_fetch_pipeline
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

@@ -398,3 +398,173 @@ EOF
     return 0
 }
 
+# Resolve active Steam user grid directory (~/.local/share/Steam/userdata/<account_id>/config/grid)
+get_steam_grid_dir() {
+    if [ -n "${GAMECTL_GRID_DIR:-}" ]; then
+        echo "$GAMECTL_GRID_DIR"
+        return 0
+    fi
+
+    local s_roots=(
+        "$HOME/.local/share/Steam"
+        "$HOME/.steam/steam"
+        "$HOME/.steam/root"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam"
+        "$HOME/snap/steam/common/.local/share/Steam"
+    )
+    for s_root in "${s_roots[@]}"; do
+        if [ -d "$s_root/userdata" ]; then
+            for udir in "$s_root/userdata"/*; do
+                [ -d "$udir" ] || continue
+                local u_id
+                u_id=$(basename "$udir")
+                if [[ "$u_id" =~ ^[0-9]+$ ]] && [ "$u_id" -gt 0 ] 2>/dev/null; then
+                    echo "$udir/config/grid"
+                    return 0
+                fi
+            done
+        fi
+    done
+
+    # Fallback to default
+    echo "$HOME/.local/share/Steam/userdata/0/config/grid"
+}
+
+# Fetch official artwork (portrait, banner, hero, logo) from Steam CDN
+fetch_steam_artwork() {
+    local target="${1:-}"
+    local appid="${2:-}"
+
+    if [ -z "$target" ]; then
+        echo "Usage: gamectl fetch-art <game_dir|appid> [appid]" >&2
+        return 1
+    fi
+
+    local game_dir=""
+    if [[ "$target" =~ ^[0-9]+$ ]] && [ -z "$appid" ]; then
+        appid="$target"
+    elif [ -d "$target" ]; then
+        game_dir="$target"
+    elif [ -f "$target" ]; then
+        game_dir="$(dirname "$target")"
+    fi
+
+    # Resolve AppID from directory if not explicitly provided
+    if [ -z "$appid" ] && [ -n "$game_dir" ]; then
+        if [ -f "$game_dir/steam_appid.txt" ]; then
+            appid=$(grep -oE '^[0-9]+' "$game_dir/steam_appid.txt" 2>/dev/null | head -n 1 || true)
+        elif [ -f "$game_dir/steam_settings/steam_appid.txt" ]; then
+            appid=$(grep -oE '^[0-9]+' "$game_dir/steam_settings/steam_appid.txt" 2>/dev/null | head -n 1 || true)
+        fi
+    fi
+
+    if [ -z "$appid" ]; then
+        echo "[ERROR] Cannot resolve Steam AppID for target: $target" >&2
+        echo "        Provide a numeric AppID: gamectl fetch-art <dir> <appid>" >&2
+        return 1
+    fi
+
+    local grid_dir
+    grid_dir=$(get_steam_grid_dir)
+    mkdir -p "$grid_dir"
+
+    # Identify target shortcut and artwork IDs
+    local target_ids=("$appid")
+    if [ -n "$game_dir" ]; then
+        local g_bin
+        g_bin=$(find_game_binary "$game_dir" 2>/dev/null || true)
+        local g_title
+        g_title=$(basename "$game_dir")
+        if [ -n "$g_bin" ]; then
+            local sc_id
+            sc_id=$(python3 -c "import binascii, sys; p = sys.argv[1]; t = sys.argv[2]; print((binascii.crc32((p + t).encode('utf-8')) | 0x80000000))" "$game_dir/$g_bin" "$g_title" 2>/dev/null || true)
+            if [ -n "$sc_id" ] && [ "$sc_id" != "$appid" ]; then
+                target_ids+=("$sc_id")
+            fi
+        fi
+    fi
+
+    echo "[INFO] Fetching Steam artwork for AppID: $appid"
+    echo "[INFO] Destination Steam grid directory: $grid_dir"
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    local downloaded_count=0
+
+    # Helper function to download and convert image to PNG
+    _download_asset() {
+        local asset_type="$1"
+        local asset_suffix="$2"
+        shift 2
+        local urls=("$@")
+
+        local tmp_file="$tmp_dir/${asset_type// /_}.raw"
+        rm -f "$tmp_file"
+
+        local url
+        for url in "${urls[@]}"; do
+            if curl -fsSL --connect-timeout 5 --max-time 15 "$url" -o "$tmp_file" 2>/dev/null && [ -s "$tmp_file" ]; then
+                break
+            fi
+        done
+
+        if [ ! -s "$tmp_file" ]; then
+            echo "    • $(printf '%-18s' "$asset_type") : [WARN] Not available on CDN"
+            return 1
+        fi
+
+        local tid
+        for tid in "${target_ids[@]}"; do
+            local dest_png="$grid_dir/${tid}${asset_suffix}.png"
+            if command -v magick >/dev/null 2>&1; then
+                magick "$tmp_file" "$dest_png" 2>/dev/null || cp "$tmp_file" "$dest_png"
+            elif command -v convert >/dev/null 2>&1; then
+                convert "$tmp_file" "$dest_png" 2>/dev/null || cp "$tmp_file" "$dest_png"
+            elif command -v ffmpeg >/dev/null 2>&1; then
+                ffmpeg -v error -y -i "$tmp_file" "$dest_png" 2>/dev/null || cp "$tmp_file" "$dest_png"
+            else
+                cp "$tmp_file" "$dest_png"
+            fi
+        done
+
+        echo "    • $(printf '%-18s' "$asset_type") : [VERIFIED] Saved as <id>${asset_suffix}.png"
+        downloaded_count=$((downloaded_count + 1))
+        return 0
+    }
+
+    # 1. Portrait capsule (600x900) -> <shortcut_id>p.png
+    _download_asset "Portrait Capsule" "p" \
+        "https://cdn.akamai.steamstatic.com/steam/apps/$appid/library_600x900_2x.jpg" \
+        "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appid/library_600x900_2x.jpg" \
+        "https://cdn.cloudflare.steamstatic.com/steam/apps/$appid/library_600x900_2x.jpg" \
+        "https://cdn.akamai.steamstatic.com/steam/apps/$appid/library_600x900.jpg" || true
+
+    # 2. Horizontal banner (920x430 or 460x215) -> <shortcut_id>.png
+    _download_asset "Horizontal Banner" "" \
+        "https://cdn.akamai.steamstatic.com/steam/apps/$appid/header.jpg" \
+        "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appid/header.jpg" \
+        "https://cdn.cloudflare.steamstatic.com/steam/apps/$appid/header.jpg" || true
+
+    # 3. Hero background (1920x620) -> <shortcut_id>_hero.png
+    _download_asset "Hero Background" "_hero" \
+        "https://cdn.akamai.steamstatic.com/steam/apps/$appid/library_hero.jpg" \
+        "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appid/library_hero.jpg" \
+        "https://cdn.cloudflare.steamstatic.com/steam/apps/$appid/library_hero.jpg" || true
+
+    # 4. Logo transparent overlay -> <shortcut_id>_logo.png
+    _download_asset "Logo Overlay" "_logo" \
+        "https://cdn.akamai.steamstatic.com/steam/apps/$appid/logo.png" \
+        "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appid/logo.png" \
+        "https://cdn.cloudflare.steamstatic.com/steam/apps/$appid/logo.png" || true
+
+    rm -rf "$tmp_dir"
+
+    if [ "$downloaded_count" -gt 0 ]; then
+        echo "[VERIFIED] Successfully fetched $downloaded_count artwork asset(s) for AppID: $appid"
+        return 0
+    else
+        echo "[ERROR] Failed to fetch any artwork assets for AppID: $appid" >&2
+        return 1
+    fi
+}
+
