@@ -393,6 +393,24 @@ test_desktop_entry_lifecycle() {
 }
 run_test "Desktop Entry Generator: Valid FreeDesktop specification format" test_desktop_entry_lifecycle
 
+test_installer_dry_run() {
+    local out1 out2
+    out1=$("$REPO_ROOT/install.sh" --dry-run 2>&1)
+    out2=$(cat "$REPO_ROOT/install.sh" | bash -s -- --dry-run 2>&1)
+    echo "$out1" | grep -q "DRY-RUN mode" && \
+    echo "$out2" | grep -q "turnkey piped web installer" && \
+    echo "$out2" | grep -q "Dry-run pre-flight check completed successfully"
+}
+run_test "Turnkey Installer: Local and piped stdin dry-run execution" test_installer_dry_run
+
+test_arch_pkgbuild_validation() {
+    [ -f "$REPO_ROOT/packaging/arch/PKGBUILD" ] && \
+    [ -f "$REPO_ROOT/packaging/arch/.SRCINFO" ] && \
+    bash -n "$REPO_ROOT/packaging/arch/PKGBUILD" && \
+    grep -q "pkgname = gamectl" "$REPO_ROOT/packaging/arch/.SRCINFO"
+}
+run_test "Arch Packaging: Valid PKGBUILD syntax and .SRCINFO generation" test_arch_pkgbuild_validation
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

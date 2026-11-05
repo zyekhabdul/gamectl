@@ -1,0 +1,47 @@
+# Maintainer: Zyekh Abdul <zyekhabdul@users.noreply.github.com>
+
+pkgname=gamectl
+pkgver=1.2.0
+pkgrel=1
+pkgdesc="Sovereign TUI Game Manager & Launcher for Linux (Zero-Bloat)"
+arch=('any')
+url="https://github.com/zyekhabdul/gamectl"
+license=('MIT')
+depends=(
+    'bash'
+    'curl'
+    'file'
+    'fzf'
+    'jq'
+    'openssh'
+    'python'
+    'rsync'
+    'unzip'
+)
+optdepends=(
+    'gamemode: Performance optimizations during gameplay'
+    'gamescope: Micro-compositor with dynamic FSR upscaling'
+    'mangohud: On-screen performance overlay and frame limiter'
+    'python-ruamel-yaml: Preserves indentation in YAML configs'
+    'umu-launcher: Unified Linux compatibility runner'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "$srcdir/$pkgname-$pkgver"
+
+    # Install standalone executable and shorthand alias
+    install -Dm755 bin/gamectl "$pkgdir/usr/bin/gamectl"
+    ln -sf gamectl "$pkgdir/usr/bin/game"
+
+    # Install shell autocompletion
+    install -Dm644 completions/gamectl.bash "$pkgdir/usr/share/bash-completion/completions/gamectl"
+    ln -sf gamectl "$pkgdir/usr/share/bash-completion/completions/game"
+
+    # Install FreeDesktop desktop application entry
+    install -Dm644 gamectl.desktop "$pkgdir/usr/share/applications/gamectl.desktop"
+
+    # Install documentation
+    install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname" README.md docs/GUIDE.md docs/ARCHITECTURE.md
+}

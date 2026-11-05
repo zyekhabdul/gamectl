@@ -1,0 +1,25 @@
+pkgbase = gamectl
+	pkgdesc = Sovereign TUI Game Manager & Launcher for Linux (Zero-Bloat)
+	pkgver = 1.2.0
+	pkgrel = 1
+	url = https://github.com/zyekhabdul/gamectl
+	arch = any
+	license = MIT
+	depends = bash
+	depends = curl
+	depends = file
+	depends = fzf
+	depends = jq
+	depends = openssh
+	depends = python
+	depends = rsync
+	depends = unzip
+	optdepends = gamemode: Performance optimizations during gameplay
+	optdepends = gamescope: Micro-compositor with dynamic FSR upscaling
+	optdepends = mangohud: On-screen performance overlay and frame limiter
+	optdepends = python-ruamel-yaml: Preserves indentation in YAML configs
+	optdepends = umu-launcher: Unified Linux compatibility runner
+	source = gamectl-1.2.0.tar.gz::https://github.com/zyekhabdul/gamectl/archive/refs/tags/v1.2.0.tar.gz
+	sha256sums = SKIP
+
+pkgname = gamectl
