@@ -32,7 +32,7 @@ Scope of Work:
      - Cancel / Return
   4. Hapus seluruh prompt pasif `read -r -p "Press [ENTER] to continue..."` dan gantikan dengan transisi status kembali ke catalog atau dashboard.
 
-### Chunk 2: Entitlement Engine Nomenclature & ACF Semantics Overhaul
+### Chunk 2: Entitlement Engine Nomenclature & ACF Semantics Overhaul [DONE] (`efce9fd`)
 - Target Files: `src/tui/70_dashboard.sh`, `src/steam/30_downloader.sh`, `src/main.sh`
 - Runtutan Eksekusi Teknis:
   1. Perbarui Master Dashboard Hub (`dashboard_menu` di `src/tui/70_dashboard.sh`): ubah item `[04] UNLOCK STEAM (DLC)` menjadi `[04] STEAM ENTITLEMENT & ACF  Adopt files, Steam Input & shaders (Full DLC)`.
