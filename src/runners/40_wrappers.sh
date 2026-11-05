@@ -806,11 +806,21 @@ get_default_gamescope_args() {
     echo "-W $rw -H $rh -w $nw -h $nh -F fsr -f"
 }
 
+# Check if systemd user daemon and cgroups v2 scope unit execution is supported
+check_systemd_scope_support() {
+    if command -v systemd-run >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1; then
+        if systemd-run --user --scope --quiet true 2>/dev/null; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
 # Resolve and build wrapper prefix command array (gamemoderun, mangohud, gamescope)
 build_wrapper_command() {
     local gdir="$1"
     shift || true
-    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr=""
+    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr="" opt_systemd_scope=""
     local remaining_args=()
 
     while [ $# -gt 0 ]; do
@@ -825,13 +835,15 @@ build_wrapper_command() {
             --no-fsr) opt_fsr=0; shift ;;
             --glthread) opt_glthread=1; shift ;;
             --no-glthread) opt_glthread=0; shift ;;
+            --scope|--systemd-scope) opt_systemd_scope=1; shift ;;
+            --no-scope|--no-systemd-scope) opt_systemd_scope=0; shift ;;
             --) shift; remaining_args+=("$@"); break ;;
             *) remaining_args+=("$1"); shift ;;
         esac
     done
 
     # 1. Base defaults
-    local use_gm=0 use_hud=0 use_scope=0 use_fsr=0 use_glthread=0
+    local use_gm=0 use_hud=0 use_scope=0 use_fsr=0 use_glthread=0 use_systemd_scope=""
     local gscope_args
     gscope_args=$(get_default_gamescope_args)
 
@@ -847,6 +859,7 @@ build_wrapper_command() {
                 gamescope) use_scope="$v" ;;
                 fsr) use_fsr="$v" ;;
                 glthread|mesa_glthread) use_glthread="$v" ;;
+                scope|systemd_scope) use_systemd_scope="$v" ;;
                 gamescope_args) gscope_args="$v" ;;
             esac
         done < "$HOME/.config/gamectl/wrappers"
@@ -864,6 +877,7 @@ build_wrapper_command() {
                 gamescope) use_scope="$v" ;;
                 fsr) use_fsr="$v" ;;
                 glthread|mesa_glthread) use_glthread="$v" ;;
+                scope|systemd_scope) use_systemd_scope="$v" ;;
                 gamescope_args) gscope_args="$v" ;;
             esac
         done < "$gdir/.wrappers"
@@ -875,6 +889,7 @@ build_wrapper_command() {
     [ -n "${GAMECTL_GAMESCOPE:-}" ] && use_scope="$GAMECTL_GAMESCOPE"
     [ -n "${GAMECTL_FSR:-}" ] && use_fsr="$GAMECTL_FSR"
     [ -n "${GAMECTL_GLTHREAD:-}" ] && use_glthread="$GAMECTL_GLTHREAD"
+    [ -n "${GAMECTL_SCOPE:-${GAMECTL_SYSTEMD_SCOPE:-}}" ] && use_systemd_scope="${GAMECTL_SCOPE:-$GAMECTL_SYSTEMD_SCOPE}"
     [ -n "${GAMECTL_GAMESCOPE_ARGS:-}" ] && gscope_args="$GAMECTL_GAMESCOPE_ARGS"
 
     # 5. CLI flag overrides
@@ -883,8 +898,18 @@ build_wrapper_command() {
     [ -n "$opt_gamescope" ] && use_scope="$opt_gamescope"
     [ -n "$opt_fsr" ] && use_fsr="$opt_fsr"
     [ -n "${opt_glthread:-}" ] && use_glthread="$opt_glthread"
+    [ -n "${opt_systemd_scope:-}" ] && use_systemd_scope="$opt_systemd_scope"
+
+    if [ -z "${use_systemd_scope:-}" ]; then
+        if check_systemd_scope_support; then
+            use_systemd_scope=1
+        else
+            use_systemd_scope=0
+        fi
+    fi
 
     GAMECTL_ACTIVE_GLTHREAD="$use_glthread"
+    GAMECTL_ACTIVE_SYSTEMD_SCOPE="$use_systemd_scope"
 
     local prefix=()
     if [ "$use_gm" = "1" ]; then

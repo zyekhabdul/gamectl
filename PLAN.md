@@ -12,7 +12,7 @@ Implement Linux systems architectural remediation (Phase 4 / Actions 4.1-4.4):
 
 ## 2. Granular Technical Execution Plan (Work Packet 12)
 
-### Chunk 1: cgroups v2 / systemd-run Scope Process Isolation (Action 4.1) [PENDING]
+### Chunk 1: cgroups v2 / systemd-run Scope Process Isolation (Action 4.1) [DONE]
 - Target Files: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/main.sh`
 - Runtutan Eksekusi Teknis:
   1. Buat helper `check_systemd_scope_support` di `src/runners/40_wrappers.sh`:

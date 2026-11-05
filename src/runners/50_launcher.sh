@@ -57,7 +57,12 @@ game_controller_hud() {
                     wait "$t_pid" 2>/dev/null || true
                     ;;
                 4)
+                    local s_unit=""
+                    [ -f "$info_file" ] && s_unit=$(grep -E '^SCOPE_UNIT=' "$info_file" 2>/dev/null | cut -d'=' -f2- || true)
                     echo "  [INFO] Sending SIGTERM signal to process PID $game_pid..."
+                    if [ -n "$s_unit" ]; then
+                        systemctl --user stop "$s_unit.scope" 2>/dev/null || true
+                    fi
                     kill "$game_pid" 2>/dev/null || true
                     local wait_cnt=0
                     while kill -0 "$game_pid" 2>/dev/null && [ "$wait_cnt" -lt 6 ]; do
@@ -78,7 +83,13 @@ game_controller_hud() {
                     sleep 0.8
                     ;;
                 5)
+                    local s_unit=""
+                    [ -f "$info_file" ] && s_unit=$(grep -E '^SCOPE_UNIT=' "$info_file" 2>/dev/null | cut -d'=' -f2- || true)
                     echo "  [INFO] Sending SIGKILL signal to process PID $game_pid..."
+                    if [ -n "$s_unit" ]; then
+                        systemctl --user kill -s SIGKILL "$s_unit.scope" 2>/dev/null || true
+                        systemctl --user stop "$s_unit.scope" 2>/dev/null || true
+                    fi
                     kill -9 "$game_pid" 2>/dev/null || true
                     if [ -d "$gdir/pfx" ]; then
                         # Remediation DEFECT-02: Force terminate stuck wineserver daemon and release lockfiles
@@ -256,7 +267,11 @@ launch_game() {
     fi
 
     # Local state cleanup helper & signal trap
+    local unit_name=""
     _restore_launch_state() {
+        if [ -n "$unit_name" ]; then
+            systemctl --user stop "$unit_name.scope" 2>/dev/null || true
+        fi
         if [ -n "$prev_governor" ] && [ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
             echo "$prev_governor" | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
         fi
@@ -300,6 +315,23 @@ launch_game() {
     local game_pid=""
     local run_type="Native Linux"
 
+    local safe_title
+    safe_title=$(echo "$title" | tr -cd '[:alnum:]_-')
+    [ -z "$safe_title" ] && safe_title="game"
+
+    local use_scope=false
+    if [ "${GAMECTL_ACTIVE_SYSTEMD_SCOPE:-0}" = "1" ] && check_systemd_scope_support; then
+        use_scope=true
+    fi
+
+    _exec_in_scope() {
+        if [ "$use_scope" = true ]; then
+            exec systemd-run --user --scope --quiet --unit="gamectl-${safe_title}-${BASHPID}" --description="gamectl: ${title}" "$@"
+        else
+            exec "$@"
+        fi
+    }
+
     if [ "$is_win" = true ]; then
         local detected_overrides
         detected_overrides=$(detect_dll_overrides "$gdir")
@@ -333,27 +365,26 @@ launch_game() {
         case "$runner_bin" in
             umu-run)
                 (
-                    WINEPREFIX="$pfx_dir" GAMEID="$appid" WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
-                    exec "${wrappers[@]}" umu-run "$gdir/$gbin" "${game_args[@]}"
+                    export WINEPREFIX="$pfx_dir" GAMEID="$appid" WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}"
+                    _exec_in_scope "${wrappers[@]}" umu-run "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
                 ;;
             *proton*)
                 (
-                    STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_INSTALL_PATH:-$(get_steam_root 2>/dev/null || echo "$HOME/.local/share/Steam")}" \
+                    export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_INSTALL_PATH:-$(get_steam_root 2>/dev/null || echo "$HOME/.local/share/Steam")}" \
                     STEAM_COMPAT_DATA_PATH="$gdir" \
                     STEAM_COMPAT_APP_ID="$appid" \
                     WINEPREFIX="$pfx_dir" \
-                    WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
-                    exec "${wrappers[@]}" "$runner_bin" waitforexitandrun "$gdir/$gbin" "${game_args[@]}"
+                    WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}"
+                    _exec_in_scope "${wrappers[@]}" "$runner_bin" waitforexitandrun "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
                 ;;
             *)
                 (
-                    WINEPREFIX="$pfx_dir" \
-                    WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
-                    exec "${wrappers[@]}" "$runner_bin" "$gdir/$gbin" "${game_args[@]}"
+                    export WINEPREFIX="$pfx_dir" WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}"
+                    _exec_in_scope "${wrappers[@]}" "$runner_bin" "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
                 ;;
@@ -362,7 +393,7 @@ launch_game() {
         echo "[INFO] Launching $title (Native Linux) in background..."
         echo "[INFO] Log stream: $log_file"
         (
-            exec "${wrappers[@]}" ./"$gbin" "${game_args[@]}"
+            _exec_in_scope "${wrappers[@]}" ./"$gbin" "${game_args[@]}"
         ) > "$log_file" 2>&1 &
         game_pid=$!
     fi
@@ -373,6 +404,10 @@ launch_game() {
         return 1
     fi
 
+    if [ "$use_scope" = true ]; then
+        unit_name="gamectl-${safe_title}-${game_pid}"
+    fi
+
     local info_file="$run_dir/active_games/${game_pid}.info"
     cat <<EOF > "$info_file"
 PID=$game_pid
@@ -381,11 +416,15 @@ DIR=$gdir
 BIN=$gbin
 LOG=$log_file
 START=$(date +%s)
+SCOPE_UNIT=$unit_name
 EOF
 
     # Detached background watchdog to restore CPU governor and cleanup when process exits
     (
         wait "$game_pid" 2>/dev/null
+        if [ -n "$unit_name" ]; then
+            systemctl --user stop "$unit_name.scope" 2>/dev/null || true
+        fi
         if [ "$is_win" = true ] && [ -d "$pfx_dir" ]; then
             # Remediation DEFECT-02: Wait for wineserver to flush data & release lockfile before snapshot (wineserver -w)
             local ws_bin
@@ -740,7 +779,7 @@ cli_launch() {
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --hud|--mangohud|--no-hud|--no-mangohud|--gamemode|--no-gamemode|--gamescope|--no-gamescope|--fsr|--no-fsr)
+            --hud|--mangohud|--no-hud|--no-mangohud|--gamemode|--no-gamemode|--gamescope|--no-gamescope|--fsr|--no-fsr|--glthread|--no-glthread|--scope|--systemd-scope|--no-scope|--no-systemd-scope)
                 l_flags+=("$1")
                 shift
                 ;;
