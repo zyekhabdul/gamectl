@@ -436,9 +436,19 @@ library_menu() {
 
 # Live Steam Search View (Actionable TUI Search)
 search_steam() {
-    echo -n "Enter game title to search: "
-    read -r query
-    [ -z "$query" ] && return
+    local query_raw=""
+    query_raw=$(echo "Search Steam Store catalog (Type title and press ENTER)" | fzf \
+        --print-query \
+        --border-label="  ╢ gamectl :: Steam Store Search ╟  " \
+        --border-label-pos=2 \
+        --header="Type game title to search (Enter: Search │ Esc: Cancel)" \
+        --prompt="Search Store > " \
+        --height=20% \
+        --reverse 2>/dev/null) || return 0
+
+    local query
+    query=$(echo "$query_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [ -z "$query" ] && return 0
 
     echo "[INFO] Searching '$query' on Steam Store API..."
     local encoded_query
@@ -489,143 +499,173 @@ search_steam() {
         results+="${appid}"$'\t'"${name}"$'\t'"${status}"$'\n'
     done <<< "$items"
 
-    local selection
-    selection=$(echo -n "$results" | fzf \
-        --delimiter=$'\t' \
-        --with-nth=1,2,3 \
-        --border-label="  ╢ gamectl :: Steam Store Catalog ╟  " \
-        --border-label-pos=2 \
-        --header="STEAM CATALOG (Enter: Actions & Install │ Esc: Back)" \
-        --prompt="Steam Store > " \
-        --preview='
-            appid={1}
-            title={2}
-            status={3}
-            echo -e "\033[38;5;60m╭─ STEAM METADATA & PROTONDB AUDIT ───────────────────╮\033[0m"
-            echo -e "│ \033[1m$title\033[0m \033[38;5;244m(AppID: $appid)\033[0m"
-            echo -e "\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m"
-            echo -e "  \033[1;38;5;117mLocal State\033[0m : $status"
-            details=$(curl -s --connect-timeout 2 "https://store.steampowered.com/api/appdetails?appids=$appid&filters=platforms,genres" | jq -r ".\"$appid\".data // empty" 2>/dev/null)
-            if [ -n "$details" ]; then
-                is_linux=$(echo "$details" | jq -r ".platforms.linux // false" 2>/dev/null)
-                is_win=$(echo "$details" | jq -r ".platforms.windows // false" 2>/dev/null)
-                genres=$(echo "$details" | jq -r "[.genres[]?.description] | join(\", \")" 2>/dev/null)
-                [ -n "$genres" ] && echo -e "  \033[1;38;5;117mGenres     \033[0m : \033[38;5;244m$genres\033[0m"
-                if [ "$is_linux" = "true" ]; then
-                    echo -e "  \033[1;38;5;117mPlatform   \033[0m : \033[1;38;5;120mNative Linux ELF available\033[0m"
-                elif [ "$is_win" = "true" ]; then
-                    echo -e "  \033[1;38;5;117mPlatform   \033[0m : \033[1;38;5;141mWindows PE (Requires Proton/Wine)\033[0m"
-                fi
-            fi
-            echo
-            echo -e "\033[38;5;60m╭─ COMMUNITY COMPATIBILITY ───────────────────────────╮\033[0m"
-            pdb=$(curl -s --connect-timeout 2 "https://www.protondb.com/api/v1/reports/summaries/$appid.json" 2>/dev/null)
-            if [ -n "$pdb" ] && [ "$pdb" != "null" ]; then
-                tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null)
-                score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null)
-                conf=$(echo "$pdb" | jq -r ".confidence // \"-\"" 2>/dev/null)
-                tier_upper="${tier^^}"
-                c_tier="\033[1;38;5;120m[$tier_upper]\033[0m"
-                case "$tier_upper" in
-                    *PLATINUM*) c_tier="\033[1;38;5;153m[PLATINUM]\033[0m" ;;
-                    *GOLD*)     c_tier="\033[1;38;5;221m[GOLD]\033[0m" ;;
-                    *SILVER*)   c_tier="\033[1;38;5;248m[SILVER]\033[0m" ;;
-                    *BRONZE*)   c_tier="\033[1;38;5;173m[BRONZE]\033[0m" ;;
-                    *BORKED*)   c_tier="\033[1;38;5;203m[BORKED]\033[0m" ;;
-                esac
-                echo -e "  \033[1;38;5;117mProtonDB Tier \033[0m: $c_tier"
-                echo -e "  \033[1;38;5;117mRating Score  \033[0m: \033[1m$score\033[0m \033[38;5;244m(Confidence: $conf)\033[0m"
-            else
-                echo -e "  \033[1;38;5;117mProtonDB Tier \033[0m: \033[38;5;244m[NO REPORTS YET]\033[0m"
-            fi
-            echo -e "\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m"
-        ' \
-        --preview-window=right:52%:border-rounded:wrap \
-    ) || return
-
-    if [ -n "$selection" ]; then
-        local sel_id sel_name sel_status
-        sel_id=$(echo "$selection" | awk -F'\t' '{print $1}')
-        sel_name=$(echo "$selection" | awk -F'\t' '{print $2}')
-        sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
-
-        echo
-        echo "${UI_BOX}╭─ SELECTED TARGET ───────────────────────────────────╮${UI_RST}"
-        echo "│ ${UI_BOLD}$sel_name${UI_RST} ${UI_DIM}(AppID: $sel_id)${UI_RST}"
-        echo "${UI_BOX}╰─────────────────────────────────────────────────────╯${UI_RST}"
-        if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-            local gdir=""
-            local clean_sel_name="${sel_name,,}"
-            if [ -n "${installed_dir["$sel_id"]:-}" ] && [ -d "${installed_dir["$sel_id"]}" ]; then
-                gdir="${installed_dir["$sel_id"]}"
-            elif [ -n "${installed_dir["$clean_sel_name"]:-}" ] && [ -d "${installed_dir["$clean_sel_name"]}" ]; then
-                gdir="${installed_dir["$clean_sel_name"]}"
-            elif [ -d "$HOME/Games/$sel_name" ]; then
-                gdir="$HOME/Games/$sel_name"
-            fi
-
-            echo "  ${UI_PURPLE}1)${UI_RST} Launch game directly"
-            echo "  ${UI_PURPLE}2)${UI_RST} Inject GBE Fork only (Standalone ./saves & DLC.txt)"
-            echo "  ${UI_PURPLE}3)${UI_RST} Inject GBE + Sync Steam Client (All-in-One full DLC)"
-            echo "  ${UI_PURPLE}4)${UI_RST} Sync to Steam Client entitlement only"
-            echo "  ${UI_DIM}5)${UI_RST} Cancel / Return"
-            echo
-            read -r -p "Select action [1-5]: " act_opt
-
-            case "$act_opt" in
-                1)
-                    local gbin
-                    gbin=$(find_game_binary "$gdir" 2>/dev/null || echo "")
-                    if [ -n "$gbin" ]; then
-                        launch_game "$gdir" "$gbin" "$sel_name"
-                    else
-                        echo "[ERROR] Binary executable not found in $gdir."
+    while true; do
+        local selection
+        selection=$(echo -n "$results" | fzf \
+            --delimiter=$'\t' \
+            --with-nth=1,2,3 \
+            --border-label="  ╢ gamectl :: Steam Store Catalog ╟  " \
+            --border-label-pos=2 \
+            --header="STEAM CATALOG (Enter: Actions & Install │ Esc: Back)" \
+            --prompt="Steam Store > " \
+            --preview='
+                appid={1}
+                title={2}
+                status={3}
+                echo -e "\033[38;5;60m╭─ STEAM METADATA & PROTONDB AUDIT ───────────────────╮\033[0m"
+                echo -e "│ \033[1m$title\033[0m \033[38;5;244m(AppID: $appid)\033[0m"
+                echo -e "\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m"
+                echo -e "  \033[1;38;5;117mLocal State\033[0m : $status"
+                details=$(curl -s --connect-timeout 2 "https://store.steampowered.com/api/appdetails?appids=$appid&filters=platforms,genres" | jq -r ".\"$appid\".data // empty" 2>/dev/null)
+                if [ -n "$details" ]; then
+                    is_linux=$(echo "$details" | jq -r ".platforms.linux // false" 2>/dev/null)
+                    is_win=$(echo "$details" | jq -r ".platforms.windows // false" 2>/dev/null)
+                    genres=$(echo "$details" | jq -r "[.genres[]?.description] | join(\", \")" 2>/dev/null)
+                    [ -n "$genres" ] && echo -e "  \033[1;38;5;117mGenres     \033[0m : \033[38;5;244m$genres\033[0m"
+                    if [ "$is_linux" = "true" ]; then
+                        echo -e "  \033[1;38;5;117mPlatform   \033[0m : \033[1;38;5;120mNative Linux ELF available\033[0m"
+                    elif [ "$is_win" = "true" ]; then
+                        echo -e "  \033[1;38;5;117mPlatform   \033[0m : \033[1;38;5;141mWindows PE (Requires Proton/Wine)\033[0m"
                     fi
-                    ;;
-                2)
-                    inject_game "$gdir" "$sel_id" --no-sync
-                    ;;
-                3)
-                    inject_game "$gdir" "$sel_id"
-                    ;;
-                4)
-                    sync_steam "$sel_id" "$sel_name" "$gdir"
-                    ;;
-                *)
-                    echo "[INFO] Action cancelled."
-                    ;;
-            esac
-        else
-            echo "  ${UI_PURPLE}1)${UI_RST} [All-in-One] Download + Inject GBE + Sync Steam (Background)"
-            echo "  ${UI_PURPLE}2)${UI_RST} [All-in-One] Download + Inject GBE + Sync Steam (Live Stream)"
-            echo "  ${UI_PURPLE}3)${UI_RST} [Standalone] Download + Inject GBE only (Steam-free)"
-            echo "  ${UI_PURPLE}4)${UI_RST} [Unlock Steam DLC] Zero-Download Steam entitlement (Full DLC)"
-            echo "  ${UI_PURPLE}5)${UI_RST} [Raw Download] Download raw depot assets only"
-            echo "  ${UI_DIM}6)${UI_RST} Cancel"
-            echo
-            read -r -p "Select package [1-6]: " opt
-            case "$opt" in
-                1)
-                    download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --all --background
-                    ;;
-                2)
-                    download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --all --foreground
-                    ;;
-                3)
-                    download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --inject-only --background
-                    ;;
-                4)
-                    unlock_game "$sel_id" "$sel_name"
-                    ;;
-                5)
-                    download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --raw --background
-                    ;;
-                *)
-                    echo "[INFO] Action cancelled."
-                    ;;
-            esac
+                fi
+                echo
+                echo -e "\033[38;5;60m╭─ COMMUNITY COMPATIBILITY ───────────────────────────╮\033[0m"
+                pdb=$(curl -s --connect-timeout 2 "https://www.protondb.com/api/v1/reports/summaries/$appid.json" 2>/dev/null)
+                if [ -n "$pdb" ] && [ "$pdb" != "null" ]; then
+                    tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null)
+                    score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null)
+                    conf=$(echo "$pdb" | jq -r ".confidence // \"-\"" 2>/dev/null)
+                    tier_upper="${tier^^}"
+                    c_tier="\033[1;38;5;120m[$tier_upper]\033[0m"
+                    case "$tier_upper" in
+                        *PLATINUM*) c_tier="\033[1;38;5;153m[PLATINUM]\033[0m" ;;
+                        *GOLD*)     c_tier="\033[1;38;5;221m[GOLD]\033[0m" ;;
+                        *SILVER*)   c_tier="\033[1;38;5;248m[SILVER]\033[0m" ;;
+                        *BRONZE*)   c_tier="\033[1;38;5;173m[BRONZE]\033[0m" ;;
+                        *BORKED*)   c_tier="\033[1;38;5;203m[BORKED]\033[0m" ;;
+                    esac
+                    echo -e "  \033[1;38;5;117mProtonDB Tier \033[0m: $c_tier"
+                    echo -e "  \033[1;38;5;117mRating Score  \033[0m: \033[1m$score\033[0m \033[38;5;244m(Confidence: $conf)\033[0m"
+                else
+                    echo -e "  \033[1;38;5;117mProtonDB Tier \033[0m: \033[38;5;244m[NO REPORTS YET]\033[0m"
+                fi
+                echo -e "\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m"
+            ' \
+            --preview-window=right:52%:border-rounded:wrap \
+        ) || break
+
+        if [ -n "$selection" ]; then
+            local sel_id sel_name sel_status
+            sel_id=$(echo "$selection" | awk -F'\t' '{print $1}')
+            sel_name=$(echo "$selection" | awk -F'\t' '{print $2}')
+            sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
+
+            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
+                local gdir=""
+                local clean_sel_name="${sel_name,,}"
+                if [ -n "${installed_dir["$sel_id"]:-}" ] && [ -d "${installed_dir["$sel_id"]}" ]; then
+                    gdir="${installed_dir["$sel_id"]}"
+                elif [ -n "${installed_dir["$clean_sel_name"]:-}" ] && [ -d "${installed_dir["$clean_sel_name"]}" ]; then
+                    gdir="${installed_dir["$clean_sel_name"]}"
+                elif [ -d "$HOME/Games/$sel_name" ]; then
+                    gdir="$HOME/Games/$sel_name"
+                fi
+
+                local action_palette
+                action_palette=$(cat <<EOF
+1	Launch Game Directly
+2	Inject GBE Fork Only (Standalone ./saves & DLC.txt)
+3	Inject GBE + Sync Steam Client (All-in-One Full DLC)
+4	Sync to Steam Client Entitlement Only (ACF & Steam Input)
+5	Cancel / Return
+EOF
+)
+                local action_sel
+                action_sel=$(echo "$action_palette" | fzf \
+                    --delimiter=$'\t' \
+                    --with-nth=2 \
+                    --border-label="  ╢ Action Palette: $sel_name ╟  " \
+                    --border-label-pos=2 \
+                    --header="ACTION PALETTE (Enter: Execute │ Esc: Return)" \
+                    --prompt="Action > " \
+                    --height=40% \
+                    --reverse 2>/dev/null) || action_sel="5"
+
+                local act_opt
+                act_opt=$(echo "$action_sel" | awk -F'\t' '{print $1}')
+
+                case "$act_opt" in
+                    1)
+                        local gbin
+                        gbin=$(find_game_binary "$gdir" 2>/dev/null || echo "")
+                        if [ -n "$gbin" ]; then
+                            local launch_rc=0
+                            launch_game "$gdir" "$gbin" "$sel_name" || launch_rc=$?
+                            if [ "$launch_rc" -eq 10 ]; then
+                                break
+                            fi
+                        else
+                            echo "[ERROR] Binary executable not found in $gdir."
+                            sleep 1.2
+                        fi
+                        ;;
+                    2)
+                        inject_game "$gdir" "$sel_id" --no-sync
+                        ;;
+                    3)
+                        inject_game "$gdir" "$sel_id"
+                        ;;
+                    4)
+                        sync_steam "$sel_id" "$sel_name" "$gdir"
+                        ;;
+                    *)
+                        ;;
+                esac
+            else
+                local not_installed_palette
+                not_installed_palette=$(cat <<EOF
+1	[All-in-One] Download + Inject GBE + Sync Steam (Background)
+2	[All-in-One] Download + Inject GBE + Sync Steam (Live Stream)
+3	[Standalone] Download + Inject GBE only (Steam-free)
+4	[Steam Entitlement & ACF] Adopt files, Steam Input & Shaders (Full DLC)
+5	[Raw Download] Download raw depot assets only
+6	Cancel / Return
+EOF
+)
+                local pkg_sel
+                pkg_sel=$(echo "$not_installed_palette" | fzf \
+                    --delimiter=$'\t' \
+                    --with-nth=2 \
+                    --border-label="  ╢ Action Palette: $sel_name ╟  " \
+                    --border-label-pos=2 \
+                    --header="PACKAGE SELECTION (Enter: Execute │ Esc: Return)" \
+                    --prompt="Package > " \
+                    --height=45% \
+                    --reverse 2>/dev/null) || pkg_sel="6"
+
+                local opt
+                opt=$(echo "$pkg_sel" | awk -F'\t' '{print $1}')
+                case "$opt" in
+                    1)
+                        download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --all --background
+                        ;;
+                    2)
+                        download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --all --foreground
+                        ;;
+                    3)
+                        download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --inject-only --background
+                        ;;
+                    4)
+                        unlock_game "$sel_id" "$sel_name"
+                        ;;
+                    5)
+                        download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --raw --background
+                        ;;
+                    *)
+                        ;;
+                esac
+            fi
         fi
-        [ "${act_opt:-}" != "1" ] && read -r -p "Press [ENTER] to continue..."
-    fi
+    done
 }
 
