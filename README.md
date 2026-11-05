@@ -262,7 +262,7 @@ gamectl/
 │   ├── tui/             # Master dashboard hub, preview cards, interactive search
 │   └── main.sh          # Subshell exports and CLI command dispatcher
 ├── tests/
-│   └── test_cli.sh      # Comprehensive regression & integrity harness (36+ tests)
+│   └── test_cli.sh      # Comprehensive regression & integrity harness (50+ tests)
 ├── gamectl.desktop      # FreeDesktop application launcher entry
 ├── install.sh           # Turnkey installation script
 └── README.md            # Project manifesto, benchmarks, and command dictionary
