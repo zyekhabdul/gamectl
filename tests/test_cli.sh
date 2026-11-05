@@ -441,6 +441,46 @@ test_artwork_fetch_pipeline() {
 }
 run_test "Artwork Pipeline: Fetch capsule, banner, hero, and logo from Steam CDN" test_artwork_fetch_pipeline
 
+test_steam_shortcut_missing_target() {
+    local exit_code=0
+    "$GAMECTL" add-to-steam >/dev/null 2>&1 || exit_code=$?
+    [ "$exit_code" -ne 0 ]
+}
+run_test "Steam Deck Shortcut: Reject execution without target directory" test_steam_shortcut_missing_target
+
+test_steam_shortcut_registration_flow() {
+    local t_dir
+    t_dir=$(mktemp -d)
+    local t_game1
+    t_game1=$(mktemp -d)
+    local t_game2
+    t_game2=$(mktemp -d)
+    touch "$t_game1/alpha.exe" "$t_game1/icon.png"
+    touch "$t_game2/beta.exe"
+
+    local vdf_file="$t_dir/shortcuts.vdf"
+    local exit1=0 exit2=0
+    GAMECTL_SHORTCUTS_VDF="$vdf_file" "$GAMECTL" add-to-steam "$t_game1" "Project Alpha" >/dev/null 2>&1 || exit1=$?
+    GAMECTL_SHORTCUTS_VDF="$vdf_file" "$GAMECTL" add-to-steam "$t_game2" "Project Beta" >/dev/null 2>&1 || exit2=$?
+
+    local vdf_ok=0
+    if [ -f "$vdf_file" ] && [ -f "${vdf_file}.bak" ]; then
+        python3 -c "
+with open('$vdf_file', 'rb') as f:
+    d = f.read()
+assert d.startswith(b'\x00shortcuts\x00')
+assert b'Project Alpha' in d
+assert b'Project Beta' in d
+assert b'launch' in d
+assert b'--hud' in d
+" >/dev/null 2>&1 && vdf_ok=1
+    fi
+
+    rm -rf "$t_dir" "$t_game1" "$t_game2"
+    [ "$exit1" -eq 0 ] && [ "$exit2" -eq 0 ] && [ "$vdf_ok" -eq 1 ]
+}
+run_test "Steam Deck Shortcut: Binary shortcuts.vdf registration & atomic backup" test_steam_shortcut_registration_flow
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

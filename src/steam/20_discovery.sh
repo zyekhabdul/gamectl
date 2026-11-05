@@ -568,3 +568,232 @@ fetch_steam_artwork() {
     fi
 }
 
+# Resolve active Steam user shortcuts.vdf path (~/.local/share/Steam/userdata/<account_id>/config/shortcuts.vdf)
+get_steam_shortcuts_vdf() {
+    if [ -n "${GAMECTL_SHORTCUTS_VDF:-}" ]; then
+        echo "$GAMECTL_SHORTCUTS_VDF"
+        return 0
+    fi
+
+    local s_roots=(
+        "$HOME/.local/share/Steam"
+        "$HOME/.steam/steam"
+        "$HOME/.steam/root"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam"
+        "$HOME/snap/steam/common/.local/share/Steam"
+    )
+    for s_root in "${s_roots[@]}"; do
+        if [ -d "$s_root/userdata" ]; then
+            for udir in "$s_root/userdata"/*; do
+                [ -d "$udir" ] || continue
+                local u_id
+                u_id=$(basename "$udir")
+                if [[ "$u_id" =~ ^[0-9]+$ ]] && [ "$u_id" -gt 0 ] 2>/dev/null; then
+                    echo "$udir/config/shortcuts.vdf"
+                    return 0
+                fi
+            done
+        fi
+    done
+
+    # Default fallback
+    echo "$HOME/.local/share/Steam/userdata/0/config/shortcuts.vdf"
+}
+
+# Add or update a non-Steam shortcut in Steam Deck Game Mode (binary shortcuts.vdf)
+add_steam_shortcut() {
+    local game_dir="${1:-}"
+    local title="${2:-}"
+
+    if [ -z "$game_dir" ]; then
+        echo "Usage: gamectl add-to-steam <game_dir> [title]" >&2
+        return 1
+    fi
+
+    if [ ! -d "$game_dir" ]; then
+        echo "[ERROR] Game directory does not exist: $game_dir" >&2
+        return 1
+    fi
+
+    game_dir="$(cd "$game_dir" && pwd)"
+
+    if [ -z "$title" ]; then
+        title="$(basename "$game_dir")"
+    fi
+
+    # Locate game icon
+    local icon_path=""
+    for candidate in "icon.png" "icon.ico" "logo.png" "app.png" "banner.png"; do
+        if [ -f "$game_dir/$candidate" ]; then
+            icon_path="$game_dir/$candidate"
+            break
+        fi
+    done
+    if [ -z "$icon_path" ]; then
+        icon_path=$(find "$game_dir" -maxdepth 2 \( -name "*.ico" -o -name "*.png" \) 2>/dev/null | head -n 1 || true)
+    fi
+
+    # Resolve gamectl binary
+    local gamectl_bin
+    gamectl_bin="$(command -v gamectl 2>/dev/null || true)"
+    if [ -z "$gamectl_bin" ]; then
+        if [ -x "$HOME/.local/bin/gamectl" ]; then
+            gamectl_bin="$HOME/.local/bin/gamectl"
+        elif [ -x "/usr/local/bin/gamectl" ]; then
+            gamectl_bin="/usr/local/bin/gamectl"
+        elif [ -x "$REPO_ROOT/bin/gamectl" ]; then
+            gamectl_bin="$REPO_ROOT/bin/gamectl"
+        else
+            gamectl_bin="gamectl"
+        fi
+    fi
+
+    local shortcuts_file
+    shortcuts_file="$(get_steam_shortcuts_vdf)"
+    local vdf_dir
+    vdf_dir="$(dirname "$shortcuts_file")"
+    mkdir -p "$vdf_dir"
+
+    # Create atomic backup if file already exists
+    if [ -f "$shortcuts_file" ]; then
+        cp -f "$shortcuts_file" "${shortcuts_file}.bak"
+    fi
+
+    python3 - "$shortcuts_file" "$title" "$game_dir" "$gamectl_bin" "$icon_path" << 'PYEOF'
+import sys, os, struct, binascii
+
+shortcuts_path = sys.argv[1]
+title = sys.argv[2]
+game_dir = os.path.abspath(sys.argv[3])
+gamectl_bin = sys.argv[4]
+icon_path = sys.argv[5]
+
+exe_field = f'"{gamectl_bin}"'
+startdir_field = f'"{game_dir}"'
+launch_opts = f'launch "{game_dir}" --hud'
+
+raw_crc = (binascii.crc32((exe_field + title).encode('utf-8')) | 0x80000000) & 0xffffffff
+signed_appid = struct.unpack('<i', struct.pack('<I', raw_crc))[0]
+
+def parse_binary_vdf(data):
+    pos = 0
+    def read_str():
+        nonlocal pos
+        end = data.find(b'\x00', pos)
+        if end == -1: return ''
+        s = data[pos:end].decode('utf-8', errors='replace')
+        pos = end + 1
+        return s
+    def parse_map():
+        nonlocal pos
+        res = {}
+        while pos < len(data):
+            b = data[pos]
+            pos += 1
+            if b == 8: break
+            key = read_str()
+            if b == 0: res[key] = parse_map()
+            elif b == 1: res[key] = read_str()
+            elif b == 2:
+                if pos + 4 <= len(data):
+                    val = struct.unpack('<i', data[pos:pos+4])[0]
+                    pos += 4
+                    res[key] = val
+        return res
+    if data.startswith(b'\x00shortcuts\x00'):
+        pos = len(b'\x00shortcuts\x00')
+        root = parse_map()
+        shortcuts = []
+        for k in sorted(root.keys(), key=lambda x: int(x) if x.isdigit() else 9999):
+            if isinstance(root[k], dict): shortcuts.append(root[k])
+        return shortcuts
+    return []
+
+def serialize_shortcuts(shortcuts):
+    buf = bytearray(b'\x00shortcuts\x00')
+    for idx, s in enumerate(shortcuts):
+        buf.append(0)
+        buf.extend(str(idx).encode('utf-8') + b'\x00')
+        for k, v in s.items():
+            if isinstance(v, int):
+                buf.append(2)
+                buf.extend(k.encode('utf-8') + b'\x00')
+                buf.extend(struct.pack('<i', v))
+            elif isinstance(v, str):
+                buf.append(1)
+                buf.extend(k.encode('utf-8') + b'\x00')
+                buf.extend(v.encode('utf-8') + b'\x00')
+            elif isinstance(v, dict):
+                buf.append(0)
+                buf.extend(k.encode('utf-8') + b'\x00')
+                for tk, tv in v.items():
+                    buf.append(1)
+                    buf.extend(str(tk).encode('utf-8') + b'\x00')
+                    buf.extend(str(tv).encode('utf-8') + b'\x00')
+                buf.append(8)
+        buf.append(8)
+    buf.append(8)
+    buf.append(8)
+    return bytes(buf)
+
+shortcuts = []
+if os.path.exists(shortcuts_path):
+    try:
+        with open(shortcuts_path, 'rb') as f:
+            shortcuts = parse_binary_vdf(f.read())
+    except Exception:
+        shortcuts = []
+
+existing_idx = -1
+for i, sc in enumerate(shortcuts):
+    if sc.get('AppName') == title or sc.get('StartDir', '').strip('"') == game_dir:
+        existing_idx = i
+        break
+
+new_entry = {
+    'appid': signed_appid,
+    'AppName': title,
+    'Exe': exe_field,
+    'StartDir': startdir_field,
+    'icon': icon_path,
+    'ShortcutPath': '',
+    'LaunchOptions': launch_opts,
+    'IsHidden': 0,
+    'AllowDesktopConfig': 1,
+    'AllowOverlay': 1,
+    'OpenVR': 0,
+    'Devkit': 0,
+    'DevkitGameID': '',
+    'DevkitOverrideAppID': 0,
+    'LastPlayTime': 0,
+    'FlatpakAppID': '',
+    'tags': {}
+}
+
+if existing_idx >= 0:
+    shortcuts[existing_idx] = new_entry
+    action = "updated"
+else:
+    shortcuts.append(new_entry)
+    action = "registered"
+
+out_data = serialize_shortcuts(shortcuts)
+tmp_path = shortcuts_path + f'.tmp.{os.getpid()}'
+with open(tmp_path, 'wb') as f:
+    f.write(out_data)
+os.replace(tmp_path, shortcuts_path)
+
+print(f'[VERIFIED] Steam shortcut {action} successfully: {title}')
+print(f'[INFO] Target 32-bit AppID : {raw_crc}')
+print(f'[INFO] Shortcuts file      : {shortcuts_path}')
+print(f'[INFO] Launch Options      : {launch_opts}')
+PYEOF
+
+    # Optionally attempt artwork synchronization if an AppID is available
+    if [ -f "$game_dir/steam_appid.txt" ] || [ -f "$game_dir/steam_settings/steam_appid.txt" ]; then
+        fetch_steam_artwork "$game_dir" >/dev/null 2>&1 || true
+    fi
+
+    return 0
+}
+

@@ -14,7 +14,7 @@ _gamectl_completions() {
         cword=$COMP_CWORD
     fi
 
-    local commands="menu dashboard library list-ui config configure doctor audit launch run configure-wrappers set-id set-id-interactive generate-steamid get-gamescope-args get-resolution get-steam-root get-steam-libraries steam-libs download downloads unlock inject fetch-dlc sync-steam ensure-downloader list-formatted --list-formatted --search --list --sync sync sync-companion --backup mod-overrides onlinefix proton-list proton-install proton-remove pfx prefix protondb pdb make-desktop fetch-art fetch-artwork get-steam-grid --help --version -h -v"
+    local commands="menu dashboard library list-ui config configure doctor audit launch run configure-wrappers set-id set-id-interactive generate-steamid get-gamescope-args get-resolution get-steam-root get-steam-libraries steam-libs download downloads unlock inject fetch-dlc sync-steam ensure-downloader list-formatted --list-formatted --search --list --sync sync sync-companion --backup mod-overrides onlinefix proton-list proton-install proton-remove pfx prefix protondb pdb make-desktop fetch-art fetch-artwork get-steam-grid add-to-steam add-steam get-steam-shortcuts --help --version -h -v"
     local download_opts="--raw --inject-only --all --foreground -f"
     local inject_opts="--all --no-sync"
     local launch_opts="--hud --no-hud --mangohud --no-mangohud --gamemode --no-gamemode --gamescope --no-gamescope --fsr --no-fsr --glthread --no-glthread"
