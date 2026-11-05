@@ -16,7 +16,7 @@ Background specifications: `docs/PROPOSAL_GLOBAL_FEATURES.md` and `remediation.m
 
 ## 2. Granular Chunks & Technical Execution DoD
 
-### Chunk 1: OnlineFix & Mod DLL Overrides Detection Engine
+### Chunk 1: OnlineFix & Mod DLL Overrides Detection Engine [ DONE ]
 - **Target File**: `src/runners/40_wrappers.sh`
 - **Function Signature**: `detect_dll_overrides <game_dir>` -> outputs clean semicolon-separated `WINEDLLOVERRIDES` string
 - **Technical Logic & Rules**:
@@ -42,7 +42,7 @@ Background specifications: `docs/PROPOSAL_GLOBAL_FEATURES.md` and `remediation.m
 
 ---
 
-### Chunk 2: Launcher Overrides Injection, Spacewar Entitlement & PipeWire Audio Tuning
+### Chunk 2: Launcher Overrides Injection, Spacewar Entitlement & PipeWire Audio Tuning [ DONE ]
 - **Target Files**: `src/runners/50_launcher.sh`, `src/steam/30_downloader.sh`
 - **Functions**: `setup_onlinefix <game_dir>`, updates to `launch_game <game_dir> <bin> <title>`
 - **Technical Logic & Rules**:
@@ -65,7 +65,7 @@ Background specifications: `docs/PROPOSAL_GLOBAL_FEATURES.md` and `remediation.m
 
 ---
 
-### Chunk 3: Headless GE-Proton / Wine-GE Release Manager
+### Chunk 3: Headless GE-Proton / Wine-GE Release Manager [ DONE ]
 - **Target File**: `src/runners/40_wrappers.sh`
 - **Functions**: `proton_list`, `proton_install [tag|latest]`, `proton_remove <tag>`
 - **Technical Logic & Rules**:
@@ -93,7 +93,7 @@ Background specifications: `docs/PROPOSAL_GLOBAL_FEATURES.md` and `remediation.m
 
 ---
 
-### Chunk 4: Wine Prefix Swiss Army Knife (`pfx`) & Wineserver Lifecycle Guard
+### Chunk 4: Wine Prefix Swiss Army Knife (`pfx`) & Wineserver Lifecycle Guard [ DONE ]
 - **Target File**: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`
 - **Functions**: `manage_prefix <game_dir> <action> [args...]`, updates to `_restore_launch_state`
 - **Technical Logic & Rules**:
@@ -121,7 +121,7 @@ Background specifications: `docs/PROPOSAL_GLOBAL_FEATURES.md` and `remediation.m
 
 ---
 
-### Chunk 5: ProtonDB Quick Audit CLI & Desktop Entry Generator
+### Chunk 5: ProtonDB Quick Audit CLI & Desktop Entry Generator [ DONE ]
 - **Target Files**: `src/diagnostics/60_doctor.sh`, `src/steam/20_discovery.sh`
 - **Functions**: `query_protondb <appid|dir>`, `create_desktop_entry <game_dir> [title]`
 - **Technical Logic & Rules**:
@@ -144,7 +144,7 @@ Background specifications: `docs/PROPOSAL_GLOBAL_FEATURES.md` and `remediation.m
 
 ---
 
-### Chunk 6: CLI Entrypoint Dispatcher & Build Synchronization
+### Chunk 6: CLI Entrypoint Dispatcher & Build Synchronization [ DONE ]
 - **Target Files**: `src/main.sh`, `scripts/build.sh`, `bin/gamectl`
 - **Technical Logic & Rules**:
   1. In `src/main.sh`:
@@ -165,7 +165,7 @@ Background specifications: `docs/PROPOSAL_GLOBAL_FEATURES.md` and `remediation.m
 
 ---
 
-### Chunk 7: Automated Test Suite Expansion & Contract Verification
+### Chunk 7: Automated Test Suite Expansion & Contract Verification [ DONE ]
 - **Target File**: `tests/test_cli.sh`
 - **Technical Logic & Rules**:
   1. Add Test Suite 5: Global Features & Remediation Harness:
@@ -183,7 +183,7 @@ Background specifications: `docs/PROPOSAL_GLOBAL_FEATURES.md` and `remediation.m
 
 ---
 
-### Chunk 8: Documentation, Memory Sync & Local Checkpoint Commit
+### Chunk 8: Documentation, Memory Sync & Local Checkpoint Commit [ IN PROGRESS ]
 - **Target Files**: `README.md`, `DEVELOPMENT.md`, `remediation.md`, Obsidian RAG `STATE.md`, Git commit
 - **Technical Logic & Rules**:
   1. Update `README.md` and `DEVELOPMENT.md` with new subcommands, flags, and architecture documentation.

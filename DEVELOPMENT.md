@@ -20,14 +20,14 @@ src/
 │   ├── 00_header.sh       # SSoT Constants, Tokyo Night ANSI styling palette, FZF base configuration
 │   └── 10_utils.sh        # GBE templates resolution, remote host, save snapshots, binary discovery
 ├── steam/
-│   ├── 20_discovery.sh    # Multi-path Steam root discovery, primary apps, library folders, manifest scanning
+│   ├── 20_discovery.sh    # Multi-path Steam root discovery, manifest scanning, and create_desktop_entry
 │   ├── 25_identity.sh     # SteamID64 generation, active SteamID resolution, persona configuration, set-id
 │   └── 30_downloader.sh   # DLC fetching, multi-arch DepotDownloader engine, downloads monitor, SLSsteam sync
 ├── runners/
-│   ├── 40_wrappers.sh     # Windows runner discovery, Haswell GPU detection, display resolution, wrapper builder
-│   └── 50_launcher.sh     # Prefix isolation, game launcher, remote sync, GBE injection, CLI launcher
+│   ├── 40_wrappers.sh     # Windows runner, detect_dll_overrides, GE-Proton manager, manage_prefix (pfx)
+│   └── 50_launcher.sh     # Prefix isolation, setup_onlinefix, PipeWire audio latency, wineserver teardown guard
 ├── diagnostics/
-│   └── 60_doctor.sh       # 7-layer health diagnostics & hardware audit (doctor_audit)
+│   └── 60_doctor.sh       # 7-layer health diagnostics, hardware audit, and query_protondb
 ├── tui/
 │   └── 70_dashboard.sh    # Terminal previews, interactive dashboard hub, library menu, Steam Store search
 └── main.sh                # Subshell exports (export -f) and top-level CLI command dispatcher

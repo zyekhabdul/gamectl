@@ -51,6 +51,7 @@ Audit forensik sistem terhadap basis kode `gamectl` membuktikan keunggulan menda
 ---
 
 ### DEFECT-02: Wineserver Lingering & Prefix Lock Contention
+- **Status**: `[ RESOLVED in Work Packet 9 ]`
 - **Tingkat Keparahan**: `HIGH`
 - **Lokasi Kode**: `src/runners/50_launcher.sh` (`launch_game`, `game_controller_hud`)
 - **Mekanisme Kegagalan**:
@@ -75,6 +76,7 @@ Audit forensik sistem terhadap basis kode `gamectl` membuktikan keunggulan menda
 ---
 
 ### DEFECT-03: Audio Subsystem Underruns & Latency Crackling (PipeWire)
+- **Status**: `[ RESOLVED in Work Packet 9 ]`
 - **Tingkat Keparahan**: `MEDIUM`
 - **Lokasi Kode**: `src/runners/40_wrappers.sh` (`build_wrapper_command`)
 - **Mekanisme Kegagalan**:

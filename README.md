@@ -19,6 +19,10 @@ Dibuat untuk arsitektur workstation Linux yang mengutamakan efisiensi resource, 
 - **Headless Downloader Engine (`gamectl download`)**: Mengunduh game langsung dari Steam Content Server via DepotDownloader headless CLI tanpa memerlukan client Steam GUI atau cache berat.
 - **Zero-Download Steam Library Registration (`gamectl unlock`)**: Mendaftarkan kepemilikan AppID dan seluruh DLC ke SLSsteam serta membuat manifest ACF tanpa perlu mengunduh file game. Saat Steam resmi dibuka, game langsung muncul di library dengan status full DLC.
 - **Dual-Mode Steam & SLSsteam Sync (`gamectl sync-steam`)**: Otomatis mendaftarkan AppID & DLC ke `~/.config/SLSsteam/config.yaml` dan membuat `appmanifest_<appid>.acf` berstatus terinstal. Game siap dimainkan mandiri dan langsung berstatus full DLC saat aplikasi Steam resmi dibuka.
+- **Universal Mod DLL Overrides & OnlineFix Engine (`gamectl onlinefix`)**: Auto-detection signature DLL (OnlineFix, BepInEx, UE4SS, REFramework, ReShade) dengan deduplikasi token `WINEDLLOVERRIDES` dan registrasi otomatis Spacewar AppID 480.
+- **Headless GE-Proton Release Manager (`gamectl proton-*`)**: Query, download, instalasi stream tarball, dan manajemen lifecycle versi GE-Proton/Wine-GE langsung via CLI tanpa dependensi GUI.
+- **Wine Prefix Swiss Army Knife (`gamectl pfx`) & Wineserver Guard**: Pengelolaan terisolasi prefix game (`winecfg`, `regedit`, `cmd`, `shell`, `winetricks`, `kill`, `clean`) dengan terminasi wineserver deterministik (`wineserver -w` / `-k`) untuk mencegah lockfile contention.
+- **Real-Time PipeWire Audio Scheduling**: Ekspor otomatis buffer quantum audio terkalibrasi (`PIPEWIRE_LATENCY="256/48000"`, `PULSE_LATENCY_MSEC=60`) untuk mengeliminasi audio crackling/underruns.
 - **One-Key Multi-Node Sync (`<Ctrl-S>`)**: Menyinkronkan progres savegame portabel ke host remote lain (SSH/Rsync) secara instan dengan proteksi pre-flight timeout (konfigurasi opsional).
 - **Steam & ProtonDB Discovery**: Pencarian judul game via Steam Web API publik yang terintegrasi dengan tier rating kompatibilitas Linux dari ProtonDB (Native, Platinum, Gold, Silver).
 - **Self-Healing Pre-Flight**: Pembersihan otomatis file lock dan socket terlantar di `/tmp/` sebelum sesi dimulai.
@@ -137,6 +141,58 @@ Installer otomatis melakukan setup turnkey:
 10. **Sinkronisasi Manual Savegame ke Remote Host**:
    ```bash
    gamectl --sync /path/to/game "Game Title" [remote_host]
+   ```
+
+11. **Setup OnlineFix & Universal Mod DLL Overrides**:
+   ```bash
+   # Deteksi signature mod DLL & registrasi Spacewar AppID 480:
+   gamectl onlinefix "$HOME/Games/CoopGame"
+   ```
+
+12. **GE-Proton Headless Release Manager**:
+   ```bash
+   # Cek daftar rilis lokal vs upstream GitHub:
+   gamectl proton-list
+
+   # Pasang versi GE-Proton terbaru (atau tentukan tag spesifik):
+   gamectl proton-install latest
+   gamectl proton-install GE-Proton9-25
+
+   # Hapus versi GE-Proton lokal:
+   gamectl proton-remove GE-Proton8-26
+   ```
+
+13. **Wine Prefix Swiss Army Knife (`pfx`)**:
+   ```bash
+   # Buka menu interaktif prefix:
+   gamectl pfx "$HOME/Games/MyGame"
+
+   # Jalankan utilitas Windows di dalam prefix:
+   gamectl pfx "$HOME/Games/MyGame" winecfg
+   gamectl pfx "$HOME/Games/MyGame" regedit
+   gamectl pfx "$HOME/Games/MyGame" cmd
+   gamectl pfx "$HOME/Games/MyGame" shell
+   gamectl pfx "$HOME/Games/MyGame" winetricks d3dx9 vcrun2022
+
+   # Matikan wineserver yang tersangkut (DEFECT-02):
+   gamectl pfx "$HOME/Games/MyGame" kill
+
+   # Backup save otomatis dan reset total prefix:
+   gamectl pfx "$HOME/Games/MyGame" clean -y
+   ```
+
+14. **Audit Kompatibilitas ProtonDB**:
+   ```bash
+   # Audit berdasarkan AppID:
+   gamectl protondb 105600
+
+   # Audit berdasarkan direktori game (membaca steam_appid.txt):
+   gamectl protondb "$HOME/Games/Terraria"
+   ```
+
+15. **Pembuatan Shortcut Desktop FreeDesktop (`.desktop`)**:
+   ```bash
+   gamectl make-desktop "$HOME/Games/Terraria" "Terraria"
    ```
 
 ---
