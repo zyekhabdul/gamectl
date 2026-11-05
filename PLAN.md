@@ -13,7 +13,7 @@ Scope of Work:
 
 ## 2. Granular Technical Execution Plan (Active Packet)
 
-### Chunk 1: TUI Modal Action Palette & Query Input Refactor
+### Chunk 1: TUI Modal Action Palette & Query Input Refactor [DONE] (`07501fd`)
 - Target File: `src/tui/70_dashboard.sh`
 - Runtutan Eksekusi Teknis:
   1. Refactor query input pada `search_steam`: ganti raw `read -r query` dengan modal picker atau prompt input yang aman tanpa merusak buffer terminal.
