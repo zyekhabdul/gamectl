@@ -273,6 +273,38 @@ test_audio_latency_env() {
 }
 run_test "Audio Invariant (DEFECT-03): PipeWire & Pulse latency env export" test_audio_latency_env
 
+test_proton_list() {
+    local out
+    out=$("$GAMECTL" proton-list)
+    echo "$out" | grep -q "GE-PROTON RELEASE MANAGER" && \
+    echo "$out" | grep -q "LOCAL VERSIONS"
+}
+run_test "Proton Manager: Query local & upstream release table" test_proton_list
+
+test_proton_remove_traversal() {
+    local exit_code=0
+    "$GAMECTL" proton-remove "../../etc" >/dev/null 2>&1 || exit_code=$?
+    [ "$exit_code" -ne 0 ]
+}
+run_test "Proton Manager: Guard against path traversal attacks" test_proton_remove_traversal
+
+test_proton_remove_missing() {
+    local exit_code=0
+    "$GAMECTL" proton-remove "non_existent_mock_tag_999" >/dev/null 2>&1 || exit_code=$?
+    [ "$exit_code" -ne 0 ]
+}
+run_test "Proton Manager: Graceful handling of missing version" test_proton_remove_missing
+
+test_proton_mock_lifecycle() {
+    local compat_dir="$HOME/.local/share/Steam/compatibilitytools.d"
+    mkdir -p "$compat_dir/MockProton-test"
+    touch "$compat_dir/MockProton-test/compatibilitytool.vdf"
+    local exit_code=0
+    "$GAMECTL" proton-remove "MockProton-test" --yes >/dev/null 2>&1 || exit_code=$?
+    [ "$exit_code" -eq 0 ] && [ ! -d "$compat_dir/MockProton-test" ]
+}
+run_test "Proton Manager: Safe deletion lifecycle (proton-remove)" test_proton_mock_lifecycle
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
