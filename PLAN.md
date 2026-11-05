@@ -1,72 +1,97 @@
-# WORK PACKET 10.5: TUI MODALITY UNIFICATION & STEAM ENTITLEMENT SEMANTICS [COMPLETED]
+# WORK PACKET 11: GLOBAL ECOSYSTEM REMEDIATION & MULTI-DRIVE HARDENING [ACTIVE]
 
 ## 1. Objective & Technical Scope
-Eliminate modality thrashing and screen flicker caused by raw shell `read -p` prompts and numbered transitions. Standardize the TUI around continuous alternate-screen modal action palettes. Reclassify the shallow and misleading term "[Unlock Steam DLC]" into its true technical utility: "[Steam Entitlement & ACF] Adopt files, Steam Input & Shaders (Full DLC)".
+Eliminate systemic assumptions tied to local $HOME directories, provide unified embedded wineserver resolution for Proton-only Linux gaming distributions, negotiate dual-OS (Linux/Windows) game depot downloads dynamically, guard Steam client runtime state, normalize cross-drive savegame sync paths, and introduce an ephemeral caching tier for Steam Store and ProtonDB API requests.
 
 Scope of Work:
-1. **TUI Modality Unification (`src/tui/70_dashboard.sh`)**: Replace raw `echo` and `read -p` numbered prompts (`1-5`, `1-6`) with TokyoNight-styled modal `fzf` action sheets, preserving the alternate screen buffer (`tput smcup`) without screen clears or cursor desync.
-2. **Entitlement Engine & ACF Nomenclature (`src/steam/30_downloader.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`)**: Redefine the entitlement engine from a superficial DLC unlocker to an industrial-grade Steam asset adoption system (zero-download file adoption, community Steam Input mapping, Valve CDN Vulkan shader pre-caching, and base-game DLC activation).
-3. **Ergonomic Direct Keybindings (`src/tui/70_dashboard.sh`)**: Integrate direct catalog hotkeys (`Ctrl-A` for All-in-One, `Ctrl-U` for Steam Entitlement, `Ctrl-S` for Standalone, `Ctrl-D` for Live Stream, `Enter` for Action Palette) to enable instant execution without sub-menu friction.
-4. **Verification & Documentation Harmonization**: Update CLI contracts in `tests/test_cli.sh`, synchronize `bin/gamectl` via `./scripts/build.sh`, and update documentation in `README.md` and `DEVELOPMENT.md`.
+1. **Unified Wineserver Resolution (`src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`)**: Replace bare `wineserver` calls with dynamic path resolution from active Proton runtimes to harden DEFECT-02 across minimal distros (SteamOS, Bazzite, ChimeraOS).
+2. **Dual-OS DepotDownloader Negotiation & Target Library Routing (`src/steam/30_downloader.sh`, `src/tui/70_dashboard.sh`)**: Dynamically negotiate `-os linux` vs `-os windows` based on store metadata and route downloads to libraries with maximum available capacity.
+3. **Steam Runtime Guardrail (`src/steam/20_discovery.sh`, `src/steam/30_downloader.sh`)**: Warn when Steam client process is active to prevent clobbering of `shortcuts.vdf` and `appmanifest_*.acf`.
+4. **Savegame Path Normalization (`src/runners/50_launcher.sh`)**: Clean directory sanitization for non-$HOME mounts (`/mnt/`, `/media/`) during remote companion synchronization.
+5. **Ephemeral Store & ProtonDB Cache Tier (`src/core/10_utils.sh`, `src/tui/70_dashboard.sh`, `src/diagnostics/60_doctor.sh`)**: 3600-second TTL disk cache in `$XDG_CACHE_HOME/gamectl/` for zero-stutter TUI browsing and offline resilience.
+6. **Machine Verification & Regression Suite (`tests/test_cli.sh`, `./scripts/build.sh`)**: Automated assertions for cache hits, wineserver resolution, library routing, and path normalization with Exit Code 0.
 
 ---
 
-## 2. Granular Technical Execution Plan (Work Packet 10.5)
+## 2. Granular Technical Execution Plan (Work Packet 11)
 
-### Chunk 1: TUI Modal Action Palette & Query Input Refactor [DONE] (`07501fd`)
-- Target File: `src/tui/70_dashboard.sh`
+### Chunk 1: Unified Wineserver Lifecycle Resolution (DEFECT-02 Hardening) [PENDING]
+- Target Files: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/main.sh`
 - Runtutan Eksekusi Teknis:
-  1. Refactor query input pada `search_steam`: ganti raw `read -r query` dengan modal picker atau prompt input yang aman tanpa merusak buffer terminal.
-  2. Refactor seleksi aksi untuk game yang sudah terpasang (`INSTALLED`): hilangkan `read -r -p "Select action [1-5]: "`, ganti dengan modal `fzf` bertajuk `Action Palette: <Game Name>` dengan opsi:
-     - Launch Game Directly
-     - Inject GBE Fork Only (Standalone ./saves & DLC.txt)
-     - Inject GBE + Sync Steam Client (All-in-One Full DLC)
-     - Sync to Steam Client Entitlement Only (ACF & Steam Input)
-     - Cancel / Return
-  3. Refactor seleksi aksi untuk game belum terpasang (`NOT INSTALLED`): hilangkan `read -r -p "Select package [1-6]: "`, ganti dengan modal `fzf` Action Palette dengan opsi:
-     - [All-in-One] Download + Inject GBE + Sync Steam (Background)
-     - [All-in-One] Download + Inject GBE + Sync Steam (Live Stream)
-     - [Standalone] Download + Inject GBE only (Steam-free)
-     - [Steam Entitlement & ACF] Adopt files, Steam Input & Shaders (Full DLC)
-     - [Raw Download] Download raw depot assets only
-     - Cancel / Return
-  4. Hapus seluruh prompt pasif `read -r -p "Press [ENTER] to continue..."` dan gantikan dengan transisi status kembali ke catalog atau dashboard.
+  1. Buat fungsi helper `get_wineserver_bin "$runner_bin"` di `src/runners/40_wrappers.sh` yang memeriksa:
+     - Jika `$runner_bin` mengandung `proton`: cari executable `files/bin/wineserver`, `dist/bin/wineserver`, atau `bin/wineserver` di direktori Proton.
+     - Jika tidak ada: periksa `command -v wineserver`.
+     - Fallback: cari wineserver dari direktori GE-Proton lokal tertinggi.
+  2. Ekspor `get_wineserver_bin` di `src/main.sh`.
+  3. Perbarui `src/runners/50_launcher.sh` pada 4 titik pemanggilan wineserver (lines 68, 83, 261, 385) agar menggunakan binari wineserver yang teresolusi (`"$ws_bin" -w` dan `"$ws_bin" -k`) dan abaikan pemanggilan jika tidak ditemukan binari yang valid.
+  4. Perbarui `manage_prefix` di `src/runners/40_wrappers.sh` agar menggunakan `get_wineserver_bin` secara konsisten.
+- DoD: Pemanggilan flush (`-w`) dan terminate (`-k`) berjalan sukses pada environment tanpa `/usr/bin/wineserver` host.
 
-### Chunk 2: Entitlement Engine Nomenclature & ACF Semantics Overhaul [DONE] (`efce9fd`)
-- Target Files: `src/tui/70_dashboard.sh`, `src/steam/30_downloader.sh`, `src/main.sh`
+### Chunk 2: Dual-OS DepotDownloader Negotiation & Target Library Selection [PENDING]
+- Target Files: `src/steam/30_downloader.sh`, `src/tui/70_dashboard.sh`
 - Runtutan Eksekusi Teknis:
-  1. Perbarui Master Dashboard Hub (`dashboard_menu` di `src/tui/70_dashboard.sh`): ubah item `[04] UNLOCK STEAM (DLC)` menjadi `[04] STEAM ENTITLEMENT & ACF  Adopt files, Steam Input & shaders (Full DLC)`.
-  2. Perbarui fungsi `unlock_game` di `src/steam/30_downloader.sh`: ubah teks banner dari `STEAM ZERO-DOWNLOAD UNLOCK (FULL DLC)` menjadi `STEAM ENTITLEMENT & ACF ADOPTION ENGINE`, sertakan deskripsi adopsi ACF dan Steam Input.
-  3. Refactor `unlock_interactive` di `src/steam/30_downloader.sh`: hilangkan raw `clear` dan `read -p`, sediakan validasi numeric AppID yang bersih tanpa screen flashing.
-  4. Perbarui CLI command dispatcher di `src/main.sh`: tambahkan alias deskriptif `entitle` dan `adopt-steam` di samping `unlock`, serta perbarui pesan help CLI.
+  1. Tambahkan fungsi `resolve_target_library_dir "$safe_title"` di `src/steam/30_downloader.sh`:
+     - Pindai custom libraries dari `~/.config/gamectl/libraries` dan fallback ke `$HOME/Games`.
+     - Gunakan `df -PB 1M "$dir"` untuk memilih direktori dengan ruang bebas terbesar.
+     - Kembalikan path lengkap direktori game target.
+  2. Perbarui `download_game` di `src/steam/30_downloader.sh` untuk menerima flag `--os <linux|windows|all>` (default: `linux`).
+  3. Ganti hardcoded `-os linux` pada DepotDownloader dengan nilai flag `--os` yang dinegosiasikan.
+  4. Di `search_steam` (`src/tui/70_dashboard.sh`):
+     - Evaluasi metadata `platforms.linux` dan `platforms.windows`.
+     - Jika `platforms.linux == false` dan `platforms.windows == true`, tetapkan opsi download dengan `--os windows`.
+     - Ganti hardcoded `$HOME/Games/$sel_name` dengan hasil `resolve_target_library_dir`.
+- DoD: Game ber-platform Windows PE diunduh dengan `-os windows`, dan file masuk ke partisi library yang memiliki kapasitas memadai.
 
-### Chunk 3: Catalog Direct Action Shortcuts & Ergonomic Hotkeys [DONE] (`4412c5f`)
-- Target File: `src/tui/70_dashboard.sh`
+### Chunk 3: Steam Runtime Active Guardrail [PENDING]
+- Target Files: `src/steam/20_discovery.sh`, `src/steam/30_downloader.sh`
 - Runtutan Eksekusi Teknis:
-  1. Tambahkan binding `--bind` pada `fzf` Steam Catalog:
-     - `ctrl-a`: Eksekusi langsung Download + Inject GBE + Sync Steam (Background).
-     - `ctrl-u`: Eksekusi langsung Steam Entitlement & ACF adoption.
-     - `ctrl-s`: Eksekusi langsung Standalone download.
-     - `ctrl-d`: Eksekusi langsung Live Stream download.
-  2. Tampilkan petunjuk hotkey pada header `fzf` catalog agar terbaca jelas oleh pengguna keyboard-centric (`Enter: Actions │ Ctrl-A: All-in-One │ Ctrl-U: Entitle │ Ctrl-S: Standalone │ Esc: Back`).
-  3. Tangani multi-line output parsing dari `fzf` yang mengembalikan keybinding terpilih.
+  1. Buat helper `check_steam_active` di `src/steam/20_discovery.sh`:
+     - Periksa apakah proses `steam` sedang aktif via `pgrep -x steam`.
+     - Jika aktif, cetak pesan `[WARN]` informatif ke stderr bahwa Steam sedang memegang lock memori pada shortcuts dan manifest.
+  2. Pasang `check_steam_active` pada:
+     - `sync_steam` sebelum menulis `appmanifest_${appid}.acf`.
+     - `add_steam_shortcut` sebelum membaca/menulis `shortcuts.vdf`.
+- DoD: User mendapatkan notifikasi pencegahan inkonsistensi cache saat Steam client sedang berjalan tanpa crash atau aborting script.
 
-### Chunk 4: Machine Verification, Automated Regression Suite & Documentation [DONE] (`c2fb6b7`)
-- Target Files: `tests/test_cli.sh`, `README.md`, `DEVELOPMENT.md`
+### Chunk 4: Savegame Remote Sync Path Normalization [PENDING]
+- Target Files: `src/runners/50_launcher.sh`
 - Runtutan Eksekusi Teknis:
-  1. Tambahkan unit assertions pada `tests/test_cli.sh` untuk memverifikasi alias baru `gamectl entitle` dan `gamectl adopt-steam`.
-  2. Perbarui dokumentasi di `README.md` dan `DEVELOPMENT.md` mengenai fungsi sebenarnya dari Steam Entitlement & ACF Adoption (adopsi file lokal, Steam Input gyro/touchpad, shader pre-caching).
-  3. Jalankan kompilasi `./scripts/build.sh`, verifikasi integritas biner via `./scripts/build.sh --check`, dan pastikan seluruh 44 test assertions lulus dengan exit code 0.
+  1. Perbarui fungsi `sync_save_remote` di `src/runners/50_launcher.sh`:
+     - Evaluasi path direktori game target `$gdir`.
+     - Jika `$gdir` berada di dalam `$HOME`, gunakan `rel_path="${gdir#$HOME/}"`.
+     - Jika `$gdir` berada di luar `$HOME` (misal `/mnt/games/Title` atau `/data/games/Title`), gunakan `rel_path="Games/$(basename "$gdir")"`.
+     - Bersihkan target destination remote agar tidak menghasilkan path corrupt seperti `~//mnt/...`.
+- DoD: Eksekusi rsync pada direktori game non-$HOME tersinkronisasi rapi ke host remote di direktori `~/Games/<Title>/saves/`.
+
+### Chunk 5: Ephemeral Store & ProtonDB Cache Tier [PENDING]
+- Target Files: `src/core/10_utils.sh`, `src/tui/70_dashboard.sh`, `src/diagnostics/60_doctor.sh`
+- Runtutan Eksekusi Teknis:
+  1. Implementasikan fungsi `fetch_cached_json "$url" "$cache_key" [ttl_seconds]` di `src/core/10_utils.sh`:
+     - Lokasi cache: `${XDG_CACHE_HOME:-$HOME/.cache}/gamectl`.
+     - TTL default: 3600 detik (1 jam).
+     - Jika cache valid dan belum kedaluwarsa, baca langsung dari disk.
+     - Jika expired atau belum ada, fetch via curl dengan timeout 2-3s, tulis atomic via `.tmp.$$`, lalu atomik `mv`.
+     - Jika fetch gagal atau offline, fallback ke stale cache jika ada.
+  2. Integrasikan `fetch_cached_json` ke preview pane `search_steam` di `src/tui/70_dashboard.sh` untuk metadata Steam Store dan ProtonDB summary.
+  3. Integrasikan `fetch_cached_json` ke `query_protondb` di `src/diagnostics/60_doctor.sh`.
+- DoD: Navigasi preview store katalog instan (<10ms) untuk item ter-cache dan tidak freeze saat offline.
+
+### Chunk 6: Machine Verification & Automated Regression Suite [PENDING]
+- Target Files: `tests/test_cli.sh`, `scripts/build.sh`, `README.md`, `DEVELOPMENT.md`
+- Runtutan Eksekusi Teknis:
+  1. Tambahkan 5 test assertions baru di `tests/test_cli.sh`:
+     - Assertion 1: `get_wineserver_bin` mengembalikan path executable Proton wineserver.
+     - Assertion 2: `download_game` menerima dan meneruskan parameter `--os windows` dan `--os linux`.
+     - Assertion 3: `resolve_target_library_dir` merutekan folder ke library berkapasitas terbesar.
+     - Assertion 4: `sync_save_remote` menormalisasi path non-$HOME dengan benar.
+     - Assertion 5: `fetch_cached_json` membaca cache lokal pada pemanggilan kedua dalam jendela TTL.
+  2. Jalankan `./scripts/build.sh` dan `./scripts/build.sh --check`.
+  3. Jalankan regression suite `./tests/test_cli.sh` dan pastikan seluruh test assertions (49/49) lulus dengan Exit Code 0.
+- DoD: Seluruh rangkaian tes deterministik lulus 100% tanpa regresi.
 
 ---
 
-## 3. Matriks Milestone Selesai (Work Packet 10 & 10.5 - Completed)
-- [x] Chunk 1: Core, Runner & Diagnostics Internationalization (`82e3a84`) [DONE]
-- [x] Chunk 2: Steam Engine & Interactive Dashboard TUI Internationalization (`17d3346`) [DONE]
-- [x] Chunk 3: Legal Shielding, Neutral Nomenclature & Documentation Overhaul (`60d01f2`) [DONE]
-- [x] Chunk 4: Turnkey Piped Web Installer & Arch Linux AUR Packaging (`139cb7d`) [DONE]
-- [x] Chunk 5: Steam Deck shortcuts.vdf Non-Steam Integration Engine (`d5e670f`) [DONE]
-- [x] Chunk 6: SteamGridDB & Steam CDN Artwork Pipeline for Game Mode (`07344fc`) [DONE]
+## 3. Matriks Milestone Selesai (Work Packet 10.5 & History)
 - [x] WP 10.5 Chunk 1: TUI Modal Action Palette & Query Input Refactor (`07501fd`) [DONE]
 - [x] WP 10.5 Chunk 2: Entitlement Engine Nomenclature & ACF Semantics Overhaul (`efce9fd`) [DONE]
 - [x] WP 10.5 Chunk 3: Catalog Direct Action Shortcuts & Ergonomic Hotkeys (`4412c5f`) [DONE]
