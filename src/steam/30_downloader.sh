@@ -104,11 +104,83 @@ ensure_downloader() {
     echo "$depot_bin"
 }
 
+# Resolve optimal destination directory based on configured libraries and available disk space
+resolve_target_library_dir() {
+    local safe_title="${1:-game}"
+    local candidate_dirs=()
+
+    # 1. Custom libraries from config
+    local cfg_libs="$HOME/.config/gamectl/libraries"
+    if [ -f "$cfg_libs" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            line="${line#"${line%%[![:space:]]*}"}" # trim leading
+            line="${line%"${line##*[![:space:]]}"}" # trim trailing
+            [ -z "$line" ] && continue
+            [[ "$line" =~ ^# ]] && continue
+            candidate_dirs+=("${line/#\~/$HOME}")
+        done < "$cfg_libs"
+    fi
+
+    # 2. Extra libraries from environment
+    if [ -n "${GAMECTL_LIBRARY_DIRS:-}" ]; then
+        local extra_dirs=()
+        IFS=":" read -r -a extra_dirs <<< "$GAMECTL_LIBRARY_DIRS"
+        candidate_dirs+=("${extra_dirs[@]}")
+    fi
+
+    # 3. Default fallback directory
+    candidate_dirs+=("$HOME/Games")
+
+    local best_dir="$HOME/Games"
+    local max_free=0
+    declare -A seen_candidates=()
+
+    for d in "${candidate_dirs[@]}"; do
+        [ -n "$d" ] || continue
+        [[ -v seen_candidates["$d"] ]] && continue
+        seen_candidates["$d"]=1
+
+        # If dir doesn't exist yet, probe parent dir
+        local probe_target="$d"
+        while [ ! -d "$probe_target" ] && [ "$probe_target" != "/" ] && [ "$probe_target" != "." ]; do
+            probe_target="$(dirname "$probe_target")"
+        done
+
+        if [ -d "$probe_target" ]; then
+            local free_space
+            free_space=$(df -PB 1M "$probe_target" 2>/dev/null | awk 'NR==2 {print $4}' || echo "0")
+            if [[ "$free_space" =~ ^[0-9]+$ ]] && [ "$free_space" -gt "$max_free" ]; then
+                max_free="$free_space"
+                best_dir="$d"
+            fi
+        fi
+    done
+
+    echo "$best_dir/$safe_title"
+}
+
+# Detect primary OS platform for AppID via Steam API (returns "windows" or "linux")
+detect_app_platform_os() {
+    local appid="${1:-}"
+    [ -z "$appid" ] && echo "linux" && return 0
+
+    local det_json
+    det_json=$(curl -s --connect-timeout 2 "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=platforms" 2>/dev/null || true)
+    local is_linux is_win
+    is_linux=$(echo "$det_json" | jq -r ".\"${appid}\".data.platforms.linux // false" 2>/dev/null || echo "false")
+    is_win=$(echo "$det_json" | jq -r ".\"${appid}\".data.platforms.windows // false" 2>/dev/null || echo "false")
+    if [ "$is_linux" != "true" ] && [ "$is_win" = "true" ]; then
+        echo "windows"
+    else
+        echo "linux"
+    fi
+}
+
 # Headless Game Downloader (Standalone CLI Engine)
 download_game() {
     local appid="${1:-}"
     if [ -z "$appid" ]; then
-        echo "Usage: gamectl download <appid> [target_dir] [title] [--raw|--inject-only|--all] [--foreground|-f]" >&2
+        echo "Usage: gamectl download <appid> [target_dir] [title] [--raw|--inject-only|--all] [--foreground|-f] [--os <linux|windows|all>]" >&2
         return 1
     fi
     shift
@@ -117,6 +189,7 @@ download_game() {
     local title=""
     local action="all"     # "all", "inject", "raw"
     local exec_mode="bg"   # "bg" or "fg"
+    local target_os=""
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -134,6 +207,13 @@ download_game() {
                 ;;
             --background|-b|background)
                 exec_mode="bg"
+                ;;
+            --os)
+                shift
+                target_os="${1:-linux}"
+                ;;
+            --os=*)
+                target_os="${1#--os=}"
                 ;;
             *)
                 if [ -z "$target_dir" ]; then
@@ -158,8 +238,12 @@ download_game() {
     safe_title=$(echo "$title" | tr -cd '[:alnum:] _-')
     [ -z "$safe_title" ] && safe_title="$appid"
 
+    if [ -z "$target_os" ]; then
+        target_os="$(detect_app_platform_os "$appid")"
+    fi
+
     if [ -z "$target_dir" ]; then
-        target_dir="$HOME/Games/$safe_title"
+        target_dir="$(resolve_target_library_dir "$safe_title")"
     fi
 
     mkdir -p "$target_dir"
@@ -181,9 +265,10 @@ download_game() {
     echo "=========================================="
     echo " HEADLESS GAME DOWNLOADER (DepotDownloader)"
     echo "=========================================="
-    echo " AppID     : $appid"
+    echo " AppID      : $appid"
     echo " Title      : $title"
     echo " Target Dir : $target_dir"
+    echo " Target OS  : $target_os"
     echo " Package    : $action (raw / inject / all)"
     echo " Log Stream : $log_file"
     [ -n "$steam_user" ] && echo " Steam User : $steam_user"
@@ -191,8 +276,8 @@ download_game() {
 
     if [ "$exec_mode" = "fg" ]; then
         echo "[INFO] Running download in foreground..."
-        echo "[INFO] Starting download of AppID $appid to $target_dir at $(date)" > "$log_file"
-        "$depot_bin" -app "$appid" -os linux "${extra_args[@]}" -dir "$target_dir" 2>&1 | tee -a "$log_file"
+        echo "[INFO] Starting download of AppID $appid ($target_os) to $target_dir at $(date)" > "$log_file"
+        "$depot_bin" -app "$appid" -os "$target_os" "${extra_args[@]}" -dir "$target_dir" 2>&1 | tee -a "$log_file"
         local dl_status="${PIPESTATUS[0]}"
         if [ "$dl_status" -eq 0 ]; then
             case "$action" in
@@ -217,8 +302,8 @@ download_game() {
     else
         echo "[INFO] Spawning download process in background..."
         (
-            echo "[INFO] Starting download of AppID $appid to $target_dir at $(date)" > "$log_file"
-            "$depot_bin" -app "$appid" -os linux "${extra_args[@]}" -dir "$target_dir" >> "$log_file" 2>&1
+            echo "[INFO] Starting download of AppID $appid ($target_os) to $target_dir at $(date)" > "$log_file"
+            "$depot_bin" -app "$appid" -os "$target_os" "${extra_args[@]}" -dir "$target_dir" >> "$log_file" 2>&1
             local bg_status=$?
             if [ $bg_status -eq 0 ]; then
                 case "$action" in

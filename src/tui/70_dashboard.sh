@@ -580,14 +580,21 @@ search_steam() {
             fi
         fi
 
+        # Resolve optimal destination library and target OS platform for uninstalled games
+        local dest_dir target_os="linux"
+        if [[ ! "$sel_status" =~ INSTALLED ]] || [[ "$sel_status" =~ NOT ]]; then
+            dest_dir="$(resolve_target_library_dir "$sel_name")"
+            target_os="$(detect_app_platform_os "$sel_id")"
+        fi
+
         # Direct hotkey triggers
         if [ "$trigger_key" = "ctrl-a" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
                 echo "[INFO] Shortcut <Ctrl-A>: Injecting GBE + Syncing Steam for $sel_name..."
                 inject_game "$gdir" "$sel_id"
             else
-                echo "[INFO] Shortcut <Ctrl-A>: Starting All-in-One Background Download for $sel_name..."
-                download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --all --background
+                echo "[INFO] Shortcut <Ctrl-A>: Starting All-in-One Background Download for $sel_name ($target_os)..."
+                download_game "$sel_id" "$dest_dir" "$sel_name" --all --background --os "$target_os"
             fi
             sleep 1.2
         elif [ "$trigger_key" = "ctrl-u" ]; then
@@ -604,8 +611,8 @@ search_steam() {
                 echo "[INFO] Shortcut <Ctrl-S>: Injecting Standalone GBE Fork for $sel_name..."
                 inject_game "$gdir" "$sel_id" --no-sync
             else
-                echo "[INFO] Shortcut <Ctrl-S>: Starting Standalone Background Download for $sel_name..."
-                download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --inject-only --background
+                echo "[INFO] Shortcut <Ctrl-S>: Starting Standalone Background Download for $sel_name ($target_os)..."
+                download_game "$sel_id" "$dest_dir" "$sel_name" --inject-only --background --os "$target_os"
             fi
             sleep 1.2
         elif [ "$trigger_key" = "ctrl-d" ]; then
@@ -623,8 +630,8 @@ search_steam() {
                     sleep 1.2
                 fi
             else
-                echo "[INFO] Shortcut <Ctrl-D>: Starting All-in-One Live Stream Download for $sel_name..."
-                download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --all --foreground
+                echo "[INFO] Shortcut <Ctrl-D>: Starting All-in-One Live Stream Download for $sel_name ($target_os)..."
+                download_game "$sel_id" "$dest_dir" "$sel_name" --all --foreground --os "$target_os"
             fi
         else
             # Enter key: Open Modal Action Palette
@@ -705,19 +712,19 @@ EOF
                 opt=$(echo "$pkg_sel" | awk -F'\t' '{print $1}')
                 case "$opt" in
                     1)
-                        download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --all --background
+                        download_game "$sel_id" "$dest_dir" "$sel_name" --all --background --os "$target_os"
                         ;;
                     2)
-                        download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --all --foreground
+                        download_game "$sel_id" "$dest_dir" "$sel_name" --all --foreground --os "$target_os"
                         ;;
                     3)
-                        download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --inject-only --background
+                        download_game "$sel_id" "$dest_dir" "$sel_name" --inject-only --background --os "$target_os"
                         ;;
                     4)
                         unlock_game "$sel_id" "$sel_name"
                         ;;
                     5)
-                        download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --raw --background
+                        download_game "$sel_id" "$dest_dir" "$sel_name" --raw --background --os "$target_os"
                         ;;
                     *)
                         ;;

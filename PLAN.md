@@ -27,7 +27,7 @@ Scope of Work:
   4. Perbarui `manage_prefix` di `src/runners/40_wrappers.sh` agar menggunakan `get_wineserver_bin` secara konsisten.
 - DoD: Pemanggilan flush (`-w`) dan terminate (`-k`) berjalan sukses pada environment tanpa `/usr/bin/wineserver` host.
 
-### Chunk 2: Dual-OS DepotDownloader Negotiation & Target Library Selection [PENDING]
+### Chunk 2: Dual-OS DepotDownloader Negotiation & Target Library Selection [DONE]
 - Target Files: `src/steam/30_downloader.sh`, `src/tui/70_dashboard.sh`
 - Runtutan Eksekusi Teknis:
   1. Tambahkan fungsi `resolve_target_library_dir "$safe_title"` di `src/steam/30_downloader.sh`:

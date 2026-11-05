@@ -1,5 +1,5 @@
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut
+export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader resolve_target_library_dir detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -121,6 +121,12 @@ case "${1:-}" in
     get-wineserver)
         get_wineserver_bin "${2:-}"
         ;;
+    resolve-library|get-target-library)
+        resolve_target_library_dir "${2:-game}"
+        ;;
+    detect-os)
+        detect_app_platform_os "${2:-}"
+        ;;
     set-id-interactive)
         if [ -n "${2:-}" ]; then
             set_id_interactive "$2" "${3:-}"
@@ -165,7 +171,7 @@ case "${1:-}" in
         if [ -n "${2:-}" ]; then
             download_game "$2" "${@:3}"
         else
-            echo "Usage: gamectl download <appid> [dir] [title] [--raw|--inject-only|--all] [--foreground|-f]"
+            echo "Usage: gamectl download <appid> [dir] [title] [--raw|--inject-only|--all] [--foreground|-f] [--os <linux|windows|all>]"
             exit 1
         fi
         ;;
@@ -239,7 +245,7 @@ Usage:
                       Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]
                       Configure per-game wrappers (GameMode/MangoHud/Gamescope FSR/MesaGL)
-  gamectl download <appid> [dir] [title] [--raw|--inject-only|--all] [-f]
+  gamectl download <appid> [dir] [title] [--raw|--inject-only|--all] [-f] [--os <linux|windows|all>]
                       Headless game downloader via DepotDownloader
   gamectl downloads   Monitor active & recent download processes
   gamectl entitle <appid> [title]
