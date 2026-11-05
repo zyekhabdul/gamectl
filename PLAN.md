@@ -1,14 +1,16 @@
-# WORK PACKET 9: GLOBAL GAMER & DEVELOPER ENGINE EXPANSION
+# WORK PACKET 9: GLOBAL CAPABILITIES & SYSTEMIC REMEDIATION (HYBRID SPRINT)
 
 ## 1. Objective & Scope
-Implement and harden 4 core capabilities required by global Linux gamers, modders, and game developers:
-1. OnlineFix & Universal Mod DLL Overrides Engine (Dynamic `WINEDLLOVERRIDES` + Spacewar AppID 480 auto-entitlement).
-2. Headless GE-Proton / Wine-GE Release Manager (`proton-list`, `proton-install`, `proton-remove` via GitHub Releases API).
-3. Wine Prefix Swiss Army Knife (`gamectl pfx <gdir> [winecfg|regedit|cmd|shell|kill|clean|winetricks]`).
-4. Native ProtonDB Quick Audit CLI (`gamectl protondb <appid|dir>`).
-5. Bonus System Integration: XDG Desktop Entry Generator (`gamectl make-desktop <gdir> [title]`).
+Implement and harden core capabilities required by global Linux gamers, modders, and game developers, seamlessly integrating high-impact systemic remediations from `remediation.md` (DEFECT-02 Wineserver Lifecycle Guard & DEFECT-03 PipeWire Real-Time Audio Buffer):
 
-Detailed architectural proposal and background specifications: `docs/PROPOSAL_GLOBAL_FEATURES.md`.
+1. **OnlineFix & Universal Mod DLL Overrides Engine**: Dynamic `WINEDLLOVERRIDES` + Spacewar AppID 480 auto-entitlement.
+2. **PipeWire Real-Time Audio Scheduling (DEFECT-03 Remediation)**: Prevent audio crackling and underruns via quantum buffer tuning (`PIPEWIRE_LATENCY="256/48000"`, `PULSE_LATENCY_MSEC=60`).
+3. **Headless GE-Proton / Wine-GE Release Manager**: `proton-list`, `proton-install`, `proton-remove` via GitHub Releases API without GUI dependencies.
+4. **Wine Prefix Swiss Army Knife (`pfx`) & Wineserver Lifecycle Guard (DEFECT-02 Remediation)**: `gamectl pfx <gdir> [winecfg|regedit|cmd|shell|kill|clean|winetricks]` with deterministic `wineserver -w` / `wineserver -k` to prevent registry locking and zombie daemons.
+5. **Native ProtonDB Quick Audit CLI**: `gamectl protondb <appid|dir>` with direct tier badges and launch parameter recommendations.
+6. **XDG Desktop Entry Generator**: `gamectl make-desktop <gdir> [title]` for system launcher and Steam Deck Game Mode integration.
+
+Background specifications: `docs/PROPOSAL_GLOBAL_FEATURES.md` and `remediation.md`.
 
 ---
 
@@ -16,7 +18,7 @@ Detailed architectural proposal and background specifications: `docs/PROPOSAL_GL
 
 ### Chunk 1: OnlineFix & Mod DLL Overrides Detection Engine
 - **Target File**: `src/runners/40_wrappers.sh`
-- **Function Signature**: `detect_dll_overrides <game_dir>` -> outputs semicolon-separated `WINEDLLOVERRIDES` string
+- **Function Signature**: `detect_dll_overrides <game_dir>` -> outputs clean semicolon-separated `WINEDLLOVERRIDES` string
 - **Technical Logic & Rules**:
   1. Scan root `$game_dir` and subfolders (depth 2) for signature files:
      - **OnlineFix**: `OnlineFix64.dll`, `OnlineFix.dll`, `dnet.dll`, `SteamOverlay64.dll`, `winmm.dll`, `version.dll`.
@@ -32,21 +34,25 @@ Detailed architectural proposal and background specifications: `docs/PROPOSAL_GL
      - **Per-Game Custom Declarative**: File `$game_dir/.dll_overrides` containing custom key-values or tokens.
   2. Implement string sanitizer & deduplicator:
      - Combine all tokens with existing `WINEDLLOVERRIDES` from environment.
-     - Normalize delimiters (`;` and `,`), strip whitespace, eliminate duplicate keys.
+     - Normalize delimiters (`;` and `,`), strip whitespace, lowercase keys, eliminate duplicate keys.
 - **DoD**:
   1. `detect_dll_overrides` returns clean, normalized override string with exit code 0.
   2. Returns empty string if no mod/OnlineFix DLLs are present.
-  3. Preserves user-defined `WINEDLLOVERRIDES` without duplication.
+  3. Preserves user-defined `WINEDLLOVERRIDES` without duplicate keys.
 
 ---
 
-### Chunk 2: Launcher Overrides Injection & Spacewar Entitlement
+### Chunk 2: Launcher Overrides Injection, Spacewar Entitlement & PipeWire Audio Tuning
 - **Target Files**: `src/runners/50_launcher.sh`, `src/steam/30_downloader.sh`
 - **Functions**: `setup_onlinefix <game_dir>`, updates to `launch_game <game_dir> <bin> <title>`
 - **Technical Logic & Rules**:
   1. In `launch_game`:
      - Run `local detected_overrides; detected_overrides=$(detect_dll_overrides "$gdir")`.
      - Export combined `WINEDLLOVERRIDES` inside runner execution blocks (`umu-run`, `proton`, `wine`).
+     - **DEFECT-03 Remediation (PipeWire Audio Scheduling)**:
+       - Export `PIPEWIRE_LATENCY="${GAMECTL_PIPEWIRE_LATENCY:-256/48000}"`.
+       - Export `PULSE_LATENCY_MSEC="${GAMECTL_PULSE_LATENCY:-60}"`.
+       - Eliminates buffer underrun crackle on heavy CPU loads.
      - Log active DLL overrides: `[INFO] DLL Overrides aktif: $WINEDLLOVERRIDES`.
   2. In `setup_onlinefix`:
      - Check if `$game_dir` contains OnlineFix signatures.
@@ -54,7 +60,7 @@ Detailed architectural proposal and background specifications: `docs/PROPOSAL_GL
      - If missing, invoke `sync_steam 480 "Spacewar" "$game_dir"` to register manifest and unlock P2P socket.
      - Audit `OnlineFix.ini` for player name (`PlayerName=...`); offer to sync with `gamectl set-id` active persona.
 - **DoD**:
-  1. Windows runner subshells execute with verified `WINEDLLOVERRIDES` environment variable.
+  1. Windows runner subshells execute with verified `WINEDLLOVERRIDES` and real-time audio buffer variables.
   2. `gamectl onlinefix <game_dir>` detects files, validates Spacewar AppID 480 manifest, and syncs Steam/SLSsteam.
 
 ---
@@ -74,8 +80,8 @@ Detailed architectural proposal and background specifications: `docs/PROPOSAL_GL
      - Resolve target tag (default: latest).
      - Query asset URL for `x86_64.tar.gz`.
      - Determine Steam compatibility directory (`~/.local/share/Steam/compatibilitytools.d/`).
-     - Stream download and unpack directly:
-       `curl -# -L "$asset_url" | tar -xz -C "$compat_dir/"`
+     - Stream download with fail-on-error (`curl -fL`) and unpack directly:
+       `curl -# -fL "$asset_url" | tar -xz -C "$compat_dir/"`
      - Validate extraction: check for `compatibilitytool.vdf` and executable `proton`.
   3. `proton_remove`:
      - Verify tag path strictly within `compatibilitytools.d/` to prevent directory traversal.
@@ -87,9 +93,9 @@ Detailed architectural proposal and background specifications: `docs/PROPOSAL_GL
 
 ---
 
-### Chunk 4: Wine Prefix Swiss Army Knife (`pfx`)
-- **Target File**: `src/runners/40_wrappers.sh`
-- **Function**: `manage_prefix <game_dir> <action> [args...]`
+### Chunk 4: Wine Prefix Swiss Army Knife (`pfx`) & Wineserver Lifecycle Guard
+- **Target File**: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`
+- **Functions**: `manage_prefix <game_dir> <action> [args...]`, updates to `_restore_launch_state`
 - **Technical Logic & Rules**:
   1. Resolve prefix path `$game_dir/pfx` and game runner via `find_runner "$game_dir"`.
   2. Environment setup:
@@ -102,12 +108,16 @@ Detailed architectural proposal and background specifications: `docs/PROPOSAL_GL
      - `regedit`: Launch `"$runner" run regedit` or `wine regedit`.
      - `cmd`: Launch interactive Windows Command Prompt.
      - `shell`: Spawn interactive local Bash shell with `WINEPREFIX`, `PATH`, and runner vars pre-exported.
-     - `kill`: Check prefix wineserver PID and execute `wineserver -k` with `WINEPREFIX="$game_dir/pfx"`.
-     - `clean`: Trigger `backup_save "$game_dir"`, prompt confirmation, and safely wipe `$game_dir/pfx`.
+     - `kill`: **DEFECT-02 Remediation**: Check prefix wineserver PID and execute `wineserver -k` with `WINEPREFIX="$game_dir/pfx"`.
+     - `clean`: Trigger `backup_save "$game_dir"`, prompt confirmation, terminate wineserver, and safely wipe `$game_dir/pfx`.
      - `winetricks`: If `winetricks` binary exists, run `WINEPREFIX="$game_dir/pfx" winetricks "$@"`.
+  4. In `src/runners/50_launcher.sh` (`_restore_launch_state` & HUD option 4/5):
+     - For Windows games, execute graceful wait `WINEPREFIX="$gdir/pfx" wineserver -w 2>/dev/null || true` before save backup.
+     - On force termination (HUD option 5), call `WINEPREFIX="$gdir/pfx" wineserver -k 2>/dev/null || true` to eliminate zombie server locks.
 - **DoD**:
   1. Subcommands `winecfg`, `regedit`, `cmd`, `kill`, `clean` execute against isolated prefix without polluting global system.
   2. Clean action strictly triggers save backup before prefix directory wipe.
+  3. Wineserver is deterministically cleaned up on game teardown.
 
 ---
 
@@ -158,13 +168,14 @@ Detailed architectural proposal and background specifications: `docs/PROPOSAL_GL
 ### Chunk 7: Automated Test Suite Expansion & Contract Verification
 - **Target File**: `tests/test_cli.sh`
 - **Technical Logic & Rules**:
-  1. Add Test Suite 5: Global Features & Overrides Engine:
+  1. Add Test Suite 5: Global Features & Remediation Harness:
      - Test `detect_dll_overrides`: Mock directory with `OnlineFix64.dll` -> assert contains `OnlineFix64=n`.
      - Test `detect_dll_overrides`: Mock directory with `BepInEx/` -> assert contains `winhttp=n,b`.
      - Test `detect_dll_overrides`: Mock directory with `.dll_overrides` -> assert custom token parsed.
      - Test `proton-list`: Assert CLI runs without syntax error.
      - Test `pfx`: Assert error handling on invalid action or non-existent game directory.
      - Test `protondb`: Mock or live query for AppID 105600 -> assert tier parsed.
+     - Test `audio_env`: Assert `PIPEWIRE_LATENCY` is exported in launcher subshell.
   2. Run full regression suite: `tests/test_cli.sh`.
 - **DoD**:
   1. Test suite executes all tests (>20 test cases).
@@ -173,12 +184,22 @@ Detailed architectural proposal and background specifications: `docs/PROPOSAL_GL
 ---
 
 ### Chunk 8: Documentation, Memory Sync & Local Checkpoint Commit
-- **Target Files**: `README.md`, `DEVELOPMENT.md`, Obsidian RAG `STATE.md`, Git commit
+- **Target Files**: `README.md`, `DEVELOPMENT.md`, `remediation.md`, Obsidian RAG `STATE.md`, Git commit
 - **Technical Logic & Rules**:
   1. Update `README.md` and `DEVELOPMENT.md` with new subcommands, flags, and architecture documentation.
-  2. Update `STATE.md` in `~/Documents/Obsidian Vault/00-AGY-Memory/gamectl/` with new commit hash.
-  3. Execute local git commit with conventional commit message:
-     `feat(engine): implement onlinefix overrides, proton manager, prefix swiss army knife, and protondb cli`
+  2. Mark DEFECT-02 and DEFECT-03 as resolved in `remediation.md`.
+  3. Update `STATE.md` in `~/Documents/Obsidian Vault/00-AGY-Memory/gamectl/` with new commit hash.
+  4. Execute local git commit with conventional commit message:
+     `feat(engine): implement onlinefix overrides, proton manager, prefix swiss army knife, and audio/wineserver hardening`
 - **DoD**:
   1. Working tree clean (`git status` 0 uncommitted changes).
   2. Anti-push compliance maintained (local commit only).
+
+---
+
+## 3. Post-Sprint Roadmap (Work Packet 10)
+Upon completion and verification of Work Packet 9, remaining system remediations will be executed in **Work Packet 10**:
+- **DEFECT-01**: `systemd-run --user --scope` and cgroups v2 process tree isolation (`app-gamectl.slice`).
+- **DEFECT-04**: GPU Hybrid PRIME offloading (`--dgpu` / `--prime` with NVIDIA / AMD DRI auto-detection).
+- **DEFECT-05**: Bubblewrap (`bwrap`) containerized sandboxing profile.
+- **DEFECT-06**: Single-pass batch library scanning for multi-thousand game collections.
