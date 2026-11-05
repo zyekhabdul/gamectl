@@ -58,7 +58,7 @@ Implement Linux systems architectural remediation (Phase 4 / Actions 4.1-4.4):
   2. Tambahkan opsi per-game `sandbox=0|1` dan flag CLI `--sandbox` pada `launch_game`.
 - DoD: Standalone untrusted binary dapat dieksekusi dengan isolasi penuh terhadap file rahasia host `$HOME` tanpa merusak rendering Wayland/X11 dan audio PipeWire.
 
-### Chunk 4: Single-Pass Library Scanner Optimization (Action 4.4) [PENDING]
+### Chunk 4: Single-Pass Library Scanner Optimization (Action 4.4) [DONE]
 - Target Files: `src/steam/20_discovery.sh`, `src/tui/70_dashboard.sh`
 - Runtutan Eksekusi Teknis:
   1. Analisa kemacetan I/O pada `scan_installed_games` di `src/steam/20_discovery.sh`:
