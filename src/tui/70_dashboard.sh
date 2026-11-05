@@ -501,13 +501,15 @@ search_steam() {
     done <<< "$items"
 
     while true; do
-        local selection
-        selection=$(echo -n "$results" | fzf \
+        local fzf_out
+        fzf_out=$(echo -n "$results" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
+            --expect=ctrl-a,ctrl-u,ctrl-s,ctrl-d \
+            --bind="ctrl-a:accept,ctrl-u:accept,ctrl-s:accept,ctrl-d:accept" \
             --border-label="  ╢ gamectl :: Steam Store Catalog ╟  " \
             --border-label-pos=2 \
-            --header="STEAM CATALOG (Enter: Actions & Install │ Esc: Back)" \
+            --header="STEAM CATALOG (Enter: Actions │ Ctrl-A: All-in-One │ Ctrl-U: Entitle │ Ctrl-S: Standalone │ Esc: Back)" \
             --prompt="Steam Store > " \
             --preview='
                 appid={1}
@@ -555,23 +557,78 @@ search_steam() {
             --preview-window=right:52%:border-rounded:wrap \
         ) || break
 
-        if [ -n "$selection" ]; then
-            local sel_id sel_name sel_status
-            sel_id=$(echo "$selection" | awk -F'\t' '{print $1}')
-            sel_name=$(echo "$selection" | awk -F'\t' '{print $2}')
-            sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
+        local trigger_key selection
+        trigger_key=$(echo "$fzf_out" | sed -n '1p')
+        selection=$(echo "$fzf_out" | sed -n '2,$p')
 
+        [ -z "$selection" ] && continue
+
+        local sel_id sel_name sel_status
+        sel_id=$(echo "$selection" | awk -F'\t' '{print $1}')
+        sel_name=$(echo "$selection" | awk -F'\t' '{print $2}')
+        sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
+
+        local gdir=""
+        local clean_sel_name="${sel_name,,}"
+        if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
+            if [ -n "${installed_dir["$sel_id"]:-}" ] && [ -d "${installed_dir["$sel_id"]}" ]; then
+                gdir="${installed_dir["$sel_id"]}"
+            elif [ -n "${installed_dir["$clean_sel_name"]:-}" ] && [ -d "${installed_dir["$clean_sel_name"]}" ]; then
+                gdir="${installed_dir["$clean_sel_name"]}"
+            elif [ -d "$HOME/Games/$sel_name" ]; then
+                gdir="$HOME/Games/$sel_name"
+            fi
+        fi
+
+        # Direct hotkey triggers
+        if [ "$trigger_key" = "ctrl-a" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-                local gdir=""
-                local clean_sel_name="${sel_name,,}"
-                if [ -n "${installed_dir["$sel_id"]:-}" ] && [ -d "${installed_dir["$sel_id"]}" ]; then
-                    gdir="${installed_dir["$sel_id"]}"
-                elif [ -n "${installed_dir["$clean_sel_name"]:-}" ] && [ -d "${installed_dir["$clean_sel_name"]}" ]; then
-                    gdir="${installed_dir["$clean_sel_name"]}"
-                elif [ -d "$HOME/Games/$sel_name" ]; then
-                    gdir="$HOME/Games/$sel_name"
+                echo "[INFO] Shortcut <Ctrl-A>: Injecting GBE + Syncing Steam for $sel_name..."
+                inject_game "$gdir" "$sel_id"
+            else
+                echo "[INFO] Shortcut <Ctrl-A>: Starting All-in-One Background Download for $sel_name..."
+                download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --all --background
+            fi
+            sleep 1.2
+        elif [ "$trigger_key" = "ctrl-u" ]; then
+            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
+                echo "[INFO] Shortcut <Ctrl-U>: Synchronizing Steam Entitlement & ACF for $sel_name..."
+                sync_steam "$sel_id" "$sel_name" "$gdir"
+            else
+                echo "[INFO] Shortcut <Ctrl-U>: Adopting Steam Entitlement & ACF for $sel_name..."
+                unlock_game "$sel_id" "$sel_name"
+            fi
+            sleep 1.2
+        elif [ "$trigger_key" = "ctrl-s" ]; then
+            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
+                echo "[INFO] Shortcut <Ctrl-S>: Injecting Standalone GBE Fork for $sel_name..."
+                inject_game "$gdir" "$sel_id" --no-sync
+            else
+                echo "[INFO] Shortcut <Ctrl-S>: Starting Standalone Background Download for $sel_name..."
+                download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --inject-only --background
+            fi
+            sleep 1.2
+        elif [ "$trigger_key" = "ctrl-d" ]; then
+            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
+                local gbin
+                gbin=$(find_game_binary "$gdir" 2>/dev/null || echo "")
+                if [ -n "$gbin" ]; then
+                    local launch_rc=0
+                    launch_game "$gdir" "$gbin" "$sel_name" || launch_rc=$?
+                    if [ "$launch_rc" -eq 10 ]; then
+                        break
+                    fi
+                else
+                    echo "[ERROR] Binary executable not found in $gdir."
+                    sleep 1.2
                 fi
-
+            else
+                echo "[INFO] Shortcut <Ctrl-D>: Starting All-in-One Live Stream Download for $sel_name..."
+                download_game "$sel_id" "$HOME/Games/$sel_name" "$sel_name" --all --foreground
+            fi
+        else
+            # Enter key: Open Modal Action Palette
+            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
                 local action_palette
                 action_palette=$(cat <<EOF
 1	Launch Game Directly
