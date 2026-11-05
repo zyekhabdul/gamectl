@@ -1,77 +1,184 @@
 # WORK PACKET 9: GLOBAL GAMER & DEVELOPER ENGINE EXPANSION
 
 ## 1. Objective & Scope
-Implement high-impact capabilities required by global Linux gamers, modders, and game developers:
-1. OnlineFix multiplayer support (dynamic `WINEDLLOVERRIDES` + Spacewar AppID 480 auto-entitlement).
-2. Universal modding overrides (Unity BepInEx, Unreal Engine UE4SS, Capcom REFramework).
-3. Headless GE-Proton / Wine-GE manager (`proton-list`, `proton-install`, `proton-remove` via GitHub Releases API).
-4. Wine Prefix Swiss Army Knife (`gamectl pfx <gdir> [winecfg|regedit|cmd|kill|clean]`).
-5. Native ProtonDB compatibility audit CLI (`gamectl protondb <appid>`).
-6. Standard Desktop Entry generator (`gamectl make-desktop <gdir>`).
+Implement and harden 4 core capabilities required by global Linux gamers, modders, and game developers:
+1. OnlineFix & Universal Mod DLL Overrides Engine (Dynamic `WINEDLLOVERRIDES` + Spacewar AppID 480 auto-entitlement).
+2. Headless GE-Proton / Wine-GE Release Manager (`proton-list`, `proton-install`, `proton-remove` via GitHub Releases API).
+3. Wine Prefix Swiss Army Knife (`gamectl pfx <gdir> [winecfg|regedit|cmd|shell|kill|clean|winetricks]`).
+4. Native ProtonDB Quick Audit CLI (`gamectl protondb <appid|dir>`).
+5. Bonus System Integration: XDG Desktop Entry Generator (`gamectl make-desktop <gdir> [title]`).
 
 Detailed architectural proposal and background specifications: `docs/PROPOSAL_GLOBAL_FEATURES.md`.
 
 ---
 
-## 2. Granular Chunks & Definition of Done (DoD)
+## 2. Granular Chunks & Technical Execution DoD
 
-### Chunk 1: OnlineFix & DLL Overrides Scanner (`src/runners/40_wrappers.sh`) [PENDING]
-- **Target**: `src/runners/40_wrappers.sh`
+### Chunk 1: OnlineFix & Mod DLL Overrides Detection Engine
+- **Target File**: `src/runners/40_wrappers.sh`
+- **Function Signature**: `detect_dll_overrides <game_dir>` -> outputs semicolon-separated `WINEDLLOVERRIDES` string
+- **Technical Logic & Rules**:
+  1. Scan root `$game_dir` and subfolders (depth 2) for signature files:
+     - **OnlineFix**: `OnlineFix64.dll`, `OnlineFix.dll`, `dnet.dll`, `SteamOverlay64.dll`, `winmm.dll`, `version.dll`.
+       Token payload: `OnlineFix=n;OnlineFix64=n;SteamOverlay64=n;dnet=n;winmm=n,b;version=n,b;steam_api64=n;steam_api=n`
+     - **Unity BepInEx**: Folder `BepInEx/`, `doorstop_config.ini`, or `winhttp.dll`.
+       Token payload: `winhttp=n,b`
+     - **Unreal Engine UE4SS**: Folder `ue4ss/`, `UE4SS.dll`, or `dwmapi.dll`.
+       Token payload: `dwmapi=n,b`
+     - **Capcom REFramework / ASI Loaders**: `dinput8.dll`.
+       Token payload: `dinput8=n,b`
+     - **ReShade / SpecialK**: `ReShade.ini` or ReShade-specific `dxgi.dll`.
+       Token payload: `dxgi=n,b`
+     - **Per-Game Custom Declarative**: File `$game_dir/.dll_overrides` containing custom key-values or tokens.
+  2. Implement string sanitizer & deduplicator:
+     - Combine all tokens with existing `WINEDLLOVERRIDES` from environment.
+     - Normalize delimiters (`;` and `,`), strip whitespace, eliminate duplicate keys.
 - **DoD**:
-  1. Buat fungsi `detect_dll_overrides <game_dir>` yang memindai:
-     - OnlineFix: `OnlineFix64.dll`, `OnlineFix.dll`, `dnet.dll`, `SteamOverlay64.dll`, `winmm.dll`, `version.dll`.
-     - BepInEx (Unity): `winhttp.dll`, folder `BepInEx/`.
-     - UE4SS (Unreal): `dwmapi.dll`, folder `ue4ss/`.
-     - REFramework / ASI: `dinput8.dll`, `dxgi.dll`.
-     - Deklaratif per-game: `$game_dir/.dll_overrides`.
-  2. Susun format string `WINEDLLOVERRIDES` yang aman dan tanpa redundansi.
+  1. `detect_dll_overrides` returns clean, normalized override string with exit code 0.
+  2. Returns empty string if no mod/OnlineFix DLLs are present.
+  3. Preserves user-defined `WINEDLLOVERRIDES` without duplication.
 
-### Chunk 2: Launcher Overrides Injection & Spacewar Entitlement (`src/runners/50_launcher.sh`) [PENDING]
-- **Target**: `src/runners/50_launcher.sh`, `src/steam/30_downloader.sh`
-- **DoD**:
-  1. Ekspor `WINEDLLOVERRIDES` yang terdeteksi sebelum eksekusi `umu-run`, `proton`, dan `wine`.
-  2. Implementasikan fungsi `setup_onlinefix <game_dir>` yang memvalidasi `OnlineFix.ini` dan memastikan AppID 480 (Spacewar) terdaftar di Steam / SLSsteam via `sync_steam 480 "Spacewar"`.
+---
 
-### Chunk 3: Headless GE-Proton Release Manager (`src/runners/40_wrappers.sh`) [PENDING]
-- **Target**: `src/runners/40_wrappers.sh`
+### Chunk 2: Launcher Overrides Injection & Spacewar Entitlement
+- **Target Files**: `src/runners/50_launcher.sh`, `src/steam/30_downloader.sh`
+- **Functions**: `setup_onlinefix <game_dir>`, updates to `launch_game <game_dir> <bin> <title>`
+- **Technical Logic & Rules**:
+  1. In `launch_game`:
+     - Run `local detected_overrides; detected_overrides=$(detect_dll_overrides "$gdir")`.
+     - Export combined `WINEDLLOVERRIDES` inside runner execution blocks (`umu-run`, `proton`, `wine`).
+     - Log active DLL overrides: `[INFO] DLL Overrides aktif: $WINEDLLOVERRIDES`.
+  2. In `setup_onlinefix`:
+     - Check if `$game_dir` contains OnlineFix signatures.
+     - Verify if `appmanifest_480.acf` (Spacewar) exists in Steam root (`~/.local/share/Steam/steamapps/`) and SLSsteam.
+     - If missing, invoke `sync_steam 480 "Spacewar" "$game_dir"` to register manifest and unlock P2P socket.
+     - Audit `OnlineFix.ini` for player name (`PlayerName=...`); offer to sync with `gamectl set-id` active persona.
 - **DoD**:
-  1. `proton_list`: Query GitHub API untuk rilis terbaru `GloriousEggroll/proton-ge-custom` dan tampilkan perbandingan dengan rilis lokal di `compatibilitytools.d/`.
-  2. `proton_install [latest|<tag>]`: Unduh tarball `x86_64` secara headless tanpa dependensi GUI dan ekstrak langsung ke `~/.local/share/Steam/compatibilitytools.d/`.
-  3. `proton_remove <tag>`: Hapus instalasi GE-Proton lama untuk membebaskan ruang disk.
+  1. Windows runner subshells execute with verified `WINEDLLOVERRIDES` environment variable.
+  2. `gamectl onlinefix <game_dir>` detects files, validates Spacewar AppID 480 manifest, and syncs Steam/SLSsteam.
 
-### Chunk 4: Prefix Swiss Army Knife (`src/runners/40_wrappers.sh`) [PENDING]
-- **Target**: `src/runners/40_wrappers.sh`
-- **DoD**:
-  1. Buat handler `manage_prefix <game_dir> <subcommand> [args...]`.
-  2. Dukung subcommands: `winecfg`, `regedit`, `cmd`, `shell`, `kill` (`wineserver -k`), `clean` (reset `$gdir/pfx`).
+---
 
-### Chunk 5: ProtonDB CLI & Desktop Entry Generator (`src/diagnostics/60_doctor.sh`, `src/steam/20_discovery.sh`) [PENDING]
-- **Target**: `src/diagnostics/60_doctor.sh`, `src/steam/20_discovery.sh`
+### Chunk 3: Headless GE-Proton / Wine-GE Release Manager
+- **Target File**: `src/runners/40_wrappers.sh`
+- **Functions**: `proton_list`, `proton_install [tag|latest]`, `proton_remove <tag>`
+- **Technical Logic & Rules**:
+  1. `proton_list`:
+     - Scan local directories: `~/.local/share/Steam/compatibilitytools.d/` and `~/.steam/root/compatibilitytools.d/`.
+     - Fetch releases from GitHub API with 5-second timeout:
+       `curl -s --connect-timeout 5 https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases?per_page=5`
+     - Parse release tags, download URLs, and asset sizes using `jq`.
+     - Fallback if GitHub rate-limited (HTTP 403/429): Parse release HTML redirect or report cached local list.
+     - Display formatted ANSI table comparing installed local versions with latest upstream releases.
+  2. `proton_install`:
+     - Resolve target tag (default: latest).
+     - Query asset URL for `x86_64.tar.gz`.
+     - Determine Steam compatibility directory (`~/.local/share/Steam/compatibilitytools.d/`).
+     - Stream download and unpack directly:
+       `curl -# -L "$asset_url" | tar -xz -C "$compat_dir/"`
+     - Validate extraction: check for `compatibilitytool.vdf` and executable `proton`.
+  3. `proton_remove`:
+     - Verify tag path strictly within `compatibilitytools.d/` to prevent directory traversal.
+     - Prompt confirmation before removing directory.
 - **DoD**:
-  1. `query_protondb <appid>`: Query `https://www.protondb.com/api/v1/reports/summaries/${appid}.json` dan cetak status tier/confidence dengan ANSI color formatting.
-  2. `create_desktop_entry <game_dir> [title]`: Generate file `~/.local/share/applications/gamectl-<safe_name>.desktop` dengan resolusi icon lokal.
+  1. `proton-list` accurately lists local installations and queries GitHub releases.
+  2. `proton-install latest` downloads, unpacks, and registers valid GE-Proton build.
+  3. `proton-remove <tag>` safely deletes selected release folder.
 
-### Chunk 6: CLI Top-Level Dispatcher & Build Sync (`src/main.sh`, `scripts/build.sh`) [PENDING]
-- **Target**: `src/main.sh`, `bin/gamectl`
-- **DoD**:
-  1. Daftarkan perintah CLI di `src/main.sh`:
-     - `onlinefix <dir>`
-     - `proton-list` / `proton-install` / `proton-remove`
-     - `pfx <dir> <action>`
-     - `protondb <appid>`
-     - `make-desktop <dir>`
-  2. Eksekusi `./scripts/build.sh` dan pastikan `bash -n bin/gamectl` exit 0.
+---
 
-### Chunk 7: Test Suite Expansion & Contract Verification (`tests/test_cli.sh`) [PENDING]
-- **Target**: `tests/test_cli.sh`
+### Chunk 4: Wine Prefix Swiss Army Knife (`pfx`)
+- **Target File**: `src/runners/40_wrappers.sh`
+- **Function**: `manage_prefix <game_dir> <action> [args...]`
+- **Technical Logic & Rules**:
+  1. Resolve prefix path `$game_dir/pfx` and game runner via `find_runner "$game_dir"`.
+  2. Environment setup:
+     - If runner is Proton:
+       `STEAM_COMPAT_CLIENT_INSTALL_PATH=$(get_steam_root) STEAM_COMPAT_DATA_PATH="$game_dir" WINEPREFIX="$game_dir/pfx"`
+     - If runner is Wine:
+       `WINEPREFIX="$game_dir/pfx"`
+  3. Subcommand dispatch:
+     - `winecfg`: Launch `"$runner" run winecfg` (Proton) or `wine winecfg` (Wine).
+     - `regedit`: Launch `"$runner" run regedit` or `wine regedit`.
+     - `cmd`: Launch interactive Windows Command Prompt.
+     - `shell`: Spawn interactive local Bash shell with `WINEPREFIX`, `PATH`, and runner vars pre-exported.
+     - `kill`: Check prefix wineserver PID and execute `wineserver -k` with `WINEPREFIX="$game_dir/pfx"`.
+     - `clean`: Trigger `backup_save "$game_dir"`, prompt confirmation, and safely wipe `$game_dir/pfx`.
+     - `winetricks`: If `winetricks` binary exists, run `WINEPREFIX="$game_dir/pfx" winetricks "$@"`.
 - **DoD**:
-  1. Tambahkan test case untuk `detect_dll_overrides` (mock OnlineFix dan BepInEx directories).
-  2. Tambahkan test case untuk CLI syntax parsing subcommands baru.
-  3. Jalankan `tests/test_cli.sh` dan pastikan seluruh test lulus dengan exit 0.
+  1. Subcommands `winecfg`, `regedit`, `cmd`, `kill`, `clean` execute against isolated prefix without polluting global system.
+  2. Clean action strictly triggers save backup before prefix directory wipe.
 
-### Chunk 8: Documentation & Checkpoint Commit [PENDING]
-- **Target**: `README.md`, `DEVELOPMENT.md`, Obsidian RAG `STATE.md`, local git commit
+---
+
+### Chunk 5: ProtonDB Quick Audit CLI & Desktop Entry Generator
+- **Target Files**: `src/diagnostics/60_doctor.sh`, `src/steam/20_discovery.sh`
+- **Functions**: `query_protondb <appid|dir>`, `create_desktop_entry <game_dir> [title]`
+- **Technical Logic & Rules**:
+  1. `query_protondb`:
+     - Resolve AppID from numeric input or parse from `$game_dir/steam_appid.txt`.
+     - Query: `curl -s --connect-timeout 5 https://www.protondb.com/api/v1/reports/summaries/${appid}.json`.
+     - Parse JSON fields (`tier`, `confidence`, `score`, `total`) via `jq`.
+     - Format ANSI card:
+       - Cyan for Platinum, Green for Gold, Yellow for Silver, Red for Borked.
+     - Print community launch parameter recommendations.
+     - Handle offline / 404 / rate-limit gracefully without terminal crash.
+  2. `create_desktop_entry`:
+     - Resolve game title, binary path, and absolute directory.
+     - Search local icon candidates: `icon.png`, `icon.ico`, `logo.png`.
+     - Convert `.ico` to `.png` via ImageMagick `convert` if available; fallback to generic gaming icon.
+     - Write `~/.local/share/applications/gamectl-<safe_name>.desktop` with `Exec=gamectl launch "<dir>"`.
 - **DoD**:
-  1. Dokumentasikan perintah baru pada `README.md` dan `DEVELOPMENT.md`.
-  2. Perbarui `STATE.md` di Obsidian RAG memory.
-  3. Lakukan local commit (zero emoji, format konvensional).
+  1. `gamectl protondb <appid>` renders accurate tier badge and metrics.
+  2. `gamectl make-desktop <dir>` produces valid XDG `.desktop` file verified by `desktop-file-validate` (if installed).
+
+---
+
+### Chunk 6: CLI Entrypoint Dispatcher & Build Synchronization
+- **Target Files**: `src/main.sh`, `scripts/build.sh`, `bin/gamectl`
+- **Technical Logic & Rules**:
+  1. In `src/main.sh`:
+     - Register exported functions in `export -f`: `detect_dll_overrides`, `setup_onlinefix`, `proton_list`, `proton_install`, `proton_remove`, `manage_prefix`, `query_protondb`, `create_desktop_entry`.
+     - Route CLI subcommands:
+       - `onlinefix`: `setup_onlinefix "$2"`
+       - `proton-list` / `proton`: `proton_list`
+       - `proton-install`: `proton_install "${2:-latest}"`
+       - `proton-remove`: `proton_remove "$2"`
+       - `pfx`: `manage_prefix "$2" "${3:-winecfg}" "${@:4}"`
+       - `protondb`: `query_protondb "$2"`
+       - `make-desktop`: `create_desktop_entry "$2" "${3:-}"`
+     - Update `--help` usage documentation.
+  2. Execute `./scripts/build.sh` to compile `bin/gamectl`.
+- **DoD**:
+  1. `./scripts/build.sh --check` verifies source-to-bundle synchronization.
+  2. `bash -n bin/gamectl` returns exit code 0 with zero syntax errors.
+
+---
+
+### Chunk 7: Automated Test Suite Expansion & Contract Verification
+- **Target File**: `tests/test_cli.sh`
+- **Technical Logic & Rules**:
+  1. Add Test Suite 5: Global Features & Overrides Engine:
+     - Test `detect_dll_overrides`: Mock directory with `OnlineFix64.dll` -> assert contains `OnlineFix64=n`.
+     - Test `detect_dll_overrides`: Mock directory with `BepInEx/` -> assert contains `winhttp=n,b`.
+     - Test `detect_dll_overrides`: Mock directory with `.dll_overrides` -> assert custom token parsed.
+     - Test `proton-list`: Assert CLI runs without syntax error.
+     - Test `pfx`: Assert error handling on invalid action or non-existent game directory.
+     - Test `protondb`: Mock or live query for AppID 105600 -> assert tier parsed.
+  2. Run full regression suite: `tests/test_cli.sh`.
+- **DoD**:
+  1. Test suite executes all tests (>20 test cases).
+  2. Zero test failures, zero test skips (`exit code 0`).
+
+---
+
+### Chunk 8: Documentation, Memory Sync & Local Checkpoint Commit
+- **Target Files**: `README.md`, `DEVELOPMENT.md`, Obsidian RAG `STATE.md`, Git commit
+- **Technical Logic & Rules**:
+  1. Update `README.md` and `DEVELOPMENT.md` with new subcommands, flags, and architecture documentation.
+  2. Update `STATE.md` in `~/Documents/Obsidian Vault/00-AGY-Memory/gamectl/` with new commit hash.
+  3. Execute local git commit with conventional commit message:
+     `feat(engine): implement onlinefix overrides, proton manager, prefix swiss army knife, and protondb cli`
+- **DoD**:
+  1. Working tree clean (`git status` 0 uncommitted changes).
+  2. Anti-push compliance maintained (local commit only).
