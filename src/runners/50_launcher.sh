@@ -345,11 +345,20 @@ launch_game() {
         use_scope=true
     fi
 
+    local -a sandbox_cmd=()
+    if [ "${GAMECTL_ACTIVE_SANDBOX:-0}" = "1" ] && [ ${#GAMECTL_SANDBOX_PREFIX[@]} -gt 0 ]; then
+        sandbox_cmd=("${GAMECTL_SANDBOX_PREFIX[@]}")
+        echo "[INFO] Security Sandbox: Bubblewrap rootless filesystem isolation active."
+    fi
+
     _exec_in_scope() {
+        local -a final_cmd=()
+        [ ${#sandbox_cmd[@]} -gt 0 ] && final_cmd+=("${sandbox_cmd[@]}")
+        final_cmd+=("$@")
         if [ "$use_scope" = true ]; then
-            exec systemd-run --user --scope --quiet --unit="gamectl-${safe_title}-${BASHPID}" --description="gamectl: ${title}" "$@"
+            exec systemd-run --user --scope --quiet --unit="gamectl-${safe_title}-${BASHPID}" --description="gamectl: ${title}" "${final_cmd[@]}"
         else
-            exec "$@"
+            exec "${final_cmd[@]}"
         fi
     }
 
@@ -800,7 +809,7 @@ cli_launch() {
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --hud|--mangohud|--no-hud|--no-mangohud|--gamemode|--no-gamemode|--gamescope|--no-gamescope|--fsr|--no-fsr|--glthread|--no-glthread|--scope|--systemd-scope|--no-scope|--no-systemd-scope|--prime|--no-prime)
+            --hud|--mangohud|--no-hud|--no-mangohud|--gamemode|--no-gamemode|--gamescope|--no-gamescope|--fsr|--no-fsr|--glthread|--no-glthread|--scope|--systemd-scope|--no-scope|--no-systemd-scope|--prime|--no-prime|--sandbox|--no-sandbox)
                 l_flags+=("$1")
                 shift
                 ;;

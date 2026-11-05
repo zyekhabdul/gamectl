@@ -44,7 +44,7 @@ Implement Linux systems architectural remediation (Phase 4 / Actions 4.1-4.4):
   4. Ekspor dan daftarkan perintah `gamectl detect-gpu` di `src/main.sh`.
 - DoD: Flag `--prime` secara otomatis mengarahkan rendering ke GPU diskrit yang terdeteksi tanpa konfigurasi manual user.
 
-### Chunk 3: Bubblewrap (bwrap) Rootless Security Sandbox Profile (Action 4.3) [PENDING]
+### Chunk 3: Bubblewrap (bwrap) Rootless Security Sandbox Profile (Action 4.3) [DONE]
 - Target Files: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/main.sh`
 - Runtutan Eksekusi Teknis:
   1. Buat fungsi helper `build_sandbox_command "$gdir"` di `src/runners/40_wrappers.sh`:

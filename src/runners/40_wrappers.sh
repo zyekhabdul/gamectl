@@ -877,11 +877,59 @@ detect_dgpu_vendor() {
     return 0
 }
 
+# Construct rootless Bubblewrap (bwrap) security sandbox argument array
+build_sandbox_command() {
+    local gdir="$1"
+    declare -ga GAMECTL_SANDBOX_PREFIX=()
+
+    if ! command -v bwrap >/dev/null 2>&1; then
+        echo "[WARN] bubblewrap (bwrap) not found in PATH. Sandboxing skipped." >&2
+        return 1
+    fi
+
+    local run_uid="${UID:-$(id -u)}"
+    local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$run_uid}"
+
+    GAMECTL_SANDBOX_PREFIX=(
+        bwrap
+        --ro-bind /usr /usr
+        --ro-bind-try /lib /lib
+        --ro-bind-try /lib64 /lib64
+        --ro-bind-try /bin /bin
+        --ro-bind-try /sbin /sbin
+        --ro-bind-try /etc /etc
+        --proc /proc
+        --dev /dev
+        --ro-bind /sys /sys
+        --tmpfs /tmp
+        --ro-bind-try /tmp/.X11-unix /tmp/.X11-unix
+        --tmpfs /run
+        --tmpfs "/run/user/$run_uid"
+        --ro-bind-try "$runtime_dir/wayland-0" "$runtime_dir/wayland-0"
+        --bind-try "$runtime_dir/pipewire-0" "$runtime_dir/pipewire-0"
+        --bind-try "$runtime_dir/pulse" "$runtime_dir/pulse"
+        --bind-try "$runtime_dir/gamectl-$run_uid" "$runtime_dir/gamectl-$run_uid"
+        --tmpfs "$HOME"
+        --bind-try "$HOME/.config/gamectl" "$HOME/.config/gamectl"
+        --ro-bind-try "$HOME/.local/share/Steam" "$HOME/.local/share/Steam"
+        --ro-bind-try "$HOME/.local/share/gbe-fork" "$HOME/.local/share/gbe-fork"
+        --ro-bind-try "$HOME/.steam" "$HOME/.steam"
+        --bind-try "$HOME/.local/share/vulkan" "$HOME/.local/share/vulkan"
+        --bind "$gdir" "$gdir"
+        --chdir "$gdir"
+        --unshare-user
+        --unshare-ipc
+        --unshare-pid
+        --die-with-parent
+    )
+    return 0
+}
+
 # Resolve and build wrapper prefix command array (gamemoderun, mangohud, gamescope)
 build_wrapper_command() {
     local gdir="$1"
     shift || true
-    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr="" opt_systemd_scope="" opt_prime=""
+    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr="" opt_systemd_scope="" opt_prime="" opt_sandbox=""
     local remaining_args=()
 
     while [ $# -gt 0 ]; do
@@ -900,13 +948,15 @@ build_wrapper_command() {
             --no-scope|--no-systemd-scope) opt_systemd_scope=0; shift ;;
             --prime) opt_prime=1; shift ;;
             --no-prime) opt_prime=0; shift ;;
+            --sandbox) opt_sandbox=1; shift ;;
+            --no-sandbox) opt_sandbox=0; shift ;;
             --) shift; remaining_args+=("$@"); break ;;
             *) remaining_args+=("$1"); shift ;;
         esac
     done
 
     # 1. Base defaults
-    local use_gm=0 use_hud=0 use_scope=0 use_fsr=0 use_glthread=0 use_systemd_scope="" use_prime=0
+    local use_gm=0 use_hud=0 use_scope=0 use_fsr=0 use_glthread=0 use_systemd_scope="" use_prime=0 use_sandbox=0
     local gscope_args
     gscope_args=$(get_default_gamescope_args)
 
@@ -924,6 +974,7 @@ build_wrapper_command() {
                 glthread|mesa_glthread) use_glthread="$v" ;;
                 scope|systemd_scope) use_systemd_scope="$v" ;;
                 prime|dgpu) use_prime="$v" ;;
+                sandbox) use_sandbox="$v" ;;
                 gamescope_args) gscope_args="$v" ;;
             esac
         done < "$HOME/.config/gamectl/wrappers"
@@ -943,6 +994,7 @@ build_wrapper_command() {
                 glthread|mesa_glthread) use_glthread="$v" ;;
                 scope|systemd_scope) use_systemd_scope="$v" ;;
                 prime|dgpu) use_prime="$v" ;;
+                sandbox) use_sandbox="$v" ;;
                 gamescope_args) gscope_args="$v" ;;
             esac
         done < "$gdir/.wrappers"
@@ -956,6 +1008,7 @@ build_wrapper_command() {
     [ -n "${GAMECTL_GLTHREAD:-}" ] && use_glthread="$GAMECTL_GLTHREAD"
     [ -n "${GAMECTL_SCOPE:-${GAMECTL_SYSTEMD_SCOPE:-}}" ] && use_systemd_scope="${GAMECTL_SCOPE:-$GAMECTL_SYSTEMD_SCOPE}"
     [ -n "${GAMECTL_PRIME:-}" ] && use_prime="$GAMECTL_PRIME"
+    [ -n "${GAMECTL_SANDBOX:-}" ] && use_sandbox="$GAMECTL_SANDBOX"
     [ -n "${GAMECTL_GAMESCOPE_ARGS:-}" ] && gscope_args="$GAMECTL_GAMESCOPE_ARGS"
 
     # 5. CLI flag overrides
@@ -966,6 +1019,7 @@ build_wrapper_command() {
     [ -n "${opt_glthread:-}" ] && use_glthread="$opt_glthread"
     [ -n "${opt_systemd_scope:-}" ] && use_systemd_scope="$opt_systemd_scope"
     [ -n "$opt_prime" ] && use_prime="$opt_prime"
+    [ -n "$opt_sandbox" ] && use_sandbox="$opt_sandbox"
 
     if [ -z "${use_systemd_scope:-}" ]; then
         if check_systemd_scope_support; then
@@ -983,10 +1037,16 @@ build_wrapper_command() {
         fi
     fi
 
+    declare -ga GAMECTL_SANDBOX_PREFIX=()
+    if [ "$use_sandbox" = "1" ]; then
+        build_sandbox_command "$gdir" || use_sandbox=0
+    fi
+
     GAMECTL_ACTIVE_GLTHREAD="$use_glthread"
     GAMECTL_ACTIVE_SYSTEMD_SCOPE="$use_systemd_scope"
     GAMECTL_ACTIVE_PRIME="$use_prime"
     GAMECTL_ACTIVE_PRIME_VENDOR="$dgpu_vendor"
+    GAMECTL_ACTIVE_SANDBOX="$use_sandbox"
 
     local prefix=()
     if [ "$use_gm" = "1" ]; then

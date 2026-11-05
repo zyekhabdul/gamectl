@@ -2998,11 +2998,59 @@ detect_dgpu_vendor() {
     return 0
 }
 
+# Construct rootless Bubblewrap (bwrap) security sandbox argument array
+build_sandbox_command() {
+    local gdir="$1"
+    declare -ga GAMECTL_SANDBOX_PREFIX=()
+
+    if ! command -v bwrap >/dev/null 2>&1; then
+        echo "[WARN] bubblewrap (bwrap) not found in PATH. Sandboxing skipped." >&2
+        return 1
+    fi
+
+    local run_uid="${UID:-$(id -u)}"
+    local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$run_uid}"
+
+    GAMECTL_SANDBOX_PREFIX=(
+        bwrap
+        --ro-bind /usr /usr
+        --ro-bind-try /lib /lib
+        --ro-bind-try /lib64 /lib64
+        --ro-bind-try /bin /bin
+        --ro-bind-try /sbin /sbin
+        --ro-bind-try /etc /etc
+        --proc /proc
+        --dev /dev
+        --ro-bind /sys /sys
+        --tmpfs /tmp
+        --ro-bind-try /tmp/.X11-unix /tmp/.X11-unix
+        --tmpfs /run
+        --tmpfs "/run/user/$run_uid"
+        --ro-bind-try "$runtime_dir/wayland-0" "$runtime_dir/wayland-0"
+        --bind-try "$runtime_dir/pipewire-0" "$runtime_dir/pipewire-0"
+        --bind-try "$runtime_dir/pulse" "$runtime_dir/pulse"
+        --bind-try "$runtime_dir/gamectl-$run_uid" "$runtime_dir/gamectl-$run_uid"
+        --tmpfs "$HOME"
+        --bind-try "$HOME/.config/gamectl" "$HOME/.config/gamectl"
+        --ro-bind-try "$HOME/.local/share/Steam" "$HOME/.local/share/Steam"
+        --ro-bind-try "$HOME/.local/share/gbe-fork" "$HOME/.local/share/gbe-fork"
+        --ro-bind-try "$HOME/.steam" "$HOME/.steam"
+        --bind-try "$HOME/.local/share/vulkan" "$HOME/.local/share/vulkan"
+        --bind "$gdir" "$gdir"
+        --chdir "$gdir"
+        --unshare-user
+        --unshare-ipc
+        --unshare-pid
+        --die-with-parent
+    )
+    return 0
+}
+
 # Resolve and build wrapper prefix command array (gamemoderun, mangohud, gamescope)
 build_wrapper_command() {
     local gdir="$1"
     shift || true
-    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr="" opt_systemd_scope="" opt_prime=""
+    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr="" opt_systemd_scope="" opt_prime="" opt_sandbox=""
     local remaining_args=()
 
     while [ $# -gt 0 ]; do
@@ -3021,13 +3069,15 @@ build_wrapper_command() {
             --no-scope|--no-systemd-scope) opt_systemd_scope=0; shift ;;
             --prime) opt_prime=1; shift ;;
             --no-prime) opt_prime=0; shift ;;
+            --sandbox) opt_sandbox=1; shift ;;
+            --no-sandbox) opt_sandbox=0; shift ;;
             --) shift; remaining_args+=("$@"); break ;;
             *) remaining_args+=("$1"); shift ;;
         esac
     done
 
     # 1. Base defaults
-    local use_gm=0 use_hud=0 use_scope=0 use_fsr=0 use_glthread=0 use_systemd_scope="" use_prime=0
+    local use_gm=0 use_hud=0 use_scope=0 use_fsr=0 use_glthread=0 use_systemd_scope="" use_prime=0 use_sandbox=0
     local gscope_args
     gscope_args=$(get_default_gamescope_args)
 
@@ -3045,6 +3095,7 @@ build_wrapper_command() {
                 glthread|mesa_glthread) use_glthread="$v" ;;
                 scope|systemd_scope) use_systemd_scope="$v" ;;
                 prime|dgpu) use_prime="$v" ;;
+                sandbox) use_sandbox="$v" ;;
                 gamescope_args) gscope_args="$v" ;;
             esac
         done < "$HOME/.config/gamectl/wrappers"
@@ -3064,6 +3115,7 @@ build_wrapper_command() {
                 glthread|mesa_glthread) use_glthread="$v" ;;
                 scope|systemd_scope) use_systemd_scope="$v" ;;
                 prime|dgpu) use_prime="$v" ;;
+                sandbox) use_sandbox="$v" ;;
                 gamescope_args) gscope_args="$v" ;;
             esac
         done < "$gdir/.wrappers"
@@ -3077,6 +3129,7 @@ build_wrapper_command() {
     [ -n "${GAMECTL_GLTHREAD:-}" ] && use_glthread="$GAMECTL_GLTHREAD"
     [ -n "${GAMECTL_SCOPE:-${GAMECTL_SYSTEMD_SCOPE:-}}" ] && use_systemd_scope="${GAMECTL_SCOPE:-$GAMECTL_SYSTEMD_SCOPE}"
     [ -n "${GAMECTL_PRIME:-}" ] && use_prime="$GAMECTL_PRIME"
+    [ -n "${GAMECTL_SANDBOX:-}" ] && use_sandbox="$GAMECTL_SANDBOX"
     [ -n "${GAMECTL_GAMESCOPE_ARGS:-}" ] && gscope_args="$GAMECTL_GAMESCOPE_ARGS"
 
     # 5. CLI flag overrides
@@ -3087,6 +3140,7 @@ build_wrapper_command() {
     [ -n "${opt_glthread:-}" ] && use_glthread="$opt_glthread"
     [ -n "${opt_systemd_scope:-}" ] && use_systemd_scope="$opt_systemd_scope"
     [ -n "$opt_prime" ] && use_prime="$opt_prime"
+    [ -n "$opt_sandbox" ] && use_sandbox="$opt_sandbox"
 
     if [ -z "${use_systemd_scope:-}" ]; then
         if check_systemd_scope_support; then
@@ -3104,10 +3158,16 @@ build_wrapper_command() {
         fi
     fi
 
+    declare -ga GAMECTL_SANDBOX_PREFIX=()
+    if [ "$use_sandbox" = "1" ]; then
+        build_sandbox_command "$gdir" || use_sandbox=0
+    fi
+
     GAMECTL_ACTIVE_GLTHREAD="$use_glthread"
     GAMECTL_ACTIVE_SYSTEMD_SCOPE="$use_systemd_scope"
     GAMECTL_ACTIVE_PRIME="$use_prime"
     GAMECTL_ACTIVE_PRIME_VENDOR="$dgpu_vendor"
+    GAMECTL_ACTIVE_SANDBOX="$use_sandbox"
 
     local prefix=()
     if [ "$use_gm" = "1" ]; then
@@ -3802,11 +3862,20 @@ launch_game() {
         use_scope=true
     fi
 
+    local -a sandbox_cmd=()
+    if [ "${GAMECTL_ACTIVE_SANDBOX:-0}" = "1" ] && [ ${#GAMECTL_SANDBOX_PREFIX[@]} -gt 0 ]; then
+        sandbox_cmd=("${GAMECTL_SANDBOX_PREFIX[@]}")
+        echo "[INFO] Security Sandbox: Bubblewrap rootless filesystem isolation active."
+    fi
+
     _exec_in_scope() {
+        local -a final_cmd=()
+        [ ${#sandbox_cmd[@]} -gt 0 ] && final_cmd+=("${sandbox_cmd[@]}")
+        final_cmd+=("$@")
         if [ "$use_scope" = true ]; then
-            exec systemd-run --user --scope --quiet --unit="gamectl-${safe_title}-${BASHPID}" --description="gamectl: ${title}" "$@"
+            exec systemd-run --user --scope --quiet --unit="gamectl-${safe_title}-${BASHPID}" --description="gamectl: ${title}" "${final_cmd[@]}"
         else
-            exec "$@"
+            exec "${final_cmd[@]}"
         fi
     }
 
@@ -4257,7 +4326,7 @@ cli_launch() {
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --hud|--mangohud|--no-hud|--no-mangohud|--gamemode|--no-gamemode|--gamescope|--no-gamescope|--fsr|--no-fsr|--glthread|--no-glthread|--scope|--systemd-scope|--no-scope|--no-systemd-scope|--prime|--no-prime)
+            --hud|--mangohud|--no-hud|--no-mangohud|--gamemode|--no-gamemode|--gamescope|--no-gamescope|--fsr|--no-fsr|--glthread|--no-glthread|--scope|--systemd-scope|--no-scope|--no-systemd-scope|--prime|--no-prime|--sandbox|--no-sandbox)
                 l_flags+=("$1")
                 shift
                 ;;
@@ -5341,7 +5410,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader resolve_target_library_dir detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor
+export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader resolve_target_library_dir detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -5449,6 +5518,15 @@ case "${1:-}" in
         if [ "$vend" != "none" ]; then
             exit 0
         else
+            exit 1
+        fi
+        ;;
+    check-sandbox|sandbox-check)
+        if command -v bwrap >/dev/null 2>&1; then
+            echo "[INFO] bubblewrap (bwrap) is installed and available for security sandboxing."
+            exit 0
+        else
+            echo "[WARN] bubblewrap (bwrap) is not found in PATH."
             exit 1
         fi
         ;;
@@ -5607,7 +5685,7 @@ Usage:
   gamectl library     Open Game Library TUI directly (alias: list-ui)
   gamectl config      Open global configuration menu (~/.config/gamectl/) (alias: configure)
   gamectl doctor      Run 7-layer system & GPU health diagnostics (alias: audit)
-  gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread] [--scope|--no-scope] [--prime|--no-prime]
+  gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread] [--scope|--no-scope] [--prime|--no-prime] [--sandbox|--no-sandbox]
                       Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]
                       Configure per-game wrappers (GameMode/MangoHud/Gamescope FSR/MesaGL)
@@ -5645,6 +5723,7 @@ Usage:
   gamectl get-steam-libraries Print all detected Steam library folders
   gamectl detect-gpu       Audit and print detected secondary discrete GPU vendor
   gamectl check-scope      Check if cgroups v2 / systemd-run user scope isolation is supported
+  gamectl check-sandbox    Check if bubblewrap (bwrap) rootless security sandbox is available
   gamectl --search    Search Steam Store catalog & audit ProtonDB rating
   gamectl --list      Print detected installed games list
   gamectl list-formatted  Print formatted games list with ANSI badges
