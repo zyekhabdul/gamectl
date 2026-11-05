@@ -236,7 +236,7 @@ query_protondb() {
     fi
 
     if [ -z "$appid" ] || [[ ! "$appid" =~ ^[0-9]+$ ]]; then
-        echo "[ERROR] AppID tidak valid atau direktori game tidak memiliki steam_appid.txt: $target" >&2
+        echo "[ERROR] Invalid AppID or game directory lacks steam_appid.txt: $target" >&2
         return 1
     fi
 
@@ -260,41 +260,41 @@ query_protondb() {
         case "$tier_upper" in
             *PLATINUM*)
                 c_tier="${UI_ICE}[PLATINUM]${UI_RST}"
-                recommendation="Plug and Play. Bekerja sempurna tanpa tweaking khusus."
+                recommendation="Plug and play. Works flawlessly out of the box without special tweaking."
                 ;;
             *GOLD*)
                 c_tier="${UI_AMBER}[GOLD]${UI_RST}"
-                recommendation="Berjalan baik setelah tweak minor (e.g. GE-Proton / DirectX override)."
+                recommendation="Runs well after minor tweaks (e.g. GE-Proton / DirectX DLL override)."
                 ;;
             *SILVER*)
                 c_tier="${UI_DIM}[SILVER]${UI_RST}"
-                recommendation="Dapat dimainkan dengan beberapa isu minor / membutuhkan launch options khusus."
+                recommendation="Playable with minor issues / requires specific launch options."
                 ;;
             *BRONZE*)
                 c_tier="${UI_AMBER}[BRONZE]${UI_RST}"
-                recommendation="Sering crash atau glitch grafis. Disarankan menggunakan GE-Proton versi spesifik."
+                recommendation="Frequent crashes or graphical glitches. Specific GE-Proton version recommended."
                 ;;
             *BORKED*)
                 c_tier="${UI_RED}[BORKED]${UI_RST}"
-                recommendation="Game saat ini tidak dapat berjalan di Wine/Proton (kemungkinan Anti-Cheat invasif)."
+                recommendation="Game currently does not run under Wine/Proton (likely invasive anti-cheat)."
                 ;;
             *NATIVE*)
                 c_tier="${UI_GREEN}[NATIVE]${UI_RST}"
-                recommendation="Tersedia build Native Linux ELF tanpa emulasi Wine."
+                recommendation="Native Linux ELF build available without Wine emulation."
                 ;;
             *)
-                recommendation="Laporan kompatibilitas terbatas. Uji coba dengan GE-Proton terbaru."
+                recommendation="Limited community reports. Test with latest GE-Proton release."
                 ;;
         esac
 
         echo "│ ${UI_CYAN}ProtonDB Tier${UI_RST} : $c_tier"
         echo "│ ${UI_CYAN}Rating Score ${UI_RST} : ${UI_BOLD}$score${UI_RST} ${UI_DIM}(Confidence: $conf, Trending: $trending)${UI_RST}"
-        echo "│ ${UI_CYAN}Rekomendasi  ${UI_RST} : $recommendation"
+        echo "│ ${UI_CYAN}Recommendation${UI_RST}: $recommendation"
         echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
         return 0
     else
         echo "│ ${UI_CYAN}ProtonDB Tier${UI_RST} : ${UI_DIM}[NO REPORTS YET]${UI_RST}"
-        echo "│ ${UI_CYAN}Keterangan   ${UI_RST} : Belum ada laporan komunitas terdaftar untuk AppID $appid."
+        echo "│ ${UI_CYAN}Details       ${UI_RST}: No community reports currently recorded for AppID $appid."
         echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
         return 0
     fi

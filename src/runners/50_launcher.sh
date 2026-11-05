@@ -19,21 +19,21 @@ game_controller_hud() {
         echo "│ ${UI_CYAN}Target Game ${UI_RST}: ${UI_BOLD}$title${UI_RST}"
         echo "│ ${UI_CYAN}Process PID ${UI_RST}: ${UI_BOLD}$game_pid${UI_RST} ${UI_DIM}($run_type)${UI_RST}"
         if [ "$is_alive" -eq 1 ]; then
-            echo "│ ${UI_CYAN}Status      ${UI_RST}: ${UI_GREEN}[RUNNING]${UI_RST} ${UI_DIM}(Window aktif di layar desktop)${UI_RST}"
+            echo "│ ${UI_CYAN}Status      ${UI_RST}: ${UI_GREEN}[RUNNING]${UI_RST} ${UI_DIM}(Active window on desktop display)${UI_RST}"
         else
-            echo "│ ${UI_CYAN}Status      ${UI_RST}: ${UI_ICE}[TERMINATED / SELESAI]${UI_RST}"
+            echo "│ ${UI_CYAN}Status      ${UI_RST}: ${UI_ICE}[TERMINATED / EXITED]${UI_RST}"
         fi
         echo "│ ${UI_CYAN}Log Stream  ${UI_RST}: ${UI_DIM}$log_file${UI_RST}"
         echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
 
         if [ "$is_alive" -eq 1 ]; then
-            echo "  ${UI_PURPLE}1)${UI_RST} Kembali ke Game Library ${UI_DIM}(Game tetap berjalan di background)${UI_RST}"
-            echo "  ${UI_PURPLE}2)${UI_RST} Kembali ke Master Dashboard ${UI_DIM}(Game tetap berjalan di background)${UI_RST}"
-            echo "  ${UI_PURPLE}3)${UI_RST} Stream Log Game Langsung ${UI_DIM}(tail -f)${UI_RST}"
-            echo "  ${UI_AMBER}4)${UI_RST} Matikan Game ${UI_DIM}(Graceful Shutdown / SIGTERM)${UI_RST}"
-            echo "  ${UI_RED}5)${UI_RST} Paksa Matikan Game ${UI_DIM}(Force Kill / SIGKILL)${UI_RST}"
+            echo "  ${UI_PURPLE}1)${UI_RST} Return to Game Library ${UI_DIM}(Game continues running in background)${UI_RST}"
+            echo "  ${UI_PURPLE}2)${UI_RST} Return to Master Dashboard ${UI_DIM}(Game continues running in background)${UI_RST}"
+            echo "  ${UI_PURPLE}3)${UI_RST} Live Game Log Stream ${UI_DIM}(tail -f)${UI_RST}"
+            echo "  ${UI_AMBER}4)${UI_RST} Stop Game ${UI_DIM}(Graceful Shutdown / SIGTERM)${UI_RST}"
+            echo "  ${UI_RED}5)${UI_RST} Force Kill Game ${UI_DIM}(Emergency Teardown / SIGKILL)${UI_RST}"
             echo
-            read -r -p "Pilih aksi [1-5]: " hud_opt
+            read -t 30 -r -p "Select action [1-5]: " hud_opt || hud_opt="1"
 
             case "$hud_opt" in
                 1)
@@ -45,10 +45,10 @@ game_controller_hud() {
                 3)
                     clear
                     echo "${UI_BOX}╭─ LIVE LOG STREAM: $title (PID: $game_pid) ─────────────╮${UI_RST}"
-                    echo "│ ${UI_CYAN}Tekan sembarang tombol untuk kembali ke Menu Kontrol Game     ${UI_RST}"
+                    echo "│ ${UI_CYAN}Press any key to return to Game Controller Menu               ${UI_RST}"
                     echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
                     tail -n 25 "$log_file" 2>/dev/null || true
-                    echo "${UI_DIM}─── Live Output (tekan sembarang tombol untuk berhenti) ───────${UI_RST}"
+                    echo "${UI_DIM}─── Live Output (press any key to stop) ───────────────────────${UI_RST}"
                     local t_pid=""
                     tail -f "$log_file" 2>/dev/null &
                     t_pid=$!
@@ -57,7 +57,7 @@ game_controller_hud() {
                     wait "$t_pid" 2>/dev/null || true
                     ;;
                 4)
-                    echo "  [INFO] Mengirim sinyal SIGTERM ke proses PID $game_pid..."
+                    echo "  [INFO] Sending SIGTERM signal to process PID $game_pid..."
                     kill "$game_pid" 2>/dev/null || true
                     local wait_cnt=0
                     while kill -0 "$game_pid" 2>/dev/null && [ "$wait_cnt" -lt 6 ]; do
@@ -68,22 +68,22 @@ game_controller_hud() {
                         WINEPREFIX="$gdir/pfx" wineserver -w 2>/dev/null || true
                     fi
                     if ! kill -0 "$game_pid" 2>/dev/null; then
-                        echo "  ${UI_GREEN}[SUCCESS] Game '$title' (PID $game_pid) berhasil dimatikan.${UI_RST}"
+                        echo "  ${UI_GREEN}[SUCCESS] Game '$title' (PID $game_pid) terminated gracefully.${UI_RST}"
                         rm -f "$info_file" 2>/dev/null || true
                     else
-                        echo "  ${UI_AMBER}[WARN] Game belum tertutup. Anda dapat memilih opsi 5 (Force Kill).${UI_RST}"
+                        echo "  ${UI_AMBER}[WARN] Process still running. You can select option 5 (Force Kill).${UI_RST}"
                     fi
                     sleep 0.8
                     ;;
                 5)
-                    echo "  [INFO] Mengirim sinyal SIGKILL ke proses PID $game_pid..."
+                    echo "  [INFO] Sending SIGKILL signal to process PID $game_pid..."
                     kill -9 "$game_pid" 2>/dev/null || true
                     if [ -d "$gdir/pfx" ]; then
                         # Remediation DEFECT-02: Force terminate stuck wineserver daemon and release lockfiles
                         WINEPREFIX="$gdir/pfx" wineserver -k 2>/dev/null || true
                     fi
                     sleep 0.3
-                    echo "  ${UI_GREEN}[SUCCESS] Game '$title' (PID $game_pid) dimatikan secara paksa.${UI_RST}"
+                    echo "  ${UI_GREEN}[SUCCESS] Game '$title' (PID $game_pid) force-killed.${UI_RST}"
                     rm -f "$info_file" 2>/dev/null || true
                     sleep 0.8
                     ;;
@@ -91,11 +91,11 @@ game_controller_hud() {
                     ;;
             esac
         else
-            echo "  ${UI_PURPLE}1)${UI_RST} Kembali ke Game Library"
-            echo "  ${UI_PURPLE}2)${UI_RST} Kembali ke Master Dashboard"
-            echo "  ${UI_PURPLE}3)${UI_RST} Periksa Log Terakhir (tail -n 25)"
+            echo "  ${UI_PURPLE}1)${UI_RST} Return to Game Library"
+            echo "  ${UI_PURPLE}2)${UI_RST} Return to Master Dashboard"
+            echo "  ${UI_PURPLE}3)${UI_RST} View Recent Logs (tail -n 25)"
             echo
-            read -r -p "Pilih aksi [1-3]: " hud_opt
+            read -t 30 -r -p "Select action [1-3]: " hud_opt || hud_opt="1"
             case "$hud_opt" in
                 1) return 0 ;;
                 2) return 10 ;;
@@ -104,7 +104,7 @@ game_controller_hud() {
                     echo "${UI_DIM}──────────────────────────────────────────${UI_RST}"
                     tail -n 25 "$log_file" 2>/dev/null || echo "[No logs available]"
                     echo "${UI_DIM}──────────────────────────────────────────${UI_RST}"
-                    read -r -p "Tekan [ENTER] untuk kembali..."
+                    read -t 15 -r -p "Press [ENTER] to return..." || true
                     ;;
                 *) return 0 ;;
             esac
@@ -125,14 +125,14 @@ setup_onlinefix() {
     done
 
     if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
-        echo "[ERROR] Direktori game tidak ditemukan: $gdir" >&2
+        echo "[ERROR] Game directory not found: $gdir" >&2
         return 1
     fi
     gdir="$(cd "$gdir" && pwd)"
 
-    echo "[INFO] Menjalankan setup OnlineFix & audit Spacewar di: $gdir..."
+    echo "[INFO] Running OnlineFix setup and Spacewar entitlement audit in: $gdir..."
 
-    # 1. Deteksi file OnlineFix
+    # 1. Discover OnlineFix signature files
     local of_files
     of_files=$(find "$gdir" -maxdepth 3 \( -name "pfx" -o -name ".git" -o -name ".save_snapshots" -o -name "saves" \) -prune -o \( \
         -iname "OnlineFix64.dll" -o -iname "OnlineFix.dll" -o -iname "OnlineFix.ini" -o \
@@ -140,11 +140,11 @@ setup_onlinefix() {
     \) -print 2>/dev/null || true)
 
     if [ -z "$of_files" ]; then
-        echo "[WARN] Signature OnlineFix tidak ditemukan di direktori game ini." >&2
-        echo "       Tidak ditemukan OnlineFix64.dll, OnlineFix.dll, atau OnlineFix.ini." >&2
+        echo "[WARN] No OnlineFix signatures found in this game directory." >&2
+        echo "       Neither OnlineFix64.dll, OnlineFix.dll, nor OnlineFix.ini was found." >&2
         return 1
     fi
-    echo "[VERIFIED] Signature OnlineFix terdeteksi."
+    echo "[VERIFIED] OnlineFix signature detected."
 
     # 2. Spacewar (AppID 480) Entitlement & ACF Check
     local s_primary
@@ -159,11 +159,11 @@ setup_onlinefix() {
     fi
 
     if [ "$has_spacewar" -eq 1 ]; then
-        echo "[VERIFIED] Spacewar (AppID 480) sudah terdaftar di library Steam/SLSsteam."
+        echo "[VERIFIED] Spacewar (AppID 480) already registered in Steam/SLSsteam library."
     else
-        echo "[INFO] Spacewar (AppID 480) belum terdaftar. Menjalankan registrasi otomatis..."
+        echo "[INFO] Spacewar (AppID 480) not registered yet. Running automatic registration..."
         sync_steam 480 "Spacewar" "$gdir"
-        echo "[VERIFIED] Spacewar (AppID 480) berhasil didaftarkan ke Steam/SLSsteam."
+        echo "[VERIFIED] Spacewar (AppID 480) successfully registered to Steam/SLSsteam."
     fi
 
     # 3. Audit & Sync OnlineFix.ini PlayerName
@@ -172,8 +172,8 @@ setup_onlinefix() {
     if [ -n "$ini_file" ] && [ -f "$ini_file" ]; then
         local curr_pname
         curr_pname=$(grep -E '^[[:space:]]*PlayerName[[:space:]]*=' "$ini_file" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*PlayerName[[:space:]]*=[[:space:]]*//' | tr -d '\r')
-        echo "[INFO] OnlineFix.ini terdeteksi: $ini_file"
-        echo "       PlayerName saat ini: ${curr_pname:-[Tidak diatur]}"
+        echo "[INFO] OnlineFix.ini detected: $ini_file"
+        echo "       Current PlayerName: ${curr_pname:-[Unset]}"
 
         local persona_name=""
         if [ -f "$HOME/.config/gamectl/persona" ]; then
@@ -186,7 +186,7 @@ setup_onlinefix() {
             if [ "$auto_yes" = true ]; then
                 should_sync=true
             elif [ -t 0 ]; then
-                echo -n "       Sinkronkan PlayerName ke '$persona_name'? [Y/n] (Auto-yes in 5s): "
+                echo -n "       Synchronize PlayerName to '$persona_name'? [Y/n] (Auto-yes in 5s): "
                 local confirm_sync=""
                 read -t 5 -r confirm_sync || confirm_sync="y"
                 echo
@@ -199,12 +199,12 @@ setup_onlinefix() {
 
             if [ "$should_sync" = true ]; then
                 sed -i -E "s/^[[:space:]]*PlayerName[[:space:]]*=.*/PlayerName = $persona_name/" "$ini_file"
-                echo "       ${UI_GREEN}[SUCCESS] PlayerName di OnlineFix.ini disinkronkan ke: $persona_name${UI_RST}"
+                echo "       ${UI_GREEN}[SUCCESS] PlayerName in OnlineFix.ini synchronized to: $persona_name${UI_RST}"
             fi
         fi
     fi
 
-    echo "[VERIFIED] Setup OnlineFix selesai untuk: $(basename "$gdir")"
+    echo "[VERIFIED] OnlineFix setup completed for: $(basename "$gdir")"
     return 0
 }
 
@@ -215,7 +215,7 @@ launch_game() {
     local title="$3"
     shift 3 || true
 
-    echo "[INFO] Menyiapkan peluncuran: $title..."
+    echo "[INFO] Preparing launch: $title..."
     backup_save "$gdir" true || true
 
     # Resolve wrappers and extra flags
@@ -267,7 +267,7 @@ launch_game() {
     trap '_restore_launch_state' EXIT
 
     if [ ${#wrappers[@]} -gt 0 ]; then
-        echo "[INFO] Wrapper aktif: ${wrappers[*]}"
+        echo "[INFO] Active wrappers: ${wrappers[*]}"
     fi
 
     cd "$gdir"
@@ -299,14 +299,14 @@ launch_game() {
         detected_overrides=$(detect_dll_overrides "$gdir")
         if [ -n "$detected_overrides" ]; then
             export WINEDLLOVERRIDES="$detected_overrides"
-            echo "[INFO] DLL Overrides aktif: $WINEDLLOVERRIDES"
+            echo "[INFO] Active DLL Overrides: $WINEDLLOVERRIDES"
         fi
 
         local runner_bin
         runner_bin=$(find_runner "$gdir" 2>/dev/null || true)
         if [ -z "$runner_bin" ]; then
-            echo "[ERROR] Runner Windows tidak ditemukan (umu-run, Proton, atau Wine belum terpasang)." >&2
-            echo "        Pasang GE-Proton di ~/.local/share/Steam/compatibilitytools.d/ atau install wine." >&2
+            echo "[ERROR] Windows runner not found (umu-run, Proton, or Wine not installed)." >&2
+            echo "        Install GE-Proton in ~/.local/share/Steam/compatibilitytools.d/ or install wine." >&2
             _restore_launch_state
             return 1
         fi
@@ -320,8 +320,8 @@ launch_game() {
         [ -z "$appid" ] && appid="0"
 
         run_type="Windows ($(basename "$runner_bin"))"
-        echo "[INFO] Meluncurkan game Windows via $(basename "$runner_bin") di background..."
-        echo "[INFO] Wine Prefix terisolasi: $pfx_dir"
+        echo "[INFO] Launching Windows game via $(basename "$runner_bin") in background..."
+        echo "[INFO] Isolated Wine Prefix: $pfx_dir"
         echo "[INFO] Log stream: $log_file"
 
         case "$runner_bin" in
@@ -353,7 +353,7 @@ launch_game() {
                 ;;
         esac
     else
-        echo "[INFO] Meluncurkan $title (Native Linux) di background..."
+        echo "[INFO] Launching $title (Native Linux) in background..."
         echo "[INFO] Log stream: $log_file"
         (
             exec "${wrappers[@]}" ./"$gbin" "${game_args[@]}"
@@ -362,7 +362,7 @@ launch_game() {
     fi
 
     if [ -z "$game_pid" ] || ! kill -0 "$game_pid" 2>/dev/null; then
-        echo "[ERROR] Gagal meluncurkan game ke background." >&2
+        echo "[ERROR] Failed to launch game into background." >&2
         _restore_launch_state
         return 1
     fi
@@ -388,7 +388,7 @@ EOF
         _restore_launch_state
     ) &
 
-    echo "[VERIFIED] Game '$title' aktif di background (PID: $game_pid)."
+    echo "[VERIFIED] Game '$title' running in background (PID: $game_pid)."
 
     # If running interactively, invoke Game Controller HUD
     local hud_exit=0
@@ -410,27 +410,27 @@ sync_save_remote() {
     [ -z "$rhost" ] && rhost=$(get_remote_host)
 
     if [ ! -d "$sdir" ]; then
-        echo "[ERROR] Folder portable saves tidak ditemukan di $gdir"
+        echo "[ERROR] Portable saves directory not found in $gdir"
         return 1
     fi
 
     if [ -z "$rhost" ]; then
-        echo "[WARN] Target remote host belum dikonfigurasi."
-        echo "       Tentukan host di ~/.config/gamectl/remote_host atau variabel GAMECTL_REMOTE_HOST."
+        echo "[WARN] Target remote host not configured."
+        echo "       Define host in ~/.config/gamectl/remote_host or GAMECTL_REMOTE_HOST variable."
         return 1
     fi
 
-    echo "[INFO] Memeriksa konektivitas ke $rhost..."
+    echo "[INFO] Checking connectivity to $rhost..."
     if ! ssh -q -o ConnectTimeout=1 -o BatchMode=yes "$rhost" exit 2>/dev/null; then
-        echo "[WARN] Host remote '$rhost' offline atau tidak terjangkau jaringan lokal."
+        echo "[WARN] Remote host '$rhost' offline or unreachable on local network."
         return 1
     fi
 
-    echo "[INFO] Menyinkronkan savegame $title ke $rhost..."
+    echo "[INFO] Synchronizing savegame $title to $rhost..."
     local rel_path="${gdir#$HOME/}"
     ssh "$rhost" "mkdir -p ~/$rel_path"
     rsync -avzP --exclude="*.tmp" "$sdir/" "$rhost:~/$rel_path/saves/"
-    echo "[VERIFIED] Sinkronisasi savegame ke $rhost selesai."
+    echo "[VERIFIED] Savegame synchronization to $rhost completed."
 }
 
 # Aliases for remote savegame synchronization
@@ -450,7 +450,7 @@ inject_game() {
     local sync_mode="${3:-all}"
 
     if [ ! -d "$target_dir" ]; then
-        echo "[ERROR] Direktori target tidak ditemukan: $target_dir" >&2
+        echo "[ERROR] Target directory not found: $target_dir" >&2
         return 1
     fi
 
@@ -481,7 +481,7 @@ inject_game() {
         fi
     fi
 
-    echo "[INFO] Menyiapkan injeksi GBE Fork di: $target_dir..."
+    echo "[INFO] Preparing GBE Fork injection in: $target_dir..."
 
     # 1. Identify Target Executable and Platform
     local gbin=""
@@ -573,7 +573,7 @@ inject_game() {
             t_template=$(get_gbe_template "windows" "$t_arch") || true
 
             if [ -z "$t_template" ] || [ ! -f "$t_template" ]; then
-                echo "[WARN] Template GBE Fork Windows ($t_arch) tidak ditemukan." >&2
+                echo "[WARN] Windows GBE Fork template ($t_arch) not found." >&2
                 continue
             fi
 
@@ -583,7 +583,7 @@ inject_game() {
                 sz=$(stat -c%s "$t_dll" 2>/dev/null || echo 0)
                 if [ "$sz" -lt 7000000 ] && [ ! -f "$t_dll.orig" ]; then
                     cp -a "$t_dll" "$t_dll.orig"
-                    echo "[INFO] Backup $(basename "$t_dll") asli tersimpan di: $t_dll.orig"
+                    echo "[INFO] Original $(basename "$t_dll") backed up to: $t_dll.orig"
                 fi
             fi
 
@@ -591,7 +591,7 @@ inject_game() {
             cp "$t_template" "$t_dll"
             chmod +x "$t_dll" 2>/dev/null || true
             primary_shim_dir="$(dirname "$t_dll")"
-            echo "[INFO] GBE Fork Windows DLL ($t_arch) terpasang di: $t_dll"
+            echo "[INFO] Windows GBE Fork DLL ($t_arch) installed at: $t_dll"
         done
     fi
 
@@ -624,7 +624,7 @@ inject_game() {
                 sz=$(stat -c%s "$target_so" 2>/dev/null || echo 0)
                 if [ "$sz" -lt 7000000 ] && [ ! -f "$target_so.orig" ]; then
                     cp -a "$target_so" "$target_so.orig"
-                    echo "[INFO] Backup libsteam_api.so asli tersimpan di: $target_so.orig"
+                    echo "[INFO] Original libsteam_api.so backed up to: $target_so.orig"
                 fi
             fi
 
@@ -632,9 +632,9 @@ inject_game() {
             cp "$src_so" "$target_so"
             chmod +x "$target_so"
             primary_shim_dir="$(dirname "$target_so")"
-            echo "[INFO] GBE Fork Linux ELF ($linux_arch) terpasang di: $target_so"
+            echo "[INFO] Linux GBE Fork ELF ($linux_arch) installed at: $target_so"
         else
-            [ "$target_platform" = "linux" ] && echo "[WARN] Template GBE Fork Linux ($linux_arch) tidak ditemukan di: ${src_so:-empty}" >&2
+            [ "$target_platform" = "linux" ] && echo "[WARN] Linux GBE Fork template ($linux_arch) not found at: ${src_so:-empty}" >&2
         fi
     fi
 
@@ -673,7 +673,7 @@ EOF
     if [ ! -f "$target_dir/steam_settings/custom_broadcasts.txt" ]; then
         cat <<EOF > "$target_dir/steam_settings/custom_broadcasts.txt"
 # GBE Fork LAN Custom Broadcast IP list
-# Tambahkan IP peer atau broadcast subnet (satu IP per baris)
+# Add peer IPs or broadcast subnets (one IP per line)
 127.0.0.1
 255.255.255.255
 EOF
@@ -698,16 +698,16 @@ EOF
         if [ "$primary_shim_dir" != "$target_dir" ] && [ -d "$primary_shim_dir" ]; then
             echo -n "$appid" > "$primary_shim_dir/steam_appid.txt" 2>/dev/null || true
         fi
-        echo "[INFO] AppID $appid terdaftar di: $target_dir/steam_appid.txt"
+        echo "[INFO] AppID $appid registered in: $target_dir/steam_appid.txt"
         fetch_dlc "$target_dir" "$appid"
         if [ "$sync_mode" != "--no-sync" ] && [ "$sync_mode" != "no-sync" ] && [ "$sync_mode" != "standalone" ]; then
             sync_steam "$appid" "$(basename "$target_dir")" "$target_dir"
         else
-            echo "[INFO] Mode Standalone aktif: Melewati sinkronisasi Steam Client."
+            echo "[INFO] Standalone Mode active: Skipping Steam Client synchronization."
         fi
     fi
 
-    echo "[VERIFIED] Game berhasil diinjeksi GBE Fork (Platform: $target_platform, Arsitektur: $arch, Save: ./saves, AppID: ${appid:-None})"
+    echo "[VERIFIED] GBE Fork successfully injected (Platform: $target_platform, Arch: $arch, Save: ./saves, AppID: ${appid:-None})"
 }
 
 
@@ -746,7 +746,7 @@ cli_launch() {
     if [ -n "$l_bin" ]; then
         launch_game "$l_dir" "$l_bin" "$l_title" "${l_flags[@]}"
     else
-        echo "[ERROR] Biner eksekutabel tidak ditemukan di: $l_dir" >&2
+        echo "[ERROR] Executable binary not found in: $l_dir" >&2
         return 1
     fi
 }

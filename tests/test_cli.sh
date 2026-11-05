@@ -182,7 +182,7 @@ run_test "Process Invariant: Strict word-boundary pgrep queries" test_pgrep_rege
 
 test_game_controller_hud() {
     grep -q "game_controller_hud" "$REPO_ROOT/src/runners/50_launcher.sh" && \
-    grep -q "Kembali ke Master Dashboard" "$REPO_ROOT/src/runners/50_launcher.sh"
+    grep -q "Return to Master Dashboard" "$REPO_ROOT/src/runners/50_launcher.sh"
 }
 run_test "Launcher Invariant: Detached Live Controller HUD" test_game_controller_hud
 
@@ -262,8 +262,8 @@ EOF
     local out
     out=$("$GAMECTL" onlinefix "$tdir" --yes 2>&1 || true)
     rm -rf "$tdir"
-    echo "$out" | grep -q "Signature OnlineFix terdeteksi" && \
-    echo "$out" | grep -q "OnlineFix.ini terdeteksi"
+    echo "$out" | grep -q "OnlineFix signature detected" && \
+    echo "$out" | grep -q "OnlineFix.ini detected"
 }
 run_test "OnlineFix CLI: Valid signature detection & INI audit" test_onlinefix_detection_flow
 

@@ -67,14 +67,14 @@ backup_save() {
         [ -d "$snap_dir/slot2" ] && rm -rf "$snap_dir/slot3" && mv "$snap_dir/slot2" "$snap_dir/slot3"
         [ -d "$snap_dir/slot1" ] && mv "$snap_dir/slot1" "$snap_dir/slot2"
         cp -a "$save_dir" "$snap_dir/slot1"
-        echo "[INFO] Save snapshot berhasil dibuat di slot1 ($snap_dir/slot1)"
+        echo "[INFO] Save snapshot created successfully in slot1 ($snap_dir/slot1)"
     else
         if [ "$is_quiet" = true ]; then
             return 0
         fi
-        echo "[WARN] Folder saves portable ($save_dir) tidak ditemukan." >&2
-        echo "       Game belum di-inject GBE Fork atau belum memiliki save terisolasi." >&2
-        echo "       Tekan <CTRL-I> terlebih dahulu untuk mengaktifkan portable saves." >&2
+        echo "[WARN] Portable saves directory ($save_dir) not found." >&2
+        echo "       Game has not been injected with GBE Fork or lacks an isolated save directory." >&2
+        echo "       Press <CTRL-I> first to enable portable saves." >&2
         return 1
     fi
 }

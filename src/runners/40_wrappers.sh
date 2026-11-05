@@ -270,7 +270,7 @@ proton_list() {
             echo "    • ${UI_BOLD}$(printf '%-22s' "$v")${UI_RST} : ${UI_GREEN}[INSTALLED]${UI_RST} ${UI_DIM}(Size: $v_sz | $v_path)${UI_RST}"
         done
     else
-        echo "    ${UI_DIM}(Belum ada GE-Proton yang terpasang di compatibilitytools.d/)${UI_RST}"
+        echo "    ${UI_DIM}(No GE-Proton versions installed in compatibilitytools.d/)${UI_RST}"
     fi
 
     # 2. Query GitHub Releases upstream
@@ -311,10 +311,10 @@ proton_list() {
             echo "    • ${UI_BOLD}$(printf '%-22s' "$r_tag")${UI_RST} : $status_badge ${UI_DIM}(Download Size: $r_size)${UI_RST}"
         done <<< "$parsed_releases"
         echo
-        echo "  ${UI_DIM}Install perintah: gamectl proton-install [tag|latest]${UI_RST}"
+        echo "  ${UI_DIM}Install command: gamectl proton-install [tag|latest]${UI_RST}"
     else
-        echo "    ${UI_AMBER}[WARN]${UI_RST} ${UI_DIM}Tidak dapat mengambil daftar upstream (Offline atau rate-limit GitHub API).${UI_RST}"
-        echo "    ${UI_DIM}Anda tetap dapat menginstal langsung via: gamectl proton-install <tag_name>${UI_RST}"
+        echo "    ${UI_AMBER}[WARN]${UI_RST} ${UI_DIM}Unable to fetch upstream release list (Offline or GitHub API rate-limited).${UI_RST}"
+        echo "    ${UI_DIM}You can still install directly via: gamectl proton-install <tag_name>${UI_RST}"
     fi
     echo
 }
@@ -341,7 +341,7 @@ proton_install() {
         *) arch_suffix="x86_64" ;;
     esac
 
-    echo "[INFO] Menyiapkan instalasi GE-Proton ($target_tag) untuk arsitektur $arch_suffix..."
+    echo "[INFO] Preparing GE-Proton installation ($target_tag) for architecture $arch_suffix..."
 
     local resolved_tag=""
     local download_url=""
@@ -357,8 +357,8 @@ proton_install() {
             ' 2>/dev/null || echo "")
         fi
         if [ -z "$resolved_tag" ] || [ -z "$download_url" ] || [ "$download_url" = "null" ]; then
-            echo "[ERROR] Gagal mendapatkan URL rilis terbaru dari GitHub API." >&2
-            echo "        Tentukan tag secara eksplisit: gamectl proton-install <tag_name>" >&2
+            echo "[ERROR] Failed to obtain latest release URL from GitHub API." >&2
+            echo "        Specify target tag explicitly: gamectl proton-install <tag_name>" >&2
             return 1
         fi
     else
@@ -377,23 +377,23 @@ proton_install() {
         fi
     fi
 
-    echo "[INFO] Versi target : $resolved_tag"
-    echo "[INFO] Download URL : $download_url"
-    echo "[INFO] Target Dir   : $compat_dir/"
+    echo "[INFO] Target version : $resolved_tag"
+    echo "[INFO] Download URL   : $download_url"
+    echo "[INFO] Target Dir     : $compat_dir/"
 
     if [ -d "$compat_dir/$resolved_tag" ] && [ "$auto_yes" = false ]; then
         if [ -t 0 ]; then
-            echo -n "[WARN] Direktori $resolved_tag sudah ada. Timpa instalasi? [y/N]: "
+            echo -n "[WARN] Directory $resolved_tag already exists. Overwrite installation? [y/N]: "
             local confirm=""
             read -t 10 -r confirm || confirm="n"
             if [[ ! "$confirm" =~ ^[yY] ]]; then
-                echo "[INFO] Instalasi dibatalkan."
+                echo "[INFO] Installation canceled."
                 return 0
             fi
         fi
     fi
 
-    echo "[INFO] Mengunduh dan mengekstrak tarball stream..."
+    echo "[INFO] Downloading and streaming tarball extraction..."
     if curl -# -fL "$download_url" | tar -xz -C "$compat_dir/"; then
         local installed_folder="$compat_dir/$resolved_tag"
         if [ ! -d "$installed_folder" ]; then
@@ -401,14 +401,14 @@ proton_install() {
         fi
         if [ -n "$installed_folder" ] && [ -f "$installed_folder/compatibilitytool.vdf" ]; then
             [ -f "$installed_folder/proton" ] && chmod +x "$installed_folder/proton"
-            echo "[VERIFIED] GE-Proton $resolved_tag berhasil dipasang di: $installed_folder"
+            echo "[VERIFIED] GE-Proton $resolved_tag installed successfully in: $installed_folder"
             return 0
         else
-            echo "[ERROR] Ekstraksi selesai tetapi compatibilitytool.vdf tidak ditemukan di $installed_folder." >&2
+            echo "[ERROR] Extraction completed but compatibilitytool.vdf not found in $installed_folder." >&2
             return 1
         fi
     else
-        echo "[ERROR] Gagal mengunduh atau mengekstrak $resolved_tag dari $download_url" >&2
+        echo "[ERROR] Failed to download or extract $resolved_tag from $download_url" >&2
         return 1
     fi
 }
@@ -432,7 +432,7 @@ proton_remove() {
 
     # Path traversal protection
     if [[ "$tag" =~ (\.\.|\/|\\) ]]; then
-        echo "[ERROR] Tag tidak valid (karakter path traversal terdeteksi): $tag" >&2
+        echo "[ERROR] Invalid tag (path traversal sequence detected): $tag" >&2
         return 1
     fi
 
@@ -455,7 +455,7 @@ proton_remove() {
     done
 
     if [ -z "$target_dir" ] || [ ! -d "$target_dir" ]; then
-        echo "[ERROR] Versi GE-Proton '$tag' tidak ditemukan di direktori compatibilitytools.d/" >&2
+        echo "[ERROR] GE-Proton version '$tag' not found in compatibilitytools.d/" >&2
         return 1
     fi
 
@@ -471,18 +471,18 @@ proton_remove() {
     sz=$(du -sh "$target_dir" 2>/dev/null | awk '{print $1}')
 
     if [ "$auto_yes" = false ] && [ -t 0 ]; then
-        echo -n "Hapus direktori GE-Proton '$tag' (Ukuran: $sz)? [y/N]: "
+        echo -n "Delete GE-Proton directory '$tag' (Size: $sz)? [y/N]: "
         local confirm=""
         read -t 10 -r confirm || confirm="n"
         echo
         if [[ ! "$confirm" =~ ^[yY] ]]; then
-            echo "[INFO] Pembatalan penghapusan $tag."
+            echo "[INFO] Removal of $tag canceled."
             return 0
         fi
     fi
 
     rm -rf "$target_dir"
-    echo "[VERIFIED] GE-Proton '$tag' berhasil dihapus ($sz ruang disk dibebaskan)."
+    echo "[VERIFIED] GE-Proton '$tag' removed successfully ($sz disk space freed)."
     return 0
 }
 
@@ -493,7 +493,7 @@ manage_prefix() {
     shift 2 2>/dev/null || shift $# 2>/dev/null || true
 
     if [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
-        echo "[ERROR] Direktori game tidak ditemukan atau tidak valid: $game_dir" >&2
+        echo "[ERROR] Game directory not found or invalid: $game_dir" >&2
         echo "Usage: gamectl pfx <game_dir> [winecfg|regedit|cmd|shell|kill|clean|winetricks] [args...]" >&2
         return 1
     fi
@@ -535,17 +535,17 @@ manage_prefix() {
             echo "│ ${UI_CYAN}Prefix Path   ${UI_RST} : ${UI_BOLD}$pfx_dir${UI_RST}"
             echo "│ ${UI_CYAN}Active Runner ${UI_RST} : ${UI_GREEN}$runner_bin${UI_RST}"
             echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-            echo "  ${UI_PURPLE}1)${UI_RST} winecfg      ${UI_DIM}(Konfigurasi Wine Audio, Grafis & Windows Version)${UI_RST}"
+            echo "  ${UI_PURPLE}1)${UI_RST} winecfg      ${UI_DIM}(Wine Audio, Graphics & Windows Version Config)${UI_RST}"
             echo "  ${UI_PURPLE}2)${UI_RST} regedit      ${UI_DIM}(Windows Registry Editor)${UI_RST}"
             echo "  ${UI_PURPLE}3)${UI_RST} cmd          ${UI_DIM}(Windows Command Prompt)${UI_RST}"
-            echo "  ${UI_PURPLE}4)${UI_RST} shell        ${UI_DIM}(Subshell Bash Host dengan WINEPREFIX terpasang)${UI_RST}"
+            echo "  ${UI_PURPLE}4)${UI_RST} shell        ${UI_DIM}(Host Bash Subshell with active WINEPREFIX)${UI_RST}"
             echo "  ${UI_PURPLE}5)${UI_RST} winetricks   ${UI_DIM}(Winetricks GUI / Package Manager)${UI_RST}"
-            echo "  ${UI_AMBER}6)${UI_RST} kill         ${UI_DIM}(Matikan Wineserver yang terkunci / hung)${UI_RST}"
-            echo "  ${UI_RED}7)${UI_RST} clean        ${UI_DIM}(Backup Saves & Reset Total Wine Prefix)${UI_RST}"
-            echo "  ${UI_CYAN}8)${UI_RST} Keluar"
+            echo "  ${UI_AMBER}6)${UI_RST} kill         ${UI_DIM}(Terminate locked / hung Wineserver)${UI_RST}"
+            echo "  ${UI_RED}7)${UI_RST} clean        ${UI_DIM}(Backup Saves & Wipe Entire Wine Prefix)${UI_RST}"
+            echo "  ${UI_CYAN}8)${UI_RST} Exit"
             echo
             local choice=""
-            read -r -p "Pilih aksi [1-8]: " choice
+            read -t 15 -r -p "Select action [1-8]: " choice || choice="8"
             case "$choice" in
                 1) action="winecfg" ;;
                 2) action="regedit" ;;
@@ -554,7 +554,7 @@ manage_prefix() {
                 5) action="winetricks" ;;
                 6) action="kill" ;;
                 7) action="clean" ;;
-                *) echo "[INFO] Operasi dibatalkan."; return 0 ;;
+                *) echo "[INFO] Operation canceled."; return 0 ;;
             esac
         else
             echo "Usage: gamectl pfx <game_dir> [winecfg|regedit|cmd|shell|kill|clean|winetricks] [args...]" >&2
@@ -564,17 +564,17 @@ manage_prefix() {
 
     case "$action" in
         kill)
-            echo "[INFO] Mengirim sinyal terminasi paksa (wineserver -k) pada prefix: $pfx_dir"
+            echo "[INFO] Sending force termination signal (wineserver -k) to prefix: $pfx_dir"
             if [ -d "$pfx_dir" ]; then
                 WINEPREFIX="$pfx_dir" "$ws_bin" -k 2>/dev/null || WINEPREFIX="$pfx_dir" wineserver -k 2>/dev/null || true
             fi
-            echo "[VERIFIED] Wineserver untuk prefix $pfx_dir telah dihentikan."
+            echo "[VERIFIED] Wineserver for prefix $pfx_dir has been stopped."
             return 0
             ;;
         clean)
-            echo "[INFO] Memulai pembersihan Wine prefix: $pfx_dir"
+            echo "[INFO] Starting Wine prefix cleanup: $pfx_dir"
             if [ ! -d "$pfx_dir" ]; then
-                echo "[INFO] Direktori prefix $pfx_dir belum ada, tidak ada yang perlu dibersihkan."
+                echo "[INFO] Prefix directory $pfx_dir does not exist, nothing to clean."
                 return 0
             fi
 
@@ -594,25 +594,25 @@ manage_prefix() {
             done
 
             if [ "$auto_yes" = false ] && [ -t 0 ]; then
-                echo -n "[WARN] Hapus seluruh Wine prefix ($pfx_dir)? Registry & konfigurasi Wine akan di-reset. [y/N]: "
+                echo -n "[WARN] Wipe entire Wine prefix ($pfx_dir)? Registry and Wine configuration will be reset. [y/N]: "
                 local confirm=""
                 read -t 10 -r confirm || confirm="n"
                 echo
                 if [[ ! "$confirm" =~ ^[yY] ]]; then
-                    echo "[INFO] Pembersihan prefix dibatalkan."
+                    echo "[INFO] Prefix cleanup canceled."
                     return 0
                 fi
             fi
 
             # 4. Remove pfx folder safely
             rm -rf "$pfx_dir"
-            echo "[VERIFIED] Prefix Wine berhasil dibersihkan ($pfx_dir dihapus)."
+            echo "[VERIFIED] Wine prefix wiped successfully ($pfx_dir removed)."
             return 0
             ;;
         shell)
-            echo "[INFO] Membuka subshell bash di dalam lingkungan prefix $pfx_dir"
-            echo "[INFO] Lingkungan aktif: WINEPREFIX=$pfx_dir, RUNNER=$runner_bin"
-            echo "[INFO] Ketik 'exit' untuk kembali ke gamectl."
+            echo "[INFO] Spawning interactive bash subshell inside prefix environment: $pfx_dir"
+            echo "[INFO] Active environment: WINEPREFIX=$pfx_dir, RUNNER=$runner_bin"
+            echo "[INFO] Type 'exit' to return to gamectl."
             (
                 export WINEPREFIX="$pfx_dir"
                 export GAMECTL_RUNNER="$runner_bin"
@@ -631,7 +631,7 @@ manage_prefix() {
             ;;
         winecfg|regedit|cmd)
             mkdir -p "$pfx_dir"
-            echo "[INFO] Menjalankan $action pada prefix: $pfx_dir (Runner: $runner_bin)..."
+            echo "[INFO] Executing $action inside prefix: $pfx_dir (Runner: $runner_bin)..."
             local target_exec="$action"
             [ "$action" = "cmd" ] && target_exec="cmd.exe"
 
@@ -656,17 +656,17 @@ manage_prefix() {
             ;;
         winetricks)
             if ! command -v winetricks >/dev/null 2>&1; then
-                echo "[ERROR] Biner 'winetricks' tidak ditemukan di sistem host." >&2
-                echo "[INFO] Silakan pasang winetricks via package manager distro Anda (e.g. pacman -S winetricks / apt install winetricks)." >&2
+                echo "[ERROR] 'winetricks' binary not found on host system." >&2
+                echo "[INFO] Install winetricks via your distribution package manager (e.g. pacman -S winetricks / apt install winetricks)." >&2
                 return 1
             fi
             mkdir -p "$pfx_dir"
-            echo "[INFO] Menjalankan winetricks pada prefix: $pfx_dir"
+            echo "[INFO] Launching winetricks inside prefix: $pfx_dir"
             WINEPREFIX="$pfx_dir" winetricks "$@"
             ;;
         *)
-            echo "[ERROR] Aksi prefix tidak dikenal: '$action'" >&2
-            echo "Aksi yang didukung: winecfg, regedit, cmd, shell, kill, clean, winetricks" >&2
+            echo "[ERROR] Unknown prefix action: '$action'" >&2
+            echo "Supported actions: winecfg, regedit, cmd, shell, kill, clean, winetricks" >&2
             return 1
             ;;
     esac
@@ -832,7 +832,7 @@ build_wrapper_command() {
         if command -v gamemoderun >/dev/null 2>&1; then
             prefix+=("gamemoderun")
         else
-            echo "[WARN] gamemoderun diaktifkan tetapi biner tidak ditemukan di PATH." >&2
+            echo "[WARN] gamemoderun is enabled but binary not found in PATH." >&2
         fi
     fi
 
@@ -840,7 +840,7 @@ build_wrapper_command() {
         if command -v mangohud >/dev/null 2>&1; then
             prefix+=("mangohud")
         else
-            echo "[WARN] mangohud diaktifkan tetapi biner tidak ditemukan di PATH." >&2
+            echo "[WARN] mangohud is enabled but binary not found in PATH." >&2
         fi
     fi
 
@@ -859,7 +859,7 @@ build_wrapper_command() {
             fi
             prefix+=("--")
         else
-            echo "[WARN] gamescope diaktifkan tetapi biner tidak ditemukan di PATH." >&2
+            echo "[WARN] gamescope is enabled but binary not found in PATH." >&2
         fi
     fi
 
@@ -984,7 +984,7 @@ configure_global() {
         fi
         [ -z "$p_name" ] && p_name="${USER:-Player}"
 
-        local w_desc="Default (Semua Nonaktif)"
+        local w_desc="Default (All Disabled)"
         if [ -f "$HOME/.config/gamectl/wrappers" ]; then
             local act_w=()
             grep -q "^gamemode=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("GameMode")
