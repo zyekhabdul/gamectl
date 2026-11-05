@@ -15,7 +15,7 @@ Scope of Work:
 
 ## 2. Granular Technical Execution Plan (Work Packet 11)
 
-### Chunk 1: Unified Wineserver Lifecycle Resolution (DEFECT-02 Hardening) [PENDING]
+### Chunk 1: Unified Wineserver Lifecycle Resolution (DEFECT-02 Hardening) [DONE]
 - Target Files: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/main.sh`
 - Runtutan Eksekusi Teknis:
   1. Buat fungsi helper `get_wineserver_bin "$runner_bin"` di `src/runners/40_wrappers.sh` yang memeriksa:

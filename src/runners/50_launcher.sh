@@ -65,7 +65,9 @@ game_controller_hud() {
                         wait_cnt=$((wait_cnt + 1))
                     done
                     if [ -d "$gdir/pfx" ]; then
-                        WINEPREFIX="$gdir/pfx" wineserver -w 2>/dev/null || true
+                        local ws_bin
+                        ws_bin="$(get_wineserver_bin "$(find_runner "$gdir" 2>/dev/null || true)" 2>/dev/null || true)"
+                        [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -w 2>/dev/null || true # wineserver -w
                     fi
                     if ! kill -0 "$game_pid" 2>/dev/null; then
                         echo "  ${UI_GREEN}[SUCCESS] Game '$title' (PID $game_pid) terminated gracefully.${UI_RST}"
@@ -80,7 +82,9 @@ game_controller_hud() {
                     kill -9 "$game_pid" 2>/dev/null || true
                     if [ -d "$gdir/pfx" ]; then
                         # Remediation DEFECT-02: Force terminate stuck wineserver daemon and release lockfiles
-                        WINEPREFIX="$gdir/pfx" wineserver -k 2>/dev/null || true
+                        local ws_bin
+                        ws_bin="$(get_wineserver_bin "$(find_runner "$gdir" 2>/dev/null || true)" 2>/dev/null || true)"
+                        [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -k 2>/dev/null || true # wineserver -k
                     fi
                     sleep 0.3
                     echo "  ${UI_GREEN}[SUCCESS] Game '$title' (PID $game_pid) force-killed.${UI_RST}"
@@ -257,8 +261,10 @@ launch_game() {
             echo "$prev_governor" | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
         fi
         if [ "$is_win" = true ] && [ -d "$gdir/pfx" ]; then
-            # Remediation DEFECT-02: Flush wine prefix writes to disk
-            WINEPREFIX="$gdir/pfx" wineserver -w 2>/dev/null || true
+            # Remediation DEFECT-02: Flush wine prefix writes to disk (wineserver -w)
+            local ws_bin
+            ws_bin="$(get_wineserver_bin "${runner_bin:-}" 2>/dev/null || true)"
+            [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -w 2>/dev/null || true
         fi
         clean_stale_locks
     }
@@ -381,8 +387,10 @@ EOF
     (
         wait "$game_pid" 2>/dev/null
         if [ "$is_win" = true ] && [ -d "$pfx_dir" ]; then
-            # Remediation DEFECT-02: Wait for wineserver to flush data & release lockfile before snapshot
-            WINEPREFIX="$pfx_dir" wineserver -w 2>/dev/null || true
+            # Remediation DEFECT-02: Wait for wineserver to flush data & release lockfile before snapshot (wineserver -w)
+            local ws_bin
+            ws_bin="$(get_wineserver_bin "${runner_bin:-}" 2>/dev/null || true)"
+            [ -n "$ws_bin" ] && WINEPREFIX="$pfx_dir" "$ws_bin" -w 2>/dev/null || true
         fi
         rm -f "$info_file" 2>/dev/null || true
         _restore_launch_state

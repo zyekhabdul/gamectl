@@ -219,6 +219,67 @@ find_runner() {
     return 1
 }
 
+# Resolve wineserver binary matching active runner or system/Proton installation
+get_wineserver_bin() {
+    local runner="${1:-}"
+
+    # 1. If runner points directly to a Proton executable or runner string contains proton
+    if [ -n "$runner" ]; then
+        if [[ "$runner" =~ proton ]] || [ -f "$runner" ]; then
+            local p_base
+            p_base="$(dirname "$runner")"
+            for sub in "files/bin/wineserver" "dist/bin/wineserver" "bin/wineserver"; do
+                if [ -x "$p_base/$sub" ]; then
+                    echo "$p_base/$sub"
+                    return 0
+                fi
+            done
+        fi
+    fi
+
+    # 2. Check system PATH for wineserver
+    if command -v wineserver >/dev/null 2>&1; then
+        command -v wineserver
+        return 0
+    fi
+
+    # 3. Fallback: Search Steam compatibility tools for highest GE-Proton wineserver
+    local s_dyn_root
+    s_dyn_root="$(get_steam_root 2>/dev/null || true)"
+    local compat_dirs=(
+        "$s_dyn_root/compatibilitytools.d"
+        "$HOME/.local/share/Steam/compatibilitytools.d"
+        "$HOME/.steam/root/compatibilitytools.d"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"
+    )
+    for cdir in "${compat_dirs[@]}"; do
+        [ -n "$cdir" ] && [ -d "$cdir" ] || continue
+        local p
+        while read -r p; do
+            [ -z "$p" ] && continue
+            for sub in "files/bin/wineserver" "dist/bin/wineserver" "bin/wineserver"; do
+                if [ -x "$p/$sub" ]; then
+                    echo "$p/$sub"
+                    return 0
+                fi
+            done
+        done < <(find "$cdir" -mindepth 1 -maxdepth 1 -type d -name "*Proton*" 2>/dev/null | sort -Vr)
+    done
+
+    # 4. Check system wine64 / wine adjacent wineserver
+    for w in "$(command -v wine64 2>/dev/null || true)" "$(command -v wine 2>/dev/null || true)"; do
+        [ -n "$w" ] || continue
+        local w_dir
+        w_dir="$(dirname "$w")"
+        if [ -x "$w_dir/wineserver" ]; then
+            echo "$w_dir/wineserver"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 # Resolve active Steam compatibility tools directory
 get_compat_dir() {
     local s_dyn_root
@@ -513,18 +574,8 @@ manage_prefix() {
     fi
 
     # Wineserver resolution
-    local ws_bin="wineserver"
-    if [[ "$runner_bin" =~ proton ]]; then
-        local p_base
-        p_base="$(dirname "$runner_bin")"
-        if [ -x "$p_base/files/bin/wineserver" ]; then
-            ws_bin="$p_base/files/bin/wineserver"
-        elif [ -x "$p_base/dist/bin/wineserver" ]; then
-            ws_bin="$p_base/dist/bin/wineserver"
-        elif [ -x "$p_base/bin/wineserver" ]; then
-            ws_bin="$p_base/bin/wineserver"
-        fi
-    fi
+    local ws_bin
+    ws_bin="$(get_wineserver_bin "$runner_bin" 2>/dev/null || echo "")"
 
     # Interactive menu if action is empty and stdin is terminal
     if [ -z "$action" ]; then
@@ -566,7 +617,11 @@ manage_prefix() {
         kill)
             echo "[INFO] Sending force termination signal (wineserver -k) to prefix: $pfx_dir"
             if [ -d "$pfx_dir" ]; then
-                WINEPREFIX="$pfx_dir" "$ws_bin" -k 2>/dev/null || WINEPREFIX="$pfx_dir" wineserver -k 2>/dev/null || true
+                if [ -n "$ws_bin" ]; then
+                    WINEPREFIX="$pfx_dir" "$ws_bin" -k 2>/dev/null || true
+                elif command -v wineserver >/dev/null 2>&1; then
+                    WINEPREFIX="$pfx_dir" wineserver -k 2>/dev/null || true
+                fi
             fi
             echo "[VERIFIED] Wineserver for prefix $pfx_dir has been stopped."
             return 0
@@ -582,7 +637,11 @@ manage_prefix() {
             backup_save "$game_dir" true || true
 
             # 2. Kill running wineserver
-            WINEPREFIX="$pfx_dir" "$ws_bin" -k 2>/dev/null || WINEPREFIX="$pfx_dir" wineserver -k 2>/dev/null || true
+            if [ -n "$ws_bin" ]; then
+                WINEPREFIX="$pfx_dir" "$ws_bin" -k 2>/dev/null || true
+            elif command -v wineserver >/dev/null 2>&1; then
+                WINEPREFIX="$pfx_dir" wineserver -k 2>/dev/null || true
+            fi
             sleep 0.2
 
             # 3. Confirmation check
