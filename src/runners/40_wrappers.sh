@@ -1,4 +1,4 @@
-# Detect OnlineFix, mod loaders, and custom DLL overrides for a game directory
+# Detect P2P multiplayer compatibility hooks, mod loaders, and custom DLL overrides for a game directory
 detect_dll_overrides() {
     local gdir="${1:-}"
     [ -n "$gdir" ] && [ -d "$gdir" ] || return 0

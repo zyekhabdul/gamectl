@@ -1,31 +1,31 @@
 # GAMECTL — DEVELOPER GUIDE & COMPILATION ARCHITECTURE
 
-## 1. Arsitektur Source-to-Bundle
+## 1. Source-to-Bundle Architecture
 
-`gamectl` menggunakan pola **Source-to-Bundle**:
-- Kode sumber dikembangkan secara modular dalam direktori `src/` (masing-masing 150-600 baris per modul).
-- Script bundling native [`scripts/build.sh`](file:///home/aomiqaza/Projects/gamectl/scripts/build.sh) menggabungkan seluruh modul menjadi executable mandiri tunggal di [`bin/gamectl`](file:///home/aomiqaza/Projects/gamectl/bin/gamectl).
-- Keuntungan:
-  - **Zero Dependency at Runtime**: Executable tidak bergantung pada file library eksternal saat dieksekusi di mesin target.
-  - **Portabilitas Tinggi**: Binary dapat disymlink atau dipindahkan ke `~/.local/bin` atau `/usr/local/bin` tanpa kehilangan modul.
-  - **Instant Subshell Performance**: Subshell `fzf` (`fzf --preview`) berjalan instan tanpa overhead runtime parsing multi-file.
+`gamectl` adheres strictly to a deterministic **Source-to-Bundle** design pattern:
+- Source code is developed modularly inside `src/` (each module scoped to 150-600 lines for maintainability).
+- The native bundling script [`scripts/build.sh`](file:///home/aomiqaza/Projects/gamectl/scripts/build.sh) concatenates and validates all modules into a single standalone executable at [`bin/gamectl`](file:///home/aomiqaza/Projects/gamectl/bin/gamectl).
+- Strategic Advantages:
+  - **Zero Dependency at Runtime**: The compiled executable does not depend on external library files or project directory paths on target systems.
+  - **Maximum Portability**: The standalone binary can be symlinked or installed to `~/.local/bin` or `/usr/bin` without losing module context.
+  - **Instant Subshell Performance**: Fast subshells (`fzf --preview`) execute instantly with zero multi-file parsing overhead.
 
 ---
 
-## 2. Struktur Modul (`src/`)
+## 2. Modular Architecture (`src/`)
 
 ```text
 src/
 ├── core/
 │   ├── 00_header.sh       # SSoT Constants, Tokyo Night ANSI styling palette, FZF base configuration
-│   └── 10_utils.sh        # GBE templates resolution, remote host, save snapshots, binary discovery
+│   └── 10_utils.sh        # Decentralized LAN templates, remote host, save snapshots, binary discovery
 ├── steam/
-│   ├── 20_discovery.sh    # Multi-path Steam root discovery, manifest scanning, and create_desktop_entry
+│   ├── 20_discovery.sh    # Multi-path Steam root discovery, manifest scanning, and desktop launcher generation
 │   ├── 25_identity.sh     # SteamID64 generation, active SteamID resolution, persona configuration, set-id
-│   └── 30_downloader.sh   # DLC fetching, multi-arch DepotDownloader engine, downloads monitor, SLSsteam sync
+│   └── 30_downloader.sh   # Asset fetching, multi-arch DepotDownloader engine, downloads monitor, entitlement sync
 ├── runners/
 │   ├── 40_wrappers.sh     # Windows runner, detect_dll_overrides, GE-Proton manager, manage_prefix (pfx)
-│   └── 50_launcher.sh     # Prefix isolation, setup_onlinefix, PipeWire audio latency, wineserver teardown guard
+│   └── 50_launcher.sh     # Prefix isolation, P2P compatibility (setup_onlinefix), PipeWire audio, wineserver guard
 ├── diagnostics/
 │   └── 60_doctor.sh       # 7-layer health diagnostics, hardware audit, and query_protondb
 ├── tui/
@@ -35,29 +35,29 @@ src/
 
 ---
 
-## 3. Workflow Kompilasi & Pengujian
+## 3. Compilation & Quality Verification Workflow
 
-### Kompilasi ke Standalone Binary
+### Compile to Standalone Binary
 ```bash
 ./scripts/build.sh
 ```
 
-### Verifikasi Sinkronisasi Source vs Binary (CI / Pre-commit Gate)
+### Verify Source vs Binary Synchronization (CI / Pre-commit Gate)
 ```bash
 ./scripts/build.sh --check
 ```
 
-### Verifikasi Sintaks Seluruh Modul
+### Syntax Verification Across All Modules
 ```bash
 for f in src/*/*.sh src/main.sh bin/gamectl scripts/build.sh; do bash -n "$f" || exit 1; done
 ```
 
-### Jalankan Test Suite Otomatis (Regression & Integrity Harness)
+### Run Comprehensive Regression & Integrity Test Suite
 ```bash
 ./tests/test_cli.sh
 ```
 
-### Jalankan Diagnostik Sistem
+### Run System Health Diagnostics
 ```bash
 bin/gamectl doctor
 ```

@@ -18,11 +18,11 @@ case "${1:-}" in
             exit 1
         fi
         ;;
-    onlinefix|onlinefix-setup)
+    mod-overrides|onlinefix|onlinefix-setup)
         if [ -n "${2:-}" ]; then
             setup_onlinefix "$2" "${@:3}"
         else
-            echo "Usage: gamectl onlinefix <game_dir> [--yes|-y]"
+            echo "Usage: gamectl mod-overrides <game_dir> [--yes|-y] (alias: onlinefix)"
             exit 1
         fi
         ;;
@@ -218,10 +218,12 @@ Usage:
                       Headless game downloader via DepotDownloader
   gamectl downloads   Monitor active & recent download processes
   gamectl unlock <appid> [title]
-                      Zero-download Steam Client & SLSsteam Full DLC entitlement
+                      Zero-download Steam Client & entitlement synchronizer
   gamectl inject <dir> [appid] [--no-sync|--all]
-                      Inject GBE Fork standalone & portable saves
-  gamectl onlinefix <dir> Setup OnlineFix DLL overrides & Spacewar entitlement
+                      Inject decentralized LAN runtime & portable saves
+  gamectl mod-overrides <dir>
+                      Setup P2P multiplayer compatibility & mod DLL overrides (alias: onlinefix)
+  gamectl onlinefix <dir> (Alias for mod-overrides)
   gamectl proton-list List local & latest upstream GE-Proton releases
   gamectl proton-install [tag|latest] Headless GE-Proton installer
   gamectl proton-remove <tag> Safely remove an installed GE-Proton version

@@ -267,6 +267,22 @@ EOF
 }
 run_test "OnlineFix CLI: Valid signature detection & INI audit" test_onlinefix_detection_flow
 
+test_mod_overrides_alias() {
+    local tdir
+    tdir=$(mktemp -d)
+    touch "$tdir/OnlineFix64.dll"
+    cat <<EOF > "$tdir/OnlineFix.ini"
+[Main]
+PlayerName = DefaultPlayer
+EOF
+    local out
+    out=$("$GAMECTL" mod-overrides "$tdir" --yes 2>&1 || true)
+    rm -rf "$tdir"
+    echo "$out" | grep -q "OnlineFix signature detected" && \
+    echo "$out" | grep -q "OnlineFix.ini detected"
+}
+run_test "Mod Overrides Alias: Backward compatibility & signature detection" test_mod_overrides_alias
+
 test_audio_latency_env() {
     grep -q 'export PIPEWIRE_LATENCY=' "$REPO_ROOT/src/runners/50_launcher.sh" && \
     grep -q 'export PULSE_LATENCY_MSEC=' "$REPO_ROOT/src/runners/50_launcher.sh"

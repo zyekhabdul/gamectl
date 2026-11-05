@@ -112,7 +112,7 @@ game_controller_hud() {
     done
 }
 
-# Setup OnlineFix DLL overrides & Spacewar (AppID 480) entitlement
+# Setup P2P Multiplayer Compatibility Layer, mod DLL overrides & Spacewar (AppID 480) entitlement
 setup_onlinefix() {
     local gdir="${1:-}"
     shift || true
