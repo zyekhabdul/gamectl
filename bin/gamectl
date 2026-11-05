@@ -113,6 +113,61 @@ clean_stale_locks() {
     rm -f "$HOME/.config/SLSsteam/cache/.picsbuffer.lock" 2>/dev/null || true
 }
 
+# Ephemeral cache tier for JSON APIs (Steam Store & ProtonDB) with TTL
+fetch_cached_json() {
+    local url="${1:-}"
+    local cache_key="${2:-}"
+    local ttl="${3:-3600}"
+
+    if [ -z "$url" ] || [ -z "$cache_key" ]; then
+        return 1
+    fi
+
+    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl"
+    mkdir -p "$cache_dir" 2>/dev/null || true
+
+    local safe_key
+    safe_key=$(echo "$cache_key" | tr -cd '[:alnum:]_-')
+    local cache_file="$cache_dir/${safe_key}.json"
+
+    local now
+    now=$(date +%s)
+
+    # 1. Check existing cache validity against TTL
+    if [ -f "$cache_file" ]; then
+        local mtime
+        mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null || echo 0)
+        local age=$(( now - mtime ))
+        if [ "$age" -ge 0 ] && [ "$age" -lt "$ttl" ] && [ -s "$cache_file" ]; then
+            cat "$cache_file"
+            return 0
+        fi
+    fi
+
+    # 2. Fetch fresh content with timeout and atomic replacement
+    local tmp_file="${cache_file}.tmp.$$"
+    local fetched
+    fetched=$(curl -s --connect-timeout 2 --max-time 4 "$url" 2>/dev/null || true)
+
+    if [ -n "$fetched" ] && [ "$fetched" != "null" ]; then
+        # Ensure it contains valid JSON before caching
+        if echo "$fetched" | jq . >/dev/null 2>&1; then
+            echo "$fetched" > "$tmp_file" 2>/dev/null && mv -f "$tmp_file" "$cache_file" 2>/dev/null || rm -f "$tmp_file" 2>/dev/null
+            echo "$fetched"
+            return 0
+        fi
+    fi
+    rm -f "$tmp_file" 2>/dev/null || true
+
+    # 3. Fallback to stale cache if network/API failed
+    if [ -s "$cache_file" ]; then
+        cat "$cache_file"
+        return 0
+    fi
+
+    return 1
+}
+
 # Auto-backup savegame (Rolling 3 snapshots)
 backup_save() {
     local game_dir="$1"
@@ -1561,7 +1616,7 @@ detect_app_platform_os() {
     [ -z "$appid" ] && echo "linux" && return 0
 
     local det_json
-    det_json=$(curl -s --connect-timeout 2 "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=platforms" 2>/dev/null || true)
+    det_json=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=platforms" "steam_platforms_${appid}" 3600 2>/dev/null || true)
     local is_linux is_win
     is_linux=$(echo "$det_json" | jq -r ".\"${appid}\".data.platforms.linux // false" 2>/dev/null || echo "false")
     is_win=$(echo "$det_json" | jq -r ".\"${appid}\".data.platforms.windows // false" 2>/dev/null || echo "false")
@@ -4318,7 +4373,7 @@ query_protondb() {
     echo "│ ${UI_CYAN}Target AppID${UI_RST}  : ${UI_BOLD}$appid${UI_RST}"
 
     local pdb=""
-    pdb=$(curl -s --connect-timeout 3 --max-time 5 "https://www.protondb.com/api/v1/reports/summaries/${appid}.json" 2>/dev/null || true)
+    pdb=$(fetch_cached_json "https://www.protondb.com/api/v1/reports/summaries/${appid}.json" "protondb_${appid}" 3600 2>/dev/null || true)
 
     if [ -n "$pdb" ] && [ "$pdb" != "null" ] && echo "$pdb" | jq . >/dev/null 2>&1; then
         local tier score conf trending
@@ -4897,7 +4952,7 @@ search_steam() {
                 echo -e "│ \033[1m$title\033[0m \033[38;5;244m(AppID: $appid)\033[0m"
                 echo -e "\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m"
                 echo -e "  \033[1;38;5;117mLocal State\033[0m : $status"
-                details=$(curl -s --connect-timeout 2 "https://store.steampowered.com/api/appdetails?appids=$appid&filters=platforms,genres" | jq -r ".\"$appid\".data // empty" 2>/dev/null)
+                details=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=$appid&filters=platforms,genres" "steam_details_$appid" 3600 2>/dev/null | jq -r ".\"$appid\".data // empty" 2>/dev/null)
                 if [ -n "$details" ]; then
                     is_linux=$(echo "$details" | jq -r ".platforms.linux // false" 2>/dev/null)
                     is_win=$(echo "$details" | jq -r ".platforms.windows // false" 2>/dev/null)
@@ -4911,7 +4966,7 @@ search_steam() {
                 fi
                 echo
                 echo -e "\033[38;5;60m╭─ COMMUNITY COMPATIBILITY ───────────────────────────╮\033[0m"
-                pdb=$(curl -s --connect-timeout 2 "https://www.protondb.com/api/v1/reports/summaries/$appid.json" 2>/dev/null)
+                pdb=$(fetch_cached_json "https://www.protondb.com/api/v1/reports/summaries/$appid.json" "protondb_$appid" 3600 2>/dev/null)
                 if [ -n "$pdb" ] && [ "$pdb" != "null" ]; then
                     tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null)
                     score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null)
@@ -5115,7 +5170,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader resolve_target_library_dir detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active
+export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader resolve_target_library_dir detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -5245,6 +5300,9 @@ case "${1:-}" in
         ;;
     check-steam|check-steam-active)
         check_steam_active "${2:-Manual check}"
+        ;;
+    cache-json|fetch-cached-json)
+        fetch_cached_json "${2:-}" "${3:-}" "${4:-3600}"
         ;;
     set-id-interactive)
         if [ -n "${2:-}" ]; then

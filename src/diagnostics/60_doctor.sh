@@ -244,7 +244,7 @@ query_protondb() {
     echo "│ ${UI_CYAN}Target AppID${UI_RST}  : ${UI_BOLD}$appid${UI_RST}"
 
     local pdb=""
-    pdb=$(curl -s --connect-timeout 3 --max-time 5 "https://www.protondb.com/api/v1/reports/summaries/${appid}.json" 2>/dev/null || true)
+    pdb=$(fetch_cached_json "https://www.protondb.com/api/v1/reports/summaries/${appid}.json" "protondb_${appid}" 3600 2>/dev/null || true)
 
     if [ -n "$pdb" ] && [ "$pdb" != "null" ] && echo "$pdb" | jq . >/dev/null 2>&1; then
         local tier score conf trending

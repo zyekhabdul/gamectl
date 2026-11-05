@@ -519,7 +519,7 @@ search_steam() {
                 echo -e "│ \033[1m$title\033[0m \033[38;5;244m(AppID: $appid)\033[0m"
                 echo -e "\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m"
                 echo -e "  \033[1;38;5;117mLocal State\033[0m : $status"
-                details=$(curl -s --connect-timeout 2 "https://store.steampowered.com/api/appdetails?appids=$appid&filters=platforms,genres" | jq -r ".\"$appid\".data // empty" 2>/dev/null)
+                details=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=$appid&filters=platforms,genres" "steam_details_$appid" 3600 2>/dev/null | jq -r ".\"$appid\".data // empty" 2>/dev/null)
                 if [ -n "$details" ]; then
                     is_linux=$(echo "$details" | jq -r ".platforms.linux // false" 2>/dev/null)
                     is_win=$(echo "$details" | jq -r ".platforms.windows // false" 2>/dev/null)
@@ -533,7 +533,7 @@ search_steam() {
                 fi
                 echo
                 echo -e "\033[38;5;60m╭─ COMMUNITY COMPATIBILITY ───────────────────────────╮\033[0m"
-                pdb=$(curl -s --connect-timeout 2 "https://www.protondb.com/api/v1/reports/summaries/$appid.json" 2>/dev/null)
+                pdb=$(fetch_cached_json "https://www.protondb.com/api/v1/reports/summaries/$appid.json" "protondb_$appid" 3600 2>/dev/null)
                 if [ -n "$pdb" ] && [ "$pdb" != "null" ]; then
                     tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null)
                     score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null)

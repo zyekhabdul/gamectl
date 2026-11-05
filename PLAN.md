@@ -63,7 +63,7 @@ Scope of Work:
      - Bersihkan target destination remote agar tidak menghasilkan path corrupt seperti `~//mnt/...`.
 - DoD: Eksekusi rsync pada direktori game non-$HOME tersinkronisasi rapi ke host remote di direktori `~/Games/<Title>/saves/`.
 
-### Chunk 5: Ephemeral Store & ProtonDB Cache Tier [PENDING]
+### Chunk 5: Ephemeral Store & ProtonDB Cache Tier [DONE]
 - Target Files: `src/core/10_utils.sh`, `src/tui/70_dashboard.sh`, `src/diagnostics/60_doctor.sh`
 - Runtutan Eksekusi Teknis:
   1. Implementasikan fungsi `fetch_cached_json "$url" "$cache_key" [ttl_seconds]` di `src/core/10_utils.sh`:

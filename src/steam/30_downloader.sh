@@ -165,7 +165,7 @@ detect_app_platform_os() {
     [ -z "$appid" ] && echo "linux" && return 0
 
     local det_json
-    det_json=$(curl -s --connect-timeout 2 "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=platforms" 2>/dev/null || true)
+    det_json=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=platforms" "steam_platforms_${appid}" 3600 2>/dev/null || true)
     local is_linux is_win
     is_linux=$(echo "$det_json" | jq -r ".\"${appid}\".data.platforms.linux // false" 2>/dev/null || echo "false")
     is_win=$(echo "$det_json" | jq -r ".\"${appid}\".data.platforms.windows // false" 2>/dev/null || echo "false")

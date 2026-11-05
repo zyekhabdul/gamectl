@@ -56,6 +56,61 @@ clean_stale_locks() {
     rm -f "$HOME/.config/SLSsteam/cache/.picsbuffer.lock" 2>/dev/null || true
 }
 
+# Ephemeral cache tier for JSON APIs (Steam Store & ProtonDB) with TTL
+fetch_cached_json() {
+    local url="${1:-}"
+    local cache_key="${2:-}"
+    local ttl="${3:-3600}"
+
+    if [ -z "$url" ] || [ -z "$cache_key" ]; then
+        return 1
+    fi
+
+    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl"
+    mkdir -p "$cache_dir" 2>/dev/null || true
+
+    local safe_key
+    safe_key=$(echo "$cache_key" | tr -cd '[:alnum:]_-')
+    local cache_file="$cache_dir/${safe_key}.json"
+
+    local now
+    now=$(date +%s)
+
+    # 1. Check existing cache validity against TTL
+    if [ -f "$cache_file" ]; then
+        local mtime
+        mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null || echo 0)
+        local age=$(( now - mtime ))
+        if [ "$age" -ge 0 ] && [ "$age" -lt "$ttl" ] && [ -s "$cache_file" ]; then
+            cat "$cache_file"
+            return 0
+        fi
+    fi
+
+    # 2. Fetch fresh content with timeout and atomic replacement
+    local tmp_file="${cache_file}.tmp.$$"
+    local fetched
+    fetched=$(curl -s --connect-timeout 2 --max-time 4 "$url" 2>/dev/null || true)
+
+    if [ -n "$fetched" ] && [ "$fetched" != "null" ]; then
+        # Ensure it contains valid JSON before caching
+        if echo "$fetched" | jq . >/dev/null 2>&1; then
+            echo "$fetched" > "$tmp_file" 2>/dev/null && mv -f "$tmp_file" "$cache_file" 2>/dev/null || rm -f "$tmp_file" 2>/dev/null
+            echo "$fetched"
+            return 0
+        fi
+    fi
+    rm -f "$tmp_file" 2>/dev/null || true
+
+    # 3. Fallback to stale cache if network/API failed
+    if [ -s "$cache_file" ]; then
+        cat "$cache_file"
+        return 0
+    fi
+
+    return 1
+}
+
 # Auto-backup savegame (Rolling 3 snapshots)
 backup_save() {
     local game_dir="$1"
