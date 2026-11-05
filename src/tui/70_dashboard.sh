@@ -474,9 +474,10 @@ search_steam() {
 
     local sc_id sc_name sc_st sc_dir sc_bin
     while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
-        sc_id=$(echo "$sc_id" | tr -d '[:space:]')
-        sc_name=$(echo "$sc_name" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-        sc_dir=$(echo "$sc_dir" | tr -d '\r')
+        sc_id="${sc_id//[[:space:]]/}"
+        sc_name="${sc_name#"${sc_name%%[![:space:]]*}"}"
+        sc_name="${sc_name%"${sc_name##*[![:space:]]}"}"
+        sc_dir="${sc_dir//$'\r'/}"
         if [ -n "$sc_id" ] && [ "$sc_id" != "STANDALONE" ]; then
             installed_by_id["$sc_id"]=1
             installed_dir["$sc_id"]="$sc_dir"
