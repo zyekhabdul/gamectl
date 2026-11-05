@@ -1,4 +1,4 @@
-# WORK PACKET 10.5: TUI MODALITY UNIFICATION & STEAM ENTITLEMENT SEMANTICS [ACTIVE]
+# WORK PACKET 10.5: TUI MODALITY UNIFICATION & STEAM ENTITLEMENT SEMANTICS [COMPLETED]
 
 ## 1. Objective & Technical Scope
 Eliminate modality thrashing and screen flicker caused by raw shell `read -p` prompts and numbered transitions. Standardize the TUI around continuous alternate-screen modal action palettes. Reclassify the shallow and misleading term "[Unlock Steam DLC]" into its true technical utility: "[Steam Entitlement & ACF] Adopt files, Steam Input & Shaders (Full DLC)".
@@ -11,7 +11,7 @@ Scope of Work:
 
 ---
 
-## 2. Granular Technical Execution Plan (Active Packet)
+## 2. Granular Technical Execution Plan (Work Packet 10.5)
 
 ### Chunk 1: TUI Modal Action Palette & Query Input Refactor [DONE] (`07501fd`)
 - Target File: `src/tui/70_dashboard.sh`
@@ -51,20 +51,24 @@ Scope of Work:
   2. Tampilkan petunjuk hotkey pada header `fzf` catalog agar terbaca jelas oleh pengguna keyboard-centric (`Enter: Actions │ Ctrl-A: All-in-One │ Ctrl-U: Entitle │ Ctrl-S: Standalone │ Esc: Back`).
   3. Tangani multi-line output parsing dari `fzf` yang mengembalikan keybinding terpilih.
 
-### Chunk 4: Machine Verification, Automated Regression Suite & Documentation
+### Chunk 4: Machine Verification, Automated Regression Suite & Documentation [DONE] (`c2fb6b7`)
 - Target Files: `tests/test_cli.sh`, `README.md`, `DEVELOPMENT.md`
 - Runtutan Eksekusi Teknis:
   1. Tambahkan unit assertions pada `tests/test_cli.sh` untuk memverifikasi alias baru `gamectl entitle` dan `gamectl adopt-steam`.
   2. Perbarui dokumentasi di `README.md` dan `DEVELOPMENT.md` mengenai fungsi sebenarnya dari Steam Entitlement & ACF Adoption (adopsi file lokal, Steam Input gyro/touchpad, shader pre-caching).
-  3. Jalankan kompilasi `./scripts/build.sh`, verifikasi integritas biner via `./scripts/build.sh --check`, dan pastikan seluruh 42+ test assertions lulus dengan exit code 0.
+  3. Jalankan kompilasi `./scripts/build.sh`, verifikasi integritas biner via `./scripts/build.sh --check`, dan pastikan seluruh 44 test assertions lulus dengan exit code 0.
 
 ---
 
-## 3. Matriks Milestone Sebelumnya (Work Packet 10 - Completed)
+## 3. Matriks Milestone Selesai (Work Packet 10 & 10.5 - Completed)
 - [x] Chunk 1: Core, Runner & Diagnostics Internationalization (`82e3a84`) [DONE]
 - [x] Chunk 2: Steam Engine & Interactive Dashboard TUI Internationalization (`17d3346`) [DONE]
 - [x] Chunk 3: Legal Shielding, Neutral Nomenclature & Documentation Overhaul (`60d01f2`) [DONE]
 - [x] Chunk 4: Turnkey Piped Web Installer & Arch Linux AUR Packaging (`139cb7d`) [DONE]
 - [x] Chunk 5: Steam Deck shortcuts.vdf Non-Steam Integration Engine (`d5e670f`) [DONE]
 - [x] Chunk 6: SteamGridDB & Steam CDN Artwork Pipeline for Game Mode (`07344fc`) [DONE]
-- [x] Checkpoint Verifikasi: 42/42 tests passing (`d164e46`) [DONE]
+- [x] WP 10.5 Chunk 1: TUI Modal Action Palette & Query Input Refactor (`07501fd`) [DONE]
+- [x] WP 10.5 Chunk 2: Entitlement Engine Nomenclature & ACF Semantics Overhaul (`efce9fd`) [DONE]
+- [x] WP 10.5 Chunk 3: Catalog Direct Action Shortcuts & Ergonomic Hotkeys (`4412c5f`) [DONE]
+- [x] WP 10.5 Chunk 4: Machine Verification & Automated Regression Suite (`c2fb6b7`) [DONE]
+- [x] Checkpoint Verifikasi: 44/44 tests passing with Exit 0. [DONE]
