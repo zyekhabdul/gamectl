@@ -75,10 +75,13 @@ if [ "${1:-}" = "--check" ]; then
     fi
 fi
 
-# Atomic install
-mkdir -p "$(dirname "$OUTPUT_BIN")"
-cp "$TMP_OUT" "$OUTPUT_BIN"
-chmod +x "$OUTPUT_BIN"
+# Atomic install via POSIX rename(2) to prevent in-place truncation of running processes
+DEST_DIR="$(dirname "$OUTPUT_BIN")"
+mkdir -p "$DEST_DIR"
+DEST_TMP="$(mktemp "${DEST_DIR}/.gamectl.tmp.XXXXXX")"
+cp "$TMP_OUT" "$DEST_TMP"
+chmod +x "$DEST_TMP"
+mv -f "$DEST_TMP" "$OUTPUT_BIN"
 
 line_count=$(wc -l < "$OUTPUT_BIN" | tr -d ' ')
 echo "[ VERIFIED ] gamectl compiled successfully -> bin/gamectl ($line_count lines, executable)"
