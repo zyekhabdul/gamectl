@@ -1,62 +1,77 @@
-# WORK PACKET 8: SOURCE-TO-BUNDLE MODULAR ARCHITECTURE TRANSITION
+# WORK PACKET 9: GLOBAL GAMER & DEVELOPER ENGINE EXPANSION
 
 ## 1. Objective & Scope
-Transition `gamectl` codebase from a monolithic 3,440-line script (`bin/gamectl`) to a clean, maintainable modular structure (`src/`) with a native, zero-dependency bundling engine (`scripts/build.sh`). The output remains a single standalone executable (`bin/gamectl`), preserving 100% backward compatibility, zero-dependency deployment, and instantaneous subshell performance in `fzf`.
+Implement high-impact capabilities required by global Linux gamers, modders, and game developers:
+1. OnlineFix multiplayer support (dynamic `WINEDLLOVERRIDES` + Spacewar AppID 480 auto-entitlement).
+2. Universal modding overrides (Unity BepInEx, Unreal Engine UE4SS, Capcom REFramework).
+3. Headless GE-Proton / Wine-GE manager (`proton-list`, `proton-install`, `proton-remove` via GitHub Releases API).
+4. Wine Prefix Swiss Army Knife (`gamectl pfx <gdir> [winecfg|regedit|cmd|kill|clean]`).
+5. Native ProtonDB compatibility audit CLI (`gamectl protondb <appid>`).
+6. Standard Desktop Entry generator (`gamectl make-desktop <gdir>`).
+
+Detailed architectural proposal and background specifications: `docs/PROPOSAL_GLOBAL_FEATURES.md`.
 
 ---
 
 ## 2. Granular Chunks & Definition of Done (DoD)
 
-### Chunk 1: Build Engine & Source Scaffolding [VERIFIED]
-- **Target**: `scripts/build.sh`, `src/` directory tree
+### Chunk 1: OnlineFix & DLL Overrides Scanner (`src/runners/40_wrappers.sh`) [PENDING]
+- **Target**: `src/runners/40_wrappers.sh`
 - **DoD**:
-  1. Buat direktori: `src/core`, `src/steam`, `src/runners`, `src/diagnostics`, `src/tui`. [DONE]
-  2. Implementasikan `scripts/build.sh` (POSIX/Bash native) yang merangkai modul sesuai urutan deklarasi, menyuntikkan header build stamp, menjalankan `bash -n`, dan menghasilkan `bin/gamectl` executable (`chmod +x`). [DONE]
-  3. Pastikan `scripts/build.sh` memiliki mode `--check` untuk memverifikasi apakah `bin/gamectl` sinkron dengan `src/`. [DONE]
+  1. Buat fungsi `detect_dll_overrides <game_dir>` yang memindai:
+     - OnlineFix: `OnlineFix64.dll`, `OnlineFix.dll`, `dnet.dll`, `SteamOverlay64.dll`, `winmm.dll`, `version.dll`.
+     - BepInEx (Unity): `winhttp.dll`, folder `BepInEx/`.
+     - UE4SS (Unreal): `dwmapi.dll`, folder `ue4ss/`.
+     - REFramework / ASI: `dinput8.dll`, `dxgi.dll`.
+     - Deklaratif per-game: `$game_dir/.dll_overrides`.
+  2. Susun format string `WINEDLLOVERRIDES` yang aman dan tanpa redundansi.
 
-### Chunk 2: Extract Core Modul (`src/core/`) [VERIFIED]
-- **Target**: `src/core/00_header.sh`, `src/core/10_utils.sh`
+### Chunk 2: Launcher Overrides Injection & Spacewar Entitlement (`src/runners/50_launcher.sh`) [PENDING]
+- **Target**: `src/runners/50_launcher.sh`, `src/steam/30_downloader.sh`
 - **DoD**:
-  1. Pindahkan shebang, constants, theme palette (Tokyo Night ANSI), dan SSoT configs ke `src/core/00_header.sh`. [DONE]
-  2. Pindahkan helper functions dasar (`get_gbe_template`, `get_remote_host`, `clean_stale_locks`, `backup_save`, `find_game_binary`) ke `src/core/10_utils.sh`. [DONE]
+  1. Ekspor `WINEDLLOVERRIDES` yang terdeteksi sebelum eksekusi `umu-run`, `proton`, dan `wine`.
+  2. Implementasikan fungsi `setup_onlinefix <game_dir>` yang memvalidasi `OnlineFix.ini` dan memastikan AppID 480 (Spacewar) terdaftar di Steam / SLSsteam via `sync_steam 480 "Spacewar"`.
 
-### Chunk 3: Extract Steam Subsystems (`src/steam/`) [VERIFIED]
-- **Target**: `src/steam/20_discovery.sh`, `src/steam/25_identity.sh`, `src/steam/30_downloader.sh`
+### Chunk 3: Headless GE-Proton Release Manager (`src/runners/40_wrappers.sh`) [PENDING]
+- **Target**: `src/runners/40_wrappers.sh`
 - **DoD**:
-  1. `20_discovery.sh`: `get_steam_root`, `get_steam_primary_apps`, `get_steam_libraries`, `scan_installed_games`, `search_steam`. [DONE]
-  2. `25_identity.sh`: `generate_steamid64`, `resolve_active_steamid`, `get_game_persona`, `set_id`, `set_id_interactive`. [DONE]
-  3. `30_downloader.sh`: `fetch_dlc`, `ensure_downloader`, `download_game`, `list_downloads`, `list_downloads_interactive`, `sync_steam`, `unlock_game`, `unlock_interactive`. [DONE]
+  1. `proton_list`: Query GitHub API untuk rilis terbaru `GloriousEggroll/proton-ge-custom` dan tampilkan perbandingan dengan rilis lokal di `compatibilitytools.d/`.
+  2. `proton_install [latest|<tag>]`: Unduh tarball `x86_64` secara headless tanpa dependensi GUI dan ekstrak langsung ke `~/.local/share/Steam/compatibilitytools.d/`.
+  3. `proton_remove <tag>`: Hapus instalasi GE-Proton lama untuk membebaskan ruang disk.
 
-### Chunk 4: Extract Runners & Wrappers (`src/runners/`) [VERIFIED]
-- **Target**: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`
+### Chunk 4: Prefix Swiss Army Knife (`src/runners/40_wrappers.sh`) [PENDING]
+- **Target**: `src/runners/40_wrappers.sh`
 - **DoD**:
-  1. `40_wrappers.sh`: `find_runner`, `is_haswell_gpu`, `get_native_resolution`, `get_default_gamescope_args`, `build_wrapper_command`, `configure_wrappers`, `configure_global`. [DONE]
-  2. `50_launcher.sh`: `launch_game`, `cli_launch`, `inject_game`, `sync_save_remote`, `sync_to_companion`, `sync_to_tuf`. [DONE]
+  1. Buat handler `manage_prefix <game_dir> <subcommand> [args...]`.
+  2. Dukung subcommands: `winecfg`, `regedit`, `cmd`, `shell`, `kill` (`wineserver -k`), `clean` (reset `$gdir/pfx`).
 
-### Chunk 5: Extract Diagnostics & TUI Dashboard (`src/diagnostics/`, `src/tui/`) [VERIFIED]
-- **Target**: `src/diagnostics/60_doctor.sh`, `src/tui/70_dashboard.sh`
+### Chunk 5: ProtonDB CLI & Desktop Entry Generator (`src/diagnostics/60_doctor.sh`, `src/steam/20_discovery.sh`) [PENDING]
+- **Target**: `src/diagnostics/60_doctor.sh`, `src/steam/20_discovery.sh`
 - **DoD**:
-  1. `60_doctor.sh`: `doctor_audit` (7-layer diagnostic health suite). [DONE]
-  2. `70_dashboard.sh`: `preview_game`, `preview_dashboard`, `dashboard_menu`, `library_menu`. [DONE]
+  1. `query_protondb <appid>`: Query `https://www.protondb.com/api/v1/reports/summaries/${appid}.json` dan cetak status tier/confidence dengan ANSI color formatting.
+  2. `create_desktop_entry <game_dir> [title]`: Generate file `~/.local/share/applications/gamectl-<safe_name>.desktop` dengan resolusi icon lokal.
 
-### Chunk 6: Extract Entrypoint & Dispatcher (`src/main.sh`) [VERIFIED]
-- **Target**: `src/main.sh`
+### Chunk 6: CLI Top-Level Dispatcher & Build Sync (`src/main.sh`, `scripts/build.sh`) [PENDING]
+- **Target**: `src/main.sh`, `bin/gamectl`
 - **DoD**:
-  1. Pindahkan registrasi `export -f` untuk subshells fzf. [DONE]
-  2. Pindahkan CLI command parser & top-level case statement (`case "${1:-}" in ...`). [DONE]
+  1. Daftarkan perintah CLI di `src/main.sh`:
+     - `onlinefix <dir>`
+     - `proton-list` / `proton-install` / `proton-remove`
+     - `pfx <dir> <action>`
+     - `protondb <appid>`
+     - `make-desktop <dir>`
+  2. Eksekusi `./scripts/build.sh` dan pastikan `bash -n bin/gamectl` exit 0.
 
-### Chunk 7: Build & Functional Verification Gate [VERIFIED]
-- **Target**: `scripts/build.sh`, `bin/gamectl`
+### Chunk 7: Test Suite Expansion & Contract Verification (`tests/test_cli.sh`) [PENDING]
+- **Target**: `tests/test_cli.sh`
 - **DoD**:
-  1. Eksekusi `scripts/build.sh` menghasilkan `bin/gamectl`. [DONE]
-  2. Verifikasi deterministik:
-     - `bash -n bin/gamectl` (Exit 0). [DONE]
-     - Test CLI output: `bin/gamectl doctor`, `bin/gamectl get-resolution`, `bin/gamectl get-steam-root`. [DONE]
-     - Bandingkan fungsionalitas dan pastikan 0% breaking changes. [DONE]
+  1. Tambahkan test case untuk `detect_dll_overrides` (mock OnlineFix dan BepInEx directories).
+  2. Tambahkan test case untuk CLI syntax parsing subcommands baru.
+  3. Jalankan `tests/test_cli.sh` dan pastikan seluruh test lulus dengan exit 0.
 
-### Chunk 8: Documentation, ADR-011 & Local Commit [VERIFIED]
-- **Target**: `DEVELOPMENT.md`, Obsidian RAG `DECISIONS.md`, `STATE.md`, git commit
+### Chunk 8: Documentation & Checkpoint Commit [PENDING]
+- **Target**: `README.md`, `DEVELOPMENT.md`, Obsidian RAG `STATE.md`, local git commit
 - **DoD**:
-  1. Perbarui `DEVELOPMENT.md` menjelaskan arsitektur baru (`src/` -> `scripts/build.sh` -> `bin/gamectl`). [DONE]
-  2. Catat ADR-011 di Obsidian RAG namespace `00-AGY-Memory/gamectl/DECISIONS.md`. [DONE]
-  3. Sinkronkan `STATE.md` dan buat local git checkpoint. [DONE]
+  1. Dokumentasikan perintah baru pada `README.md` dan `DEVELOPMENT.md`.
+  2. Perbarui `STATE.md` di Obsidian RAG memory.
+  3. Lakukan local commit (zero emoji, format konvensional).
