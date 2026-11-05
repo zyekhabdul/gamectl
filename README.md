@@ -115,11 +115,32 @@ gamectl launch "$HOME/Games/DeadCells" --hud --gamemode
 # Launch Windows executable with Gamescope FSR upscaling:
 gamectl launch "$HOME/Games/WindowsGame" game.exe --gamescope --fsr
 
+# Launch with cgroups v2 process tree isolation (systemd-run scope):
+gamectl launch "$HOME/Games/HeavyGame" --scope
+
+# Launch with automated PRIME hybrid discrete GPU offloading (NVIDIA / AMD / Intel Arc):
+gamectl launch "$HOME/Games/3DGame" --prime
+
+# Launch inside rootless Bubblewrap (bwrap) security sandbox (shielding ~/.ssh, ~/.gnupg, cookies):
+gamectl launch "$HOME/Games/UntrustedGame" --sandbox
+
 # Configure per-game wrapper persistence:
 gamectl configure-wrappers "$HOME/Games/DeadCells"
 ```
 
-### 3. P2P Multiplayer Compatibility & Mod DLL Overrides
+### 3. Linux Kernel Isolation & Hardware Diagnostics
+```bash
+# Detect discrete secondary GPU vendor on hybrid laptop/desktop systems:
+gamectl detect-gpu
+
+# Check if systemd-run user scope cgroups v2 isolation is supported:
+gamectl check-scope
+
+# Check if Bubblewrap rootless sandbox profile is available:
+gamectl check-sandbox
+```
+
+### 4. P2P Multiplayer Compatibility & Mod DLL Overrides
 ```bash
 # Setup P2P compatibility layer, DLL overrides, and Spacewar AppID 480:
 gamectl mod-overrides "$HOME/Games/CoopGame"
@@ -128,7 +149,7 @@ gamectl mod-overrides "$HOME/Games/CoopGame"
 gamectl onlinefix "$HOME/Games/CoopGame"
 ```
 
-### 4. GE-Proton Release Manager
+### 5. GE-Proton Release Manager
 ```bash
 # Query installed local releases vs latest upstream releases on GitHub:
 gamectl proton-list
@@ -141,7 +162,7 @@ gamectl proton-install GE-Proton9-25
 gamectl proton-remove GE-Proton8-26
 ```
 
-### 5. Wine Prefix Swiss Army Knife (`pfx`)
+### 6. Wine Prefix Swiss Army Knife (`pfx`)
 ```bash
 # Open interactive prefix management menu:
 gamectl pfx "$HOME/Games/MyGame"
@@ -160,7 +181,7 @@ gamectl pfx "$HOME/Games/MyGame" kill
 gamectl pfx "$HOME/Games/MyGame" clean -y
 ```
 
-### 6. Decentralized LAN Steam Runtime & Portable Saves
+### 7. Decentralized LAN Steam Runtime & Portable Saves
 ```bash
 # Inject standalone LAN runtime and sync offline entitlement (All-in-One):
 gamectl inject "$HOME/Games/Limbo" 48000
@@ -174,7 +195,7 @@ gamectl set-id "Alice" 76561198123456789 "$HOME/Games/Valheim" --broadcast "192.
 gamectl set-id "MyGamerTag" auto --global
 ```
 
-### 7. Headless Asset Downloader Engine
+### 8. Headless Asset Downloader Engine
 ```bash
 # Download game files, inject decentralized runtime, and sync entitlement:
 gamectl download 48000 "$HOME/Games/Limbo" "LIMBO"
@@ -189,7 +210,7 @@ gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" -f
 gamectl downloads
 ```
 
-### 8. Steam Entitlement & ACF Adoption Engine (Zero-Download Full DLC)
+### 9. Steam Entitlement & ACF Adoption Engine (Zero-Download Full DLC)
 Adopts offline or standalone game files into the official Steam client, enabling community Steam Input (gyro/trackpad profiles), Valve CDN Vulkan shader pre-caching, and full DLC entitlement without re-downloading:
 
 ```bash
@@ -200,7 +221,7 @@ gamectl entitle 1145360 "Hades II"     # Aliases: unlock, adopt-steam
 gamectl sync-steam 427520 "Factorio" "$HOME/Games/Factorio"
 ```
 
-### 9. ProtonDB Compatibility Audit & Shortcuts
+### 10. ProtonDB Compatibility Audit & Shortcuts
 ```bash
 # Query ProtonDB rating by AppID:
 gamectl protondb 105600
@@ -212,7 +233,7 @@ gamectl protondb "$HOME/Games/Terraria"
 gamectl make-desktop "$HOME/Games/Terraria" "Terraria"
 ```
 
-### 10. Multi-Node Savegame Synchronization
+### 11. Multi-Node Savegame Synchronization
 ```bash
 # Synchronize local savegame snapshots to configured remote companion host:
 gamectl --sync "$HOME/Games/Terraria" "Terraria"

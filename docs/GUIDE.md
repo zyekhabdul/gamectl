@@ -51,6 +51,8 @@ Untuk menjalankan game biner Windows (`.exe`), `gamectl` secara otomatis mendete
 - `gamemoderun` (`gamemode`): Optimasi prioritas proses, CPU governor, dan scheduler Linux saat game aktif.
 - `mangohud`: On-Screen Display (OSD) overlay untuk memantau FPS, frametime, temperatur, dan utilisasi GPU/VRAM.
 - `gamescope`: Micro-compositor Wayland dari Valve untuk integer scaling, resolusi kustom, dan AMD FidelityFX Super Resolution (FSR) upscaling.
+- `systemd-run` (`systemd`): Isolasi pohon proses cgroups v2 (`--scope`) untuk terminasi instan tanpa zombie process.
+- `bwrap` (`bubblewrap`): Sandbox keamanan rootless (`--sandbox`) untuk melindungi kredensial host (`~/.ssh`, `~/.gnupg`, token browser).
 
 ---
 
@@ -136,10 +138,10 @@ Installer otomatis memasang integrasi sistem:
 - **Fitur Autocompletion**:
   1. **Top-Level Subcommands**:
      Ketik `gamectl <TAB><TAB>` atau `game <TAB><TAB>` untuk menampilkan seluruh sub-perintah:
-     `launch`, `run`, `configure-wrappers`, `set-id`, `set-id-interactive`, `generate-steamid`, `download`, `downloads`, `unlock`, `inject`, `fetch-dlc`, `sync-steam`, `ensure-downloader`, `--search`, `--list`, `--sync`, `--backup`, `--help`, `--version`.
+     `launch`, `run`, `configure-wrappers`, `set-id`, `set-id-interactive`, `generate-steamid`, `download`, `downloads`, `entitle`, `adopt-steam`, `unlock`, `inject`, `fetch-dlc`, `sync-steam`, `ensure-downloader`, `detect-gpu`, `check-scope`, `check-sandbox`, `pfx`, `proton-list`, `proton-install`, `proton-remove`, `protondb`, `make-desktop`, `add-to-steam`, `fetch-art`, `--search`, `--list`, `--sync`, `--backup`, `--help`, `--version`.
   2. **Flag Konfigurasi Runtime Wrappers**:
      Ketik `gamectl launch <dir> --<TAB>` untuk melengkapi flag:
-     `--hud`, `--no-hud`, `--mangohud`, `--no-mangohud`, `--gamemode`, `--no-gamemode`, `--gamescope`, `--no-gamescope`, `--fsr`, `--no-fsr`.
+     `--hud`, `--no-hud`, `--mangohud`, `--no-mangohud`, `--gamemode`, `--no-gamemode`, `--gamescope`, `--no-gamescope`, `--fsr`, `--no-fsr`, `--glthread`, `--no-glthread`, `--scope`, `--no-scope`, `--prime`, `--no-prime`, `--sandbox`, `--no-sandbox`.
   3. **Identitas LAN & SteamID**:
      Ketik `gamectl set-id PlayerName <TAB>` untuk melengkapi keyword generator (`auto`, `random`) atau flag `--broadcast`, `--global`.
   4. **Pilihan Paket Download & Injeksi**:

@@ -889,6 +889,8 @@ build_sandbox_command() {
 
     local run_uid="${UID:-$(id -u)}"
     local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$run_uid}"
+    local wayland_socket="${WAYLAND_DISPLAY:-wayland-0}"
+    local xauth_file="${XAUTHORITY:-$HOME/.Xauthority}"
 
     GAMECTL_SANDBOX_PREFIX=(
         bwrap
@@ -906,10 +908,12 @@ build_sandbox_command() {
         --tmpfs /run
         --tmpfs "/run/user/$run_uid"
         --ro-bind-try "$runtime_dir/wayland-0" "$runtime_dir/wayland-0"
+        --ro-bind-try "$runtime_dir/$wayland_socket" "$runtime_dir/$wayland_socket"
         --bind-try "$runtime_dir/pipewire-0" "$runtime_dir/pipewire-0"
         --bind-try "$runtime_dir/pulse" "$runtime_dir/pulse"
         --bind-try "$runtime_dir/gamectl-$run_uid" "$runtime_dir/gamectl-$run_uid"
         --tmpfs "$HOME"
+        --ro-bind-try "$xauth_file" "$xauth_file"
         --bind-try "$HOME/.config/gamectl" "$HOME/.config/gamectl"
         --ro-bind-try "$HOME/.local/share/Steam" "$HOME/.local/share/Steam"
         --ro-bind-try "$HOME/.local/share/gbe-fork" "$HOME/.local/share/gbe-fork"
