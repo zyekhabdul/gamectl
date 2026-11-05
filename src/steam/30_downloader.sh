@@ -515,13 +515,13 @@ ACF
     fi
 }
 
-# Unlock game in official Steam client without downloading game files
+# Entitle game and adopt assets in official Steam client without downloading
 unlock_game() {
     local appid="${1:-}"
     local title="${2:-}"
 
     if [ -z "$appid" ]; then
-        echo "Usage: gamectl unlock <appid> [title]" >&2
+        echo "Usage: gamectl entitle <appid> [title] (aliases: unlock, adopt-steam)" >&2
         return 1
     fi
 
@@ -531,47 +531,50 @@ unlock_game() {
         [ -z "$title" ] && title="AppID_${appid}"
     fi
 
-    echo "${UI_BOX}╭─ STEAM ZERO-DOWNLOAD UNLOCK (FULL DLC) ─────────────────────╮${UI_RST}"
+    echo "${UI_BOX}╭─ STEAM ENTITLEMENT & ACF ADOPTION ENGINE ───────────────────╮${UI_RST}"
     echo "│ ${UI_CYAN}Target Game${UI_RST}: ${UI_BOLD}$title${UI_RST} ${UI_DIM}(AppID: $appid)${UI_RST}"
+    echo "│ ${UI_DIM}Adopts local files, community Steam Input & Vulkan shader caching${UI_RST}"
     echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
 
     sync_steam "$appid" "$title" ""
-    echo "  ${UI_GREEN}[SUCCESS] Game '$title' ($appid) entitled in Steam Client with Full DLC.${UI_RST}"
+    echo "  ${UI_GREEN}[SUCCESS] Game '$title' ($appid) entitled in Steam Client with Full DLC & ACF manifest.${UI_RST}"
 }
 
-# Interactive Steam Unlock Wizard
-unlock_interactive() {
-    clear
-    echo "${UI_BOX}╭─ STEAM ZERO-DOWNLOAD UNLOCK WIZARD ─────────────────────────╮${UI_RST}"
-    echo "│ ${UI_CYAN}Registers ownership & Full DLC directly to SLSsteam & Steam ACF${UI_RST}"
-    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-    echo -n "  Enter Steam AppID (e.g. 105600): "
-    read -r u_appid
+# Aliases for entitlement engine
+entitle_game() { unlock_game "$@"; }
+adopt_steam() { unlock_game "$@"; }
 
-    if [ -z "$u_appid" ]; then
-        echo "  [INFO] AppID empty. Cancelling unlock wizard."
-        read -r -p "Press [ENTER] to return..."
-        return 0
-    fi
+# Interactive Steam Entitlement & ACF Adoption Wizard
+unlock_interactive() {
+    local u_appid_raw=""
+    u_appid_raw=$(echo "Enter Steam AppID (e.g. 105600, 48000, 730) and press ENTER" | fzf \
+        --print-query \
+        --border-label="  ╢ Steam Entitlement & ACF Adoption Wizard ╟  " \
+        --border-label-pos=2 \
+        --header="Enter numeric AppID (Enter: Adopt │ Esc: Cancel)" \
+        --prompt="Steam AppID > " \
+        --height=20% \
+        --reverse 2>/dev/null) || return 0
+
+    local u_appid
+    u_appid=$(echo "$u_appid_raw" | head -n 1 | tr -d '[:space:]')
+    [ -z "$u_appid" ] && return 0
 
     if [[ ! "$u_appid" =~ ^[0-9]+$ ]]; then
         echo "  ${UI_RED}[ERROR] AppID must be numeric characters (e.g. 105600).${UI_RST}"
-        read -r -p "Press [ENTER] to return..."
+        sleep 1.5
         return 1
     fi
 
-    echo -n "  Enter Game Title (leave blank for automatic lookup): "
-    read -r u_title
-
-    if [ -z "$u_title" ]; then
-        echo "  [INFO] Fetching title from Steam Store API for AppID $u_appid..."
-        u_title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${u_appid}&filters=basic" | jq -r ".\"${u_appid}\".data.name // empty" 2>/dev/null || true)
-        [ -z "$u_title" ] && u_title="AppID_${u_appid}"
-    fi
+    echo "  [INFO] Fetching title from Steam Store API for AppID $u_appid..."
+    local u_title
+    u_title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${u_appid}&filters=basic" | jq -r ".\"${u_appid}\".data.name // empty" 2>/dev/null || true)
+    [ -z "$u_title" ] && u_title="AppID_${u_appid}"
 
     echo "  Registering: $u_title ($u_appid)..."
     unlock_game "$u_appid" "$u_title"
-    echo
-    read -r -p "Press [ENTER] to return to Dashboard..."
+    sleep 1.2
 }
+
+entitle_interactive() { unlock_interactive "$@"; }
 

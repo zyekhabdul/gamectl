@@ -1897,13 +1897,13 @@ ACF
     fi
 }
 
-# Unlock game in official Steam client without downloading game files
+# Entitle game and adopt assets in official Steam client without downloading
 unlock_game() {
     local appid="${1:-}"
     local title="${2:-}"
 
     if [ -z "$appid" ]; then
-        echo "Usage: gamectl unlock <appid> [title]" >&2
+        echo "Usage: gamectl entitle <appid> [title] (aliases: unlock, adopt-steam)" >&2
         return 1
     fi
 
@@ -1913,49 +1913,52 @@ unlock_game() {
         [ -z "$title" ] && title="AppID_${appid}"
     fi
 
-    echo "${UI_BOX}╭─ STEAM ZERO-DOWNLOAD UNLOCK (FULL DLC) ─────────────────────╮${UI_RST}"
+    echo "${UI_BOX}╭─ STEAM ENTITLEMENT & ACF ADOPTION ENGINE ───────────────────╮${UI_RST}"
     echo "│ ${UI_CYAN}Target Game${UI_RST}: ${UI_BOLD}$title${UI_RST} ${UI_DIM}(AppID: $appid)${UI_RST}"
+    echo "│ ${UI_DIM}Adopts local files, community Steam Input & Vulkan shader caching${UI_RST}"
     echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
 
     sync_steam "$appid" "$title" ""
-    echo "  ${UI_GREEN}[SUCCESS] Game '$title' ($appid) entitled in Steam Client with Full DLC.${UI_RST}"
+    echo "  ${UI_GREEN}[SUCCESS] Game '$title' ($appid) entitled in Steam Client with Full DLC & ACF manifest.${UI_RST}"
 }
 
-# Interactive Steam Unlock Wizard
-unlock_interactive() {
-    clear
-    echo "${UI_BOX}╭─ STEAM ZERO-DOWNLOAD UNLOCK WIZARD ─────────────────────────╮${UI_RST}"
-    echo "│ ${UI_CYAN}Registers ownership & Full DLC directly to SLSsteam & Steam ACF${UI_RST}"
-    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-    echo -n "  Enter Steam AppID (e.g. 105600): "
-    read -r u_appid
+# Aliases for entitlement engine
+entitle_game() { unlock_game "$@"; }
+adopt_steam() { unlock_game "$@"; }
 
-    if [ -z "$u_appid" ]; then
-        echo "  [INFO] AppID empty. Cancelling unlock wizard."
-        read -r -p "Press [ENTER] to return..."
-        return 0
-    fi
+# Interactive Steam Entitlement & ACF Adoption Wizard
+unlock_interactive() {
+    local u_appid_raw=""
+    u_appid_raw=$(echo "Enter Steam AppID (e.g. 105600, 48000, 730) and press ENTER" | fzf \
+        --print-query \
+        --border-label="  ╢ Steam Entitlement & ACF Adoption Wizard ╟  " \
+        --border-label-pos=2 \
+        --header="Enter numeric AppID (Enter: Adopt │ Esc: Cancel)" \
+        --prompt="Steam AppID > " \
+        --height=20% \
+        --reverse 2>/dev/null) || return 0
+
+    local u_appid
+    u_appid=$(echo "$u_appid_raw" | head -n 1 | tr -d '[:space:]')
+    [ -z "$u_appid" ] && return 0
 
     if [[ ! "$u_appid" =~ ^[0-9]+$ ]]; then
         echo "  ${UI_RED}[ERROR] AppID must be numeric characters (e.g. 105600).${UI_RST}"
-        read -r -p "Press [ENTER] to return..."
+        sleep 1.5
         return 1
     fi
 
-    echo -n "  Enter Game Title (leave blank for automatic lookup): "
-    read -r u_title
-
-    if [ -z "$u_title" ]; then
-        echo "  [INFO] Fetching title from Steam Store API for AppID $u_appid..."
-        u_title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${u_appid}&filters=basic" | jq -r ".\"${u_appid}\".data.name // empty" 2>/dev/null || true)
-        [ -z "$u_title" ] && u_title="AppID_${u_appid}"
-    fi
+    echo "  [INFO] Fetching title from Steam Store API for AppID $u_appid..."
+    local u_title
+    u_title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${u_appid}&filters=basic" | jq -r ".\"${u_appid}\".data.name // empty" 2>/dev/null || true)
+    [ -z "$u_title" ] && u_title="AppID_${u_appid}"
 
     echo "  Registering: $u_title ($u_appid)..."
     unlock_game "$u_appid" "$u_title"
-    echo
-    read -r -p "Press [ENTER] to return to Dashboard..."
+    sleep 1.2
 }
+
+entitle_interactive() { unlock_interactive "$@"; }
 
 
 # --- [MODULE] src/runners/40_wrappers.sh ---
@@ -4490,10 +4493,11 @@ preview_dashboard() {
             echo "  • Monitor active background DepotDownloader tasks."
             echo "  • Real-time log streaming (tail -f) and stuck process termination."
             ;;
-        *4*|*UNLOCK*)
+        *4*|*UNLOCK*|*ENTITLE*|*ENTITLEMENT*|*ACF*)
             echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
-            echo "│ ${UI_BOLD}[04] STEAM UNLOCK (ZERO-DOWNLOAD FULL DLC)${UI_RST}"
+            echo "│ ${UI_BOLD}[04] STEAM ENTITLEMENT & ACF ADOPTION ENGINE${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
+            echo "  • Adopt local files, community Steam Input gyro/touchpad & Vulkan shaders."
             echo "  • Register AppID & full DLC entitlements directly to SLSsteam."
             echo "  • Generate appmanifest_<appid>.acf automatically without downloading."
             ;;
@@ -4537,7 +4541,7 @@ dashboard_menu() {
 1	${UI_PURPLE}[01]${UI_RST} ${UI_BOLD}GAME LIBRARY${UI_RST}	${UI_DIM}Browse, inject and launch installed games${UI_RST}
 2	${UI_PURPLE}[02]${UI_RST} ${UI_BOLD}STEAM STORE SEARCH${UI_RST}	${UI_DIM}Search games & check ProtonDB compatibility${UI_RST}
 3	${UI_PURPLE}[03]${UI_RST} ${UI_BOLD}DOWNLOAD MONITOR${UI_RST}	${UI_DIM}Track background DepotDownloader logs${UI_RST}
-4	${UI_PURPLE}[04]${UI_RST} ${UI_BOLD}UNLOCK STEAM (DLC)${UI_RST}	${UI_DIM}Entitle games & DLC in Steam without downloading${UI_RST}
+4	${UI_PURPLE}[04]${UI_RST} ${UI_BOLD}STEAM ENTITLEMENT & ACF${UI_RST}	${UI_DIM}Adopt files, Steam Input & shaders (Full DLC)${UI_RST}
 5	${UI_PURPLE}[05]${UI_RST} ${UI_BOLD}GLOBAL SETTINGS${UI_RST}	${UI_DIM}Configure LAN persona, default wrappers & remote host${UI_RST}
 6	${UI_PURPLE}[06]${UI_RST} ${UI_BOLD}SYSTEM DIAGNOSTICS${UI_RST}	${UI_DIM}Audit 7-layer dependencies, runners & GPU health${UI_RST}
 EOF
@@ -4867,7 +4871,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive get_remote_host get_gbe_template find_game_binary find_runner launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut
+export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -5034,14 +5038,14 @@ case "${1:-}" in
             exit 1
         fi
         ;;
-    unlock|add-steam|--unlock)
+    unlock|add-steam|entitle|adopt-steam|--unlock|--entitle)
         if [ -n "${2:-}" ]; then
             unlock_game "$2" "${3:-}"
         else
             if [ -t 0 ]; then
                 unlock_interactive
             else
-                echo "Usage: gamectl unlock <appid> [title]"
+                echo "Usage: gamectl entitle <appid> [title] (aliases: unlock, adopt-steam)"
                 exit 1
             fi
         fi
@@ -5107,8 +5111,9 @@ Usage:
   gamectl download <appid> [dir] [title] [--raw|--inject-only|--all] [-f]
                       Headless game downloader via DepotDownloader
   gamectl downloads   Monitor active & recent download processes
-  gamectl unlock <appid> [title]
-                      Zero-download Steam Client & entitlement synchronizer
+  gamectl entitle <appid> [title]
+                      Adopt local assets, Steam Input & shaders via Steam entitlement & ACF (aliases: unlock, adopt-steam)
+  gamectl unlock <appid> [title] (Alias for entitle)
   gamectl inject <dir> [appid] [--no-sync|--all]
                       Inject decentralized LAN runtime & portable saves
   gamectl mod-overrides <dir>

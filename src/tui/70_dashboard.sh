@@ -295,10 +295,11 @@ preview_dashboard() {
             echo "  • Monitor active background DepotDownloader tasks."
             echo "  • Real-time log streaming (tail -f) and stuck process termination."
             ;;
-        *4*|*UNLOCK*)
+        *4*|*UNLOCK*|*ENTITLE*|*ENTITLEMENT*|*ACF*)
             echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
-            echo "│ ${UI_BOLD}[04] STEAM UNLOCK (ZERO-DOWNLOAD FULL DLC)${UI_RST}"
+            echo "│ ${UI_BOLD}[04] STEAM ENTITLEMENT & ACF ADOPTION ENGINE${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
+            echo "  • Adopt local files, community Steam Input gyro/touchpad & Vulkan shaders."
             echo "  • Register AppID & full DLC entitlements directly to SLSsteam."
             echo "  • Generate appmanifest_<appid>.acf automatically without downloading."
             ;;
@@ -342,7 +343,7 @@ dashboard_menu() {
 1	${UI_PURPLE}[01]${UI_RST} ${UI_BOLD}GAME LIBRARY${UI_RST}	${UI_DIM}Browse, inject and launch installed games${UI_RST}
 2	${UI_PURPLE}[02]${UI_RST} ${UI_BOLD}STEAM STORE SEARCH${UI_RST}	${UI_DIM}Search games & check ProtonDB compatibility${UI_RST}
 3	${UI_PURPLE}[03]${UI_RST} ${UI_BOLD}DOWNLOAD MONITOR${UI_RST}	${UI_DIM}Track background DepotDownloader logs${UI_RST}
-4	${UI_PURPLE}[04]${UI_RST} ${UI_BOLD}UNLOCK STEAM (DLC)${UI_RST}	${UI_DIM}Entitle games & DLC in Steam without downloading${UI_RST}
+4	${UI_PURPLE}[04]${UI_RST} ${UI_BOLD}STEAM ENTITLEMENT & ACF${UI_RST}	${UI_DIM}Adopt files, Steam Input & shaders (Full DLC)${UI_RST}
 5	${UI_PURPLE}[05]${UI_RST} ${UI_BOLD}GLOBAL SETTINGS${UI_RST}	${UI_DIM}Configure LAN persona, default wrappers & remote host${UI_RST}
 6	${UI_PURPLE}[06]${UI_RST} ${UI_BOLD}SYSTEM DIAGNOSTICS${UI_RST}	${UI_DIM}Audit 7-layer dependencies, runners & GPU health${UI_RST}
 EOF
