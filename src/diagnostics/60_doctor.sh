@@ -197,3 +197,106 @@ doctor_audit() {
     return $(( miss_cnt > 0 ? 1 : 0 ))
 }
 
+# Query ProtonDB community compatibility tier and rating (Chunk 5)
+query_protondb() {
+    local target="${1:-}"
+
+    if [ -z "$target" ]; then
+        echo "Usage: gamectl protondb <appid|game_dir>" >&2
+        return 1
+    fi
+
+    local appid=""
+    if [[ "$target" =~ ^[0-9]+$ ]]; then
+        appid="$target"
+    elif [ -d "$target" ]; then
+        if [ -f "$target/steam_appid.txt" ]; then
+            appid=$(tr -dc '0-9' < "$target/steam_appid.txt")
+        fi
+        if [ -z "$appid" ]; then
+            local base_dir
+            base_dir="$(basename "$target")"
+            local parent_apps
+            parent_apps="$(dirname "$target")"
+            if [ "$(basename "$parent_apps")" = "common" ]; then
+                local steamapps_dir
+                steamapps_dir="$(dirname "$parent_apps")"
+                local acf
+                for acf in "$steamapps_dir"/appmanifest_*.acf; do
+                    [ -f "$acf" ] || continue
+                    local installdir
+                    installdir=$(grep -E '^\s*"installdir"' "$acf" | head -n 1 | sed -E 's/.*"installdir"[[:space:]]+"([^"]+)".*/\1/')
+                    if [ "$installdir" = "$base_dir" ]; then
+                        appid=$(grep -E '^\s*"appid"' "$acf" | head -n 1 | sed -E 's/.*"appid"[[:space:]]+"([0-9]+)".*/\1/')
+                        break
+                    fi
+                done
+            fi
+        fi
+    fi
+
+    if [ -z "$appid" ] || [[ ! "$appid" =~ ^[0-9]+$ ]]; then
+        echo "[ERROR] AppID tidak valid atau direktori game tidak memiliki steam_appid.txt: $target" >&2
+        return 1
+    fi
+
+    echo "${UI_BOX}╭─ PROTONDB COMPATIBILITY REPORT ─────────────────────────────╮${UI_RST}"
+    echo "│ ${UI_CYAN}Target AppID${UI_RST}  : ${UI_BOLD}$appid${UI_RST}"
+
+    local pdb=""
+    pdb=$(curl -s --connect-timeout 3 --max-time 5 "https://www.protondb.com/api/v1/reports/summaries/${appid}.json" 2>/dev/null || true)
+
+    if [ -n "$pdb" ] && [ "$pdb" != "null" ] && echo "$pdb" | jq . >/dev/null 2>&1; then
+        local tier score conf trending
+        tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null)
+        score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null)
+        conf=$(echo "$pdb" | jq -r ".confidence // \"-\"" 2>/dev/null)
+        trending=$(echo "$pdb" | jq -r ".trendingTier // \"-\"" 2>/dev/null)
+
+        local tier_upper="${tier^^}"
+        local c_tier="${UI_GREEN}[$tier_upper]${UI_RST}"
+        local recommendation=""
+
+        case "$tier_upper" in
+            *PLATINUM*)
+                c_tier="${UI_ICE}[PLATINUM]${UI_RST}"
+                recommendation="Plug and Play. Bekerja sempurna tanpa tweaking khusus."
+                ;;
+            *GOLD*)
+                c_tier="${UI_AMBER}[GOLD]${UI_RST}"
+                recommendation="Berjalan baik setelah tweak minor (e.g. GE-Proton / DirectX override)."
+                ;;
+            *SILVER*)
+                c_tier="${UI_DIM}[SILVER]${UI_RST}"
+                recommendation="Dapat dimainkan dengan beberapa isu minor / membutuhkan launch options khusus."
+                ;;
+            *BRONZE*)
+                c_tier="${UI_AMBER}[BRONZE]${UI_RST}"
+                recommendation="Sering crash atau glitch grafis. Disarankan menggunakan GE-Proton versi spesifik."
+                ;;
+            *BORKED*)
+                c_tier="${UI_RED}[BORKED]${UI_RST}"
+                recommendation="Game saat ini tidak dapat berjalan di Wine/Proton (kemungkinan Anti-Cheat invasif)."
+                ;;
+            *NATIVE*)
+                c_tier="${UI_GREEN}[NATIVE]${UI_RST}"
+                recommendation="Tersedia build Native Linux ELF tanpa emulasi Wine."
+                ;;
+            *)
+                recommendation="Laporan kompatibilitas terbatas. Uji coba dengan GE-Proton terbaru."
+                ;;
+        esac
+
+        echo "│ ${UI_CYAN}ProtonDB Tier${UI_RST} : $c_tier"
+        echo "│ ${UI_CYAN}Rating Score ${UI_RST} : ${UI_BOLD}$score${UI_RST} ${UI_DIM}(Confidence: $conf, Trending: $trending)${UI_RST}"
+        echo "│ ${UI_CYAN}Rekomendasi  ${UI_RST} : $recommendation"
+        echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+        return 0
+    else
+        echo "│ ${UI_CYAN}ProtonDB Tier${UI_RST} : ${UI_DIM}[NO REPORTS YET]${UI_RST}"
+        echo "│ ${UI_CYAN}Keterangan   ${UI_RST} : Belum ada laporan komunitas terdaftar untuk AppID $appid."
+        echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+        return 0
+    fi
+}
+

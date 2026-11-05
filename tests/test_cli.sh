@@ -343,6 +343,40 @@ test_wineserver_lifecycle_guard() {
 }
 run_test "Wineserver Guard (DEFECT-02): Integrated flush (-w) and kill (-k)" test_wineserver_lifecycle_guard
 
+test_protondb_invalid_target() {
+    local exit_code=0
+    "$GAMECTL" protondb "invalid_non_numeric_target_xyz" >/dev/null 2>&1 || exit_code=$?
+    [ "$exit_code" -ne 0 ]
+}
+run_test "ProtonDB Audit: Reject non-numeric AppID without steam_appid.txt" test_protondb_invalid_target
+
+test_protondb_query_flow() {
+    local out
+    out=$("$GAMECTL" protondb 480)
+    echo "$out" | grep -q "PROTONDB COMPATIBILITY REPORT" && \
+    echo "$out" | grep -q "Target AppID"
+}
+run_test "ProtonDB Audit: Query reports and display compatibility tier" test_protondb_query_flow
+
+test_desktop_entry_lifecycle() {
+    local t_dir="/tmp/gamectl_test_desktop_$$"
+    mkdir -p "$t_dir"
+    touch "$t_dir/game.exe" "$t_dir/icon.png"
+    local exit_code=0
+    "$GAMECTL" make-desktop "$t_dir" "Test Cyber Odyssey" >/dev/null 2>&1 || exit_code=$?
+    local desk_file="$HOME/.local/share/applications/gamectl-testcyberodyssey.desktop"
+    local file_ok=0
+    if [ -f "$desk_file" ]; then
+        grep -q "Name=Test Cyber Odyssey" "$desk_file" && \
+        grep -q "Categories=Game;" "$desk_file" && \
+        file_ok=1
+        rm -f "$desk_file"
+    fi
+    rm -rf "$t_dir"
+    [ "$exit_code" -eq 0 ] && [ "$file_ok" -eq 1 ]
+}
+run_test "Desktop Entry Generator: Valid FreeDesktop specification format" test_desktop_entry_lifecycle
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

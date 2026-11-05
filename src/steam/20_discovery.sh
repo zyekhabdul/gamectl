@@ -294,3 +294,107 @@ scan_installed_games() {
     done
 }
 
+# Generate FreeDesktop .desktop application shortcut (Chunk 5)
+create_desktop_entry() {
+    local game_dir="${1:-}"
+    local title="${2:-}"
+
+    if [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
+        echo "[ERROR] Direktori game tidak ditemukan atau tidak valid: $game_dir" >&2
+        echo "Usage: gamectl make-desktop <game_dir> [title]" >&2
+        return 1
+    fi
+
+    game_dir="$(cd "$game_dir" 2>/dev/null && pwd || echo "$game_dir")"
+
+    # Attempt to resolve title if not supplied
+    if [ -z "$title" ]; then
+        local base_dir
+        base_dir="$(basename "$game_dir")"
+        local parent_apps
+        parent_apps="$(dirname "$game_dir")"
+        if [ "$(basename "$parent_apps")" = "common" ]; then
+            local steamapps_dir
+            steamapps_dir="$(dirname "$parent_apps")"
+            local acf
+            for acf in "$steamapps_dir"/appmanifest_*.acf; do
+                [ -f "$acf" ] || continue
+                local installdir
+                installdir=$(grep -E '^\s*"installdir"' "$acf" | head -n 1 | sed -E 's/.*"installdir"[[:space:]]+"([^"]+)".*/\1/')
+                if [ "$installdir" = "$base_dir" ]; then
+                    title=$(grep -E '^\s*"name"' "$acf" | head -n 1 | sed -E 's/.*"name"[[:space:]]+"([^"]+)".*/\1/')
+                    break
+                fi
+            done
+        fi
+        [ -z "$title" ] && title="$base_dir"
+    fi
+
+    # Locate game binary
+    local gbin
+    gbin="$(find_game_binary "$game_dir" 2>/dev/null || true)"
+    if [ -z "$gbin" ]; then
+        echo "[WARN] Biner executable game tidak terdeteksi otomatis di $game_dir" >&2
+    fi
+
+    # Locate game icon (prefer icon.png, icon.ico, logo.png, or any png/ico)
+    local icon_path="applications-games"
+    local found_icon=""
+    for candidate in "icon.png" "icon.ico" "logo.png" "app.png" "banner.png"; do
+        if [ -f "$game_dir/$candidate" ]; then
+            found_icon="$game_dir/$candidate"
+            break
+        fi
+    done
+    if [ -z "$found_icon" ]; then
+        found_icon=$(find "$game_dir" -maxdepth 2 \( -name "*.ico" -o -name "*.png" \) 2>/dev/null | head -n 1 || true)
+    fi
+    [ -n "$found_icon" ] && icon_path="$found_icon"
+
+    # Resolve gamectl binary
+    local gamectl_bin
+    gamectl_bin="$(command -v gamectl 2>/dev/null || true)"
+    if [ -z "$gamectl_bin" ]; then
+        if [ -x "$HOME/.local/bin/gamectl" ]; then
+            gamectl_bin="$HOME/.local/bin/gamectl"
+        elif [ -x "/usr/local/bin/gamectl" ]; then
+            gamectl_bin="/usr/local/bin/gamectl"
+        else
+            gamectl_bin="gamectl"
+        fi
+    fi
+
+    # Sanitize title for desktop entry file name
+    local safe_title
+    safe_title=$(echo "$title" | tr -dc '[:alnum:]_-' | tr '[:upper:]' '[:lower:]')
+    [ -z "$safe_title" ] && safe_title="game"
+
+    local desk_dir="$HOME/.local/share/applications"
+    mkdir -p "$desk_dir"
+    local desk_file="$desk_dir/gamectl-${safe_title}.desktop"
+
+    cat <<EOF > "$desk_file"
+[Desktop Entry]
+Type=Application
+Name=$title
+Comment=Launched via gamectl
+Exec=$gamectl_bin launch "$game_dir" --hud
+Icon=$icon_path
+Terminal=false
+Categories=Game;
+Path=$game_dir
+StartupNotify=true
+EOF
+
+    chmod +x "$desk_file"
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "$desk_dir" 2>/dev/null || true
+    fi
+
+    echo "[VERIFIED] Desktop entry berhasil dibuat: $desk_file"
+    echo "[INFO] Judul    : $title"
+    echo "[INFO] Exec     : $gamectl_bin launch \"$game_dir\" --hud"
+    echo "[INFO] Icon     : $icon_path"
+    return 0
+}
+
