@@ -64,6 +64,9 @@ game_controller_hud() {
                         sleep 0.3
                         wait_cnt=$((wait_cnt + 1))
                     done
+                    if [ -d "$gdir/pfx" ]; then
+                        WINEPREFIX="$gdir/pfx" wineserver -w 2>/dev/null || true
+                    fi
                     if ! kill -0 "$game_pid" 2>/dev/null; then
                         echo "  ${UI_GREEN}[SUCCESS] Game '$title' (PID $game_pid) berhasil dimatikan.${UI_RST}"
                         rm -f "$info_file" 2>/dev/null || true
@@ -75,6 +78,10 @@ game_controller_hud() {
                 5)
                     echo "  [INFO] Mengirim sinyal SIGKILL ke proses PID $game_pid..."
                     kill -9 "$game_pid" 2>/dev/null || true
+                    if [ -d "$gdir/pfx" ]; then
+                        # Remediation DEFECT-02: Force terminate stuck wineserver daemon and release lockfiles
+                        WINEPREFIX="$gdir/pfx" wineserver -k 2>/dev/null || true
+                    fi
                     sleep 0.3
                     echo "  ${UI_GREEN}[SUCCESS] Game '$title' (PID $game_pid) dimatikan secara paksa.${UI_RST}"
                     rm -f "$info_file" 2>/dev/null || true
@@ -249,6 +256,10 @@ launch_game() {
         if [ -n "$prev_governor" ] && [ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
             echo "$prev_governor" | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
         fi
+        if [ "$is_win" = true ] && [ -d "$gdir/pfx" ]; then
+            # Remediation DEFECT-02: Flush wine prefix writes to disk
+            WINEPREFIX="$gdir/pfx" wineserver -w 2>/dev/null || true
+        fi
         clean_stale_locks
     }
     trap '_restore_launch_state; trap - INT TERM EXIT; return 130 2>/dev/null || exit 130' INT
@@ -369,6 +380,10 @@ EOF
     # Detached background watchdog to restore CPU governor and cleanup when process exits
     (
         wait "$game_pid" 2>/dev/null
+        if [ "$is_win" = true ] && [ -d "$pfx_dir" ]; then
+            # Remediation DEFECT-02: Wait for wineserver to flush data & release lockfile before snapshot
+            WINEPREFIX="$pfx_dir" wineserver -w 2>/dev/null || true
+        fi
         rm -f "$info_file" 2>/dev/null || true
         _restore_launch_state
     ) &

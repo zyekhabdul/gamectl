@@ -486,6 +486,192 @@ proton_remove() {
     return 0
 }
 
+# Wine Prefix Swiss Army Knife & Wineserver Lifecycle Guard (Chunk 4)
+manage_prefix() {
+    local game_dir="${1:-}"
+    local action="${2:-}"
+    shift 2 2>/dev/null || shift $# 2>/dev/null || true
+
+    if [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
+        echo "[ERROR] Direktori game tidak ditemukan atau tidak valid: $game_dir" >&2
+        echo "Usage: gamectl pfx <game_dir> [winecfg|regedit|cmd|shell|kill|clean|winetricks] [args...]" >&2
+        return 1
+    fi
+
+    # Canonicalize game_dir path
+    game_dir="$(cd "$game_dir" 2>/dev/null && pwd || echo "$game_dir")"
+    local pfx_dir="$game_dir/pfx"
+    local runner_bin
+    runner_bin="$(find_runner "$game_dir" 2>/dev/null || true)"
+    [ -z "$runner_bin" ] && runner_bin="wine"
+
+    # AppID resolution
+    local appid="0"
+    if [ -f "$game_dir/steam_appid.txt" ]; then
+        appid=$(tr -dc '0-9' < "$game_dir/steam_appid.txt")
+        [ -z "$appid" ] && appid="0"
+    fi
+
+    # Wineserver resolution
+    local ws_bin="wineserver"
+    if [[ "$runner_bin" =~ proton ]]; then
+        local p_base
+        p_base="$(dirname "$runner_bin")"
+        if [ -x "$p_base/files/bin/wineserver" ]; then
+            ws_bin="$p_base/files/bin/wineserver"
+        elif [ -x "$p_base/dist/bin/wineserver" ]; then
+            ws_bin="$p_base/dist/bin/wineserver"
+        elif [ -x "$p_base/bin/wineserver" ]; then
+            ws_bin="$p_base/bin/wineserver"
+        fi
+    fi
+
+    # Interactive menu if action is empty and stdin is terminal
+    if [ -z "$action" ]; then
+        if [ -t 0 ]; then
+            clear
+            echo "${UI_BOX}╭─ WINE PREFIX SWISS ARMY KNIFE ──────────────────────────────╮${UI_RST}"
+            echo "│ ${UI_CYAN}Game Directory${UI_RST} : ${UI_BOLD}$game_dir${UI_RST}"
+            echo "│ ${UI_CYAN}Prefix Path   ${UI_RST} : ${UI_BOLD}$pfx_dir${UI_RST}"
+            echo "│ ${UI_CYAN}Active Runner ${UI_RST} : ${UI_GREEN}$runner_bin${UI_RST}"
+            echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+            echo "  ${UI_PURPLE}1)${UI_RST} winecfg      ${UI_DIM}(Konfigurasi Wine Audio, Grafis & Windows Version)${UI_RST}"
+            echo "  ${UI_PURPLE}2)${UI_RST} regedit      ${UI_DIM}(Windows Registry Editor)${UI_RST}"
+            echo "  ${UI_PURPLE}3)${UI_RST} cmd          ${UI_DIM}(Windows Command Prompt)${UI_RST}"
+            echo "  ${UI_PURPLE}4)${UI_RST} shell        ${UI_DIM}(Subshell Bash Host dengan WINEPREFIX terpasang)${UI_RST}"
+            echo "  ${UI_PURPLE}5)${UI_RST} winetricks   ${UI_DIM}(Winetricks GUI / Package Manager)${UI_RST}"
+            echo "  ${UI_AMBER}6)${UI_RST} kill         ${UI_DIM}(Matikan Wineserver yang terkunci / hung)${UI_RST}"
+            echo "  ${UI_RED}7)${UI_RST} clean        ${UI_DIM}(Backup Saves & Reset Total Wine Prefix)${UI_RST}"
+            echo "  ${UI_CYAN}8)${UI_RST} Keluar"
+            echo
+            local choice=""
+            read -r -p "Pilih aksi [1-8]: " choice
+            case "$choice" in
+                1) action="winecfg" ;;
+                2) action="regedit" ;;
+                3) action="cmd" ;;
+                4) action="shell" ;;
+                5) action="winetricks" ;;
+                6) action="kill" ;;
+                7) action="clean" ;;
+                *) echo "[INFO] Operasi dibatalkan."; return 0 ;;
+            esac
+        else
+            echo "Usage: gamectl pfx <game_dir> [winecfg|regedit|cmd|shell|kill|clean|winetricks] [args...]" >&2
+            return 1
+        fi
+    fi
+
+    case "$action" in
+        kill)
+            echo "[INFO] Mengirim sinyal terminasi paksa (wineserver -k) pada prefix: $pfx_dir"
+            if [ -d "$pfx_dir" ]; then
+                WINEPREFIX="$pfx_dir" "$ws_bin" -k 2>/dev/null || WINEPREFIX="$pfx_dir" wineserver -k 2>/dev/null || true
+            fi
+            echo "[VERIFIED] Wineserver untuk prefix $pfx_dir telah dihentikan."
+            return 0
+            ;;
+        clean)
+            echo "[INFO] Memulai pembersihan Wine prefix: $pfx_dir"
+            if [ ! -d "$pfx_dir" ]; then
+                echo "[INFO] Direktori prefix $pfx_dir belum ada, tidak ada yang perlu dibersihkan."
+                return 0
+            fi
+
+            # 1. Create save snapshot backup
+            backup_save "$game_dir" true || true
+
+            # 2. Kill running wineserver
+            WINEPREFIX="$pfx_dir" "$ws_bin" -k 2>/dev/null || WINEPREFIX="$pfx_dir" wineserver -k 2>/dev/null || true
+            sleep 0.2
+
+            # 3. Confirmation check
+            local auto_yes=false
+            for arg in "$@"; do
+                if [ "$arg" = "-y" ] || [ "$arg" = "--yes" ]; then
+                    auto_yes=true
+                fi
+            done
+
+            if [ "$auto_yes" = false ] && [ -t 0 ]; then
+                echo -n "[WARN] Hapus seluruh Wine prefix ($pfx_dir)? Registry & konfigurasi Wine akan di-reset. [y/N]: "
+                local confirm=""
+                read -t 10 -r confirm || confirm="n"
+                echo
+                if [[ ! "$confirm" =~ ^[yY] ]]; then
+                    echo "[INFO] Pembersihan prefix dibatalkan."
+                    return 0
+                fi
+            fi
+
+            # 4. Remove pfx folder safely
+            rm -rf "$pfx_dir"
+            echo "[VERIFIED] Prefix Wine berhasil dibersihkan ($pfx_dir dihapus)."
+            return 0
+            ;;
+        shell)
+            echo "[INFO] Membuka subshell bash di dalam lingkungan prefix $pfx_dir"
+            echo "[INFO] Lingkungan aktif: WINEPREFIX=$pfx_dir, RUNNER=$runner_bin"
+            echo "[INFO] Ketik 'exit' untuk kembali ke gamectl."
+            (
+                export WINEPREFIX="$pfx_dir"
+                export GAMECTL_RUNNER="$runner_bin"
+                if [[ "$runner_bin" =~ proton ]]; then
+                    export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_INSTALL_PATH:-$(get_steam_root 2>/dev/null || echo "$HOME/.local/share/Steam")}"
+                    export STEAM_COMPAT_DATA_PATH="$game_dir"
+                    export STEAM_COMPAT_APP_ID="$appid"
+                    local p_bin_dir
+                    p_bin_dir="$(dirname "$runner_bin")/files/bin"
+                    [ -d "$p_bin_dir" ] && export PATH="$p_bin_dir:$PATH"
+                fi
+                cd "$game_dir" || true
+                exec bash -i
+            )
+            return 0
+            ;;
+        winecfg|regedit|cmd)
+            mkdir -p "$pfx_dir"
+            echo "[INFO] Menjalankan $action pada prefix: $pfx_dir (Runner: $runner_bin)..."
+            local target_exec="$action"
+            [ "$action" = "cmd" ] && target_exec="cmd.exe"
+
+            local s_root
+            s_root="$(get_steam_root 2>/dev/null || echo "$HOME/.local/share/Steam")"
+
+            case "$runner_bin" in
+                umu-run)
+                    WINEPREFIX="$pfx_dir" GAMEID="$appid" umu-run "$target_exec" "$@"
+                    ;;
+                *proton*)
+                    STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_INSTALL_PATH:-$s_root}" \
+                    STEAM_COMPAT_DATA_PATH="$game_dir" \
+                    STEAM_COMPAT_APP_ID="$appid" \
+                    WINEPREFIX="$pfx_dir" \
+                    "$runner_bin" run "$target_exec" "$@"
+                    ;;
+                *)
+                    WINEPREFIX="$pfx_dir" "$runner_bin" "$target_exec" "$@"
+                    ;;
+            esac
+            ;;
+        winetricks)
+            if ! command -v winetricks >/dev/null 2>&1; then
+                echo "[ERROR] Biner 'winetricks' tidak ditemukan di sistem host." >&2
+                echo "[INFO] Silakan pasang winetricks via package manager distro Anda (e.g. pacman -S winetricks / apt install winetricks)." >&2
+                return 1
+            fi
+            mkdir -p "$pfx_dir"
+            echo "[INFO] Menjalankan winetricks pada prefix: $pfx_dir"
+            WINEPREFIX="$pfx_dir" winetricks "$@"
+            ;;
+        *)
+            echo "[ERROR] Aksi prefix tidak dikenal: '$action'" >&2
+            echo "Aksi yang didukung: winecfg, regedit, cmd, shell, kill, clean, winetricks" >&2
+            return 1
+            ;;
+    esac
+}
+
 # Check if host GPU is Intel Haswell / 4th Gen Core (prone to Mesa GL threaded asset decompression crashes)
 is_haswell_gpu() {
     local gpu_info=""

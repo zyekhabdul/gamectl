@@ -305,6 +305,44 @@ test_proton_mock_lifecycle() {
 }
 run_test "Proton Manager: Safe deletion lifecycle (proton-remove)" test_proton_mock_lifecycle
 
+test_prefix_invalid_dir() {
+    local exit_code=0
+    "$GAMECTL" pfx "/nonexistent/mock/game/dir_999" kill >/dev/null 2>&1 || exit_code=$?
+    [ "$exit_code" -ne 0 ]
+}
+run_test "Prefix Manager: Reject invalid or nonexistent game directory" test_prefix_invalid_dir
+
+test_prefix_kill_lifecycle() {
+    local t_dir="/tmp/gamectl_test_pfx_kill_$$"
+    mkdir -p "$t_dir/pfx"
+    local exit_code=0
+    "$GAMECTL" pfx "$t_dir" kill >/dev/null 2>&1 || exit_code=$?
+    rm -rf "$t_dir"
+    [ "$exit_code" -eq 0 ]
+}
+run_test "Prefix Manager: Kill command lifecycle & zero error exit" test_prefix_kill_lifecycle
+
+test_prefix_clean_lifecycle() {
+    local t_dir="/tmp/gamectl_test_pfx_clean_$$"
+    mkdir -p "$t_dir/pfx/drive_c" "$t_dir/saves"
+    echo "test_save" > "$t_dir/saves/save.dat"
+    local exit_code=0
+    "$GAMECTL" pfx "$t_dir" clean --yes >/dev/null 2>&1 || exit_code=$?
+    local pfx_gone=0
+    [ ! -d "$t_dir/pfx" ] && pfx_gone=1
+    local snapshot_ok=0
+    [ -d "$t_dir/.save_snapshots/slot1" ] && snapshot_ok=1
+    rm -rf "$t_dir"
+    [ "$exit_code" -eq 0 ] && [ "$pfx_gone" -eq 1 ] && [ "$snapshot_ok" -eq 1 ]
+}
+run_test "Prefix Manager: Clean command backup and wipe lifecycle" test_prefix_clean_lifecycle
+
+test_wineserver_lifecycle_guard() {
+    grep -q 'wineserver -w' "$REPO_ROOT/src/runners/50_launcher.sh" && \
+    grep -q 'wineserver -k' "$REPO_ROOT/src/runners/50_launcher.sh"
+}
+run_test "Wineserver Guard (DEFECT-02): Integrated flush (-w) and kill (-k)" test_wineserver_lifecycle_guard
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
