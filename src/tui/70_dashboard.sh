@@ -213,7 +213,7 @@ preview_dashboard() {
 
     local def_runner
     def_runner=$(find_runner "$HOME" 2>/dev/null || true)
-    local runner_str="${UI_DIM}[MISSING] Belum terpasang${UI_RST}"
+    local runner_str="${UI_DIM}[MISSING] Not installed${UI_RST}"
     if [ -n "$def_runner" ]; then
         runner_str="${UI_PURPLE}$(basename "$def_runner")${UI_RST} ${UI_DIM}($def_runner)${UI_RST}"
     fi
@@ -271,7 +271,7 @@ preview_dashboard() {
     echo
 
     case "$item_key" in
-        *1*|*PUSTAKA*|*LIBRARY*)
+        *1*|*LIBRARY*|*PUSTAKA*)
             echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
             echo "│ ${UI_BOLD}[01] GAME LIBRARY${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
@@ -280,7 +280,7 @@ preview_dashboard() {
             echo "  • Automatic 3-slot savegame snapshot protection before launch."
             echo "  • Action shortcuts: ${UI_CYAN}Ctrl-I${UI_RST} (Inject), ${UI_CYAN}Ctrl-O${UI_RST} (Wrappers), ${UI_CYAN}Ctrl-P${UI_RST} (Persona)."
             ;;
-        *2*|*PENCARIAN*|*SEARCH*)
+        *2*|*SEARCH*|*PENCARIAN*)
             echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
             echo "│ ${UI_BOLD}[02] STEAM STORE SEARCH & PROTONDB${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
@@ -288,7 +288,7 @@ preview_dashboard() {
             echo "  • Instant Linux compatibility tier audit from ProtonDB."
             echo "  • One-click background or foreground headless download."
             ;;
-        *3*|*UNDUHAN*|*DOWNLOAD*)
+        *3*|*DOWNLOAD*|*UNDUHAN*)
             echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
             echo "│ ${UI_BOLD}[03] DOWNLOAD MONITOR${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
@@ -302,7 +302,7 @@ preview_dashboard() {
             echo "  • Register AppID & full DLC entitlements directly to SLSsteam."
             echo "  • Generate appmanifest_<appid>.acf automatically without downloading."
             ;;
-        *5*|*KONFIGURASI*|*CONFIG*)
+        *5*|*CONFIG*|*SETTINGS*|*KONFIGURASI*)
             echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
             echo "│ ${UI_BOLD}[05] GLOBAL CONFIGURATION${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
@@ -310,7 +310,7 @@ preview_dashboard() {
             echo "  • Set default runtime wrappers (GameMode, MangoHud, Gamescope FSR)."
             echo "  • Configure additional library paths & remote companion sync host."
             ;;
-        *6*|*DIAGNOSTIK*|*DOCTOR*|*AUDIT*)
+        *6*|*DOCTOR*|*AUDIT*|*DIAGNOSTICS*|*DIAGNOSTIK*)
             echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
             echo "│ ${UI_BOLD}[06] SYSTEM DIAGNOSTICS (HEALTH AUDIT)${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
@@ -436,11 +436,11 @@ library_menu() {
 
 # Live Steam Search View (Actionable TUI Search)
 search_steam() {
-    echo -n "Masukkan nama game yang dicari: "
+    echo -n "Enter game title to search: "
     read -r query
     [ -z "$query" ] && return
 
-    echo "[INFO] Mencari '$query' di Steam Store API..."
+    echo "[INFO] Searching '$query' on Steam Store API..."
     local encoded_query
     encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$query")
     local raw_results
@@ -450,7 +450,7 @@ search_steam() {
     items=$(echo "$raw_results" | jq -r '.items[]? | "\(.id)\t\(.name)"' 2>/dev/null || true)
 
     if [ -z "$items" ]; then
-        echo "[INFO] Game tidak ditemukan."
+        echo "[INFO] Game not found."
         sleep 1
         return
     fi

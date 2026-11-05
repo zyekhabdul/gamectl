@@ -179,7 +179,7 @@ account_name=$player_name
 account_steamid=$steamid
 language=english
 EOF
-        echo "[INFO] Identitas global tersimpan di ~/.config/gamectl/persona ($player_name | $steamid)"
+        echo "[INFO] Global persona saved to ~/.config/gamectl/persona ($player_name | $steamid)"
     fi
 
     if [ -n "$target_dir" ] && [ -d "$target_dir" ]; then
@@ -215,7 +215,7 @@ EOF
         if [ ! -f "$bc_file" ]; then
             cat <<EOF > "$bc_file"
 # GBE Fork LAN Custom Broadcast IP list
-# Tambahkan IP peer atau broadcast subnet (satu IP per baris)
+# Add peer IPs or broadcast subnets (one IP per line)
 127.0.0.1
 255.255.255.255
 EOF
@@ -229,7 +229,7 @@ EOF
                     [ -z "$s_ip" ] && continue
                     if ! grep -q -F "$s_ip" "$bc_file" 2>/dev/null; then
                         echo "$s_ip" >> "$bc_file"
-                        echo "[INFO] Ditambahkan broadcast IP: $s_ip"
+                        echo "[INFO] Added broadcast IP: $s_ip"
                     fi
                 done
             done
@@ -246,8 +246,8 @@ EOF
             fi
         done
 
-        echo "[VERIFIED] Identitas LAN game diperbarui di $target_dir:"
-        echo "           Nama Pemain : $player_name"
+        echo "[VERIFIED] Game LAN identity updated in $target_dir:"
+        echo "           Player Name : $player_name"
         echo "           SteamID64   : $steamid"
         echo "           Config File : $ini_file"
         local is_gbe_check=false
@@ -259,7 +259,7 @@ EOF
             fi
         done
         if [ "$is_gbe_check" = false ]; then
-            echo "           Catatan     : Game belum di-inject GBE Fork. Tekan <CTRL-I> untuk mengaktifkan."
+            echo "           Note        : Game is not injected with GBE Fork yet. Press <CTRL-I> to enable."
         fi
     fi
 }
@@ -269,7 +269,7 @@ set_id_interactive() {
     local target_dir="${1:-}"
     local title="${2:-}"
     if [ -z "$target_dir" ] || [ ! -d "$target_dir" ]; then
-        echo "[ERROR] Direktori game tidak valid: $target_dir" >&2
+        echo "[ERROR] Invalid game directory: $target_dir" >&2
         return 1
     fi
     target_dir="$(cd "$target_dir" && pwd)"

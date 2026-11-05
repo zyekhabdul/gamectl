@@ -4,7 +4,7 @@ fetch_dlc() {
     local appid="${2:-}"
 
     if [ ! -d "$target_dir" ]; then
-        echo "[ERROR] Direktori target tidak ditemukan: $target_dir" >&2
+        echo "[ERROR] Target directory not found: $target_dir" >&2
         return 1
     fi
 
@@ -18,11 +18,11 @@ fetch_dlc() {
     fi
 
     if [ -z "$appid" ] || [ "$appid" = "STANDALONE" ]; then
-        echo "[WARN] AppID numerik tidak ditemukan. Melewati pembuatan DLC.txt."
+        echo "[WARN] Numeric AppID not found. Skipping DLC.txt generation."
         return 0
     fi
 
-    echo "[INFO] Mengambil daftar DLC untuk AppID $appid dari Steam API..."
+    echo "[INFO] Fetching DLC list for AppID $appid from Steam API..."
     local dlc_file="$target_dir/steam_settings/DLC.txt"
     mkdir -p "$target_dir/steam_settings"
 
@@ -48,10 +48,10 @@ fetch_dlc() {
         [ -s "$dlc_file" ] && echo "" >> "$dlc_file"
         local count
         count=$(grep -c "=" "$dlc_file" || echo 0)
-        echo "[VERIFIED] Berhasil menulis $count DLC ke: $dlc_file"
+        echo "[VERIFIED] Successfully wrote $count DLC(s) to: $dlc_file"
     else
         touch "$dlc_file"
-        echo "[INFO] Tidak ada DLC yang ditemukan di Steam API. File kosong: $dlc_file"
+        echo "[INFO] No DLC found in Steam API. Created empty file: $dlc_file"
     fi
 }
 
@@ -83,7 +83,7 @@ ensure_downloader() {
                 ;;
         esac
 
-        echo "[INFO] Mengunduh DepotDownloader standalone binary ($dl_arch)..." >&2
+        echo "[INFO] Downloading DepotDownloader standalone binary ($dl_arch)..." >&2
         mkdir -p "$HOME/.local/share/gamectl/bin" "$HOME/.local/bin"
         local dl_url="https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_3.4.0/DepotDownloader-${dl_arch}.zip"
         local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
@@ -95,16 +95,16 @@ ensure_downloader() {
             ln -sf "$HOME/.local/share/gamectl/bin/DepotDownloader" "$HOME/.local/bin/depotdownloader"
             rm -f "$dl_zip"
             depot_bin="$HOME/.local/share/gamectl/bin/DepotDownloader"
-            echo "[VERIFIED] DepotDownloader terpasang di $depot_bin" >&2
+            echo "[VERIFIED] DepotDownloader installed at: $depot_bin" >&2
         else
-            echo "[ERROR] Gagal mengunduh DepotDownloader dari GitHub." >&2
+            echo "[ERROR] Failed to download DepotDownloader from GitHub." >&2
             return 1
         fi
     fi
     echo "$depot_bin"
 }
 
-# Headless Game Downloader (Pengganti ACCELA & SteaMidra)
+# Headless Game Downloader (Standalone CLI Engine)
 download_game() {
     local appid="${1:-}"
     if [ -z "$appid" ]; then
@@ -182,74 +182,74 @@ download_game() {
     echo " HEADLESS GAME DOWNLOADER (DepotDownloader)"
     echo "=========================================="
     echo " AppID     : $appid"
-    echo " Judul     : $title"
-    echo " Target    : $target_dir"
-    echo " Paket     : $action (raw / inject / all)"
-    echo " Log Stream: $log_file"
-    [ -n "$steam_user" ] && echo " Steam User: $steam_user"
+    echo " Title      : $title"
+    echo " Target Dir : $target_dir"
+    echo " Package    : $action (raw / inject / all)"
+    echo " Log Stream : $log_file"
+    [ -n "$steam_user" ] && echo " Steam User : $steam_user"
     echo "=========================================="
 
     if [ "$exec_mode" = "fg" ]; then
-        echo "[INFO] Menjalankan unduhan di foreground..."
-        echo "[INFO] Mulai unduh AppID $appid ke $target_dir pada $(date)" > "$log_file"
+        echo "[INFO] Running download in foreground..."
+        echo "[INFO] Starting download of AppID $appid to $target_dir at $(date)" > "$log_file"
         "$depot_bin" -app "$appid" -os linux "${extra_args[@]}" -dir "$target_dir" 2>&1 | tee -a "$log_file"
         local dl_status="${PIPESTATUS[0]}"
         if [ "$dl_status" -eq 0 ]; then
             case "$action" in
                 raw)
-                    echo "[SUCCESS] Unduhan aset mentah selesai untuk $title ($appid)."
+                    echo "[SUCCESS] Raw asset download completed for $title ($appid)."
                     ;;
                 inject)
-                    echo "[INFO] Menjalankan injeksi GBE Fork standalone..."
+                    echo "[INFO] Executing standalone GBE Fork injection..."
                     "$SELF_BIN" inject "$target_dir" "$appid" --no-sync
-                    echo "[SUCCESS] Unduh dan injeksi standalone selesai untuk $title ($appid)."
+                    echo "[SUCCESS] Download and standalone injection completed for $title ($appid)."
                     ;;
                 all|*)
-                    echo "[INFO] Menjalankan injeksi GBE Fork dan sinkronisasi Steam Client..."
+                    echo "[INFO] Executing GBE Fork injection and Steam Client synchronization..."
                     "$SELF_BIN" inject "$target_dir" "$appid"
-                    echo "[SUCCESS] Instalasi All-in-One selesai untuk $title ($appid)."
+                    echo "[SUCCESS] All-in-One installation completed for $title ($appid)."
                     ;;
             esac
         else
-            echo "[ERROR] Unduhan gagal (exit code: $dl_status). Cek: $log_file" >&2
+            echo "[ERROR] Download failed (exit code: $dl_status). See: $log_file" >&2
             return "$dl_status"
         fi
     else
-        echo "[INFO] Meluncurkan proses unduh di background..."
+        echo "[INFO] Spawning download process in background..."
         (
-            echo "[INFO] Mulai unduh AppID $appid ke $target_dir pada $(date)" > "$log_file"
+            echo "[INFO] Starting download of AppID $appid to $target_dir at $(date)" > "$log_file"
             "$depot_bin" -app "$appid" -os linux "${extra_args[@]}" -dir "$target_dir" >> "$log_file" 2>&1
             local bg_status=$?
             if [ $bg_status -eq 0 ]; then
                 case "$action" in
                     raw)
-                        echo "[SUCCESS] Unduhan aset mentah selesai untuk $title ($appid) pada $(date)." >> "$log_file"
+                        echo "[SUCCESS] Raw asset download completed for $title ($appid) at $(date)." >> "$log_file"
                         ;;
                     inject)
-                        echo "[INFO] Menjalankan injeksi GBE Fork standalone..." >> "$log_file"
+                        echo "[INFO] Executing standalone GBE Fork injection..." >> "$log_file"
                         "$SELF_BIN" inject "$target_dir" "$appid" --no-sync >> "$log_file" 2>&1
-                        echo "[SUCCESS] Unduh dan injeksi standalone selesai untuk $title ($appid) pada $(date)." >> "$log_file"
+                        echo "[SUCCESS] Download and standalone injection completed for $title ($appid) at $(date)." >> "$log_file"
                         ;;
                     all|*)
-                        echo "[INFO] Menjalankan auto-inject dan sinkronisasi Steam Client..." >> "$log_file"
+                        echo "[INFO] Executing auto-injection and Steam Client synchronization..." >> "$log_file"
                         "$SELF_BIN" inject "$target_dir" "$appid" >> "$log_file" 2>&1
-                        echo "[SUCCESS] Pemasangan lengkap All-in-One selesai untuk $title ($appid) pada $(date)." >> "$log_file"
+                        echo "[SUCCESS] All-in-One complete installation finished for $title ($appid) at $(date)." >> "$log_file"
                         ;;
                 esac
             else
-                echo "[ERROR] Unduhan gagal (exit code: $bg_status) pada $(date)." >> "$log_file"
+                echo "[ERROR] Download failed (exit code: $bg_status) at $(date)." >> "$log_file"
             fi
         ) &
         local pid=$!
-        echo "[VERIFIED] Unduhan berjalan di background (PID: $pid)."
-        echo "Pantau progres: tail -f $log_file"
+        echo "[VERIFIED] Download running in background (PID: $pid)."
+        echo "Monitor progress: tail -f $log_file"
     fi
 }
 
 # List active and recent downloads
 list_downloads() {
     echo "=========================================="
-    echo " STATUS UNDUHAN GAMECTL (DepotDownloader)"
+    echo " GAMECTL DOWNLOAD STATUS (DepotDownloader)"
     echo "=========================================="
     local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
     local count=0
@@ -261,16 +261,16 @@ list_downloads() {
         count=$((count + 1))
         local appid
         appid=$(basename "$log" | sed -E 's/gamectl_dl_([0-9]+)\.log/\1/')
-        local status="[SELESAI/BERHENTI]"
+        local status="[COMPLETED/STOPPED]"
         if pgrep -f "DepotDownloader.*-app[[:space:]]+${appid}([[:space:]]|$)" >/dev/null 2>&1; then
-            status="[SEDANG MENGUNDUH]"
+            status="[DOWNLOADING]"
         fi
         echo "$status AppID: $appid | Log: $log"
         tail -n 2 "$log" 2>/dev/null | sed 's/^/  > /'
         echo "------------------------------------------"
     done
     if [ $count -eq 0 ]; then
-        echo "[INFO] Tidak ada riwayat atau proses unduhan aktif di $run_dir."
+        echo "[INFO] No active or recent download tasks in $run_dir."
     fi
 }
 
@@ -379,7 +379,7 @@ sync_steam() {
     local game_dir="${3:-}"
 
     if [ -z "$appid" ] || [ "$appid" = "STANDALONE" ]; then
-        echo "[WARN] AppID numerik tidak valid. Melewati sinkronisasi Steam." >&2
+        echo "[WARN] Invalid numeric AppID. Skipping Steam synchronization." >&2
         return 0
     fi
 
@@ -391,7 +391,7 @@ sync_steam() {
     safe_title=$(echo "$title" | tr -cd '[:alnum:] _-')
     [ -z "$safe_title" ] && safe_title="$appid"
 
-    echo "[INFO] Sinkronisasi Steam Client & SLSsteam untuk: $title ($appid)..."
+    echo "[INFO] Synchronizing Steam Client & SLSsteam for: $title ($appid)..."
 
     # 1. Fetch DLC mapping via Steam API
     local dlc_json
@@ -417,7 +417,7 @@ except Exception:
     try:
         import yaml as pyyaml
     except Exception:
-        print('[ERROR] Tidak ditemukan library YAML di Python (ruamel.yaml atau pyyaml)', file=sys.stderr)
+        print('[ERROR] No YAML library found in Python (ruamel.yaml or pyyaml)', file=sys.stderr)
         sys.exit(1)
 
 try:
@@ -455,7 +455,7 @@ try:
         else:
             pyyaml.dump(data, f, default_flow_style=False, sort_keys=False)
     engine_name = 'ruamel.yaml' if has_ruamel else 'pyyaml (fallback)'
-    print(f'[VERIFIED] SLSsteam config.yaml: AppID {appid} dan {len(dlc_list)} DLC terdaftar ({engine_name}).')
+    print(f'[VERIFIED] SLSsteam config.yaml: AppID {appid} and {len(dlc_list)} DLC(s) registered ({engine_name}).')
 except Exception as e:
     print(f'[WARN] SLSsteam config sync notice: {e}', file=sys.stderr)
 " "$sls_cfg" "$appid" "$dlc_json" 2>/dev/null || true
@@ -506,12 +506,12 @@ ACF
             local common_target="$steam_apps/common/$install_name"
             if [ ! -e "$common_target" ]; then
                 ln -sf "$game_dir" "$common_target"
-                echo "[INFO] Symlink common dibuat: $common_target -> $game_dir"
+                echo "[INFO] Created common symlink: $common_target -> $game_dir"
             fi
         else
             mkdir -p "$steam_apps/common/$install_name"
         fi
-        echo "[VERIFIED] appmanifest_${appid}.acf terdaftar (Status: Terinstal di Steam, Size: $size_bytes bytes)."
+        echo "[VERIFIED] appmanifest_${appid}.acf registered (Status: Installed in Steam, Size: $size_bytes bytes)."
     fi
 }
 

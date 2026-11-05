@@ -300,7 +300,7 @@ create_desktop_entry() {
     local title="${2:-}"
 
     if [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
-        echo "[ERROR] Direktori game tidak ditemukan atau tidak valid: $game_dir" >&2
+        echo "[ERROR] Game directory not found or invalid: $game_dir" >&2
         echo "Usage: gamectl make-desktop <game_dir> [title]" >&2
         return 1
     fi
@@ -334,7 +334,7 @@ create_desktop_entry() {
     local gbin
     gbin="$(find_game_binary "$game_dir" 2>/dev/null || true)"
     if [ -z "$gbin" ]; then
-        echo "[WARN] Biner executable game tidak terdeteksi otomatis di $game_dir" >&2
+        echo "[WARN] Game executable binary not detected automatically in $game_dir" >&2
     fi
 
     # Locate game icon (prefer icon.png, icon.ico, logo.png, or any png/ico)
@@ -391,8 +391,8 @@ EOF
         update-desktop-database "$desk_dir" 2>/dev/null || true
     fi
 
-    echo "[VERIFIED] Desktop entry berhasil dibuat: $desk_file"
-    echo "[INFO] Judul    : $title"
+    echo "[VERIFIED] Desktop entry created successfully: $desk_file"
+    echo "[INFO] Title    : $title"
     echo "[INFO] Exec     : $gamectl_bin launch \"$game_dir\" --hud"
     echo "[INFO] Icon     : $icon_path"
     return 0
