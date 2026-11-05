@@ -816,11 +816,72 @@ check_systemd_scope_support() {
     return 1
 }
 
+# Detect discrete secondary GPU vendor on hybrid systems (NVIDIA, AMD, Intel Arc)
+detect_dgpu_vendor() {
+    if [ -n "${GAMECTL_DGPU_VENDOR:-}" ]; then
+        echo "$GAMECTL_DGPU_VENDOR"
+        return 0
+    fi
+
+    local vga_count=0
+    local vendors=()
+
+    for dev in /sys/bus/pci/devices/*; do
+        [ -f "$dev/class" ] || continue
+        local pci_class
+        pci_class=$(cat "$dev/class" 2>/dev/null || echo "")
+        case "$pci_class" in
+            0x0302*|0x030200*)
+                # Secondary 3D controller (Optimized for 3D acceleration / dGPU)
+                local v_id
+                v_id=$(cat "$dev/vendor" 2>/dev/null || echo "")
+                case "$v_id" in
+                    0x10de) echo "nvidia"; return 0 ;;
+                    0x1002) echo "amd"; return 0 ;;
+                    0x8086) echo "intel"; return 0 ;;
+                esac
+                ;;
+            0x0300*|0x030000*)
+                vga_count=$((vga_count + 1))
+                local v_id
+                v_id=$(cat "$dev/vendor" 2>/dev/null || echo "")
+                vendors+=("$v_id")
+                ;;
+        esac
+    done
+
+    # If multiple display controllers exist without a specific 0x0302 class device
+    if [ "$vga_count" -gt 1 ]; then
+        for v in "${vendors[@]}"; do
+            if [ "$v" = "0x10de" ]; then
+                echo "nvidia"
+                return 0
+            fi
+        done
+        local has_amd=false has_intel=false amd_count=0
+        for v in "${vendors[@]}"; do
+            [ "$v" = "0x1002" ] && { has_amd=true; amd_count=$((amd_count + 1)); }
+            [ "$v" = "0x8086" ] && has_intel=true
+        done
+        if [ "$has_amd" = true ] && [ "$has_intel" = true ]; then
+            echo "amd"
+            return 0
+        fi
+        if [ "$amd_count" -gt 1 ]; then
+            echo "amd"
+            return 0
+        fi
+    fi
+
+    echo "none"
+    return 0
+}
+
 # Resolve and build wrapper prefix command array (gamemoderun, mangohud, gamescope)
 build_wrapper_command() {
     local gdir="$1"
     shift || true
-    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr="" opt_systemd_scope=""
+    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr="" opt_systemd_scope="" opt_prime=""
     local remaining_args=()
 
     while [ $# -gt 0 ]; do
@@ -837,13 +898,15 @@ build_wrapper_command() {
             --no-glthread) opt_glthread=0; shift ;;
             --scope|--systemd-scope) opt_systemd_scope=1; shift ;;
             --no-scope|--no-systemd-scope) opt_systemd_scope=0; shift ;;
+            --prime) opt_prime=1; shift ;;
+            --no-prime) opt_prime=0; shift ;;
             --) shift; remaining_args+=("$@"); break ;;
             *) remaining_args+=("$1"); shift ;;
         esac
     done
 
     # 1. Base defaults
-    local use_gm=0 use_hud=0 use_scope=0 use_fsr=0 use_glthread=0 use_systemd_scope=""
+    local use_gm=0 use_hud=0 use_scope=0 use_fsr=0 use_glthread=0 use_systemd_scope="" use_prime=0
     local gscope_args
     gscope_args=$(get_default_gamescope_args)
 
@@ -860,6 +923,7 @@ build_wrapper_command() {
                 fsr) use_fsr="$v" ;;
                 glthread|mesa_glthread) use_glthread="$v" ;;
                 scope|systemd_scope) use_systemd_scope="$v" ;;
+                prime|dgpu) use_prime="$v" ;;
                 gamescope_args) gscope_args="$v" ;;
             esac
         done < "$HOME/.config/gamectl/wrappers"
@@ -878,6 +942,7 @@ build_wrapper_command() {
                 fsr) use_fsr="$v" ;;
                 glthread|mesa_glthread) use_glthread="$v" ;;
                 scope|systemd_scope) use_systemd_scope="$v" ;;
+                prime|dgpu) use_prime="$v" ;;
                 gamescope_args) gscope_args="$v" ;;
             esac
         done < "$gdir/.wrappers"
@@ -890,6 +955,7 @@ build_wrapper_command() {
     [ -n "${GAMECTL_FSR:-}" ] && use_fsr="$GAMECTL_FSR"
     [ -n "${GAMECTL_GLTHREAD:-}" ] && use_glthread="$GAMECTL_GLTHREAD"
     [ -n "${GAMECTL_SCOPE:-${GAMECTL_SYSTEMD_SCOPE:-}}" ] && use_systemd_scope="${GAMECTL_SCOPE:-$GAMECTL_SYSTEMD_SCOPE}"
+    [ -n "${GAMECTL_PRIME:-}" ] && use_prime="$GAMECTL_PRIME"
     [ -n "${GAMECTL_GAMESCOPE_ARGS:-}" ] && gscope_args="$GAMECTL_GAMESCOPE_ARGS"
 
     # 5. CLI flag overrides
@@ -899,6 +965,7 @@ build_wrapper_command() {
     [ -n "$opt_fsr" ] && use_fsr="$opt_fsr"
     [ -n "${opt_glthread:-}" ] && use_glthread="$opt_glthread"
     [ -n "${opt_systemd_scope:-}" ] && use_systemd_scope="$opt_systemd_scope"
+    [ -n "$opt_prime" ] && use_prime="$opt_prime"
 
     if [ -z "${use_systemd_scope:-}" ]; then
         if check_systemd_scope_support; then
@@ -908,8 +975,18 @@ build_wrapper_command() {
         fi
     fi
 
+    local dgpu_vendor="none"
+    if [ "$use_prime" = "1" ]; then
+        dgpu_vendor=$(detect_dgpu_vendor)
+        if [ "$dgpu_vendor" = "none" ]; then
+            echo "[WARN] PRIME offloading requested (--prime) but no secondary dGPU detected." >&2
+        fi
+    fi
+
     GAMECTL_ACTIVE_GLTHREAD="$use_glthread"
     GAMECTL_ACTIVE_SYSTEMD_SCOPE="$use_systemd_scope"
+    GAMECTL_ACTIVE_PRIME="$use_prime"
+    GAMECTL_ACTIVE_PRIME_VENDOR="$dgpu_vendor"
 
     local prefix=()
     if [ "$use_gm" = "1" ]; then

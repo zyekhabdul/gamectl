@@ -27,7 +27,7 @@ Implement Linux systems architectural remediation (Phase 4 / Actions 4.1-4.4):
   4. Sediakan fallback transparan ke subshell standar jika systemd tidak aktif (distro non-systemd/chroot/container).
 - DoD: Seluruh child process game (crash reporters, explorer.exe, winedevice.exe) terisolasi dalam satu cgroup slice dan berhenti seketika saat game ditutup tanpa meninggalkan zombie processes.
 
-### Chunk 2: Automated PRIME dGPU Hybrid Offloading (Action 4.2) [PENDING]
+### Chunk 2: Automated PRIME dGPU Hybrid Offloading (Action 4.2) [DONE]
 - Target Files: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/diagnostics/60_doctor.sh`, `src/main.sh`
 - Runtutan Eksekusi Teknis:
   1. Buat fungsi helper `detect_dgpu_vendor` di `src/runners/40_wrappers.sh`:

@@ -1,5 +1,5 @@
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader resolve_target_library_dir detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support
+export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader resolve_target_library_dir detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -98,6 +98,15 @@ case "${1:-}" in
             exit 0
         else
             echo "[WARN] cgroups v2 / systemd-run user scope isolation is not supported on this host."
+            exit 1
+        fi
+        ;;
+    detect-gpu|gpu-detect|dgpu)
+        vend="$(detect_dgpu_vendor)"
+        echo "[INFO] Detected secondary discrete GPU vendor: $vend"
+        if [ "$vend" != "none" ]; then
+            exit 0
+        else
             exit 1
         fi
         ;;
@@ -256,7 +265,7 @@ Usage:
   gamectl library     Open Game Library TUI directly (alias: list-ui)
   gamectl config      Open global configuration menu (~/.config/gamectl/) (alias: configure)
   gamectl doctor      Run 7-layer system & GPU health diagnostics (alias: audit)
-  gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread] [--scope|--no-scope]
+  gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread] [--scope|--no-scope] [--prime|--no-prime]
                       Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]
                       Configure per-game wrappers (GameMode/MangoHud/Gamescope FSR/MesaGL)
@@ -292,6 +301,8 @@ Usage:
   gamectl get-gamescope-args Print dynamically scaled Gamescope FSR parameters
   gamectl get-steam-root   Print detected active Steam root directory
   gamectl get-steam-libraries Print all detected Steam library folders
+  gamectl detect-gpu       Audit and print detected secondary discrete GPU vendor
+  gamectl check-scope      Check if cgroups v2 / systemd-run user scope isolation is supported
   gamectl --search    Search Steam Store catalog & audit ProtonDB rating
   gamectl --list      Print detected installed games list
   gamectl list-formatted  Print formatted games list with ANSI badges

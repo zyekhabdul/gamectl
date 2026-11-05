@@ -182,6 +182,15 @@ doctor_audit() {
         pass_cnt=$((pass_cnt + 1))
     fi
 
+    local dgpu_vend
+    dgpu_vend="$(detect_dgpu_vendor 2>/dev/null || echo "none")"
+    if [ "$dgpu_vend" != "none" ]; then
+        echo "    • Hybrid dGPU    : ${UI_GREEN}[READY]${UI_RST} Discrete GPU detected ($dgpu_vend). PRIME offload available (--prime)."
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "    • Hybrid dGPU    : ${UI_DIM}[N/A]${UI_RST} No discrete secondary GPU detected (single GPU topology)."
+    fi
+
     echo
     echo "${UI_BOX}╭─ DIAGNOSTIC AUDIT SUMMARY ──────────────────────────────────╮${UI_RST}"
     echo "│ ${UI_GREEN}Passed: $pass_cnt${UI_RST}  •  ${UI_AMBER}Warnings: $warn_cnt${UI_RST}  •  ${UI_RED}Missing: $miss_cnt${UI_RST}"

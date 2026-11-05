@@ -249,6 +249,26 @@ launch_game() {
     fi
     export vblank_mode=0
 
+    # Hybrid dGPU PRIME offloading
+    if [ "${GAMECTL_ACTIVE_PRIME:-0}" = "1" ]; then
+        case "${GAMECTL_ACTIVE_PRIME_VENDOR:-none}" in
+            nvidia)
+                export __NV_PRIME_RENDER_OFFLOAD=1
+                export __GLX_VENDOR_LIBRARY_NAME=nvidia
+                export __VK_LAYER_NV_optimus=NVIDIA_only
+                echo "[INFO] Hybrid Graphics: Injected NVIDIA PRIME offload environment."
+                ;;
+            amd|intel)
+                export DRI_PRIME=1
+                echo "[INFO] Hybrid Graphics: Injected DRI_PRIME=1 offload environment."
+                ;;
+            *)
+                export DRI_PRIME=1
+                echo "[INFO] Hybrid Graphics: Fallback to DRI_PRIME=1 offload environment."
+                ;;
+        esac
+    fi
+
     # Remedi Audio (DEFECT-03): Set buffer latency environment safely (PipeWire / PulseAudio)
     export PIPEWIRE_LATENCY="${GAMECTL_PIPEWIRE_LATENCY:-256/48000}"
     export PULSE_LATENCY_MSEC="${GAMECTL_PULSE_LATENCY:-60}"
@@ -281,6 +301,7 @@ launch_game() {
             ws_bin="$(get_wineserver_bin "${runner_bin:-}" 2>/dev/null || true)"
             [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -w 2>/dev/null || true
         fi
+        unset __NV_PRIME_RENDER_OFFLOAD __GLX_VENDOR_LIBRARY_NAME __VK_LAYER_NV_optimus DRI_PRIME
         clean_stale_locks
     }
     trap '_restore_launch_state; trap - INT TERM EXIT; return 130 2>/dev/null || exit 130' INT
@@ -779,7 +800,7 @@ cli_launch() {
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --hud|--mangohud|--no-hud|--no-mangohud|--gamemode|--no-gamemode|--gamescope|--no-gamescope|--fsr|--no-fsr|--glthread|--no-glthread|--scope|--systemd-scope|--no-scope|--no-systemd-scope)
+            --hud|--mangohud|--no-hud|--no-mangohud|--gamemode|--no-gamemode|--gamescope|--no-gamescope|--fsr|--no-fsr|--glthread|--no-glthread|--scope|--systemd-scope|--no-scope|--no-systemd-scope|--prime|--no-prime)
                 l_flags+=("$1")
                 shift
                 ;;
