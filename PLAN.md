@@ -68,7 +68,7 @@ Implement Linux systems architectural remediation (Phase 4 / Actions 4.1-4.4):
   3. Sediakan opsi cache pemindaian library sementara di `$XDG_RUNTIME_DIR/gamectl-$UID/scancache.tab` dengan waktu validasi mtime direktori library untuk mempercepat render daftar game TUI secara instan.
 - DoD: Kecepatan pemindaian library masif meningkat signifikan (>3x lebih cepat) dengan konsistensi output data yang identik.
 
-### Chunk 5: Machine Verification & Automated Regression Suite (Work Packet 12) [PENDING]
+### Chunk 5: Machine Verification & Automated Regression Suite (Work Packet 12) [DONE]
 - Target Files: `tests/test_cli.sh`, `remediation.md`, `DEVELOPMENT.md`
 - Runtutan Eksekusi Teknis:
   1. Tambahkan unit test assertions di `tests/test_cli.sh`:
@@ -84,11 +84,10 @@ Implement Linux systems architectural remediation (Phase 4 / Actions 4.1-4.4):
 
 ---
 
-## 3. Matriks Milestone Selesai (Work Packet 11 & History)
-- [x] WP 11 Chunk 1: Unified Wineserver Lifecycle Resolution (`2769c0c`) [DONE]
-- [x] WP 11 Chunk 2: Dual-OS DepotDownloader Negotiation & Target Library Selection (`79c3f74`) [DONE]
-- [x] WP 11 Chunk 3: Steam Runtime Active Guardrail (`c837b10`) [DONE]
-- [x] WP 11 Chunk 4: Savegame Remote Sync Path Normalization (`aa7f332`) [DONE]
-- [x] WP 11 Chunk 5: Ephemeral Store & ProtonDB Cache Tier (`12857a9`) [DONE]
-- [x] WP 11 Chunk 6: Machine Verification & Automated Regression Suite (`630d10d`, `ab8c9ff`) [DONE]
-- [x] Checkpoint Verifikasi: 50/50 tests passing with Exit 0. [DONE]
+## 3. Matriks Milestone Selesai (Work Packet 12 & History)
+- [x] WP 12 Chunk 1: cgroups v2 / systemd-run Scope Process Isolation (`a752f25`) [DONE]
+- [x] WP 12 Chunk 2: Automated PRIME dGPU Hybrid Offloading (`45aef7f`) [DONE]
+- [x] WP 12 Chunk 3: Bubblewrap (bwrap) Rootless Security Sandbox Profile (`701f6fb`) [DONE]
+- [x] WP 12 Chunk 4: Single-Pass Library Scanner Optimization (`de6f4ff`) [DONE]
+- [x] WP 12 Chunk 5: Machine Verification & Automated Regression Suite [DONE]
+- [x] Checkpoint Verifikasi: 55/55 tests passing with Exit 0. [DONE]

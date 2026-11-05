@@ -93,3 +93,19 @@ The Entitlement & ACF adoption engine (`src/steam/30_downloader.sh`, CLI: `gamec
 
 6. **Ephemeral High-Throughput JSON Cache Tier (`fetch_cached_json`)**:
    Implements disk-backed TTL-controlled (default 3600s) atomic JSON caching for Steam Store details and ProtonDB summaries at `${XDG_CACHE_HOME:-$HOME/.cache}/gamectl/`, eliminating network latency and fzf preview stutter.
+
+---
+
+## 6. Linux Kernel Process Isolation, Hybrid PRIME & Security Sandboxing
+
+1. **cgroups v2 / systemd-run Scope Isolation (`check_systemd_scope_support`)**:
+   Envelops game processes in transient user scopes (`systemd-run --user --scope --unit="gamectl-${safe_title}-${BASHPID}"`). Binds all child daemons (`winedevice.exe`, `explorer.exe`, crash reporters) to a dedicated cgroups v2 slice, eliminating PID 1 orphan reparenting and ensuring 100% clean teardown on exit or kill.
+
+2. **Automated PRIME dGPU Hybrid Offloading (`detect_dgpu_vendor`)**:
+   Inspects `/sys/bus/pci/devices/*/class` for secondary 3D controllers and discrete VGA endpoints. On hybrid dual-GPU systems, `--prime` automatically injects `__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only` for NVIDIA and `DRI_PRIME=1` for AMD/Intel Arc.
+
+3. **Rootless Bubblewrap Security Sandboxing (`build_sandbox_command`)**:
+   Provides an opt-in rootless sandbox (`--sandbox`) utilizing `bwrap`. Mounts `$HOME` as an ephemeral tmpfs while exposing only the game directory (rw), system runtimes (ro), and display/audio sockets (Wayland/PipeWire/PulseAudio), shielding sensitive personal files (`~/.ssh`, `~/.gnupg`, browser data, `.env`) from third-party code.
+
+4. **Single-Pass Library Scanner Optimization (`scan_installed_games`)**:
+   Eliminates hundreds of subshell forks via native bash regex parsing of Steam ACF manifests and built-in path expansion. Caches discovered library states in `${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/scancache.tab` with automated mtime invalidation, delivering sub-millisecond game listing in TUI menus.

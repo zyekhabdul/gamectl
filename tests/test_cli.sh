@@ -571,6 +571,54 @@ test_ephemeral_cache_tier() {
 }
 run_test "Ephemeral Cache Tier: Hits local disk cache and falls back cleanly" test_ephemeral_cache_tier
 
+test_systemd_scope_contract() {
+    local out code=0
+    out=$("$GAMECTL" check-scope 2>&1) || code=$?
+    echo "$out" | grep -q "cgroups v2 / systemd-run user scope isolation" && \
+    grep -q "systemd-run --user --scope" "$REPO_ROOT/src/runners/50_launcher.sh" && \
+    grep -q "check_systemd_scope_support" "$REPO_ROOT/src/runners/40_wrappers.sh"
+}
+run_test "cgroups v2 Scope: systemd-run user scope unit isolation contract" test_systemd_scope_contract
+
+test_dgpu_vendor_detection() {
+    local out1 out2 out3 code1=0 code2=0 code3=0
+    out1=$(GAMECTL_DGPU_VENDOR="nvidia" "$GAMECTL" detect-gpu 2>&1) || code1=$?
+    out2=$(GAMECTL_DGPU_VENDOR="amd" "$GAMECTL" detect-gpu 2>&1) || code2=$?
+    out3=$(GAMECTL_DGPU_VENDOR="none" "$GAMECTL" detect-gpu 2>&1) || code3=$?
+    [ "$code1" -eq 0 ] && [ "$code2" -eq 0 ] && [ "$code3" -ne 0 ] && \
+    echo "$out1" | grep -q "Detected secondary discrete GPU vendor: nvidia" && \
+    echo "$out2" | grep -q "Detected secondary discrete GPU vendor: amd"
+}
+run_test "Hybrid GPU Detection: Discrete GPU vendor resolution contract" test_dgpu_vendor_detection
+
+test_prime_wrapper_injection() {
+    grep -q "export __NV_PRIME_RENDER_OFFLOAD=1" "$REPO_ROOT/src/runners/50_launcher.sh" && \
+    grep -q "export DRI_PRIME=1" "$REPO_ROOT/src/runners/50_launcher.sh" && \
+    grep -q "GAMECTL_ACTIVE_PRIME" "$REPO_ROOT/src/runners/40_wrappers.sh" && \
+    grep -q -- "--prime" "$REPO_ROOT/src/runners/40_wrappers.sh"
+}
+run_test "PRIME Hybrid Offloading: Automated dGPU environment injection" test_prime_wrapper_injection
+
+test_bwrap_sandbox_contract() {
+    local out code=0
+    out=$("$GAMECTL" check-sandbox 2>&1) || code=$?
+    echo "$out" | grep -q "bubblewrap (bwrap)" && \
+    grep -q "build_sandbox_command" "$REPO_ROOT/src/runners/40_wrappers.sh" && \
+    grep -q -- "--unshare-user" "$REPO_ROOT/src/runners/40_wrappers.sh" && \
+    grep -q -- "--tmpfs \"\$HOME\"" "$REPO_ROOT/src/runners/40_wrappers.sh"
+}
+run_test "Security Sandboxing: Rootless Bubblewrap (bwrap) isolation profile" test_bwrap_sandbox_contract
+
+test_optimized_library_scanner() {
+    local r_uid="${UID:-$(id -u)}"
+    local c_file="${XDG_RUNTIME_DIR:-/tmp/gamectl-$r_uid}/scancache.tab"
+    rm -f "$c_file"
+    "$GAMECTL" --list --refresh >/dev/null 2>&1
+    [ -f "$c_file" ] && [ -s "$c_file" ] && \
+    grep -qE '^(STANDALONE|[0-9]+)[[:space:]]' "$c_file"
+}
+run_test "Library Scanner Optimization: Single-pass parser & runtime disk cache" test_optimized_library_scanner
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
