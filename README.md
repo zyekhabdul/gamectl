@@ -1,4 +1,44 @@
-# gamectl: Sovereign TUI Game Manager & Launcher for Linux
+<div align="center">
+
+# gamectl
+
+### Sovereign TUI Game Manager & Launcher for Linux Purists
+
+*Zero Electron. Zero Chromium. Zero Bloat. Sub-80ms Startup.*
+
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20SteamDeck-blue?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/zyekhabdul/gamectl)
+[![Shell](https://img.shields.io/badge/Shell-POSIX%20Bash-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white)](https://github.com/zyekhabdul/gamectl)
+[![Memory](https://img.shields.io/badge/Memory-<%2015%20MB%20RSS-brightgreen?style=for-the-badge&logo=speedtest&logoColor=white)](https://github.com/zyekhabdul/gamectl)
+[![Startup](https://img.shields.io/badge/Startup-<%2080ms-success?style=for-the-badge&logo=lightning&logoColor=white)](https://github.com/zyekhabdul/gamectl)
+[![Tests](https://img.shields.io/badge/Tests-55%2F55%20Passing-success?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/zyekhabdul/gamectl)
+[![License](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](LICENSE)
+[![Display](https://img.shields.io/badge/Compositor-Wayland%20%7C%20X11-orange?style=for-the-badge&logo=wayland&logoColor=white)](https://github.com/zyekhabdul/gamectl)
+[![Packaging](https://img.shields.io/badge/Packaging-Arch%20PKGBUILD%20%7C%20Universal-1793D1?style=for-the-badge&logo=arch-linux&logoColor=white)](packaging/arch/PKGBUILD)
+
+```bash
+# Turnkey Instant Installation
+curl -fsSL https://raw.githubusercontent.com/zyekhabdul/gamectl/main/install.sh | bash
+```
+
+[Quickstart](#quick-installation) • [Benchmark](#benchmark-matrix-headless-sovereign-vs-gui-launchers) • [Core Capabilities](#core-capabilities) • [Keyboard Shortcuts](#keyboard-shortcuts-reference) • [CLI Reference](#cli-command-reference) • [Ecosystems](#supported-ecosystems--handhelds) • [Architecture](docs/ARCHITECTURE.md)
+
+</div>
+
+---
+
+```text
+╭─ GAMECTL SOVEREIGN COCKPIT ──────────────────┬─ RUNTIME INSPECTION ──────────────────────────────╮
+│ [GBE_FORK]  Hades II                         │ AppID     : 1145360 (Hades II)                    │
+│ [VALVE_DLL] Balatro                          │ Arch      : Windows PE32+ (x86_64)                │
+│ [STANDALONE] Dead Cells                      │ Runner    : GE-Proton9-25 (~/.local/share/Steam/) │
+│ [GBE_FORK]  Factorio                         │ Prefix    : Isolated ($GAME_DIR/pfx)              │
+│ [STANDALONE] Slay the Spire                  │ Wrappers  : GameMode: ON │ MangoHud: ON │ FSR: OFF│
+│ [VALVE_SO]  Celeste                          │ Audio     : PipeWire 256/48000 (Low Latency)      │
+│ [GBE_FORK]  Hollow Knight: Silksong          │ Saves     : 3-Slot Disaster Guard (slot1/slot2)   │
+│ [STANDALONE] Terraria                        │ Sandbox   : Bubblewrap (bwrap: ~/.ssh shielded)   │
+│ [VALVE_DLL] Elden Ring                       │ Isolation : cgroups v2 (systemd-run scope)        │
+╰──────────────────────────────────────────────┴───────────────────────────────────────────────────╯
+```
 
 **gamectl** is an ultra-lightweight (< 15 MB RAM RSS), high-performance Terminal User Interface (TUI) game manager and launcher designed for Linux workstations and handhelds. It manages, launches, and synchronizes standalone portable games with zero dependency on heavyweight graphical client runtimes (such as Electron, Chromium, or CEF).
 
@@ -24,11 +64,29 @@ Empirical comparisons measured on Arch Linux x86_64 (Linux kernel 6.x, AMD Ryzen
 
 ---
 
+## Supported Ecosystems & Handhelds
+
+| Ecosystem / Platform | Target Architecture | Support Level | Integration Details |
+| :--- | :--- | :--- | :--- |
+| **Arch Linux / EndeavourOS** | x86_64 | **Native Tier 1** | Standalone binary & `packaging/arch/PKGBUILD` AUR recipe |
+| **Steam Deck (SteamOS)** | AMD Van Gogh (x86_64) | **Native Tier 1** | Desktop Mode TUI + Steam Deck Game Mode (`shortcuts.vdf` + artwork) |
+| **Bazzite / ChimeraOS** | Immutable Linux | **Native Tier 1** | Rootless turnkey installation to `~/.local/bin/` |
+| **Debian / Ubuntu / Linux Mint** | x86_64 | **Verified** | Standard package dependencies via APT |
+| **Fedora / Nobara** | x86_64 | **Verified** | Standard package dependencies via DNF |
+| **Wayland (Niri / Sway / Hyprland)** | Wayland socket pass-through | **Verified** | Full Gamescope FSR & dynamic `$WAYLAND_DISPLAY` binding |
+| **X11 (i3 / bspwm / XFCE)** | Native X11 | **Verified** | Automatic `$XAUTHORITY` and DISPLAY detection |
+| **Handheld PCs (ROG Ally, Legion Go)** | AMD Phoenix / Z1 Extreme | **Verified** | Low-overhead execution freeing maximum VRAM for 3D shaders |
+
+---
+
 ## Core Capabilities
 
 - **Zero-Bloat & Instant Startup**: Written in pure POSIX Bash, `fzf`, and `jq`. Cuts 95%+ memory overhead compared to conventional graphical game launchers.
 - **Dynamic Multi-Library Autodetection**: Automatically scans and aggregates games across all Steam library partitions (`libraryfolders.vdf` + ACF manifests), portable directories (`~/Games/`), Lutris paths, and custom locations via `~/.config/gamectl/libraries` or `GAMECTL_LIBRARY_DIRS`.
 - **Split-Pane Live Inspection Cockpit**: Left pane lists your library with ANSI status badges; right pane streams real-time binary architectures (ELF 32/64-bit, PE32/PE32+), runner paths, wrapper profiles, LAN multiplayer personas, and savegame sizes.
+- **cgroups v2 Process Tree Isolation (`gamectl launch --scope`)**: Encapsulates game execution in a dedicated systemd user scope (`gamectl-<title>-<pid>`), terminating all background helpers (`winedevice.exe`, `explorer.exe`, crash reporters) atomically on exit with zero zombie processes.
+- **Automated PRIME Hybrid dGPU Offload (`gamectl launch --prime`)**: Auto-probes `/sys/bus/pci/devices/` and routes rendering to secondary discrete NVIDIA (`__NV_PRIME_RENDER_OFFLOAD=1`), AMD, or Intel Arc (`DRI_PRIME=1`) controllers without manual environment variable hacking.
+- **Rootless Bubblewrap Security Sandbox (`gamectl launch --sandbox`)**: Mounts host root as read-only and shields private directories (`~/.ssh`, `~/.gnupg`, browser cookies, and `.env` credentials) inside a hardened tmpfs namespace while transparently passing Wayland/X11 and PipeWire audio sockets.
 - **Disaster-Proof Savegame Snapshots**: Automatically creates a 3-slot rotating backup (`slot1`, `slot2`, `slot3`) before each game launch, safeguarding your save states against crashes and dirty shutdowns.
 - **Decentralized LAN Steam Emulator (`gamectl inject`)**: Converts Valve binaries (Linux native `.so` and Windows `.dll` x86/x64) into portable standalone runtimes featuring local `./saves` redirection and automated `steam_settings/DLC.txt` generation.
 - **Isolated Windows Runner & Prefix Engine**: Discovers installed Windows compatibility runners (`umu-run` -> `GE-Proton` / Steam `Proton` -> `wine`) and maintains strictly isolated prefixes in `$GAME_DIR/pfx`, keeping host `~/.wine` pristine.
@@ -288,6 +346,17 @@ gamectl/
 ├── install.sh           # Turnkey installation script
 └── README.md            # Project manifesto, benchmarks, and command dictionary
 ```
+
+---
+
+## Community & Stargazers
+
+If `gamectl` freed your RAM, eliminated background browser bloat, or improved your Linux gaming workflow, consider starring the repository on GitHub!
+
+[![Star History Chart](https://api.star-history.com/svg?repos=zyekhabdul/gamectl&type=Date)](https://star-history.com/#zyekhabdul/gamectl&Date)
+
+- **Issues & Discussions**: Found an edge-case or want to propose an optimization? Open an issue on GitHub.
+- **Contributions**: Packaging recipes (Nix, Flatpak, Void, Alpine) and hardware profiles are welcome via Pull Requests.
 
 ---
 
