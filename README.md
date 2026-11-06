@@ -10,7 +10,8 @@
 [![Shell](https://img.shields.io/badge/Shell-POSIX%20Bash-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white)](https://github.com/zyekhabdul/gamectl)
 [![Memory](https://img.shields.io/badge/Memory-<%2015%20MB%20RSS-brightgreen?style=for-the-badge&logo=speedtest&logoColor=white)](https://github.com/zyekhabdul/gamectl)
 [![Startup](https://img.shields.io/badge/Startup-<%2080ms-success?style=for-the-badge&logo=lightning&logoColor=white)](https://github.com/zyekhabdul/gamectl)
-[![Tests](https://img.shields.io/badge/Tests-55%2F55%20Passing-success?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/zyekhabdul/gamectl)
+[![Tests](https://img.shields.io/badge/Tests-59%2F59%20Passing-success?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/zyekhabdul/gamectl)
+[![PyPI](https://img.shields.io/badge/PyPI-gamectl-3775A9?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/project/gamectl/)
 [![License](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](LICENSE)
 [![Display](https://img.shields.io/badge/Compositor-Wayland%20%7C%20X11-orange?style=for-the-badge&logo=wayland&logoColor=white)](https://github.com/zyekhabdul/gamectl)
 [![Packaging](https://img.shields.io/badge/Packaging-Arch%20PKGBUILD%20%7C%20Universal-1793D1?style=for-the-badge&logo=arch-linux&logoColor=white)](packaging/arch/PKGBUILD)
@@ -159,7 +160,16 @@ nix run github:zyekhabdul/gamectl
 # inputs.gamectl.url = "github:zyekhabdul/gamectl";
 ```
 
-### Option 6: Manual Source Clone & Turnkey Installer
+### Option 6: Python Package (pipx & pip)
+```bash
+# Recommended for modern Linux (PEP 668):
+pipx install gamectl
+
+# Or inside standard virtualenv:
+pip install gamectl
+```
+
+### Option 7: Manual Source Clone & Turnkey Installer
 ```bash
 git clone git@github.com:zyekhabdul/gamectl.git
 cd gamectl
