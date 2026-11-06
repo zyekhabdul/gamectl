@@ -251,6 +251,12 @@ case "${1:-}" in
             exit 1
         fi
         ;;
+    login-luatools|auth-luatools)
+        login_luatools "${2:-}"
+        ;;
+    auth-status|luatools-status)
+        luatools_status
+        ;;
     ensure-downloader)
         ensure_downloader
         ;;
@@ -299,6 +305,9 @@ Usage:
   gamectl downloads   Monitor active & recent downloads (Steam ACF telemetry)
   gamectl fetch-manifest <appid> [dest] [source]
                       Harvest manifest archive across Ryuu/Sushi/LuaTools providers
+  gamectl auth-status Display current LuaTools authentication session & auto-refresh status
+  gamectl login-luatools <code|token|file>
+                      Authenticate standalone LuaTools provider (6-char code, refresh token, or json)
   gamectl deploy-manifest <appid> [manifest_zip] [title]
                       Deploy manifest & stplug-in keys into SLSsteam & Steam depotcache
   gamectl entitle <appid> [title]

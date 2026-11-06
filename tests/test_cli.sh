@@ -1002,6 +1002,14 @@ test_luatools_bearer_token_manager_resolution() {
 }
 run_test "Manifest Harvester: LuaTools token resolver contract" test_luatools_bearer_token_manager_resolution
 
+test_luatools_auth_cli_commands() {
+    "$GAMECTL" auth-status | grep -q 'LuaTools Session:' || return 1
+    local out
+    out=$("$GAMECTL" login-luatools 2>&1 || true)
+    echo "$out" | grep -q 'Usage: gamectl login-luatools'
+}
+run_test "Manifest Harvester: auth-status & login-luatools CLI contracts" test_luatools_auth_cli_commands
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

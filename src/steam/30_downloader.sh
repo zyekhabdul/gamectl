@@ -212,6 +212,137 @@ get_valid_luatools_token() {
     return 1
 }
 
+# Authenticate or import standalone LuaTools session
+login_luatools() {
+    local input="${1:-}"
+    local cfg_auth="$HOME/.config/gamectl/lua_tools_auth.json"
+    mkdir -p "$HOME/.config/gamectl"
+
+    if [ -z "$input" ]; then
+        echo "Usage: gamectl login-luatools <6-character-code | refresh_token | session.json>"
+        echo "Tip: Generate a 6-character code at https://lua.tools/ or Discord bot (/login)"
+        return 1
+    fi
+
+    local supabase_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzYwMzkzNzYsImV4cCI6MTg5MzQ1NjAwMCwicm9sZSI6ImFub24iLCJpc3MiOiJzdXBhYmFzZSJ9.f_-K38u3odjltP-g_67FVmG32Vg-_-k-lNBvIaVUVBM"
+    local now
+    now=$(date +%s)
+
+    # Mode 1: 6-Character Redeem Code (e.g. A1B2C3)
+    if [[ "$input" =~ ^[A-Za-z0-9]{6}$ ]]; then
+        local code="${input^^}"
+        echo "[INFO] Redeeming 6-character code '$code' at lua.tools API..."
+        local redeem_resp
+        redeem_resp=$(curl -sSL --connect-timeout 5 --max-time 15 \
+            -X POST "https://lua.tools/api/auth/code/redeem" \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: discord(dot)gg/luatools" \
+            -d "{"code":"$code"}" 2>/dev/null || true)
+
+        local token_hash
+        token_hash=$(echo "$redeem_resp" | jq -r '.token // empty' 2>/dev/null || true)
+        if [ -z "$token_hash" ]; then
+            echo "[ERROR] Failed to redeem code: $(echo "$redeem_resp" | jq -r '.error // "Unknown error"' 2>/dev/null || echo "$redeem_resp")" >&2
+            return 1
+        fi
+
+        echo "[INFO] Verifying authentication token with Supabase..."
+        local verify_resp
+        verify_resp=$(curl -sSL --connect-timeout 5 --max-time 15 \
+            -X POST "https://db.lua.tools/auth/v1/verify" \
+            -H "Content-Type: application/json" \
+            -H "apikey: $supabase_key" \
+            -H "User-Agent: discord(dot)gg/luatools" \
+            -d "{"type":"magiclink","token_hash":"$token_hash"}" 2>/dev/null || true)
+
+        local access_token refresh_token expires_in
+        access_token=$(echo "$verify_resp" | jq -r '.access_token // empty' 2>/dev/null || true)
+        refresh_token=$(echo "$verify_resp" | jq -r '.refresh_token // empty' 2>/dev/null || true)
+        expires_in=$(echo "$verify_resp" | jq -r '.expires_in // 3600' 2>/dev/null || echo 3600)
+
+        if [ -n "$access_token" ] && [ -n "$refresh_token" ]; then
+            local expires_at=$((now + expires_in))
+            echo "$verify_resp" | jq --argjson exp "$expires_at" '.expires_at = $exp' > "$cfg_auth"
+            chmod 600 "$cfg_auth"
+            local user_name
+            user_name=$(echo "$verify_resp" | jq -r '.user.user_metadata.custom_claims.global_name // .user.user_metadata.full_name // .user.email // "User"' 2>/dev/null || echo "User")
+            echo "[VERIFIED] Successfully authenticated as $user_name. Sesi disimpan di $cfg_auth"
+            return 0
+        else
+            echo "[ERROR] Verification failed: $(echo "$verify_resp" | jq -r '.error_description // .message // "Invalid session response"')" >&2
+            return 1
+        fi
+
+    # Mode 2: Existing JSON session file (e.g. from Lumen or backup)
+    elif [ -f "$input" ]; then
+        if jq -e '.refresh_token' "$input" >/dev/null 2>&1; then
+            cp -f "$input" "$cfg_auth"
+            chmod 600 "$cfg_auth"
+            echo "[VERIFIED] Imported session file from $input -> $cfg_auth"
+            get_valid_luatools_token >/dev/null 2>&1 || true
+            return 0
+        else
+            echo "[ERROR] File does not contain a valid .refresh_token JSON field." >&2
+            return 1
+        fi
+
+    # Mode 3: Raw refresh_token or JWT string
+    else
+        echo "[INFO] Attempting refresh exchange using provided raw token..."
+        local refresh_resp
+        refresh_resp=$(curl -sSL --connect-timeout 5 --max-time 15 \
+            -X POST "https://db.lua.tools/auth/v1/token?grant_type=refresh_token" \
+            -H "Content-Type: application/json" \
+            -H "apikey: $supabase_key" \
+            -H "User-Agent: discord(dot)gg/luatools" \
+            -d "{"refresh_token":"$input"}" 2>/dev/null || true)
+
+        local access_token new_refresh expires_in
+        access_token=$(echo "$refresh_resp" | jq -r '.access_token // empty' 2>/dev/null || true)
+        new_refresh=$(echo "$refresh_resp" | jq -r '.refresh_token // empty' 2>/dev/null || echo "$input")
+        expires_in=$(echo "$refresh_resp" | jq -r '.expires_in // 3600' 2>/dev/null || echo 3600)
+
+        if [ -n "$access_token" ]; then
+            local expires_at=$((now + expires_in))
+            echo "$refresh_resp" | jq --argjson exp "$expires_at" --arg rt "$new_refresh" '.expires_at = $exp | .refresh_token = $rt' > "$cfg_auth"
+            chmod 600 "$cfg_auth"
+            echo "[VERIFIED] Successfully authenticated via token. Sesi disimpan di $cfg_auth"
+            return 0
+        else
+            echo "[ERROR] Token exchange failed: $(echo "$refresh_resp" | jq -r '.error_description // .error // "Invalid token"')" >&2
+            return 1
+        fi
+    fi
+}
+
+# Display LuaTools authentication session status
+luatools_status() {
+    local cfg_auth="$HOME/.config/gamectl/lua_tools_auth.json"
+    local lumen_auth="${XDG_DATA_HOME:-$HOME/.local/share}/Lumen/luatools/backend/data/lua_tools_auth.json"
+    local target_auth=""
+
+    if [ -f "$cfg_auth" ]; then target_auth="$cfg_auth"; elif [ -f "$lumen_auth" ]; then target_auth="$lumen_auth"; fi
+
+    if [ -n "$target_auth" ] && [ -f "$target_auth" ]; then
+        local user_name expires_at now remaining
+        user_name=$(jq -r '.user.user_metadata.custom_claims.global_name // .user.user_metadata.full_name // .user.email // "Authenticated User"' "$target_auth" 2>/dev/null || echo "Authenticated User")
+        expires_at=$(jq -r '.expires_at // 0' "$target_auth" 2>/dev/null || echo 0)
+        now=$(date +%s)
+        remaining=$((expires_at - now))
+        echo "[STATUS] LuaTools Session: ACTIVE (${target_auth})"
+        echo "  • User     : $user_name"
+        if [ "$remaining" -gt 0 ]; then
+            echo "  • Lifetime : Token valid ($((remaining / 60)) min remaining, auto-refreshed by gamectl)"
+        else
+            echo "  • Lifetime : Expired (will auto-refresh on next download)"
+        fi
+    else
+        echo "[STATUS] LuaTools Session: NOT CONFIGURED"
+        echo "  • Public providers (Ryuu, Sushi) are ACTIVE (Zero login required)."
+        echo "  • To unlock LuaTools provider: gamectl login-luatools <6-character-code | token>"
+    fi
+}
+
 # Multi-Provider Manifest & Key Harvester
 fetch_manifest() {
     local appid="$1"
