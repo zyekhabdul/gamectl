@@ -121,23 +121,45 @@ The interactive TUI library navigation provides instantaneous single-keystroke o
 
 ---
 
-## Quick Installation
+## Multi-Platform Installation
 
-### Prerequisites
-Ensure core Linux utilities are available (`fzf`, `jq`, `curl`, `rsync`, `ssh`, `file`, `unzip`, `python3`):
-
+### Option 1: Turnkey One-Liner (Universal Linux & Steam Deck)
 ```bash
-# Debian / Ubuntu / Mint
-sudo apt install fzf jq curl rsync openssh-client file unzip python3
-
-# Arch Linux / Manjaro
-sudo pacman -S fzf jq curl rsync openssh file unzip python
-
-# Fedora
-sudo dnf install fzf jq curl rsync openssh-clients file unzip python3
+curl -fsSL https://raw.githubusercontent.com/zyekhabdul/gamectl/main/install.sh | bash
 ```
 
-### Installation Steps
+### Option 2: Arch Linux (AUR & AUR-Git)
+```bash
+# Release package:
+yay -S gamectl
+# or development branch (VCS):
+paru -S gamectl-git
+```
+
+### Option 3: Debian / Ubuntu (.deb Package)
+```bash
+# Build and install Debian package:
+make pkg-deb
+sudo dpkg -i packaging/debian/gamectl_1.2.0_all.deb
+sudo apt install -f
+```
+
+### Option 4: Homebrew Tap (Linux & macOS)
+```bash
+brew tap zyekhabdul/tap
+brew install gamectl
+```
+
+### Option 5: Nix Flake (NixOS / Declarative)
+```bash
+# Run directly without installation:
+nix run github:zyekhabdul/gamectl
+
+# Or add to your NixOS flake inputs:
+# inputs.gamectl.url = "github:zyekhabdul/gamectl";
+```
+
+### Option 6: Manual Source Clone & Turnkey Installer
 ```bash
 git clone git@github.com:zyekhabdul/gamectl.git
 cd gamectl
@@ -145,7 +167,7 @@ cd gamectl
 ```
 
 The turnkey installer automatically executes:
-1. Symlinks standalone binary `gamectl` and shorthand alias `game` to `~/.local/bin/`.
+1. Compiles or symlinks standalone binary `gamectl` and shorthand alias `game` to `~/.local/bin/`.
 2. Scaffolds configuration directory and templates in `~/.config/gamectl/`.
 3. Installs shell completion script to `~/.local/share/bash-completion/completions/gamectl`.
 4. Registers FreeDesktop entry `gamectl.desktop` for Wayland/X11 application launchers (rofi, fuzzel, wofi, dmenu).

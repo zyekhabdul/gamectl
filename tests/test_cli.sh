@@ -411,6 +411,29 @@ test_arch_pkgbuild_validation() {
 }
 run_test "Arch Packaging: Valid PKGBUILD syntax and .SRCINFO generation" test_arch_pkgbuild_validation
 
+test_aur_git_pkgbuild_validation() {
+    [ -f "$REPO_ROOT/packaging/aur-git/PKGBUILD" ] && \
+    [ -f "$REPO_ROOT/packaging/aur-git/.SRCINFO" ] && \
+    bash -n "$REPO_ROOT/packaging/aur-git/PKGBUILD" && \
+    grep -q "pkgname = gamectl-git" "$REPO_ROOT/packaging/aur-git/.SRCINFO"
+}
+run_test "AUR Git Packaging: Valid PKGBUILD syntax and .SRCINFO generation" test_aur_git_pkgbuild_validation
+
+test_debian_packaging_validation() {
+    [ -x "$REPO_ROOT/packaging/debian/build-deb.sh" ] && \
+    bash "$REPO_ROOT/packaging/debian/build-deb.sh" >/dev/null 2>&1 && \
+    [ -f "$REPO_ROOT/packaging/debian/gamectl_1.2.0_all.deb" ] && \
+    dpkg-deb -I "$REPO_ROOT/packaging/debian/gamectl_1.2.0_all.deb" | grep -q "Package: gamectl"
+}
+run_test "Debian Packaging: Valid .deb construction and control metadata" test_debian_packaging_validation
+
+test_nix_flake_validation() {
+    [ -f "$REPO_ROOT/flake.nix" ] && \
+    grep -q 'pname = "gamectl"' "$REPO_ROOT/flake.nix" && \
+    grep -q 'mainProgram = "gamectl"' "$REPO_ROOT/flake.nix"
+}
+run_test "Nix Flake: Valid flake schema and package definition" test_nix_flake_validation
+
 test_artwork_fetch_missing_target() {
     local exit_code=0
     "$GAMECTL" fetch-art >/dev/null 2>&1 || exit_code=$?
