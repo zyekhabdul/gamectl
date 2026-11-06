@@ -1642,6 +1642,104 @@ validate_manifest_zip() {
     [ "$has_valid_manifest" -eq 1 ]
 }
 
+# Check if file is a valid Lua manifest / stplugin payload
+is_valid_lua_manifest() {
+    local lua_file="$1"
+    local appid="${2:-}"
+    [ -f "$lua_file" ] || return 1
+    local sz
+    sz=$(stat -c %s "$lua_file" 2>/dev/null || wc -c < "$lua_file" 2>/dev/null || echo 0)
+    [ "$sz" -gt 0 ] && [ "$sz" -le 16777216 ] || return 1
+
+    local clean
+    clean=$(sed 's/--.*$//' "$lua_file" 2>/dev/null || true)
+    if [ -n "$appid" ]; then
+        echo "$clean" | grep -Eq "^[[:space:]]*addappid[[:space:]]*\([[:space:]]*${appid}([[:space:]]*\)|[[:space:]]*,)" || \
+        echo "$clean" | grep -Eq "^[[:space:]]*addappid[[:space:]]*\("
+    else
+        echo "$clean" | grep -Eq "^[[:space:]]*addappid[[:space:]]*\("
+    fi
+}
+
+# Acquire or auto-refresh LuaTools bearer access token
+get_valid_luatools_token() {
+    local lumen_auth="${XDG_DATA_HOME:-$HOME/.local/share}/Lumen/luatools/backend/data/lua_tools_auth.json"
+    local cfg_auth="$HOME/.config/gamectl/lua_tools_auth.json"
+    local target_auth=""
+
+    if [ -f "$cfg_auth" ]; then
+        target_auth="$cfg_auth"
+    elif [ -f "$lumen_auth" ]; then
+        target_auth="$lumen_auth"
+        # Seed into ~/.config/gamectl for standalone sovereign operation
+        mkdir -p "$HOME/.config/gamectl"
+        cp -f "$lumen_auth" "$cfg_auth" 2>/dev/null || true
+        chmod 600 "$cfg_auth" 2>/dev/null || true
+        target_auth="$cfg_auth"
+    fi
+
+    [ -n "$target_auth" ] && [ -f "$target_auth" ] || return 1
+
+    local access_token refresh_token expires_at now
+    access_token=$(jq -r '.access_token // empty' "$target_auth" 2>/dev/null || true)
+    refresh_token=$(jq -r '.refresh_token // empty' "$target_auth" 2>/dev/null || true)
+    expires_at=$(jq -r '.expires_at // 0' "$target_auth" 2>/dev/null || echo 0)
+    now=$(date +%s)
+
+    # Return valid cached token if at least 60 seconds remain before expiration
+    if [ -n "$access_token" ] && [ "$((expires_at - now))" -gt 60 ]; then
+        printf "%s" "$access_token"
+        return 0
+    fi
+
+    # Trigger token auto-refresh via Supabase auth endpoint
+    if [ -n "$refresh_token" ]; then
+        local supabase_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzYwMzkzNzYsImV4cCI6MTg5MzQ1NjAwMCwicm9sZSI6ImFub24iLCJpc3MiOiJzdXBhYmFzZSJ9.f_-K38u3odjltP-g_67FVmG32Vg-_-k-lNBvIaVUVBM"
+        local refresh_resp
+        refresh_resp=$(curl -sSL --connect-timeout 5 --max-time 15 \
+            -X POST "https://db.lua.tools/auth/v1/token?grant_type=refresh_token" \
+            -H "Content-Type: application/json" \
+            -H "apikey: $supabase_key" \
+            -H "User-Agent: discord(dot)gg/luatools" \
+            -d "{\"refresh_token\":\"$refresh_token\"}" 2>/dev/null || true)
+
+        local new_token new_expires_in new_refresh
+        new_token=$(echo "$refresh_resp" | jq -r '.access_token // empty' 2>/dev/null || true)
+        new_expires_in=$(echo "$refresh_resp" | jq -r '.expires_in // 3600' 2>/dev/null || echo 3600)
+        new_refresh=$(echo "$refresh_resp" | jq -r '.refresh_token // empty' 2>/dev/null || true)
+
+        if [ -n "$new_token" ]; then
+            local new_expires_at=$((now + new_expires_in))
+            [ -z "$new_refresh" ] && new_refresh="$refresh_token"
+
+            local tmp_json="${target_auth}.tmp.$$"
+            jq --arg at "$new_token" \
+               --arg rt "$new_refresh" \
+               --argjson exp "$new_expires_at" \
+               '.access_token = $at | .refresh_token = $rt | .expires_at = $exp' \
+               "$target_auth" > "$tmp_json" 2>/dev/null && mv -f "$tmp_json" "$target_auth"
+            chmod 600 "$target_auth" 2>/dev/null || true
+
+            # Also synchronize back to Lumen backend auth file if present
+            if [ -f "$lumen_auth" ] && [ "$target_auth" != "$lumen_auth" ]; then
+                cp -f "$target_auth" "$lumen_auth" 2>/dev/null || true
+                chmod 600 "$lumen_auth" 2>/dev/null || true
+            fi
+
+            printf "%s" "$new_token"
+            return 0
+        fi
+    fi
+
+    # Fallback to existing access_token if network refresh fails
+    if [ -n "$access_token" ]; then
+        printf "%s" "$access_token"
+        return 0
+    fi
+
+    return 1
+}
+
 # Multi-Provider Manifest & Key Harvester
 fetch_manifest() {
     local appid="$1"
@@ -1708,16 +1806,13 @@ fetch_manifest() {
     src_count=$((src_count + 1))
 
     # Source 3: Lua.tools managed API (if auth session exists)
-    local luatools_auth="$HOME/.local/share/Lumen/luatools/backend/data/lua_tools_auth.json"
-    if [ -f "$luatools_auth" ]; then
-        local token
-        token=$(jq -r ".access_token // empty" "$luatools_auth" 2>/dev/null || true)
-        if [ -n "$token" ]; then
-            src_names[src_count]="LuaTools"
-            src_urls[src_count]="https://lua.tools/api/manifest/download?appid=${appid}&source=Luie"
-            src_headers[src_count]="Authorization: Bearer $token"
-            src_count=$((src_count + 1))
-        fi
+    local token
+    token=$(get_valid_luatools_token 2>/dev/null || true)
+    if [ -n "$token" ]; then
+        src_names[src_count]="LuaTools"
+        src_urls[src_count]="https://lua.tools/api/manifest/download?appid=${appid}&source=Luie"
+        src_headers[src_count]="Authorization: Bearer $token"
+        src_count=$((src_count + 1))
     fi
 
     local found=0
@@ -1731,7 +1826,7 @@ fetch_manifest() {
         fi
 
         echo "[INFO] Querying provider: $name ($url)..." >&2
-        local curl_args=("-sL" "--connect-timeout" "5" "--max-time" "20" "-o" "$dl_tmp" "-w" "%{http_code}")
+        local curl_args=("-sSL" "--connect-timeout" "5" "--max-time" "25" "-A" "discord(dot)gg/luatools" "-o" "$dl_tmp" "-w" "%{http_code}")
         if [ -n "$hdr" ]; then
             curl_args+=("-H" "$hdr")
         fi
@@ -1740,6 +1835,18 @@ fetch_manifest() {
         http_code=$(curl "${curl_args[@]}" "$url" 2>/dev/null || echo "000")
 
         if [ "$http_code" = "200" ] && [ -s "$dl_tmp" ]; then
+            # Format adaptation: If payload is a raw Lua script, encapsulate into standardized ZIP
+            if ! unzip -tq "$dl_tmp" >/dev/null 2>&1 && is_valid_lua_manifest "$dl_tmp" "$appid"; then
+                local stage_lua="$run_dir/${appid}.lua"
+                cp -f "$dl_tmp" "$stage_lua"
+                local zip_tmp="$run_dir/wrap_${appid}_$$.zip"
+                (cd "$run_dir" && zip -q -0 "$zip_tmp" "${appid}.lua") 2>/dev/null || true
+                rm -f "$stage_lua"
+                if [ -f "$zip_tmp" ]; then
+                    mv -f "$zip_tmp" "$dl_tmp"
+                fi
+            fi
+
             if validate_manifest_zip "$dl_tmp" "$appid"; then
                 echo "[VERIFIED] Manifest archive acquired from $name." >&2
                 cp -f "$dl_tmp" "$cached_zip"
@@ -4859,7 +4966,7 @@ doctor_audit() {
     echo
     echo "  ${UI_PURPLE}[LAYER 1] Fundamental CLI Tools${UI_RST}"
     local cli_tool
-    for cli_tool in fzf jq curl file unzip rsync ssh; do
+    for cli_tool in fzf jq curl file zip unzip rsync ssh; do
         if command -v "$cli_tool" >/dev/null 2>&1; then
             echo "    • $(printf '%-10s' "$cli_tool") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(command -v "$cli_tool"))${UI_RST}"
             pass_cnt=$((pass_cnt + 1))
@@ -4977,12 +5084,13 @@ doctor_audit() {
     local harvest_ok=1
     command -v curl >/dev/null 2>&1 || harvest_ok=0
     command -v jq >/dev/null 2>&1 || harvest_ok=0
+    command -v zip >/dev/null 2>&1 || harvest_ok=0
     command -v unzip >/dev/null 2>&1 || harvest_ok=0
     if [ "$harvest_ok" -eq 1 ]; then
-        echo "    • $(printf '%-15s' "Harvester") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}(curl, jq, unzip)${UI_RST}"
+        echo "    • $(printf '%-15s' "Harvester") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}(curl, jq, zip, unzip)${UI_RST}"
         pass_cnt=$((pass_cnt + 1))
     else
-        echo "    • $(printf '%-15s' "Harvester") : ${UI_RED}[MISSING]${UI_RST} curl, jq, or unzip not found"
+        echo "    • $(printf '%-15s' "Harvester") : ${UI_RED}[MISSING]${UI_RST} curl, jq, zip, or unzip not found"
         miss_cnt=$((miss_cnt + 1))
     fi
 

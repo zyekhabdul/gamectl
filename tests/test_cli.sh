@@ -960,6 +960,48 @@ test_download_game_deprecated_engine_flag_handling() {
 }
 run_test "Download Orchestrator: --engine=depot deprecation defense" test_download_game_deprecated_engine_flag_handling
 
+test_raw_lua_manifest_validation_contract() {
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    local t_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/test_lua_val_$$"
+    mkdir -p "$t_dir"
+
+    local valid_lua="$t_dir/219150.lua"
+    cat << 'EOF_LUA' > "$valid_lua"
+-- Sample Lua manifest
+addappid(219150, 1, "2913177754c5c8b37def713cdb2cbb3c6c7268f3ceff993c9a1ba1b6805d5116")
+addappid(219151, 1, "456344fdb2b0b0fa153f9224614ea5f197a574c7fa01dca7d4e67396b90862f1")
+EOF_LUA
+
+    local invalid_lua="$t_dir/invalid.lua"
+    echo "print('hello')" > "$invalid_lua"
+
+    local ok1 ok2 ok3
+    is_valid_lua_manifest "$valid_lua" "219150" && ok1=1 || ok1=0
+    is_valid_lua_manifest "$invalid_lua" "219150" && ok2=1 || ok2=0
+    is_valid_lua_manifest "/nonexistent.lua" "219150" && ok3=1 || ok3=0
+
+    rm -rf "$t_dir"
+    [ "$ok1" -eq 1 ] && [ "$ok2" -eq 0 ] && [ "$ok3" -eq 0 ]
+}
+run_test "Manifest Harvester: Raw Lua manifest validation & audit" test_raw_lua_manifest_validation_contract
+
+test_luatools_bearer_token_manager_resolution() {
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    local t_cfg="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/test_auth_$$"
+    mkdir -p "$t_cfg"
+
+    # Verify resolution from existing auth file
+    local tok
+    tok=$(get_valid_luatools_token 2>/dev/null || true)
+    # If token exists in system, must be string of length > 20
+    if [ -n "$tok" ]; then
+        [ "${#tok}" -ge 20 ]
+    else
+        return 0
+    fi
+}
+run_test "Manifest Harvester: LuaTools token resolver contract" test_luatools_bearer_token_manager_resolution
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

@@ -13,7 +13,7 @@ doctor_audit() {
     echo
     echo "  ${UI_PURPLE}[LAYER 1] Fundamental CLI Tools${UI_RST}"
     local cli_tool
-    for cli_tool in fzf jq curl file unzip rsync ssh; do
+    for cli_tool in fzf jq curl file zip unzip rsync ssh; do
         if command -v "$cli_tool" >/dev/null 2>&1; then
             echo "    • $(printf '%-10s' "$cli_tool") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(command -v "$cli_tool"))${UI_RST}"
             pass_cnt=$((pass_cnt + 1))
@@ -131,12 +131,13 @@ doctor_audit() {
     local harvest_ok=1
     command -v curl >/dev/null 2>&1 || harvest_ok=0
     command -v jq >/dev/null 2>&1 || harvest_ok=0
+    command -v zip >/dev/null 2>&1 || harvest_ok=0
     command -v unzip >/dev/null 2>&1 || harvest_ok=0
     if [ "$harvest_ok" -eq 1 ]; then
-        echo "    • $(printf '%-15s' "Harvester") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}(curl, jq, unzip)${UI_RST}"
+        echo "    • $(printf '%-15s' "Harvester") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}(curl, jq, zip, unzip)${UI_RST}"
         pass_cnt=$((pass_cnt + 1))
     else
-        echo "    • $(printf '%-15s' "Harvester") : ${UI_RED}[MISSING]${UI_RST} curl, jq, or unzip not found"
+        echo "    • $(printf '%-15s' "Harvester") : ${UI_RED}[MISSING]${UI_RST} curl, jq, zip, or unzip not found"
         miss_cnt=$((miss_cnt + 1))
     fi
 
