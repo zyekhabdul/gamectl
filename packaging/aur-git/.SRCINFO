@@ -1,6 +1,6 @@
 pkgbase = gamectl-git
 	pkgdesc = Sovereign TUI Game Manager & Launcher for Linux (Zero-Bloat, VCS development branch)
-	pkgver = 1.2.0.r0.gfdafd3b
+	pkgver = 1.2.0.r116.gfdafd3b
 	pkgrel = 1
 	url = https://github.com/zyekhabdul/gamectl
 	arch = any

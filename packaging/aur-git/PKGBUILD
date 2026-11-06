@@ -1,6 +1,6 @@
 # Maintainer: Zyekh Abdul <zyekhabdul@users.noreply.github.com>
 pkgname=gamectl-git
-pkgver=1.2.0.r0.g$(git rev-parse --short HEAD 2>/dev/null || echo "latest")
+pkgver=1.2.0.r116.gfdafd3b
 pkgrel=1
 pkgdesc="Sovereign TUI Game Manager & Launcher for Linux (Zero-Bloat, VCS development branch)"
 arch=('any')
@@ -33,7 +33,14 @@ sha256sums=('SKIP')
 
 pkgver() {
     cd "$srcdir/gamectl"
-    git describe --long --tags 2>/dev/null | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g' || printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+    local count
+    count=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+    local hash
+    hash=$(git rev-parse --short HEAD 2>/dev/null || echo "0000000")
+    local tag
+    tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "1.2.0")
+    tag="${tag#v}"
+    printf "%s.r%s.g%s" "$tag" "$count" "$hash"
 }
 
 package() {
