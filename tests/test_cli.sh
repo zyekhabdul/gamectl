@@ -422,8 +422,10 @@ run_test "AUR Git Packaging: Valid PKGBUILD syntax and .SRCINFO generation" test
 test_debian_packaging_validation() {
     [ -x "$REPO_ROOT/packaging/debian/build-deb.sh" ] && \
     bash "$REPO_ROOT/packaging/debian/build-deb.sh" >/dev/null 2>&1 && \
-    [ -f "$REPO_ROOT/packaging/debian/gamectl_1.2.0_all.deb" ] && \
-    dpkg-deb -I "$REPO_ROOT/packaging/debian/gamectl_1.2.0_all.deb" | grep -q "Package: gamectl"
+    local deb_pkg && \
+    deb_pkg=$(ls "$REPO_ROOT/packaging/debian"/gamectl_*_all.deb 2>/dev/null | head -n 1) && \
+    [ -n "$deb_pkg" ] && [ -f "$deb_pkg" ] && \
+    dpkg-deb -I "$deb_pkg" | grep -q "Package: gamectl"
 }
 run_test "Debian Packaging: Valid .deb construction and control metadata" test_debian_packaging_validation
 

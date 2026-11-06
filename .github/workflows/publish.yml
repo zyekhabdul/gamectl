@@ -31,10 +31,23 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install build
+          pip install build wheel
+
+      - name: Build standalone gamectl bundle
+        run: |
+          chmod +x ./scripts/build.sh
+          ./scripts/build.sh
+          test -f src/gamectl_runner/bin/gamectl
 
       - name: Build distribution packages
         run: python -m build
+
+      - name: Verify wheel contents
+        run: |
+          python -m wheel unpack dist/*.whl -d /tmp/whl_check
+          test -f /tmp/whl_check/*/gamectl_runner/bin/gamectl
+          /tmp/whl_check/*/gamectl_runner/bin/gamectl --version
+          rm -rf /tmp/whl_check
 
       - name: Publish to PyPI via Trusted Publishing
         uses: pypa/gh-action-pypi-publish@release/v1
