@@ -14,6 +14,7 @@ pkgbase = gamectl
 	depends = python
 	depends = rsync
 	depends = unzip
+	optdepends = bubblewrap: Rootless security sandbox isolation profile (--sandbox)
 	optdepends = gamemode: Performance optimizations during gameplay
 	optdepends = gamescope: Micro-compositor with dynamic FSR upscaling
 	optdepends = mangohud: On-screen performance overlay and frame limiter

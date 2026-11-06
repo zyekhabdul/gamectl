@@ -5,3 +5,15 @@
 .save_snapshots/
 .DS_Store
 *~
+
+# Packaging and build artifacts
+packaging/debian/*.deb
+packaging/debian/build_deb/
+packaging/arch/*.pkg.tar*
+packaging/arch/pkg/
+packaging/arch/src/
+packaging/aur-git/*.pkg.tar*
+packaging/aur-git/pkg/
+packaging/aur-git/src/
+dist/
+build/
