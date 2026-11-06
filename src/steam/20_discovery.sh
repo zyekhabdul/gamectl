@@ -41,6 +41,33 @@ get_steam_primary_apps() {
     echo "$HOME/.local/share/Steam/steamapps"
 }
 
+# Discover active SLSsteam configuration directory
+get_sls_root() {
+    local xdg="${XDG_CONFIG_HOME:-$HOME/.config}"
+    echo "$xdg/SLSsteam"
+}
+
+# Discover active SLSsteam manifests storage directory
+get_sls_manifests_dir() {
+    local sls_root
+    sls_root="$(get_sls_root)"
+    echo "$sls_root/manifests"
+}
+
+# Discover active Steam stplug-in Lua directory
+get_steam_stplug_in_dir() {
+    local s_root
+    s_root="$(get_steam_root 2>/dev/null || echo "$HOME/.local/share/Steam")"
+    echo "$s_root/config/stplug-in"
+}
+
+# Discover active Steam depotcache directory
+get_steam_depotcache_dir() {
+    local s_root
+    s_root="$(get_steam_root 2>/dev/null || echo "$HOME/.local/share/Steam")"
+    echo "$s_root/depotcache"
+}
+
 # Discover all configured Steam library paths with deduplication
 get_steam_libraries() {
     declare -A seen_libs=()

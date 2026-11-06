@@ -31,7 +31,7 @@ Mengganti ketergantungan rapuh pada DepotDownloader eksternal (.NET GC heap ting
   3. Kembalikan path zip tervalidasi ke caller.
 - DoD: Fungsi `fetch_manifest` berhasil mengunduh, memverifikasi, dan mengembalikan file manifest archive untuk AppID valid dengan exit code 0.
 
-### Chunk 2: SLSsteam Stplug-in & Manifest Linker (`deploy_sls_manifest`) [PLANNED]
+### Chunk 2: SLSsteam Stplug-in & Manifest Linker (`deploy_sls_manifest`) [DONE]
 - Target Files: `src/steam/30_downloader.sh`, `src/steam/20_discovery.sh`
 - Runtutan Eksekusi Teknis:
   1. Implementasikan fungsi `deploy_sls_manifest "$appid" "$manifest_zip"`:
@@ -118,7 +118,7 @@ Mengganti ketergantungan rapuh pada DepotDownloader eksternal (.NET GC heap ting
 
 ## 3. Matriks Milestone (Work Packet 13)
 - [x] Chunk 1: Multi-Provider Manifest Harvester (`fetch_manifest`) [DONE]
-- [ ] Chunk 2: SLSsteam Stplug-in & Manifest Linker (`deploy_sls_manifest`) [PLANNED]
+- [x] Chunk 2: SLSsteam Stplug-in & Manifest Linker (`deploy_sls_manifest`) [DONE]
 - [ ] Chunk 3: Dual-Mode Download Orchestrator Refactoring (`download_game`) [PLANNED]
 - [ ] Chunk 4: Real-Time ACF Telemetry & Interactive Monitor (`list_downloads`) [PLANNED]
 - [ ] Chunk 5: Dashboard TUI & CLI Integration (`70_dashboard.sh` & `main.sh`) [PLANNED]

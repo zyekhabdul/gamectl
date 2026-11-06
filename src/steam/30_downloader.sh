@@ -242,6 +242,126 @@ fetch_manifest() {
     fi
 }
 
+# Deploy manifest archive into SLSsteam manifests, stplug-in Lua, and config.yaml
+deploy_sls_manifest() {
+    local appid="$1"
+    local manifest_zip="${2:-}"
+    local title="${3:-}"
+
+    # Strip ANSI escape sequences
+    appid=$(printf "%s" "$appid" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
+    title=$(printf "%s" "$title" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
+
+    if [ -z "$appid" ]; then
+        echo "[ERROR] deploy_sls_manifest: Invalid numeric AppID." >&2
+        return 1
+    fi
+
+    # 1. Acquire manifest archive if not provided
+    if [ -z "$manifest_zip" ] || [ ! -f "$manifest_zip" ]; then
+        echo "[INFO] Manifest archive not provided. Attempting automatic harvest..." >&2
+        manifest_zip=$(fetch_manifest "$appid" 2>/dev/null || true)
+        if [ -z "$manifest_zip" ] || [ ! -f "$manifest_zip" ]; then
+            echo "[ERROR] Could not acquire manifest archive for AppID $appid." >&2
+            return 1
+        fi
+    fi
+
+    if ! validate_manifest_zip "$manifest_zip" "$appid"; then
+        echo "[ERROR] Manifest zip validation failed: $manifest_zip" >&2
+        return 1
+    fi
+
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local stage_dir="$run_dir/sls_deploy_${appid}_$$"
+    mkdir -p -m 700 "$stage_dir"
+    trap 'rm -rf "$stage_dir" 2>/dev/null || true' RETURN
+
+    if ! unzip -q "$manifest_zip" -d "$stage_dir" 2>/dev/null; then
+        echo "[ERROR] Failed to unpack manifest archive: $manifest_zip" >&2
+        return 1
+    fi
+
+    local sls_mf_dir
+    sls_mf_dir="$(get_sls_manifests_dir 2>/dev/null || echo "$HOME/.config/SLSsteam/manifests")"
+    local steam_depot_dir
+    steam_depot_dir="$(get_steam_depotcache_dir 2>/dev/null || echo "$HOME/.local/share/Steam/depotcache")"
+    local stplug_dir
+    stplug_dir="$(get_steam_stplug_in_dir 2>/dev/null || echo "$HOME/.local/share/Steam/config/stplug-in")"
+
+    mkdir -p -m 700 "$sls_mf_dir" "$steam_depot_dir" "$stplug_dir"
+
+    local manifest_count=0
+    declare -A pinned_depots=()
+
+    # 2. Process and deploy binary manifests
+    shopt -s nullglob globstar
+    local mf_files=("$stage_dir"/**/*.manifest "$stage_dir"/*.manifest)
+    declare -A seen_mf=()
+    for mf in "${mf_files[@]}"; do
+        [ -f "$mf" ] || continue
+        local mf_name
+        mf_name="$(basename "$mf")"
+        [[ -v seen_mf["$mf_name"] ]] && continue
+        seen_mf["$mf_name"]=1
+
+        if manifest_has_payload_magic "$mf"; then
+            cp -f "$mf" "$sls_mf_dir/$mf_name"
+            chmod 600 "$sls_mf_dir/$mf_name"
+
+            # Mirror to Steam internal depotcache
+            cp -f "$mf" "$steam_depot_dir/$mf_name"
+            chmod 600 "$steam_depot_dir/$mf_name"
+
+            # Parse depot and GID from <depot>_<gid>.manifest
+            if [[ "$mf_name" =~ ^([0-9]+)_([0-9]+)\.manifest$ ]]; then
+                local depot_id="${BASH_REMATCH[1]}"
+                local gid="${BASH_REMATCH[2]}"
+                echo "$gid" > "$sls_mf_dir/.preferred_${depot_id}"
+                chmod 600 "$sls_mf_dir/.preferred_${depot_id}"
+                pinned_depots["$depot_id"]="$gid"
+            fi
+            manifest_count=$((manifest_count + 1))
+        fi
+    done
+    shopt -u nullglob globstar
+
+    # 3. Extract or synthesize stplug-in Lua script
+    local target_lua="$stplug_dir/${appid}.lua"
+    local staged_lua=""
+    if [ -f "$stage_dir/${appid}.lua" ]; then
+        staged_lua="$stage_dir/${appid}.lua"
+    else
+        shopt -s nullglob globstar
+        local candidate_luas=("$stage_dir"/**/*.lua "$stage_dir"/*.lua)
+        shopt -u nullglob globstar
+        if [ "${#candidate_luas[@]}" -eq 1 ]; then
+            staged_lua="${candidate_luas[0]}"
+        fi
+    fi
+
+    if [ -n "$staged_lua" ] && [ -f "$staged_lua" ]; then
+        cp -f "$staged_lua" "$target_lua"
+        chmod 600 "$target_lua"
+        echo "[VERIFIED] Stplug-in Lua deployed from archive: $target_lua" >&2
+    else
+        echo "[INFO] Synthesizing stplug-in Lua script for AppID $appid..." >&2
+        local synth_lua="addappid($appid)\n"
+        for d_id in "${!pinned_depots[@]}"; do
+            synth_lua+="addappid($d_id)\n"
+        done
+        printf "%b" "$synth_lua" > "$target_lua"
+        chmod 600 "$target_lua"
+        echo "[VERIFIED] Synthesized stplug-in Lua: $target_lua" >&2
+    fi
+
+    # 4. Synchronize entitlement in SLSsteam config.yaml (skipping ACF creation)
+    sync_steam "$appid" "$title" "--no-acf"
+
+    echo "[VERIFIED] SLSsteam deployment complete for AppID $appid ($manifest_count manifest(s) linked)." >&2
+    return 0
+}
+
 # Ensure DepotDownloader runtime is available
 ensure_downloader() {
     local depot_bin=""
@@ -677,7 +797,7 @@ sync_steam() {
     dlc_json=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/dlcforapp/?appid=${appid}" 2>/dev/null || echo "{}")
 
     # 2. Update ~/.config/SLSsteam/config.yaml using ruamel.yaml
-    local sls_cfg="$HOME/.config/SLSsteam/config.yaml"
+    local sls_cfg="$(get_sls_root 2>/dev/null || echo "$HOME/.config/SLSsteam")/config.yaml"
     if [ -f "$sls_cfg" ]; then
         python3 -c "
 import sys, json
@@ -740,7 +860,11 @@ except Exception as e:
 " "$sls_cfg" "$appid" "$dlc_json" 2>/dev/null || true
     fi
 
-    # 3. Create appmanifest_<appid>.acf in Steam steamapps
+    # 3. Create appmanifest_<appid>.acf in Steam steamapps (unless --no-acf requested)
+    if [ "${game_dir:-}" = "--no-acf" ] || [ "${4:-}" = "--no-acf" ]; then
+        return 0
+    fi
+
     local steam_apps
     steam_apps="$(get_steam_primary_apps)"
     if [ -d "$steam_apps" ]; then

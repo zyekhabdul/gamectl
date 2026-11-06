@@ -764,6 +764,68 @@ test_fetch_manifest_cache_and_stash_resolution() {
 run_test "Manifest Harvester: Local cache & stash fast-path resolution" test_fetch_manifest_cache_and_stash_resolution
 
 
+
+test_sls_and_steam_directory_helpers() {
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    # Invariant: discovery helpers resolve valid standard SLSsteam and Steam subdirectories
+    local test_cfg="${TEST_TMP_DIR:-/tmp}/test_cfg_$$"
+    local test_steam="${TEST_TMP_DIR:-/tmp}/test_steam_$$"
+    mkdir -p "$test_cfg" "$test_steam"
+    export XDG_CONFIG_HOME="$test_cfg"
+    export STEAM_ROOT="$test_steam"
+
+    local sls_root sls_mf stplug depotcache
+    sls_root="$(get_sls_root)"
+    sls_mf="$(get_sls_manifests_dir)"
+    stplug="$(get_steam_stplug_in_dir)"
+    depotcache="$(get_steam_depotcache_dir)"
+
+    rm -rf "$test_cfg" "$test_steam"
+    unset XDG_CONFIG_HOME STEAM_ROOT
+
+    [ "$sls_root" = "$test_cfg/SLSsteam" ] &&     [ "$sls_mf" = "$test_cfg/SLSsteam/manifests" ] &&     [ "$stplug" = "$test_steam/config/stplug-in" ] &&     [ "$depotcache" = "$test_steam/depotcache" ]
+}
+run_test "SLSsteam Linker: Directory path resolution contracts" test_sls_and_steam_directory_helpers
+
+test_deploy_sls_manifest_contract() {
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    # Invariant: deploy_sls_manifest extracts manifests, sets .preferred_*, writes stplug-in lua, and syncs config.yaml
+    local test_root="${TEST_TMP_DIR:-/tmp}/sls_test_root_$$"
+    local test_cfg="$test_root/config"
+    local test_steam="$test_root/Steam"
+    mkdir -p "$test_cfg/SLSsteam" "$test_steam/config/stplug-in" "$test_steam/depotcache"
+    echo "AppIds: []" > "$test_cfg/SLSsteam/config.yaml"
+
+    export XDG_CONFIG_HOME="$test_cfg"
+    export STEAM_ROOT="$test_steam"
+
+    # Create mock manifest zip with 1 depot manifest and 1 lua script
+    local mock_zip="$test_root/mock_12345.zip"
+    local stage_dir="$test_root/stage"
+    mkdir -p "$stage_dir"
+    printf "\xd0\x17\xf6\x71test_payload_12345" > "$stage_dir/44444_55555.manifest"
+    echo 'addappid(12345)' > "$stage_dir/12345.lua"
+    echo 'addappid(44444, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")' >> "$stage_dir/12345.lua"
+    (cd "$stage_dir" && zip -q "$mock_zip" 44444_55555.manifest 12345.lua)
+
+    local deploy_rc=0
+    deploy_sls_manifest "12345" "$mock_zip" "TestMockTitle" || deploy_rc=$?
+
+    local ok_mf=0 ok_steam_mf=0 ok_pref=0 ok_lua=0 ok_cfg=0
+    [ -f "$test_cfg/SLSsteam/manifests/44444_55555.manifest" ] && ok_mf=1
+    [ -f "$test_steam/depotcache/44444_55555.manifest" ] && ok_steam_mf=1
+    [ -f "$test_cfg/SLSsteam/manifests/.preferred_44444" ] &&     [ "$(cat "$test_cfg/SLSsteam/manifests/.preferred_44444" | tr -d '[:space:]')" = "55555" ] && ok_pref=1
+    [ -f "$test_steam/config/stplug-in/12345.lua" ] &&     grep -q 'addappid(12345)' "$test_steam/config/stplug-in/12345.lua" &&     grep -q 'addappid(44444' "$test_steam/config/stplug-in/12345.lua" && ok_lua=1
+    [ -f "$test_cfg/SLSsteam/config.yaml" ] &&     grep -q '12345' "$test_cfg/SLSsteam/config.yaml" && ok_cfg=1
+
+    rm -rf "$test_root"
+    unset XDG_CONFIG_HOME STEAM_ROOT
+
+    [ "$deploy_rc" -eq 0 ] &&     [ "$ok_mf" -eq 1 ] &&     [ "$ok_steam_mf" -eq 1 ] &&     [ "$ok_pref" -eq 1 ] &&     [ "$ok_lua" -eq 1 ] &&     [ "$ok_cfg" -eq 1 ]
+}
+run_test "SLSsteam Linker: deploy_sls_manifest manifest & stplug-in linking" test_deploy_sls_manifest_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
