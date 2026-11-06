@@ -951,6 +951,39 @@ test_tui_dashboard_and_cli_help_integration() {
 }
 run_test "Dashboard & CLI Integration: Cockpit indicators & command exposure" test_tui_dashboard_and_cli_help_integration
 
+test_download_game_engine_selector_flag_parsing() {
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    # Invariant: --engine depot immediately invokes ensure_downloader without touching SLS manifests
+    local test_root="${TEST_TMP_DIR:-/tmp}/engine_test_$$"
+    mkdir -p "$test_root"
+    export XDG_RUNTIME_DIR="$test_root"
+
+    local mock_bin="$test_root/mock_depot"
+    cat << 'EOF' > "$mock_bin"
+#!/usr/bin/env bash
+echo "MOCK_DEPOT_CALLED with args: $*"
+exit 0
+EOF
+    chmod +x "$mock_bin"
+
+    ensure_downloader() {
+        echo "$mock_bin"
+        return 0
+    }
+
+    local out
+    out=$(download_game "88888" --engine depot --raw --foreground "TestTitle" 2>&1)
+    local rc=$?
+
+    rm -rf "$test_root"
+    unset XDG_RUNTIME_DIR
+
+    [ "$rc" -eq 0 ] && \
+    echo "$out" | grep -q 'HEADLESS GAME DOWNLOADER (DepotDownloader)' && \
+    echo "$out" | grep -q 'MOCK_DEPOT_CALLED with args: -app 88888'
+}
+run_test "Download Orchestrator: --engine=depot explicit headless dispatch" test_download_game_engine_selector_flag_parsing
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

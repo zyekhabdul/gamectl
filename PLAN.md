@@ -101,7 +101,7 @@ Mengganti ketergantungan rapuh pada DepotDownloader eksternal (.NET GC heap ting
      - Dokumentasikan opsi baru `gamectl download <appid> [--engine=steam|depot] [--source=...]`.
 - DoD: TUI Dashboard terintegrasi penuh dengan download engine baru, shortcut keyboard berfungsi mulus.
 
-### Chunk 6: Test Suite & Empirical Machine Verification [PLANNED]
+### Chunk 6: Test Suite & Empirical Machine Verification [DONE]
 - Target Files: `tests/test_cli.sh`, `scripts/build.sh`
 - Runtutan Eksekusi Teknis:
   1. Buat unit test baru di `tests/test_cli.sh`:
@@ -119,7 +119,7 @@ Mengganti ketergantungan rapuh pada DepotDownloader eksternal (.NET GC heap ting
 ## 3. Matriks Milestone (Work Packet 13)
 - [x] Chunk 1: Multi-Provider Manifest Harvester (`fetch_manifest`) [DONE]
 - [x] Chunk 2: SLSsteam Stplug-in & Manifest Linker (`deploy_sls_manifest`) [DONE]
-- [ ] Chunk 3: Dual-Mode Download Orchestrator Refactoring (`download_game`) [PLANNED]
-- [ ] Chunk 4: Real-Time ACF Telemetry & Interactive Monitor (`list_downloads`) [PLANNED]
-- [ ] Chunk 5: Dashboard TUI & CLI Integration (`70_dashboard.sh` & `main.sh`) [PLANNED]
-- [ ] Chunk 6: Test Suite & Empirical Machine Verification (`tests/test_cli.sh`) [PLANNED]
+- [x] Chunk 3: Dual-Mode Download Orchestrator Refactoring (`download_game`) [DONE]
+- [x] Chunk 4: Real-Time ACF Telemetry & Interactive Monitor (`list_downloads`) [DONE]
+- [x] Chunk 5: Dashboard TUI & CLI Integration (`70_dashboard.sh` & `main.sh`) [DONE]
+- [x] Chunk 6: Test Suite & Empirical Machine Verification (`tests/test_cli.sh`) [DONE]
