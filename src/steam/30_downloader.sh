@@ -363,53 +363,10 @@ deploy_sls_manifest() {
     return 0
 }
 
-# Ensure DepotDownloader runtime is available
+# Ensure DepotDownloader runtime is available (Deprecated stub)
 ensure_downloader() {
-    local depot_bin=""
-    if command -v depotdownloader >/dev/null 2>&1; then
-        depot_bin="$(command -v depotdownloader)"
-    elif [ -x "$HOME/.local/share/gamectl/bin/DepotDownloader" ]; then
-        depot_bin="$HOME/.local/share/gamectl/bin/DepotDownloader"
-    elif [ -x "$HOME/.local/bin/depotdownloader" ]; then
-        depot_bin="$HOME/.local/bin/depotdownloader"
-    else
-        local u_arch
-        u_arch=$(uname -m 2>/dev/null || echo "x86_64")
-        local dl_arch="linux-x64"
-        case "$u_arch" in
-            aarch64|arm64)
-                dl_arch="linux-arm64"
-                ;;
-            armv7*|armhf)
-                dl_arch="linux-arm"
-                ;;
-            x86_64|amd64)
-                dl_arch="linux-x64"
-                ;;
-            *)
-                dl_arch="linux-x64"
-                ;;
-        esac
-
-        echo "[INFO] Downloading DepotDownloader standalone binary ($dl_arch)..." >&2
-        mkdir -p "$HOME/.local/share/gamectl/bin" "$HOME/.local/bin"
-        local dl_url="https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_3.4.0/DepotDownloader-${dl_arch}.zip"
-        local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
-        mkdir -p -m 700 "$run_dir"
-        local dl_zip="$run_dir/depotdownloader.zip"
-        if curl -sL "$dl_url" -o "$dl_zip" 2>/dev/null; then
-            unzip -q -o "$dl_zip" -d "$HOME/.local/share/gamectl/bin/"
-            chmod +x "$HOME/.local/share/gamectl/bin/DepotDownloader"
-            ln -sf "$HOME/.local/share/gamectl/bin/DepotDownloader" "$HOME/.local/bin/depotdownloader"
-            rm -f "$dl_zip"
-            depot_bin="$HOME/.local/share/gamectl/bin/DepotDownloader"
-            echo "[VERIFIED] DepotDownloader installed at: $depot_bin" >&2
-        else
-            echo "[ERROR] Failed to download DepotDownloader from GitHub." >&2
-            return 1
-        fi
-    fi
-    echo "$depot_bin"
+    echo "[WARN] DepotDownloader is deprecated and removed from gamectl. Native Steam client CDN engine is standard." >&2
+    return 1
 }
 
 # Resolve optimal destination directory based on configured libraries and available disk space
@@ -522,13 +479,13 @@ trigger_steam_install() {
     return 0
 }
 
-# Dual-Mode Game Downloader (SLSsteam Native Engine / Headless DepotDownloader)
+# Steam Native Game Downloader & Provisioner (SLSsteam-Moon Engine)
 download_game() {
     local appid="${1:-}"
     # Strip ANSI escape sequences & non-digits
     appid=$(printf "%s" "$appid" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
     if [ -z "$appid" ]; then
-        echo "Usage: gamectl download <appid> [target_dir] [title] [--engine <steam|depot>] [--source <auto|ryuu|sushi|luatools>] [--raw|--inject-only|--all] [--foreground|-f] [--os <linux|windows|all>]" >&2
+        echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|ryuu|sushi|luatools>] [--raw|--inject-only|--all]" >&2
         return 1
     fi
     shift
@@ -536,25 +493,23 @@ download_game() {
     local target_dir=""
     local title=""
     local action="all"     # "all", "inject", "raw"
-    local exec_mode="bg"   # "bg" or "fg"
-    local target_os=""
-    local engine="steam"   # "steam" or "depot"
     local source="auto"    # "auto", "ryuu", "sushi", "luatools"
 
     while [ $# -gt 0 ]; do
         case "$1" in
             --engine)
                 shift
-                engine="${1:-steam}"
+                if [ "${1:-}" = "depot" ]; then
+                    echo "[WARN] DepotDownloader is deprecated and removed. Routing to native Steam CDN engine." >&2
+                fi
                 ;;
             --engine=*)
-                engine="${1#--engine=}"
+                if [ "${1#--engine=}" = "depot" ]; then
+                    echo "[WARN] DepotDownloader is deprecated and removed. Routing to native Steam CDN engine." >&2
+                fi
                 ;;
             --headless)
-                engine="depot"
-                ;;
-            --steam)
-                engine="steam"
+                echo "[WARN] DepotDownloader is deprecated and removed. Routing to native Steam CDN engine." >&2
                 ;;
             --source)
                 shift
@@ -572,18 +527,11 @@ download_game() {
             --all)
                 action="all"
                 ;;
-            --foreground|-f|foreground)
-                exec_mode="fg"
+            --foreground|-f|foreground|--background|-b|background)
+                # Preserved for CLI flag backwards-compatibility
                 ;;
-            --background|-b|background)
-                exec_mode="bg"
-                ;;
-            --os)
-                shift
-                target_os="${1:-linux}"
-                ;;
-            --os=*)
-                target_os="${1#--os=}"
+            --os|--os=*)
+                [ "$1" = "--os" ] && shift
                 ;;
             *)
                 if [ -z "$target_dir" ]; then
@@ -597,139 +545,29 @@ download_game() {
     done
 
     if [ -z "$title" ]; then
-        title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
+        title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" | jq -r "."${appid}".data.name // empty" 2>/dev/null || true)
         [ -z "$title" ] && title="AppID_${appid}"
-    fi
-
-    # Mode A: Steam Native Content Engine (SLSsteam-Moon)
-    if [ "$engine" = "steam" ]; then
-        echo "=========================================="
-        echo " STEAM NATIVE CONTENT ENGINE (SLSsteam-Moon)"
-        echo "=========================================="
-        echo " AppID      : $appid"
-        echo " Title      : $title"
-        echo " Engine     : SLSsteam (Valve High-Speed CDN)"
-        echo " Source     : $source"
-        echo " Mode       : $action (raw/inject/all)"
-        echo "=========================================="
-
-        if deploy_sls_manifest "$appid" "" "$title" "$source"; then
-            echo "[SUCCESS] SLSsteam manifests and stplug-in keys provisioned for $title ($appid)."
-            trigger_steam_install "$appid"
-            return 0
-        else
-            echo "[WARN] Native SLSsteam manifest deployment failed for AppID $appid." >&2
-            echo "[INFO] Falling back to headless DepotDownloader engine..." >&2
-            engine="depot"
-        fi
-    fi
-
-    # Mode B: Headless DepotDownloader Engine
-    local depot_bin
-    depot_bin=$(ensure_downloader) || return 1
-
-    if [ -z "$title" ]; then
-        title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
-        [ -z "$title" ] && title="AppID_${appid}"
-    fi
-
-    local safe_title
-    safe_title=$(echo "$title" | tr -cd '[:alnum:] _-')
-    [ -z "$safe_title" ] && safe_title="$appid"
-
-    if [ -z "$target_os" ]; then
-        target_os="$(detect_app_platform_os "$appid")"
-    fi
-
-    if [ -z "$target_dir" ]; then
-        target_dir="$(resolve_target_library_dir "$safe_title")"
-    fi
-
-    mkdir -p "$target_dir"
-    target_dir="$(cd "$target_dir" && pwd)"
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
-    mkdir -p -m 700 "$run_dir"
-    local log_file="$run_dir/gamectl_dl_${appid}.log"
-
-    local extra_args=()
-    local user_cfg="$HOME/.config/gamectl/steam_user"
-    local steam_user="${GAMECTL_STEAM_USER:-}"
-    if [ -z "$steam_user" ] && [ -f "$user_cfg" ]; then
-        steam_user=$(head -n 1 "$user_cfg" | tr -d '[:space:]')
-    fi
-    if [ -n "$steam_user" ]; then
-        extra_args+=("-username" "$steam_user" "-remember-password")
     fi
 
     echo "=========================================="
-    echo " HEADLESS GAME DOWNLOADER (DepotDownloader)"
+    echo " STEAM NATIVE CONTENT ENGINE (SLSsteam-Moon)"
     echo "=========================================="
     echo " AppID      : $appid"
     echo " Title      : $title"
-    echo " Target Dir : $target_dir"
-    echo " Target OS  : $target_os"
-    echo " Package    : $action (raw / inject / all)"
-    echo " Log Stream : $log_file"
-    [ -n "$steam_user" ] && echo " Steam User : $steam_user"
+    echo " Engine     : SLSsteam (Valve High-Speed CDN)"
+    echo " Source     : $source"
+    echo " Mode       : $action"
     echo "=========================================="
 
-    if [ "$exec_mode" = "fg" ]; then
-        echo "[INFO] Running download in foreground..."
-        echo "[INFO] Starting download of AppID $appid ($target_os) to $target_dir at $(date)" > "$log_file"
-        "$depot_bin" -app "$appid" -os "$target_os" "${extra_args[@]}" -dir "$target_dir" 2>&1 | tee -a "$log_file"
-        local dl_status="${PIPESTATUS[0]}"
-        if [ "$dl_status" -eq 0 ]; then
-            case "$action" in
-                raw)
-                    echo "[SUCCESS] Raw asset download completed for $title ($appid)."
-                    ;;
-                inject)
-                    echo "[INFO] Executing standalone GBE Fork injection..."
-                    "$SELF_BIN" inject "$target_dir" "$appid" --no-sync
-                    echo "[SUCCESS] Download and standalone injection completed for $title ($appid)."
-                    ;;
-                all|*)
-                    echo "[INFO] Executing GBE Fork injection and Steam Client synchronization..."
-                    "$SELF_BIN" inject "$target_dir" "$appid"
-                    echo "[SUCCESS] All-in-One installation completed for $title ($appid)."
-                    ;;
-            esac
-        else
-            echo "[ERROR] Download failed (exit code: $dl_status). See: $log_file" >&2
-            return "$dl_status"
-        fi
+    if deploy_sls_manifest "$appid" "" "$title" "$source"; then
+        echo "[SUCCESS] SLSsteam manifests and stplug-in keys provisioned for $title ($appid)."
+        trigger_steam_install "$appid"
+        return 0
     else
-        echo "[INFO] Spawning download process in background..."
-        (
-            echo "[INFO] Starting download of AppID $appid ($target_os) to $target_dir at $(date)" > "$log_file"
-            "$depot_bin" -app "$appid" -os "$target_os" "${extra_args[@]}" -dir "$target_dir" >> "$log_file" 2>&1
-            local bg_status=$?
-            if [ $bg_status -eq 0 ]; then
-                case "$action" in
-                    raw)
-                        echo "[SUCCESS] Raw asset download completed for $title ($appid) at $(date)." >> "$log_file"
-                        ;;
-                    inject)
-                        echo "[INFO] Executing standalone GBE Fork injection..." >> "$log_file"
-                        "$SELF_BIN" inject "$target_dir" "$appid" --no-sync >> "$log_file" 2>&1
-                        echo "[SUCCESS] Download and standalone injection completed for $title ($appid) at $(date)." >> "$log_file"
-                        ;;
-                    all|*)
-                        echo "[INFO] Executing auto-injection and Steam Client synchronization..." >> "$log_file"
-                        "$SELF_BIN" inject "$target_dir" "$appid" >> "$log_file" 2>&1
-                        echo "[SUCCESS] All-in-One complete installation finished for $title ($appid) at $(date)." >> "$log_file"
-                        ;;
-                esac
-            else
-                echo "[ERROR] Download failed (exit code: $bg_status) at $(date)." >> "$log_file"
-            fi
-        ) &
-        local pid=$!
-        echo "[VERIFIED] Download running in background (PID: $pid)."
-        echo "Monitor progress: tail -f $log_file"
+        echo "[ERROR] Manifest archive and keys for AppID $appid could not be acquired across providers." >&2
+        return 1
     fi
 }
-
 # Locate appmanifest_<appid>.acf across primary and secondary libraries
 find_app_acf() {
     local appid="$1"
@@ -847,11 +685,11 @@ parse_acf_download_state() {
 # List active and recent downloads
 list_downloads() {
     echo "=========================================="
-    echo " GAMECTL DOWNLOAD STATUS (Steam & Headless)"
+    echo " GAMECTL DOWNLOAD STATUS (Steam Native Engine)"
     echo "=========================================="
     local count=0
 
-    # 1. Inspect Steam Native ACF downloads
+    # Inspect Steam Native ACF downloads
     local steam_apps
     steam_apps="$(get_steam_primary_apps 2>/dev/null || echo "$HOME/.local/share/Steam/steamapps")"
     shopt -s nullglob
@@ -877,27 +715,8 @@ list_downloads() {
         fi
     done
 
-    # 2. Inspect DepotDownloader tasks (logs)
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
-    declare -A seen_logs=()
-    for log in "$run_dir"/gamectl_dl_*.log /tmp/gamectl_dl_*.log; do
-        [ -f "$log" ] || continue
-        [[ -v seen_logs["$log"] ]] && continue
-        seen_logs["$log"]=1
-        count=$((count + 1))
-        local appid
-        appid=$(basename "$log" | sed -E 's/gamectl_dl_([0-9]+)\.log/\1/')
-        local status="[COMPLETED/STOPPED]"
-        if pgrep -f "DepotDownloader.*-app[[:space:]]+${appid}([[:space:]]|$)" >/dev/null 2>&1; then
-            status="[DOWNLOADING]"
-        fi
-        echo "$status AppID: $appid | Log: $log [DepotDownloader]"
-        tail -n 2 "$log" 2>/dev/null | sed 's/^/  > /'
-        echo "------------------------------------------"
-    done
-
     if [ $count -eq 0 ]; then
-        echo "[INFO] No active download tasks in Steam client or background downloader."
+        echo "[INFO] No active download tasks in Steam client."
     fi
 }
 
@@ -909,7 +728,7 @@ list_downloads_interactive() {
         local entries=""
         local total_items=0
 
-        # 1. Scan Steam ACF entries
+        # Scan Steam ACF entries
         local steam_apps
         steam_apps="$(get_steam_primary_apps 2>/dev/null || echo "$HOME/.local/share/Steam/steamapps")"
         shopt -s nullglob
@@ -939,34 +758,10 @@ list_downloads_interactive() {
             fi
         done
 
-        # 2. Scan DepotDownloader entries
-        local valid_logs=()
-        declare -A seen_logs=()
-        for l in "$run_dir"/gamectl_dl_*.log /tmp/gamectl_dl_*.log; do
-            [ -f "$l" ] || continue
-            [[ -v seen_logs["$l"] ]] && continue
-            seen_logs["$l"]=1
-            valid_logs+=("$l")
-        done
-
-        for log in "${valid_logs[@]}"; do
-            local appid
-            appid=$(basename "$log" | sed -E 's/gamectl_dl_([0-9]+)\.log/\1/')
-            local pid
-            pid=$(pgrep -f "DepotDownloader.*-app[[:space:]]+${appid}([[:space:]]|$)" 2>/dev/null | head -n 1 || true)
-            local status="${UI_ICE}[COMPLETED]${UI_RST}"
-            [ -n "$pid" ] && status="${UI_GREEN}[RUNNING PID:$pid]${UI_RST}"
-            local last_line
-            last_line=$(tail -n 1 "$log" 2>/dev/null | tr -d '\r\n\t' | cut -c1-60)
-            [ -z "$last_line" ] && last_line="Waiting for output..."
-            entries+="${appid}\tDepot\t${status}\tN/A\t${last_line}\t${log}\n"
-            total_items=$((total_items + 1))
-        done
-
         if [ "$total_items" -eq 0 ]; then
             clear
-            echo "${UI_BOX}╭─ DOWNLOAD MANAGER (Steam & Headless) ────────────────────────╮${UI_RST}"
-            echo "│ ${UI_CYAN}No active or recent download tasks found in Steam or $run_dir${UI_RST}"
+            echo "${UI_BOX}╭─ DOWNLOAD MANAGER (Steam Native) ───────────────────────────╮${UI_RST}"
+            echo "│ ${UI_CYAN}No active or recent download tasks found in Steam client.${UI_RST}"
             echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
             read -r -p "Press [ENTER] to return to Dashboard..."
             return 0
@@ -978,11 +773,11 @@ list_downloads_interactive() {
             --with-nth=1,2,3,5 \
             --border-label="  ╢ gamectl :: Download Manager ╟  " \
             --border-label-pos=2 \
-            --header="DOWNLOADS (Enter: Actions │ Ctrl-K: Stop/Pause │ Esc: Back)" \
+            --header="DOWNLOADS (Enter: Actions │ Ctrl-K: Pause │ Esc: Back)" \
             --prompt="Downloads > " \
-            --preview="if [ '{2}' = 'Steam' ]; then echo -e '\033[38;5;60mSteam AppManifest: {6}\033[0m\n──────────────────────────────────────────'; grep -E '\"(appid|name|StateFlags|BytesDownloaded|BytesToDownload|installdir)\"' {6} 2>/dev/null; else echo -e '\033[38;5;60mLog: {6}\033[0m\n──────────────────────────────────────────'; tail -n 30 {6} 2>/dev/null; fi" \
+            --preview="echo -e '\033[38;5;60mSteam AppManifest: {6}\033[0m\n──────────────────────────────────────────'; grep -E '\"(appid|name|StateFlags|BytesDownloaded|BytesToDownload|installdir)\"' {6} 2>/dev/null" \
             --preview-window=right:60%:border-rounded:wrap \
-            --bind="ctrl-k:execute(appid={1}; engine={2}; if [ \"\$engine\" = 'Steam' ]; then steam \"steam://pause/\$appid\" 2>/dev/null; echo \"[INFO] Dispatched pause to Steam client for AppID \$appid.\"; else pid=\$(pgrep -f \"DepotDownloader.*-app[[:space:]]+\${appid}([[:space:]]|$)\" 2>/dev/null | head -n 1); if [ -n \"\$pid\" ]; then kill \"\$pid\" 2>/dev/null && echo \"[INFO] AppID \$appid (PID \$pid) terminated.\"; else echo \"[INFO] AppID \$appid not active.\"; fi; fi; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
+            --bind="ctrl-k:execute(appid={1}; steam \"steam://pause/\$appid\" 2>/dev/null; echo \"[INFO] Dispatched pause to Steam client for AppID \$appid.\"; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
         ) || fzf_rc=$?
 
         [ "$fzf_rc" -eq 130 ] && break
@@ -998,92 +793,53 @@ list_downloads_interactive() {
             sel_ref=$(echo "$selection" | awk -F'\t' '{print $6}')
 
             clear
-            echo "${UI_BOX}╭─ DOWNLOAD ACTIONS: AppID ${UI_BOLD}$sel_appid${UI_RST} [${sel_engine}] $sel_status ─────────────╮${UI_RST}"
-            echo "│ ${UI_CYAN}Target${UI_RST}: ${UI_DIM}$sel_ref${UI_RST}"
+            echo "${UI_BOX}╭─ DOWNLOAD ACTIONS: AppID ${UI_BOLD}$sel_appid${UI_RST} $sel_status ─────────────╮${UI_RST}"
+            echo "│ ${UI_CYAN}Manifest${UI_RST}: ${UI_DIM}$sel_ref${UI_RST}"
             echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+            echo "  ${UI_PURPLE}1)${UI_RST} Pause download (steam://pause/$sel_appid)"
+            echo "  ${UI_PURPLE}2)${UI_RST} Resume download (steam://resume/$sel_appid)"
+            echo "  ${UI_PURPLE}3)${UI_RST} Inject Standalone GBE Fork LAN runtime"
+            echo "  ${UI_DIM}4)${UI_RST} Return to download list"
+            echo
+            read -r -p "Select option [1-4]: " dl_opt
 
-            if [ "$sel_engine" = "Steam" ]; then
-                echo "  ${UI_PURPLE}1)${UI_RST} Pause download (steam://pause/$sel_appid)"
-                echo "  ${UI_PURPLE}2)${UI_RST} Resume download (steam://resume/$sel_appid)"
-                echo "  ${UI_PURPLE}3)${UI_RST} Inject Standalone GBE Fork LAN runtime"
-                echo "  ${UI_DIM}4)${UI_RST} Return to download list"
-                echo
-                read -r -p "Select option [1-4]: " dl_opt
-
-                case "$dl_opt" in
-                    1)
-                        if command -v steam >/dev/null 2>&1; then
-                            steam "steam://pause/$sel_appid" >/dev/null 2>&1 &
-                            echo "  ${UI_GREEN}[SUCCESS] Dispatched steam://pause/$sel_appid${UI_RST}"
-                        else
-                            echo "  [WARN] Steam executable not found on PATH."
-                        fi
-                        read -r -p "Press [ENTER] to continue..."
-                        ;;
-                    2)
-                        if command -v steam >/dev/null 2>&1; then
-                            steam "steam://resume/$sel_appid" >/dev/null 2>&1 &
-                            echo "  ${UI_GREEN}[SUCCESS] Dispatched steam://resume/$sel_appid${UI_RST}"
-                        else
-                            echo "  [WARN] Steam executable not found on PATH."
-                        fi
-                        read -r -p "Press [ENTER] to continue..."
-                        ;;
-                    3)
-                        local g_dir
-                        g_dir="$(dirname "$sel_ref")/common/$(grep -m1 '"installdir"' "$sel_ref" 2>/dev/null | awk -F'"' '{print $4}')"
-                        if [ -d "$g_dir" ]; then
-                            echo "[INFO] Injecting GBE Fork LAN runtime into: $g_dir"
-                            "$SELF_BIN" inject "$g_dir" "$sel_appid"
-                        else
-                            echo "  [WARN] Game common directory does not exist yet: $g_dir"
-                            echo "  [INFO] Please wait until the download finishes in Steam."
-                        fi
-                        read -r -p "Press [ENTER] to continue..."
-                        ;;
-                    *)
-                        ;;
-                esac
-            else
-                echo "  ${UI_PURPLE}1)${UI_RST} Stream live output (tail -f)"
-                echo "  ${UI_PURPLE}2)${UI_RST} Terminate this process (Kill task)"
-                echo "  ${UI_PURPLE}3)${UI_RST} Remove this log history file"
-                echo "  ${UI_DIM}4)${UI_RST} Return to download list"
-                echo
-                read -r -p "Select option [1-4]: " dl_opt
-
-                case "$dl_opt" in
-                    1)
-                        clear
-                        echo "${UI_BOX}╭─ LIVE STREAM: AppID $sel_appid ─────────────────────────────╮${UI_RST}"
-                        echo "│ ${UI_CYAN}Press Ctrl-C when done to return${UI_RST}"
-                        echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-                        tail -f "$sel_ref" || true
-                        read -r -p "Press [ENTER] to return..."
-                        ;;
-                    2)
-                        local k_pid
-                        k_pid=$(pgrep -f "DepotDownloader.*-app[[:space:]]+${sel_appid}([[:space:]]|$)" 2>/dev/null | head -n 1 || true)
-                        if [ -n "$k_pid" ]; then
-                            kill "$k_pid" 2>/dev/null && echo "  ${UI_GREEN}[SUCCESS] Download process AppID $sel_appid (PID $k_pid) stopped.${UI_RST}"
-                        else
-                            echo "  [INFO] AppID $sel_appid is not currently running."
-                        fi
-                        read -r -p "Press [ENTER] to continue..."
-                        ;;
-                    3)
-                        rm -f "$sel_ref"
-                        echo "  [INFO] Log file $sel_ref deleted."
-                        read -r -p "Press [ENTER] to continue..."
-                        ;;
-                    *)
-                        ;;
-                esac
-            fi
+            case "$dl_opt" in
+                1)
+                    if command -v steam >/dev/null 2>&1; then
+                        steam "steam://pause/$sel_appid" >/dev/null 2>&1 &
+                        echo "  ${UI_GREEN}[SUCCESS] Dispatched steam://pause/$sel_appid${UI_RST}"
+                    else
+                        echo "  [WARN] Steam executable not found on PATH."
+                    fi
+                    read -r -p "Press [ENTER] to continue..."
+                    ;;
+                2)
+                    if command -v steam >/dev/null 2>&1; then
+                        steam "steam://resume/$sel_appid" >/dev/null 2>&1 &
+                        echo "  ${UI_GREEN}[SUCCESS] Dispatched steam://resume/$sel_appid${UI_RST}"
+                    else
+                        echo "  [WARN] Steam executable not found on PATH."
+                    fi
+                    read -r -p "Press [ENTER] to continue..."
+                    ;;
+                3)
+                    local g_dir
+                    g_dir="$(dirname "$sel_ref")/common/$(grep -m1 '"installdir"' "$sel_ref" 2>/dev/null | awk -F'"' '{print $4}')"
+                    if [ -d "$g_dir" ]; then
+                        echo "[INFO] Injecting GBE Fork LAN runtime into: $g_dir"
+                        "$SELF_BIN" inject "$g_dir" "$sel_appid"
+                    else
+                        echo "  [WARN] Game common directory does not exist yet: $g_dir"
+                        echo "  [INFO] Please wait until the download finishes in Steam."
+                    fi
+                    read -r -p "Press [ENTER] to continue..."
+                    ;;
+                *)
+                    ;;
+            esac
         fi
     done
 }
-
 # Dual-Mode Steam Client & SLSsteam Full DLC Sync
 sync_steam() {
     local appid="$1"

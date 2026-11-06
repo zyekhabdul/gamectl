@@ -125,22 +125,18 @@ doctor_audit() {
         fi
     done
 
-    # Layer 6: Headless Downloader Engine
+    # Layer 6: Manifest Harvester & CDN Providers
     echo
-    echo "  ${UI_PURPLE}[LAYER 6] Headless Downloader Engine${UI_RST}"
-    local dl_bin=""
-    if command -v depotdownloader >/dev/null 2>&1; then
-        dl_bin="$(command -v depotdownloader)"
-    elif [ -x "$HOME/.local/share/gamectl/bin/DepotDownloader" ]; then
-        dl_bin="$HOME/.local/share/gamectl/bin/DepotDownloader"
-    elif [ -x "$HOME/.local/bin/depotdownloader" ]; then
-        dl_bin="$HOME/.local/bin/depotdownloader"
-    fi
-    if [ -n "$dl_bin" ]; then
-        echo "    • $(printf '%-15s' "DepotDownloader") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($dl_bin)${UI_RST}"
+    echo "  ${UI_PURPLE}[LAYER 6] Manifest Harvester & CDN Providers${UI_RST}"
+    local harvest_ok=1
+    command -v curl >/dev/null 2>&1 || harvest_ok=0
+    command -v jq >/dev/null 2>&1 || harvest_ok=0
+    command -v unzip >/dev/null 2>&1 || harvest_ok=0
+    if [ "$harvest_ok" -eq 1 ]; then
+        echo "    • $(printf '%-15s' "Harvester") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}(curl, jq, unzip)${UI_RST}"
         pass_cnt=$((pass_cnt + 1))
     else
-        echo "    • $(printf '%-15s' "DepotDownloader") : ${UI_RED}[MISSING]${UI_RST} Run 'gamectl ensure-downloader' to install"
+        echo "    • $(printf '%-15s' "Harvester") : ${UI_RED}[MISSING]${UI_RST} curl, jq, or unzip not found"
         miss_cnt=$((miss_cnt + 1))
     fi
 

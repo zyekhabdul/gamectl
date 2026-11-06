@@ -229,10 +229,7 @@ preview_dashboard() {
     command -v mangohud >/dev/null 2>&1 && w_hud="${UI_GREEN}[READY]${UI_RST}"
     command -v gamescope >/dev/null 2>&1 && w_scope="${UI_GREEN}[READY]${UI_RST}"
 
-    local dl_status="${UI_RED}[MISSING]${UI_RST}" sls_status="${UI_DIM}[N/A]${UI_RST}" steam_status="${UI_DIM}[IDLE]${UI_RST}"
-    if command -v depotdownloader >/dev/null 2>&1 || [ -x "$HOME/.local/share/gamectl/bin/DepotDownloader" ] || [ -x "$HOME/.local/bin/depotdownloader" ]; then
-        dl_status="${UI_GREEN}[READY]${UI_RST}"
-    fi
+    local sls_status="${UI_DIM}[N/A]${UI_RST}" steam_status="${UI_DIM}[IDLE]${UI_RST}"
     local sls_cfg
     sls_cfg="$(get_sls_root 2>/dev/null || echo "$HOME/.config/SLSsteam")/config.yaml"
     [ -f "$sls_cfg" ] && sls_status="${UI_GREEN}[READY]${UI_RST}"
@@ -272,7 +269,7 @@ preview_dashboard() {
     echo "  ${UI_CYAN}Win Runner  ${UI_RST}: $runner_str"
     echo "  ${UI_CYAN}GBE Fork    ${UI_RST}: $gbe_status ${UI_DIM}(Linux x64: $([ -n "$gbe_l64" ] && echo "OK" || echo "MISSING") | Win x64: $([ -n "$gbe_w64" ] && echo "OK" || echo "MISSING"))${UI_RST}"
     echo "  ${UI_CYAN}Tooling     ${UI_RST}: GameMode $w_gm • MangoHud $w_hud • Gamescope $w_scope"
-    echo "  ${UI_CYAN}Integration ${UI_RST}: SLSsteam $sls_status • Steam Client $steam_status • DepotDownloader $dl_status"
+    echo "  ${UI_CYAN}Integration ${UI_RST}: SLSsteam $sls_status • Steam Client $steam_status"
     echo
 
     case "$item_key" in
@@ -298,7 +295,7 @@ preview_dashboard() {
             echo "│ ${UI_BOLD}[03] DOWNLOAD MONITOR${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
             echo "  • Monitor real-time Steam native downloads & ACF telemetry."
-            echo "  • Track background DepotDownloader logs and pause/resume tasks."
+            echo "  • Pause and resume downloads via Valve client protocol."
             ;;
         *4*|*UNLOCK*|*ENTITLE*|*ENTITLEMENT*|*ACF*)
             echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
@@ -347,7 +344,7 @@ dashboard_menu() {
         menu_entries=$(cat <<EOF
 1	${UI_PURPLE}[01]${UI_RST} ${UI_BOLD}GAME LIBRARY${UI_RST}	${UI_DIM}Browse, inject and launch installed games${UI_RST}
 2	${UI_PURPLE}[02]${UI_RST} ${UI_BOLD}STEAM STORE SEARCH${UI_RST}	${UI_DIM}Search games & check ProtonDB compatibility${UI_RST}
-3	${UI_PURPLE}[03]${UI_RST} ${UI_BOLD}DOWNLOAD MONITOR${UI_RST}	${UI_DIM}Track Steam native downloads & DepotDownloader${UI_RST}
+3	${UI_PURPLE}[03]${UI_RST} ${UI_BOLD}DOWNLOAD MONITOR${UI_RST}	${UI_DIM}Track Steam native downloads & ACF telemetry${UI_RST}
 4	${UI_PURPLE}[04]${UI_RST} ${UI_BOLD}STEAM ENTITLEMENT & ACF${UI_RST}	${UI_DIM}Adopt files, Steam Input & shaders (Full DLC)${UI_RST}
 5	${UI_PURPLE}[05]${UI_RST} ${UI_BOLD}GLOBAL SETTINGS${UI_RST}	${UI_DIM}Configure LAN persona, default wrappers & remote host${UI_RST}
 6	${UI_PURPLE}[06]${UI_RST} ${UI_BOLD}SYSTEM DIAGNOSTICS${UI_RST}	${UI_DIM}Audit 7-layer dependencies, runners & GPU health${UI_RST}
@@ -707,12 +704,10 @@ EOF
             else
                 local not_installed_palette
                 not_installed_palette=$(cat <<EOF
-1	[All-in-One] Download (Steam CDN Native / SLSsteam) + Auto-Provision
-2	[Headless Depot] Download via DepotDownloader (Foreground Stream)
-3	[Standalone] Download + Inject GBE only (Steam-free)
-4	[Steam Entitlement & ACF] Adopt files, Steam Input & Shaders (Full DLC)
-5	[Raw Download] Download raw depot assets only
-6	Cancel / Return
+1	[All-in-One] Download & Auto-Provision via Steam Native CDN (SLSsteam)
+2	[Steam Entitlement & ACF] Adopt files, Steam Input & Shaders (Full DLC)
+3	[Standalone] Inject GBE LAN runtime (Steam-free)
+4	Cancel / Return
 EOF
 )
                 local pkg_sel
@@ -723,29 +718,22 @@ EOF
                     --border-label-pos=2 \
                     --header="PACKAGE SELECTION (Enter: Execute │ Esc: Return)" \
                     --prompt="Package > " \
-                    --height=45% \
-                    --reverse 2>/dev/null) || pkg_sel="6"
+                    --height=40% \
+                    --reverse 2>/dev/null) || pkg_sel="4"
 
                 local opt
                 opt=$(echo "$pkg_sel" | awk -F'\t' '{print $1}')
                 case "$opt" in
                     1)
-                        download_game "$sel_id" "$dest_dir" "$sel_name" --engine steam --all --background --os "$target_os"
+                        download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
                         sleep 1.2
                         ;;
                     2)
-                        download_game "$sel_id" "$dest_dir" "$sel_name" --engine depot --all --foreground --os "$target_os"
-                        ;;
-                    3)
-                        download_game "$sel_id" "$dest_dir" "$sel_name" --engine depot --inject-only --background --os "$target_os"
-                        sleep 1.2
-                        ;;
-                    4)
                         unlock_game "$sel_id" "$sel_name"
                         sleep 1.2
                         ;;
-                    5)
-                        download_game "$sel_id" "$dest_dir" "$sel_name" --engine depot --raw --background --os "$target_os"
+                    3)
+                        inject_game "$dest_dir" "$sel_id" --no-sync
                         sleep 1.2
                         ;;
                     *)

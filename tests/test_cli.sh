@@ -943,7 +943,7 @@ run_test "ACF Telemetry: format_bytes integer conversion" test_format_bytes_repr
 
 test_tui_dashboard_and_cli_help_integration() {
     # Invariant: Dashboard cockpit exposes SLSsteam and Steam Client indicators
-    grep -q 'SLSsteam \$sls_status • Steam Client \$steam_status • DepotDownloader \$dl_status' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
+    grep -q 'SLSsteam \$sls_status • Steam Client \$steam_status' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
     grep -q 'fetch-manifest <appid>' "$REPO_ROOT/src/main.sh" && \
     grep -q 'deploy-manifest <appid>' "$REPO_ROOT/src/main.sh" && \
     "$GAMECTL" --help | grep -q 'fetch-manifest' && \
@@ -951,38 +951,14 @@ test_tui_dashboard_and_cli_help_integration() {
 }
 run_test "Dashboard & CLI Integration: Cockpit indicators & command exposure" test_tui_dashboard_and_cli_help_integration
 
-test_download_game_engine_selector_flag_parsing() {
+test_download_game_deprecated_engine_flag_handling() {
     source "$REPO_ROOT/src/steam/30_downloader.sh"
-    # Invariant: --engine depot immediately invokes ensure_downloader without touching SLS manifests
-    local test_root="${TEST_TMP_DIR:-/tmp}/engine_test_$$"
-    mkdir -p "$test_root"
-    export XDG_RUNTIME_DIR="$test_root"
-
-    local mock_bin="$test_root/mock_depot"
-    cat << 'EOF' > "$mock_bin"
-#!/usr/bin/env bash
-echo "MOCK_DEPOT_CALLED with args: $*"
-exit 0
-EOF
-    chmod +x "$mock_bin"
-
-    ensure_downloader() {
-        echo "$mock_bin"
-        return 0
-    }
-
+    # Invariant: --engine depot emits deprecation warning and routes to native engine
     local out
-    out=$(download_game "88888" --engine depot --raw --foreground "TestTitle" 2>&1)
-    local rc=$?
-
-    rm -rf "$test_root"
-    unset XDG_RUNTIME_DIR
-
-    [ "$rc" -eq 0 ] && \
-    echo "$out" | grep -q 'HEADLESS GAME DOWNLOADER (DepotDownloader)' && \
-    echo "$out" | grep -q 'MOCK_DEPOT_CALLED with args: -app 88888'
+    out=$(download_game "99999" --engine depot 2>&1 || true)
+    echo "$out" | grep -q 'DepotDownloader is deprecated and removed'
 }
-run_test "Download Orchestrator: --engine=depot explicit headless dispatch" test_download_game_engine_selector_flag_parsing
+run_test "Download Orchestrator: --engine=depot deprecation defense" test_download_game_deprecated_engine_flag_handling
 
 # ------------------------------------------------------------------------------
 # Final Execution Summary

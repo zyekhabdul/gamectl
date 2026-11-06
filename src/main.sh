@@ -204,7 +204,7 @@ case "${1:-}" in
         if [ -n "${2:-}" ]; then
             download_game "$2" "${@:3}"
         else
-            echo "Usage: gamectl download <appid> [dir] [title] [--engine <steam|depot>] [--source <auto|...>] [--raw|--inject-only|--all] [--foreground|-f] [--os <linux|windows|all>]"
+            echo "Usage: gamectl download <appid> [dir] [title] [--source <auto|...>] [--raw|--inject-only|--all]"
             exit 1
         fi
         ;;
@@ -294,9 +294,9 @@ Usage:
                       Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]
                       Configure per-game wrappers (GameMode/MangoHud/Gamescope FSR/MesaGL)
-  gamectl download <appid> [dir] [title] [--engine <steam|depot>] [--source <auto|...>] [--raw|--inject-only|--all] [-f]
-                      Download game via SLSsteam native CDN or headless DepotDownloader
-  gamectl downloads   Monitor active & recent downloads (Steam ACF telemetry & DepotDownloader)
+  gamectl download <appid> [dir] [title] [--source <auto|...>] [--raw|--inject-only|--all]
+                      Download game via SLSsteam native CDN (High-Speed Valve Content Servers)
+  gamectl downloads   Monitor active & recent downloads (Steam ACF telemetry)
   gamectl fetch-manifest <appid> [dest] [source]
                       Harvest manifest archive across Ryuu/Sushi/LuaTools providers
   gamectl deploy-manifest <appid> [manifest_zip] [title]
