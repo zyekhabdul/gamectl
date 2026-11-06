@@ -83,5 +83,11 @@ cp "$TMP_OUT" "$DEST_TMP"
 chmod +x "$DEST_TMP"
 mv -f "$DEST_TMP" "$OUTPUT_BIN"
 
+# Synchronize python runner bundled binary if package directory exists
+if [ -d "$REPO_ROOT/src/gamectl_runner" ]; then
+    mkdir -p "$REPO_ROOT/src/gamectl_runner/bin"
+    cp -p "$OUTPUT_BIN" "$REPO_ROOT/src/gamectl_runner/bin/gamectl"
+fi
+
 line_count=$(wc -l < "$OUTPUT_BIN" | tr -d ' ')
 echo "[ VERIFIED ] gamectl compiled successfully -> bin/gamectl ($line_count lines, executable)"

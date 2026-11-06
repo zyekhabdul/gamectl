@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gamectl"
+version = "1.2.0"
+description = "Sovereign TUI Game Manager & Launcher for Linux & Steam Deck Power Users"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+authors = [
+    { name = "zyekhabdul", email = "zyekhabdulqadirjailani@gmail.com" }
+]
+keywords = [
+    "gamectl",
+    "gaming",
+    "linux-gaming",
+    "steam",
+    "proton",
+    "steam-deck",
+    "wine",
+    "tui",
+    "cli",
+    "launcher",
+    "gamescope",
+    "mangohud"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Unix Shell",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Games/Entertainment",
+    "Topic :: Utilities"
+]
+dependencies = []
+
+[project.scripts]
+gamectl = "gamectl_runner:main"
+game = "gamectl_runner:main"
+
+[project.urls]
+Homepage = "https://github.com/zyekhabdul/gamectl"
+Repository = "https://github.com/zyekhabdul/gamectl.git"
+Issues = "https://github.com/zyekhabdul/gamectl/issues"
+Changelog = "https://github.com/zyekhabdul/gamectl/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["gamectl_runner*"]
+
+[tool.setuptools.package-data]
+gamectl_runner = ["bin/gamectl"]

@@ -18,3 +18,8 @@ packaging/aur-git/src/
 packaging/aur-git/gamectl/
 dist/
 build/
+*.egg-info/
+src/*.egg-info/
+__pycache__/
+*.py[cod]
+src/gamectl_runner/bin/
