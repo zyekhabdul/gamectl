@@ -826,6 +826,52 @@ test_deploy_sls_manifest_contract() {
 }
 run_test "SLSsteam Linker: deploy_sls_manifest manifest & stplug-in linking" test_deploy_sls_manifest_contract
 
+test_trigger_steam_install_contract() {
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    # Invariant: trigger_steam_install handles mock and uri generation cleanly
+    export GAMECTL_MOCK_STEAM_TRIGGER=1
+    local out
+    out=$(trigger_steam_install "730")
+    local rc=$?
+    unset GAMECTL_MOCK_STEAM_TRIGGER
+    [ "$rc" -eq 0 ] && echo "$out" | grep -q 'steam://install/730'
+}
+run_test "Download Orchestrator: trigger_steam_install URI contract" test_trigger_steam_install_contract
+
+test_download_game_dual_mode_orchestration() {
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    local test_root="${TEST_TMP_DIR:-/tmp}/dl_orch_test_$$"
+    local test_cfg="$test_root/config"
+    local test_steam="$test_root/Steam"
+    local test_cache="$test_root/cache"
+    mkdir -p "$test_cfg/SLSsteam" "$test_steam/config/stplug-in" "$test_steam/depotcache" "$test_cache/gamectl/manifests"
+    echo "AppIds: []" > "$test_cfg/SLSsteam/config.yaml"
+
+    export XDG_CONFIG_HOME="$test_cfg"
+    export STEAM_ROOT="$test_steam"
+    export XDG_CACHE_HOME="$test_cache"
+    export GAMECTL_MOCK_STEAM_TRIGGER=1
+
+    # Place a valid mock manifest zip in cache for AppID 99999
+    local mock_zip="$test_cache/gamectl/manifests/99999.zip"
+    local stage_dir="$test_root/stage"
+    mkdir -p "$stage_dir"
+    printf "\xd0\x17\xf6\x71test_payload_99999" > "$stage_dir/111_222.manifest"
+    echo 'addappid(99999)' > "$stage_dir/99999.lua"
+    (cd "$stage_dir" && zip -q "$mock_zip" 111_222.manifest 99999.lua)
+
+    local out
+    out=$(download_game "99999" --engine steam "DummyTitle")
+    local rc=$?
+
+    rm -rf "$test_root"
+    unset XDG_CONFIG_HOME STEAM_ROOT XDG_CACHE_HOME GAMECTL_MOCK_STEAM_TRIGGER
+
+    [ "$rc" -eq 0 ] &&     echo "$out" | grep -q 'STEAM NATIVE CONTENT ENGINE' &&     echo "$out" | grep -q 'SLSsteam manifests and stplug-in keys provisioned'
+}
+run_test "Download Orchestrator: download_game --engine=steam native flow" test_download_game_dual_mode_orchestration
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

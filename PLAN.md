@@ -51,7 +51,7 @@ Mengganti ketergantungan rapuh pada DepotDownloader eksternal (.NET GC heap ting
   3. Panggil `sync_steam "$appid"` untuk mendaftarkan AppID dan DLC ke `~/.config/SLSsteam/config.yaml`.
 - DoD: File manifest terpasang di SLSsteam manifests, file Lua stplug-in terbuat di `config/stplug-in/<appid>.lua`, dan AppID terdaftar di config SLSsteam.
 
-### Chunk 3: Dual-Mode Download Orchestrator Refactoring (`download_game`) [PLANNED]
+### Chunk 3: Dual-Mode Download Orchestrator Refactoring (`download_game`) [DONE]
 - Target Files: `src/steam/30_downloader.sh`, `src/main.sh`
 - Runtutan Eksekusi Teknis:
   1. Refactor parameter dan engine selector pada `download_game`:

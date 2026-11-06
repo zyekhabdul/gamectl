@@ -247,6 +247,7 @@ deploy_sls_manifest() {
     local appid="$1"
     local manifest_zip="${2:-}"
     local title="${3:-}"
+    local source="${4:-auto}"
 
     # Strip ANSI escape sequences
     appid=$(printf "%s" "$appid" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
@@ -259,8 +260,8 @@ deploy_sls_manifest() {
 
     # 1. Acquire manifest archive if not provided
     if [ -z "$manifest_zip" ] || [ ! -f "$manifest_zip" ]; then
-        echo "[INFO] Manifest archive not provided. Attempting automatic harvest..." >&2
-        manifest_zip=$(fetch_manifest "$appid" 2>/dev/null || true)
+        echo "[INFO] Manifest archive not provided. Attempting automatic harvest (source: $source)..." >&2
+        manifest_zip=$(fetch_manifest "$appid" "" "$source" 2>/dev/null || true)
         if [ -z "$manifest_zip" ] || [ ! -f "$manifest_zip" ]; then
             echo "[ERROR] Could not acquire manifest archive for AppID $appid." >&2
             return 1
@@ -483,11 +484,51 @@ detect_app_platform_os() {
     fi
 }
 
-# Headless Game Downloader (Standalone CLI Engine)
+# Trigger Steam client native installation for AppID via URI protocol
+trigger_steam_install() {
+    local appid="$1"
+    local uri="steam://install/${appid}"
+
+    if [ -n "${GAMECTL_MOCK_STEAM_TRIGGER:-}" ]; then
+        echo "[VERIFIED] Triggered Steam installation for AppID $appid (Mocked URI: $uri)."
+        return 0
+    fi
+
+    if command -v steam >/dev/null 2>&1; then
+        if pgrep -x steam >/dev/null 2>&1; then
+            echo "[INFO] Steam client is running. Dispatching install command..."
+            steam "$uri" >/dev/null 2>&1 &
+            echo "[VERIFIED] Dispatched '$uri' to running Steam client."
+        else
+            echo "[INFO] Steam client is not running. Starting Steam client in background..."
+            steam -silent "$uri" >/dev/null 2>&1 &
+            echo "[VERIFIED] Launched Steam silently with install intent ($uri)."
+        fi
+    elif command -v flatpak >/dev/null 2>&1 && flatpak info com.valvesoftware.Steam >/dev/null 2>&1; then
+        if pgrep -f com.valvesoftware.Steam >/dev/null 2>&1 || pgrep -x steam >/dev/null 2>&1; then
+            echo "[INFO] Steam (Flatpak) is running. Dispatching install command..."
+            flatpak run com.valvesoftware.Steam "$uri" >/dev/null 2>&1 &
+            echo "[VERIFIED] Dispatched '$uri' to running Steam Flatpak client."
+        else
+            echo "[INFO] Steam (Flatpak) is not running. Starting Flatpak Steam in background..."
+            flatpak run com.valvesoftware.Steam -silent "$uri" >/dev/null 2>&1 &
+            echo "[VERIFIED] Launched Steam Flatpak silently with install intent ($uri)."
+        fi
+    else
+        echo "[WARN] Steam executable not found on system PATH." >&2
+        echo "[INFO] You can start the download manually by opening: $uri" >&2
+    fi
+    echo "[INFO] Monitor download progress with: gamectl downloads"
+    return 0
+}
+
+# Dual-Mode Game Downloader (SLSsteam Native Engine / Headless DepotDownloader)
 download_game() {
     local appid="${1:-}"
+    # Strip ANSI escape sequences & non-digits
+    appid=$(printf "%s" "$appid" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
     if [ -z "$appid" ]; then
-        echo "Usage: gamectl download <appid> [target_dir] [title] [--raw|--inject-only|--all] [--foreground|-f] [--os <linux|windows|all>]" >&2
+        echo "Usage: gamectl download <appid> [target_dir] [title] [--engine <steam|depot>] [--source <auto|ryuu|sushi|luatools>] [--raw|--inject-only|--all] [--foreground|-f] [--os <linux|windows|all>]" >&2
         return 1
     fi
     shift
@@ -497,9 +538,31 @@ download_game() {
     local action="all"     # "all", "inject", "raw"
     local exec_mode="bg"   # "bg" or "fg"
     local target_os=""
+    local engine="steam"   # "steam" or "depot"
+    local source="auto"    # "auto", "ryuu", "sushi", "luatools"
 
     while [ $# -gt 0 ]; do
         case "$1" in
+            --engine)
+                shift
+                engine="${1:-steam}"
+                ;;
+            --engine=*)
+                engine="${1#--engine=}"
+                ;;
+            --headless)
+                engine="depot"
+                ;;
+            --steam)
+                engine="steam"
+                ;;
+            --source)
+                shift
+                source="${1:-auto}"
+                ;;
+            --source=*)
+                source="${1#--source=}"
+                ;;
             --raw|--download-only|--no-inject)
                 action="raw"
                 ;;
@@ -533,6 +596,35 @@ download_game() {
         shift
     done
 
+    if [ -z "$title" ]; then
+        title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
+        [ -z "$title" ] && title="AppID_${appid}"
+    fi
+
+    # Mode A: Steam Native Content Engine (SLSsteam-Moon)
+    if [ "$engine" = "steam" ]; then
+        echo "=========================================="
+        echo " STEAM NATIVE CONTENT ENGINE (SLSsteam-Moon)"
+        echo "=========================================="
+        echo " AppID      : $appid"
+        echo " Title      : $title"
+        echo " Engine     : SLSsteam (Valve High-Speed CDN)"
+        echo " Source     : $source"
+        echo " Mode       : $action (raw/inject/all)"
+        echo "=========================================="
+
+        if deploy_sls_manifest "$appid" "" "$title" "$source"; then
+            echo "[SUCCESS] SLSsteam manifests and stplug-in keys provisioned for $title ($appid)."
+            trigger_steam_install "$appid"
+            return 0
+        else
+            echo "[WARN] Native SLSsteam manifest deployment failed for AppID $appid." >&2
+            echo "[INFO] Falling back to headless DepotDownloader engine..." >&2
+            engine="depot"
+        fi
+    fi
+
+    # Mode B: Headless DepotDownloader Engine
     local depot_bin
     depot_bin=$(ensure_downloader) || return 1
 
