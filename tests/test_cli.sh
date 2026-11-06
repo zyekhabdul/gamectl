@@ -872,6 +872,75 @@ test_download_game_dual_mode_orchestration() {
 }
 run_test "Download Orchestrator: download_game --engine=steam native flow" test_download_game_dual_mode_orchestration
 
+test_acf_telemetry_state_parsing() {
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    local test_dir="${TEST_TMP_DIR:-/tmp}/acf_test_$$"
+    mkdir -p "$test_dir"
+
+    # Mock 1: Downloading state (1026)
+    local acf1="$test_dir/appmanifest_111.acf"
+    cat << 'EOF' > "$acf1"
+"AppState"
+{
+	"appid"		"111"
+	"name"		"CyberTest 2077"
+	"StateFlags"		"1026"
+	"installdir"		"CyberTest"
+	"BytesDownloaded"		"1073741824"
+	"BytesToDownload"		"2147483648"
+}
+EOF
+
+    # Mock 2: Paused state (512)
+    local acf2="$test_dir/appmanifest_222.acf"
+    cat << 'EOF' > "$acf2"
+"AppState"
+{
+	"appid"		"222"
+	"name"		"PauseGame"
+	"StateFlags"		"512"
+	"installdir"		"PauseGame"
+	"BytesDownloaded"		"500000"
+	"BytesToDownload"		"1000000"
+}
+EOF
+
+    # Mock 3: Installed state (4)
+    local acf3="$test_dir/appmanifest_333.acf"
+    cat << 'EOF' > "$acf3"
+"AppState"
+{
+	"appid"		"333"
+	"name"		"DoneGame"
+	"StateFlags"		"4"
+	"installdir"		"DoneGame"
+	"BytesDownloaded"		"1000000"
+	"BytesToDownload"		"1000000"
+}
+EOF
+
+    local out1 out2 out3
+    out1=$(parse_acf_download_state "$acf1")
+    out2=$(parse_acf_download_state "$acf2")
+    out3=$(parse_acf_download_state "$acf3")
+
+    rm -rf "$test_dir"
+
+    echo "$out1" | grep -q '\[DOWNLOADING\]' &&     echo "$out1" | grep -q '50%' &&     echo "$out2" | grep -q '\[PAUSED\]' &&     echo "$out3" | grep -q '\[INSTALLED\]' &&     echo "$out3" | grep -q '100%'
+}
+run_test "ACF Telemetry: StateFlags and progress parsing contracts" test_acf_telemetry_state_parsing
+
+test_format_bytes_representation() {
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    local b_gb b_mb b_kb
+    b_gb=$(format_bytes 1073741824)
+    b_mb=$(format_bytes 1048576)
+    b_kb=$(format_bytes 1024)
+
+    [ "$b_gb" = "1.0 GB" ] && [ "$b_mb" = "1 MB" ] && [ "$b_kb" = "1 KB" ]
+}
+run_test "ACF Telemetry: format_bytes integer conversion" test_format_bytes_representation
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

@@ -730,13 +730,155 @@ download_game() {
     fi
 }
 
+# Locate appmanifest_<appid>.acf across primary and secondary libraries
+find_app_acf() {
+    local appid="$1"
+    [ -z "$appid" ] && return 1
+
+    local primary_apps
+    primary_apps="$(get_steam_primary_apps 2>/dev/null || echo "$HOME/.local/share/Steam/steamapps")"
+    if [ -f "$primary_apps/appmanifest_${appid}.acf" ]; then
+        echo "$primary_apps/appmanifest_${appid}.acf"
+        return 0
+    fi
+
+    local lib
+    while IFS= read -r lib; do
+        [ -d "$lib" ] || continue
+        if [ -f "$lib/appmanifest_${appid}.acf" ]; then
+            echo "$lib/appmanifest_${appid}.acf"
+            return 0
+        fi
+        if [ -f "$lib/steamapps/appmanifest_${appid}.acf" ]; then
+            echo "$lib/steamapps/appmanifest_${appid}.acf"
+            return 0
+        fi
+    done < <(get_steam_libraries 2>/dev/null || true)
+
+    return 1
+}
+
+# Format byte integer into readable B, KB, MB, GB representation
+format_bytes() {
+    local b="${1:-0}"
+    if [ "$b" -ge 1073741824 ] 2>/dev/null; then
+        local gb=$(( b / 1073741824 ))
+        local rem=$(( (b % 1073741824) / 104857600 ))
+        echo "${gb}.${rem} GB"
+    elif [ "$b" -ge 1048576 ] 2>/dev/null; then
+        local mb=$(( b / 1048576 ))
+        echo "${mb} MB"
+    elif [ "$b" -ge 1024 ] 2>/dev/null; then
+        local kb=$(( b / 1024 ))
+        echo "${kb} KB"
+    else
+        echo "${b} B"
+    fi
+}
+
+# Parse Steam appmanifest ACF file for download progress, state, and byte metrics
+parse_acf_download_state() {
+    local target="$1"
+    local acf_file=""
+    local appid=""
+
+    if [ -f "$target" ]; then
+        acf_file="$target"
+    else
+        appid=$(printf "%s" "$target" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
+        [ -z "$appid" ] && return 1
+        acf_file=$(find_app_acf "$appid" 2>/dev/null || true)
+    fi
+
+    if [ -z "$acf_file" ] || [ ! -f "$acf_file" ]; then
+        return 1
+    fi
+
+    local name="" state_flags="0" bytes_dl="0" bytes_total="0" installdir=""
+    local re_appid='^[[:space:]]*"appid"[[:space:]]+"([0-9]+)"'
+    local re_name='^[[:space:]]*"name"[[:space:]]+"([^"]+)"'
+    local re_flags='^[[:space:]]*"StateFlags"[[:space:]]+"([0-9]+)"'
+    local re_bytes_dl='^[[:space:]]*"BytesDownloaded"[[:space:]]+"([0-9]+)"'
+    local re_bytes_total='^[[:space:]]*"BytesToDownload"[[:space:]]+"([0-9]+)"'
+    local re_installdir='^[[:space:]]*"installdir"[[:space:]]+"([^"]+)"'
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ "$line" =~ $re_appid ]] && [ -z "$appid" ]; then
+            appid="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ $re_name ]] && [ -z "$name" ]; then
+            name="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ $re_flags ]]; then
+            state_flags="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ $re_bytes_dl ]]; then
+            bytes_dl="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ $re_bytes_total ]]; then
+            bytes_total="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ $re_installdir ]] && [ -z "$installdir" ]; then
+            installdir="${BASH_REMATCH[1]}"
+        fi
+    done < "$acf_file"
+
+    [ -z "$appid" ] && return 1
+
+    local status_str="[UNKNOWN]"
+    if [ "$state_flags" -eq 4 ]; then
+        status_str="[INSTALLED]"
+    elif [ "$state_flags" -eq 512 ] || [ "$state_flags" -eq 514 ] || (( (state_flags & 512) != 0 )); then
+        status_str="[PAUSED]"
+    elif [ "$state_flags" -eq 1024 ] || [ "$state_flags" -eq 1026 ] || (( (state_flags & 1024) != 0 )); then
+        status_str="[DOWNLOADING]"
+    elif [ "$state_flags" -eq 2 ] || (( (state_flags & 2) != 0 )); then
+        status_str="[UPDATE REQUIRED]"
+    fi
+
+    local pct="0%"
+    if [ "$bytes_total" -gt 0 ] 2>/dev/null; then
+        local calc_pct=$(( (bytes_dl * 100) / bytes_total ))
+        [ "$calc_pct" -gt 100 ] && calc_pct=100
+        pct="${calc_pct}%"
+    elif [ "$state_flags" -eq 4 ]; then
+        pct="100%"
+    fi
+
+    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+        "$appid" "$name" "$status_str" "$pct" "$bytes_dl" "$bytes_total" "$state_flags" "$installdir" "$acf_file"
+}
+
 # List active and recent downloads
 list_downloads() {
     echo "=========================================="
-    echo " GAMECTL DOWNLOAD STATUS (DepotDownloader)"
+    echo " GAMECTL DOWNLOAD STATUS (Steam & Headless)"
     echo "=========================================="
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
     local count=0
+
+    # 1. Inspect Steam Native ACF downloads
+    local steam_apps
+    steam_apps="$(get_steam_primary_apps 2>/dev/null || echo "$HOME/.local/share/Steam/steamapps")"
+    shopt -s nullglob
+    local acf_files=("$steam_apps"/appmanifest_*.acf)
+    shopt -u nullglob
+
+    for acf in "${acf_files[@]}"; do
+        local state_data
+        state_data=$(parse_acf_download_state "$acf" 2>/dev/null || true)
+        [ -z "$state_data" ] && continue
+
+        local a_id a_title a_status a_pct a_dl a_total a_flags a_dir a_path
+        IFS=$'\t' read -r a_id a_title a_status a_pct a_dl a_total a_flags a_dir a_path <<< "$state_data"
+
+        # Only display active downloads or paused/updating apps in download status
+        if [ "$a_status" = "[DOWNLOADING]" ] || [ "$a_status" = "[PAUSED]" ] || [ "$a_status" = "[UPDATE REQUIRED]" ]; then
+            count=$((count + 1))
+            local dl_fmt tot_fmt
+            dl_fmt=$(format_bytes "$a_dl")
+            tot_fmt=$(format_bytes "$a_total")
+            echo "$a_status AppID: $a_id | $a_title | Progress: $a_pct ($dl_fmt / $tot_fmt) [Steam Engine]"
+            echo "------------------------------------------"
+        fi
+    done
+
+    # 2. Inspect DepotDownloader tasks (logs)
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
     declare -A seen_logs=()
     for log in "$run_dir"/gamectl_dl_*.log /tmp/gamectl_dl_*.log; do
         [ -f "$log" ] || continue
@@ -749,12 +891,13 @@ list_downloads() {
         if pgrep -f "DepotDownloader.*-app[[:space:]]+${appid}([[:space:]]|$)" >/dev/null 2>&1; then
             status="[DOWNLOADING]"
         fi
-        echo "$status AppID: $appid | Log: $log"
+        echo "$status AppID: $appid | Log: $log [DepotDownloader]"
         tail -n 2 "$log" 2>/dev/null | sed 's/^/  > /'
         echo "------------------------------------------"
     done
+
     if [ $count -eq 0 ]; then
-        echo "[INFO] No active or recent download tasks in $run_dir."
+        echo "[INFO] No active download tasks in Steam client or background downloader."
     fi
 }
 
@@ -763,6 +906,40 @@ list_downloads_interactive() {
     local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
     mkdir -p -m 700 "$run_dir"
     while true; do
+        local entries=""
+        local total_items=0
+
+        # 1. Scan Steam ACF entries
+        local steam_apps
+        steam_apps="$(get_steam_primary_apps 2>/dev/null || echo "$HOME/.local/share/Steam/steamapps")"
+        shopt -s nullglob
+        local acf_files=("$steam_apps"/appmanifest_*.acf)
+        shopt -u nullglob
+
+        for acf in "${acf_files[@]}"; do
+            local state_data
+            state_data=$(parse_acf_download_state "$acf" 2>/dev/null || true)
+            [ -z "$state_data" ] && continue
+
+            local a_id a_title a_status a_pct a_dl a_total a_flags a_dir a_path
+            IFS=$'\t' read -r a_id a_title a_status a_pct a_dl a_total a_flags a_dir a_path <<< "$state_data"
+
+            if [ "$a_status" = "[DOWNLOADING]" ] || [ "$a_status" = "[PAUSED]" ] || [ "$a_status" = "[UPDATE REQUIRED]" ] || [ "$a_status" = "[INSTALLED]" ]; then
+                local ui_status="${UI_ICE}${a_status}${UI_RST}"
+                [ "$a_status" = "[DOWNLOADING]" ] && ui_status="${UI_GREEN}[DOWNLOADING ${a_pct}]${UI_RST}"
+                [ "$a_status" = "[PAUSED]" ] && ui_status="${UI_PURPLE}[PAUSED ${a_pct}]${UI_RST}"
+                [ "$a_status" = "[INSTALLED]" ] && ui_status="${UI_CYAN}[INSTALLED]${UI_RST}"
+
+                local dl_fmt tot_fmt
+                dl_fmt=$(format_bytes "$a_dl")
+                tot_fmt=$(format_bytes "$a_total")
+                local detail="${a_title} (${dl_fmt}/${tot_fmt})"
+                entries+="${a_id}\tSteam\t${ui_status}\t${a_pct}\t${detail}\t${a_path}\n"
+                total_items=$((total_items + 1))
+            fi
+        done
+
+        # 2. Scan DepotDownloader entries
         local valid_logs=()
         declare -A seen_logs=()
         for l in "$run_dir"/gamectl_dl_*.log /tmp/gamectl_dl_*.log; do
@@ -772,16 +949,6 @@ list_downloads_interactive() {
             valid_logs+=("$l")
         done
 
-        if [ ${#valid_logs[@]} -eq 0 ]; then
-            clear
-            echo "${UI_BOX}╭─ DOWNLOAD MANAGER (DepotDownloader) ────────────────────────╮${UI_RST}"
-            echo "│ ${UI_CYAN}No active or recent download tasks found in $run_dir${UI_RST}"
-            echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-            read -r -p "Press [ENTER] to return to Dashboard..."
-            return 0
-        fi
-
-        local entries=""
         for log in "${valid_logs[@]}"; do
             local appid
             appid=$(basename "$log" | sed -E 's/gamectl_dl_([0-9]+)\.log/\1/')
@@ -792,69 +959,127 @@ list_downloads_interactive() {
             local last_line
             last_line=$(tail -n 1 "$log" 2>/dev/null | tr -d '\r\n\t' | cut -c1-60)
             [ -z "$last_line" ] && last_line="Waiting for output..."
-            entries+="${appid}\t${status}\t${log}\t${last_line}\n"
+            entries+="${appid}\tDepot\t${status}\tN/A\t${last_line}\t${log}\n"
+            total_items=$((total_items + 1))
         done
+
+        if [ "$total_items" -eq 0 ]; then
+            clear
+            echo "${UI_BOX}╭─ DOWNLOAD MANAGER (Steam & Headless) ────────────────────────╮${UI_RST}"
+            echo "│ ${UI_CYAN}No active or recent download tasks found in Steam or $run_dir${UI_RST}"
+            echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+            read -r -p "Press [ENTER] to return to Dashboard..."
+            return 0
+        fi
 
         local selection fzf_rc=0
         selection=$(printf "%b" "$entries" | fzf \
             --delimiter=$'\t' \
-            --with-nth=1,2,4 \
+            --with-nth=1,2,3,5 \
             --border-label="  ╢ gamectl :: Download Manager ╟  " \
             --border-label-pos=2 \
-            --header="ACTIVE DOWNLOADS (Enter: Actions & Stream │ Ctrl-K: Stop │ Esc: Back)" \
+            --header="DOWNLOADS (Enter: Actions │ Ctrl-K: Stop/Pause │ Esc: Back)" \
             --prompt="Downloads > " \
-            --preview="echo -e '\033[38;5;60mLog: {3}\033[0m\n──────────────────────────────────────────'; tail -n 30 {3}" \
+            --preview="if [ '{2}' = 'Steam' ]; then echo -e '\033[38;5;60mSteam AppManifest: {6}\033[0m\n──────────────────────────────────────────'; grep -E '\"(appid|name|StateFlags|BytesDownloaded|BytesToDownload|installdir)\"' {6} 2>/dev/null; else echo -e '\033[38;5;60mLog: {6}\033[0m\n──────────────────────────────────────────'; tail -n 30 {6} 2>/dev/null; fi" \
             --preview-window=right:60%:border-rounded:wrap \
-            --bind="ctrl-k:execute(appid={1}; pid=\$(pgrep -f \"DepotDownloader.*-app[[:space:]]+\${appid}([[:space:]]|$)\" 2>/dev/null | head -n 1); if [ -n \"\$pid\" ]; then kill \"\$pid\" 2>/dev/null && echo \"[INFO] AppID \$appid (PID \$pid) terminated.\"; else echo \"[INFO] AppID \$appid not active.\"; fi; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
+            --bind="ctrl-k:execute(appid={1}; engine={2}; if [ \"\$engine\" = 'Steam' ]; then steam \"steam://pause/\$appid\" 2>/dev/null; echo \"[INFO] Dispatched pause to Steam client for AppID \$appid.\"; else pid=\$(pgrep -f \"DepotDownloader.*-app[[:space:]]+\${appid}([[:space:]]|$)\" 2>/dev/null | head -n 1); if [ -n \"\$pid\" ]; then kill \"\$pid\" 2>/dev/null && echo \"[INFO] AppID \$appid (PID \$pid) terminated.\"; else echo \"[INFO] AppID \$appid not active.\"; fi; fi; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
         ) || fzf_rc=$?
 
         [ "$fzf_rc" -eq 130 ] && break
         [ -z "$selection" ] && continue
 
         if [ -n "$selection" ]; then
-            local sel_appid sel_log sel_status
+            local sel_appid sel_engine sel_status sel_pct sel_title sel_ref
             sel_appid=$(echo "$selection" | awk -F'\t' '{print $1}')
-            sel_log=$(echo "$selection" | awk -F'\t' '{print $3}')
-            sel_status=$(echo "$selection" | awk -F'\t' '{print $2}')
+            sel_engine=$(echo "$selection" | awk -F'\t' '{print $2}')
+            sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
+            sel_pct=$(echo "$selection" | awk -F'\t' '{print $4}')
+            sel_title=$(echo "$selection" | awk -F'\t' '{print $5}')
+            sel_ref=$(echo "$selection" | awk -F'\t' '{print $6}')
 
             clear
-            echo "${UI_BOX}╭─ DOWNLOAD ACTIONS: AppID ${UI_BOLD}$sel_appid${UI_RST} $sel_status ─────────────╮${UI_RST}"
-            echo "│ ${UI_CYAN}Log file${UI_RST}: ${UI_DIM}$sel_log${UI_RST}"
+            echo "${UI_BOX}╭─ DOWNLOAD ACTIONS: AppID ${UI_BOLD}$sel_appid${UI_RST} [${sel_engine}] $sel_status ─────────────╮${UI_RST}"
+            echo "│ ${UI_CYAN}Target${UI_RST}: ${UI_DIM}$sel_ref${UI_RST}"
             echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-            echo "  ${UI_PURPLE}1)${UI_RST} Stream live output (tail -f)"
-            echo "  ${UI_PURPLE}2)${UI_RST} Terminate this process (Kill task)"
-            echo "  ${UI_PURPLE}3)${UI_RST} Remove this log history file"
-            echo "  ${UI_DIM}4)${UI_RST} Return to download list"
-            echo
-            read -r -p "Select option [1-4]: " dl_opt
 
-            case "$dl_opt" in
-                1)
-                    clear
-                    echo "${UI_BOX}╭─ LIVE STREAM: AppID $sel_appid ─────────────────────────────╮${UI_RST}"
-                    echo "│ ${UI_CYAN}Press Ctrl-C when done to return${UI_RST}"
-                    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-                    tail -f "$sel_log" || true
-                    read -r -p "Press [ENTER] to return..."
-                    ;;
-                2)
-                    local k_pid
-                    k_pid=$(pgrep -f "DepotDownloader.*-app[[:space:]]+${sel_appid}([[:space:]]|$)" 2>/dev/null | head -n 1 || true)
-                    if [ -n "$k_pid" ]; then
-                        kill "$k_pid" 2>/dev/null && echo "  ${UI_GREEN}[SUCCESS] Download process AppID $sel_appid (PID $k_pid) stopped.${UI_RST}"
-                    else
-                        echo "  [INFO] AppID $sel_appid is not currently running."
-                    fi
-                    read -r -p "Press [ENTER] to continue..."
-                    ;;
-                3)
-                    rm -f "$sel_log"
-                    echo "  [INFO] Log file $sel_log deleted."
-                    read -r -p "Press [ENTER] to continue..."
-                    ;;
-                *)
-                    ;;
-            esac
+            if [ "$sel_engine" = "Steam" ]; then
+                echo "  ${UI_PURPLE}1)${UI_RST} Pause download (steam://pause/$sel_appid)"
+                echo "  ${UI_PURPLE}2)${UI_RST} Resume download (steam://resume/$sel_appid)"
+                echo "  ${UI_PURPLE}3)${UI_RST} Inject Standalone GBE Fork LAN runtime"
+                echo "  ${UI_DIM}4)${UI_RST} Return to download list"
+                echo
+                read -r -p "Select option [1-4]: " dl_opt
+
+                case "$dl_opt" in
+                    1)
+                        if command -v steam >/dev/null 2>&1; then
+                            steam "steam://pause/$sel_appid" >/dev/null 2>&1 &
+                            echo "  ${UI_GREEN}[SUCCESS] Dispatched steam://pause/$sel_appid${UI_RST}"
+                        else
+                            echo "  [WARN] Steam executable not found on PATH."
+                        fi
+                        read -r -p "Press [ENTER] to continue..."
+                        ;;
+                    2)
+                        if command -v steam >/dev/null 2>&1; then
+                            steam "steam://resume/$sel_appid" >/dev/null 2>&1 &
+                            echo "  ${UI_GREEN}[SUCCESS] Dispatched steam://resume/$sel_appid${UI_RST}"
+                        else
+                            echo "  [WARN] Steam executable not found on PATH."
+                        fi
+                        read -r -p "Press [ENTER] to continue..."
+                        ;;
+                    3)
+                        local g_dir
+                        g_dir="$(dirname "$sel_ref")/common/$(grep -m1 '"installdir"' "$sel_ref" 2>/dev/null | awk -F'"' '{print $4}')"
+                        if [ -d "$g_dir" ]; then
+                            echo "[INFO] Injecting GBE Fork LAN runtime into: $g_dir"
+                            "$SELF_BIN" inject "$g_dir" "$sel_appid"
+                        else
+                            echo "  [WARN] Game common directory does not exist yet: $g_dir"
+                            echo "  [INFO] Please wait until the download finishes in Steam."
+                        fi
+                        read -r -p "Press [ENTER] to continue..."
+                        ;;
+                    *)
+                        ;;
+                esac
+            else
+                echo "  ${UI_PURPLE}1)${UI_RST} Stream live output (tail -f)"
+                echo "  ${UI_PURPLE}2)${UI_RST} Terminate this process (Kill task)"
+                echo "  ${UI_PURPLE}3)${UI_RST} Remove this log history file"
+                echo "  ${UI_DIM}4)${UI_RST} Return to download list"
+                echo
+                read -r -p "Select option [1-4]: " dl_opt
+
+                case "$dl_opt" in
+                    1)
+                        clear
+                        echo "${UI_BOX}╭─ LIVE STREAM: AppID $sel_appid ─────────────────────────────╮${UI_RST}"
+                        echo "│ ${UI_CYAN}Press Ctrl-C when done to return${UI_RST}"
+                        echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+                        tail -f "$sel_ref" || true
+                        read -r -p "Press [ENTER] to return..."
+                        ;;
+                    2)
+                        local k_pid
+                        k_pid=$(pgrep -f "DepotDownloader.*-app[[:space:]]+${sel_appid}([[:space:]]|$)" 2>/dev/null | head -n 1 || true)
+                        if [ -n "$k_pid" ]; then
+                            kill "$k_pid" 2>/dev/null && echo "  ${UI_GREEN}[SUCCESS] Download process AppID $sel_appid (PID $k_pid) stopped.${UI_RST}"
+                        else
+                            echo "  [INFO] AppID $sel_appid is not currently running."
+                        fi
+                        read -r -p "Press [ENTER] to continue..."
+                        ;;
+                    3)
+                        rm -f "$sel_ref"
+                        echo "  [INFO] Log file $sel_ref deleted."
+                        read -r -p "Press [ENTER] to continue..."
+                        ;;
+                    *)
+                        ;;
+                esac
+            fi
         fi
     done
 }

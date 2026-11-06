@@ -68,7 +68,7 @@ Mengganti ketergantungan rapuh pada DepotDownloader eksternal (.NET GC heap ting
      - Pertahankan alur eksekusi `ensure_downloader` dan `DepotDownloader -app "$appid"` saat user memberikan flag `--engine=depot` atau `--headless`.
 - DoD: Perintah `gamectl download <appid>` sukses mengekstrak manifest, menulis stplug-in, dan mentrigger Steam client tanpa error 401.
 
-### Chunk 4: Real-Time ACF Telemetry & Interactive Monitor (`list_downloads`) [PLANNED]
+### Chunk 4: Real-Time ACF Telemetry ### Chunk 4: Real-Time ACF Telemetry & Interactive Monitor (`list_downloads`) [PLANNED] Interactive Monitor (`list_downloads`) [DONE]
 - Target Files: `src/steam/30_downloader.sh`
 - Runtutan Eksekusi Teknis:
   1. Implementasikan parser telemetri ACF `parse_acf_download_state "$appid"`:
