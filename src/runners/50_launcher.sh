@@ -537,6 +537,10 @@ inject_game() {
     local appid="${2:-}"
     local sync_mode="${3:-all}"
 
+    # Strip ANSI escape sequences
+    target_dir=$(printf "%s" "$target_dir" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g')
+    [ -n "$appid" ] && appid=$(printf "%s" "$appid" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g' | tr -dc '0-9')
+
     if [ ! -d "$target_dir" ]; then
         echo "[ERROR] Target directory not found: $target_dir" >&2
         return 1

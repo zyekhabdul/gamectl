@@ -425,7 +425,7 @@ test_debian_packaging_validation() {
     local deb_pkg && \
     deb_pkg=$(ls "$REPO_ROOT/packaging/debian"/gamectl_*_all.deb 2>/dev/null | head -n 1) && \
     [ -n "$deb_pkg" ] && [ -f "$deb_pkg" ] && \
-    dpkg-deb -I "$deb_pkg" | grep -q "Package: gamectl"
+    dpkg-deb -I "$deb_pkg" | grep "Package: gamectl" >/dev/null
 }
 run_test "Debian Packaging: Valid .deb construction and control metadata" test_debian_packaging_validation
 
@@ -679,6 +679,90 @@ test_fzf_menu_loop_break_invariants() {
     grep -q 'continue' "$REPO_ROOT/src/runners/40_wrappers.sh"
 }
 run_test "TUI Menu Loops: Universal zero-match Enter decoupling across all fzf loops" test_fzf_menu_loop_break_invariants
+
+
+test_manifest_payload_magic_detection() {
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    # Invariant: manifest_has_payload_magic correctly identifies Valve binary magic 0xd017f671
+    local test_dir="${TEST_TMP_DIR:-/tmp}/magic_test_$$"
+    mkdir -p "$test_dir"
+    local valid_file="$test_dir/valid.manifest"
+    local invalid_file="$test_dir/invalid.manifest"
+
+    printf "\xd0\x17\xf6\x71\x01\x02\x03\x04" > "$valid_file"
+    printf "\x00\x11\x22\x33\x04\x05\x06\x07" > "$invalid_file"
+
+    local ok1=0 ok2=0
+    manifest_has_payload_magic "$valid_file" && ok1=1
+    ! manifest_has_payload_magic "$invalid_file" && ok2=1
+
+    rm -rf "$test_dir"
+    [ "$ok1" -eq 1 ] && [ "$ok2" -eq 1 ]
+}
+run_test "Manifest Harvester: Binary magic signature 0xd017f671 verification" test_manifest_payload_magic_detection
+
+test_validate_manifest_zip_contract() {
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    # Invariant: validate_manifest_zip rejects corrupted, path traversal, or non-manifest archives
+    local test_dir="${TEST_TMP_DIR:-/tmp}/zip_test_$$"
+    mkdir -p "$test_dir"
+    local valid_zip="$test_dir/valid.zip"
+    local invalid_zip="$test_dir/invalid.zip"
+    local non_manifest_zip="$test_dir/empty.zip"
+
+    # Build valid manifest zip
+    local stage_dir="$test_dir/stage"
+    mkdir -p "$stage_dir"
+    printf "\xd0\x17\xf6\x71dummy payload" > "$stage_dir/12345_67890.manifest"
+    echo 'addappid(12345)' > "$stage_dir/12345.lua"
+    (cd "$stage_dir" && zip -q "$valid_zip" 12345_67890.manifest 12345.lua)
+
+    # Build non-manifest zip
+    echo "just text" > "$stage_dir/readme.txt"
+    (cd "$stage_dir" && zip -q "$non_manifest_zip" readme.txt)
+
+    # Corrupt zip
+    echo "corrupted binary data" > "$invalid_zip"
+
+    local ok_val=0 ok_inval=0 ok_empty=0
+    validate_manifest_zip "$valid_zip" "12345" && ok_val=1
+    ! validate_manifest_zip "$invalid_zip" "12345" && ok_inval=1
+    ! validate_manifest_zip "$non_manifest_zip" "12345" && ok_empty=1
+
+    rm -rf "$test_dir"
+    [ "$ok_val" -eq 1 ] && [ "$ok_inval" -eq 1 ] && [ "$ok_empty" -eq 1 ]
+}
+run_test "Manifest Harvester: ZIP safety, anti-traversal & payload verification" test_validate_manifest_zip_contract
+
+test_fetch_manifest_cache_and_stash_resolution() {
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    # Invariant: fetch_manifest prioritizes local cache and stash before attempting network fetch
+    local test_cache="${TEST_TMP_DIR:-/tmp}/gamectl_test_cache_$$"
+    export XDG_CACHE_HOME="$test_cache"
+    mkdir -p "$test_cache/gamectl/manifests"
+
+    local mock_zip="$test_cache/gamectl/manifests/99999.zip"
+    local stage_dir="$test_cache/stage"
+    mkdir -p "$stage_dir"
+    printf "\xd0\x17\xf6\x71dummy payload" > "$stage_dir/99999_1.manifest"
+    echo 'addappid(99999)' > "$stage_dir/99999.lua"
+    (cd "$stage_dir" && zip -q "$mock_zip" 99999_1.manifest 99999.lua)
+
+    local out_path
+    out_path=$(fetch_manifest "99999")
+    local fetch_rc=$?
+
+    # Invalid AppID must fail fast
+    local inv_rc=0
+    fetch_manifest "INVALID" >/dev/null 2>&1 || inv_rc=$?
+
+    rm -rf "$test_cache"
+    unset XDG_CACHE_HOME
+
+    [ "$fetch_rc" -eq 0 ] && [ "$out_path" = "$mock_zip" ] && [ "$inv_rc" -ne 0 ]
+}
+run_test "Manifest Harvester: Local cache & stash fast-path resolution" test_fetch_manifest_cache_and_stash_resolution
+
 
 # ------------------------------------------------------------------------------
 # Final Execution Summary

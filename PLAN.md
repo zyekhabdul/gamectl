@@ -1,93 +1,125 @@
-# WORK PACKET 12: LINUX KERNEL ISOLATION, HYBRID PRIME & SECURITY SANDBOXING [ACTIVE]
+# WORK PACKET 13: SLSSTEAM-MOON BACKEND ADOPTION & STANDALONE DOWNLOAD ARCHITECTURE [ACTIVE]
 
 ## 1. Objective & Technical Scope
-Implement Linux systems architectural remediation (Phase 4 / Actions 4.1-4.4):
-1. **cgroups v2 / systemd-run Scope Isolation (Action 4.1)**: Eliminate process tree leaks and zombie reparenting to PID 1 by binding launches to isolated `systemd-run --user --scope` units with automatic fallback.
-2. **Automated PRIME dGPU Hybrid Offloading (Action 4.2)**: Auto-detect discrete NVIDIA / AMD GPUs and synthesize dynamic offload flags (`--prime`) to prevent games from defaulting to low-power integrated GPUs.
-3. **Bubblewrap (`bwrap`) Security Sandboxing (Action 4.3)**: Implement an opt-in rootless sandbox (`--sandbox`) restricting filesystem visibility to necessary system runtimes and the game prefix, protecting sensitive host directories (`~/.ssh`, `~/.gnupg`, browser data, `.env`).
-4. **Single-Pass Library Scanner Optimization (Action 4.4)**: Refactor `scan_installed_games` to minimize redundant subshell forks (`file`, `stat`, `grep`) on large game collections (>500 games).
-5. **Machine Verification & Automated Regression Suite**: Add black-box unit tests in `tests/test_cli.sh`, compile via `./scripts/build.sh`, and verify exit code 0 across the entire test suite.
+Mengganti ketergantungan rapuh pada DepotDownloader eksternal (.NET GC heap tinggi, 401 unauthenticated rate-limit) dengan mengadopsi arsitektur backend SLSsteam-Moon / Lumen langsung ke dalam core `gamectl`:
+1. **Multi-Source Manifest Harvester (`fetch_manifest`)**: Pengambilan otomatis archive manifest (.manifest + AES keys) dari multi-mirror publik (lua.tools, Ryuu, Sushi, local stash) secara paralel dan deterministik dengan verifikasi payload magic `0xd017f671`.
+2. **SLSsteam Stplug-in & Manifest Linker (`deploy_sls_manifest`)**: Penempatan otomatis file `.manifest` ke `~/.config/SLSsteam/manifests/` & `depotcache/`, pembuatan skrip Lua `~/.local/share/Steam/config/stplug-in/<appid>.lua` (`addappid(depotid, 1, "AES_KEY")`), serta sinkronisasi entitlement `config.yaml`.
+3. **Dual-Mode Download Orchestrator**: Mode default Steam Native Background (`steam://install/<appid>`) dengan fallback ke engine standalone.
+4. **Real-time ACF Telemetry Monitor (`list_downloads`)**: Memantau progres unduhan presisi langsung dari `appmanifest_<appid>.acf` (`BytesDownloaded`, `BytesToDownload`, `StateFlags`).
+5. **Dashboard TUI & CLI Integration**: Integrasi kontrol download, pause/resume, dan post-install auto-injection GBE Fork pada TUI `gamectl`.
+6. **Machine Verification & Automated Regression Suite**: Memperbarui test suite `tests/test_cli.sh` (60+ assertions) dan memastikan `exit code 0` tanpa regresi.
 
 ---
 
-## 2. Granular Technical Execution Plan (Work Packet 12)
+## 2. Granular Technical Execution Plan (Work Packet 13)
 
-### Chunk 1: cgroups v2 / systemd-run Scope Process Isolation (Action 4.1) [DONE]
-- Target Files: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/main.sh`
+### Chunk 1: Multi-Provider Manifest Harvester (`fetch_manifest`) [DONE]
+- Target Files: `src/steam/30_downloader.sh`
 - Runtutan Eksekusi Teknis:
-  1. Buat helper `check_systemd_scope_support` di `src/runners/40_wrappers.sh`:
-     - Uji apakah `systemd-run --user --scope true` berhasil dieksekusi tanpa error.
-  2. Perbarui `launch_game` di `src/runners/50_launcher.sh`:
-     - Tambahkan flag CLI `--scope` / `--no-scope` (default: auto-enable jika didukung).
-     - Jika aktif, luncurkan execution string di bawah scope:
-       `systemd-run --user --scope --unit="gamectl-${safe_title}-${game_pid}" --description="gamectl runner: ${title}" "${wrappers[@]}" "$runner_bin" "$gdir/$gbin"`
-     - Simpan unit name ke metadata info file `${XDG_RUNTIME_DIR:-/tmp}/gamectl-$UID/active_game_${game_pid}.info`.
-  3. Perbarui fungsi cleanup dan `game_controller_hud`:
-     - Saat terminasi paksa (kill), jalankan `systemctl --user stop "$unit_name" 2>/dev/null || true` untuk membunuh seluruh child process tree secara atomik via kernel cgroup v2.
-  4. Sediakan fallback transparan ke subshell standar jika systemd tidak aktif (distro non-systemd/chroot/container).
-- DoD: Seluruh child process game (crash reporters, explorer.exe, winedevice.exe) terisolasi dalam satu cgroup slice dan berhenti seketika saat game ditutup tanpa meninggalkan zombie processes.
+  1. Implementasikan fungsi `fetch_manifest "$appid" [dest_dir]`:
+     - Periksa cache lokal terlebih dahulu: `${XDG_CACHE_HOME:-~/.cache}/gamectl/manifests/${appid}.zip`.
+     - Susun daftar kandidat provider secara terurut:
+       - Source 1 (Ryuu Mirror): `http://167.235.229.108/${appid}`
+       - Source 2 (Sushi Repo): `https://raw.githubusercontent.com/sushi-dev55-alt/sushitools-games-repo-alt/refs/heads/main/${appid}.zip`
+       - Source 3 (Lua.tools API): `https://lua.tools/api/manifest/download?appid=${appid}&source=Luie` (menggunakan Bearer token dari `~/.local/share/Lumen/luatools/backend/data/lua_tools_auth.json` jika tersedia).
+     - Jalankan unduhan kandidat dengan timeout ketat (10 detik) dan validasi HTTP status code 200.
+  2. Implementasikan validasi integritas archive:
+     - Cek apakah file merupakan valid ZIP (`unzip -tq`).
+     - Cegah path traversal (tolak archive dengan entri `..` atau absolute path `/`).
+     - Pastikan terdapat minimal satu file `.manifest` atau file `<appid>.lua`.
+     - Verifikasi Valve manifest payload magic signature `0xd017f671` pada file `.manifest`.
+  3. Kembalikan path zip tervalidasi ke caller.
+- DoD: Fungsi `fetch_manifest` berhasil mengunduh, memverifikasi, dan mengembalikan file manifest archive untuk AppID valid dengan exit code 0.
 
-### Chunk 2: Automated PRIME dGPU Hybrid Offloading (Action 4.2) [DONE]
-- Target Files: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/diagnostics/60_doctor.sh`, `src/main.sh`
+### Chunk 2: SLSsteam Stplug-in & Manifest Linker (`deploy_sls_manifest`) [PLANNED]
+- Target Files: `src/steam/30_downloader.sh`, `src/steam/20_discovery.sh`
 - Runtutan Eksekusi Teknis:
-  1. Buat fungsi helper `detect_dgpu_vendor` di `src/runners/40_wrappers.sh`:
-     - Periksa perangkat PCI display di `/sys/bus/pci/devices/*/class` (class `0x030000` / `0x030200`).
-     - Deteksi vendor diskrit: vendor ID `0x10de` (NVIDIA) vs `0x1002` (AMD) vs `0x8086` (Intel Arc).
-     - Kembalikan `nvidia`, `amd`, `intel`, atau `none`.
-  2. Perbarui `build_wrapper_command` di `src/runners/40_wrappers.sh`:
-     - Tambahkan parsing opsi `prime=0|1` dari konfigurasi game dan flag CLI `--prime`.
-     - Jika diaktifkan:
-       - NVIDIA: inject `__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only`.
-       - AMD: inject `DRI_PRIME=1`.
-       - Intel Arc: inject `DRI_PRIME=1`.
-  3. Tambahkan audit hybrid GPU pada Layer Hardware di `src/diagnostics/60_doctor.sh` (`doctor_audit`).
-  4. Ekspor dan daftarkan perintah `gamectl detect-gpu` di `src/main.sh`.
-- DoD: Flag `--prime` secara otomatis mengarahkan rendering ke GPU diskrit yang terdeteksi tanpa konfigurasi manual user.
+  1. Implementasikan fungsi `deploy_sls_manifest "$appid" "$manifest_zip"`:
+     - Ekstrak archive ke direktori temporer terisolasi `${XDG_RUNTIME_DIR:-/tmp}/gamectl-$UID/manifest_${appid}`.
+     - Pindahkan semua file `*.manifest` ke:
+       - `~/.config/SLSsteam/manifests/`
+       - Symlink / salin ke `~/.local/share/Steam/depotcache/`
+     - Deteksi depot ID dan generate file marker `.preferred_<depotid>` berisikan GID manifest terbaru.
+  2. Ekstraksi atau Sintesis Skrip Lua Stplug-in:
+     - Jika archive menyertakan file `<appid>.lua`, salin ke `~/.local/share/Steam/config/stplug-in/<appid>.lua`.
+     - Jika archive hanya menyertakan manifest dan file kunci teks, sintesis file Lua dengan format resmi:
+       ```lua
+       addappid(<appid>)
+       addappid(<depotid>, 1, "<aes_256_key>")
+       ```
+     - Amankan permissions file stplug-in ke `0600`.
+  3. Panggil `sync_steam "$appid"` untuk mendaftarkan AppID dan DLC ke `~/.config/SLSsteam/config.yaml`.
+- DoD: File manifest terpasang di SLSsteam manifests, file Lua stplug-in terbuat di `config/stplug-in/<appid>.lua`, dan AppID terdaftar di config SLSsteam.
 
-### Chunk 3: Bubblewrap (bwrap) Rootless Security Sandbox Profile (Action 4.3) [DONE]
-- Target Files: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/main.sh`
+### Chunk 3: Dual-Mode Download Orchestrator Refactoring (`download_game`) [PLANNED]
+- Target Files: `src/steam/30_downloader.sh`, `src/main.sh`
 - Runtutan Eksekusi Teknis:
-  1. Buat fungsi helper `build_sandbox_command "$gdir"` di `src/runners/40_wrappers.sh`:
-     - Periksa ketersediaan binari `bwrap`. Jika tidak ada, cetak peringatan `[WARN]` dan lewati sandboxing dengan aman.
-     - Susun parameter isolasi rootless bwrap:
-       - Read-only mounts: `/usr`, `/lib`, `/lib64`, `/bin`, `/etc/resolv.conf`, `/etc/ssl`, `/etc/fonts`, `/dev`, `/proc`, `/sys`.
-       - Sockets & Audio: `/run/user/$UID/pulse`, `/run/user/$UID/pipewire-0`, `/run/user/$UID/wayland-0`, `/tmp/.X11-unix`.
-       - Read-write isolasi: `$gdir` dan `${XDG_RUNTIME_DIR:-/tmp}/gamectl-$UID`.
-       - Unshare namespaces: `--unshare-user --unshare-ipc --unshare-pid`.
-       - Sembunyikan direktori kredensial: isolasi `$HOME` sehingga `~/.ssh`, `~/.gnupg`, `~/.config/google-chrome`, dan file kredensial tidak terlihat oleh binary game.
-  2. Tambahkan opsi per-game `sandbox=0|1` dan flag CLI `--sandbox` pada `launch_game`.
-- DoD: Standalone untrusted binary dapat dieksekusi dengan isolasi penuh terhadap file rahasia host `$HOME` tanpa merusak rendering Wayland/X11 dan audio PipeWire.
+  1. Refactor parameter dan engine selector pada `download_game`:
+     - Tambahkan flag CLI `--engine [steam|depot]` (default: `steam`).
+     - Tambahkan flag `--source [auto|ryuu|sushi|luatools]`.
+  2. Mode A (Default: Steam Native Content Engine):
+     - Jalankan `fetch_manifest "$appid"` untuk mengunduh manifest dan kunci.
+     - Jalankan `deploy_sls_manifest "$appid" "$manifest_zip"`.
+     - Verifikasi kesiapan Steam Client:
+       - Jika Steam aktif: trigger `steam "steam://install/${appid}" >/dev/null 2>&1 &`.
+       - Jika Steam mati: tampilkan opsi jalankan silent background `steam -silent &` atau ingatkan pengguna.
+     - Berikan umpan balik instan ke terminal bahwa tugas download telah didelegasikan ke engine Valve CDN berkecepatan penuh.
+  3. Mode B (Fallback: Headless DepotDownloader):
+     - Pertahankan alur eksekusi `ensure_downloader` dan `DepotDownloader -app "$appid"` saat user memberikan flag `--engine=depot` atau `--headless`.
+- DoD: Perintah `gamectl download <appid>` sukses mengekstrak manifest, menulis stplug-in, dan mentrigger Steam client tanpa error 401.
 
-### Chunk 4: Single-Pass Library Scanner Optimization (Action 4.4) [DONE]
-- Target Files: `src/steam/20_discovery.sh`, `src/tui/70_dashboard.sh`
+### Chunk 4: Real-Time ACF Telemetry & Interactive Monitor (`list_downloads`) [PLANNED]
+- Target Files: `src/steam/30_downloader.sh`
 - Runtutan Eksekusi Teknis:
-  1. Analisa kemacetan I/O pada `scan_installed_games` di `src/steam/20_discovery.sh`:
-     - Hilangkan fork subshell berulang (`stat`, `basename`, `dirname`, `file -b`) di dalam loop direktori game.
-  2. Implementasikan pola batch-probing berbasis bash array / fast globbing:
-     - Deteksi metadata game (`steam_appid.txt`, `pfx`, `saves`, executable utama) dalam satu operan per folder.
-  3. Sediakan opsi cache pemindaian library sementara di `$XDG_RUNTIME_DIR/gamectl-$UID/scancache.tab` dengan waktu validasi mtime direktori library untuk mempercepat render daftar game TUI secara instan.
-- DoD: Kecepatan pemindaian library masif meningkat signifikan (>3x lebih cepat) dengan konsistensi output data yang identik.
+  1. Implementasikan parser telemetri ACF `parse_acf_download_state "$appid"`:
+     - Baca langsung dari `~/.local/share/Steam/steamapps/appmanifest_${appid}.acf`.
+     - Ekstrak atribut: `StateFlags`, `BytesDownloaded`, `BytesToDownload`, `BytesToStage`, `BytesStaged`.
+     - Parsing StateFlags:
+       - `1024` atau `1026`: `[DOWNLOADING]`
+       - `512`: `[PAUSED]`
+       - `4`: `[INSTALLED]`
+       - `2`: `[UPDATE REQUIRED]`
+  2. Refactor `list_downloads`:
+     - Tampilkan tabel progres aktif: AppID, Title, Status, Progress %, Bytes Downloaded / Total.
+  3. Refactor `list_downloads_interactive`:
+     - Gunakan interface FZF untuk memantau status secara live.
+     - Tambahkan action menu:
+       - Pause / Resume via protokol Steam (`steam://pause/<appid>` / `steam://resume/<appid>`).
+       - Post-download Action: Jika `StateFlags == 4`, sediakan tombol 1-klik untuk `inject_game` (GBE Fork standalone).
+- DoD: Monitor download menampilkan persentase unduhan real-time dari file ACF resmi Steam tanpa polling log file mentah.
 
-### Chunk 5: Machine Verification & Automated Regression Suite (Work Packet 12) [DONE]
-- Target Files: `tests/test_cli.sh`, `remediation.md`, `DEVELOPMENT.md`
+### Chunk 5: Dashboard TUI & CLI Integration [PLANNED]
+- Target Files: `src/tui/70_dashboard.sh`, `src/main.sh`
 - Runtutan Eksekusi Teknis:
-  1. Tambahkan unit test assertions di `tests/test_cli.sh`:
-     - Test dGPU Vendor Detection (`detect_dgpu_vendor`).
-     - Test PRIME Wrapper synthesis (`--prime`).
-     - Test Bubblewrap sandbox argument generation (`--sandbox`).
-     - Test systemd-run scope command synthesis & fallback.
-     - Test optimized library scanner consistency against baseline.
-  2. Jalankan kompilasi `./scripts/build.sh` dan verifikasi integritas bundle `./scripts/build.sh --check`.
-  3. Jalankan regression test suite `./tests/test_cli.sh` (55+ assertions) hingga seluruh tes lulus dengan Exit Code 0.
-  4. Perbarui dokumentasi status di `remediation.md` dan `DEVELOPMENT.md`.
-- DoD: Semua fitur Phase 4 terverifikasi 100% oleh deterministic test runner dengan Exit Code 0.
+  1. Perbarui status bar indikator download di `src/tui/70_dashboard.sh`:
+     - Ganti label `DepotDownloader` dengan `SLSsteam-Moon Engine: [READY]`.
+     - Deteksi status runtime Steam client (`[RUNNING]` vs `[IDLE]`).
+  2. Perbarui shortcut aksi di TUI Dashboard:
+     - `<Ctrl-A>` (All-in-One Download): otomatis memanggil mode native SLSsteam manifest fetcher.
+     - `<Ctrl-D>` (Live Downloads Monitor): membuka monitor telemetri ACF.
+  3. Perbarui CLI help & completion di `src/main.sh`:
+     - Dokumentasikan opsi baru `gamectl download <appid> [--engine=steam|depot] [--source=...]`.
+- DoD: TUI Dashboard terintegrasi penuh dengan download engine baru, shortcut keyboard berfungsi mulus.
+
+### Chunk 6: Test Suite & Empirical Machine Verification [PLANNED]
+- Target Files: `tests/test_cli.sh`, `scripts/build.sh`
+- Runtutan Eksekusi Teknis:
+  1. Buat unit test baru di `tests/test_cli.sh`:
+     - Test validasi ZIP manifest & magic signature check (`manifest_has_payload_magic`).
+     - Test parser stplug-in Lua generator output.
+     - Test parser ACF telemetry flags (1024, 512, 4).
+     - Test engine argument parsing (`--engine=steam`, `--engine=depot`).
+  2. Eksekusi `./scripts/build.sh` untuk menghasilkan monolithic bundle `bin/gamectl`.
+  3. Jalankan regression suite `./tests/test_cli.sh` (target 65+ assertions).
+  4. Buktikan Exit Code 0 dengan 0 failures / 0 skips.
+- DoD: Seluruh rangkaian tes lulus dengan exit code 0 tanpa regresi pada fitur eksisting.
 
 ---
 
-## 3. Matriks Milestone Selesai (Work Packet 12 & History)
-- [x] WP 12 Chunk 1: cgroups v2 / systemd-run Scope Process Isolation (`a752f25`) [DONE]
-- [x] WP 12 Chunk 2: Automated PRIME dGPU Hybrid Offloading (`45aef7f`) [DONE]
-- [x] WP 12 Chunk 3: Bubblewrap (bwrap) Rootless Security Sandbox Profile (`701f6fb`) [DONE]
-- [x] WP 12 Chunk 4: Single-Pass Library Scanner Optimization (`de6f4ff`) [DONE]
-- [x] WP 12 Chunk 5: Machine Verification & Automated Regression Suite [DONE]
-- [x] Checkpoint Verifikasi: 55/55 tests passing with Exit 0. [DONE]
+## 3. Matriks Milestone (Work Packet 13)
+- [x] Chunk 1: Multi-Provider Manifest Harvester (`fetch_manifest`) [DONE]
+- [ ] Chunk 2: SLSsteam Stplug-in & Manifest Linker (`deploy_sls_manifest`) [PLANNED]
+- [ ] Chunk 3: Dual-Mode Download Orchestrator Refactoring (`download_game`) [PLANNED]
+- [ ] Chunk 4: Real-Time ACF Telemetry & Interactive Monitor (`list_downloads`) [PLANNED]
+- [ ] Chunk 5: Dashboard TUI & CLI Integration (`70_dashboard.sh` & `main.sh`) [PLANNED]
+- [ ] Chunk 6: Test Suite & Empirical Machine Verification (`tests/test_cli.sh`) [PLANNED]

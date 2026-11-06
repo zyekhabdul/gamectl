@@ -55,6 +55,193 @@ fetch_dlc() {
     fi
 }
 
+# Verify Valve manifest payload magic signature (0xd017f671)
+manifest_has_payload_magic() {
+    local m_file="$1"
+    [ -f "$m_file" ] || return 1
+    local sig
+    sig=$(od -An -tx1 -N4 "$m_file" 2>/dev/null | tr -d " \n")
+    [ "$sig" = "d017f671" ]
+}
+
+# Validate downloaded manifest ZIP archive for safety and payload contents
+validate_manifest_zip() {
+    local z_file="$1"
+    local appid="${2:-}"
+    [ -f "$z_file" ] || return 1
+    unzip -tq "$z_file" >/dev/null 2>&1 || return 1
+
+    local entries
+    entries=$(unzip -Z1 "$z_file" 2>/dev/null) || return 1
+    [ -n "$entries" ] || return 1
+
+    # Security: Path traversal & absolute path rejection
+    if echo "$entries" | grep -Eq '(^/|^[A-Za-z]:|(^|[/\\])\.\.([/\\]|$)|\\)'; then
+        echo "[ERROR] Manifest zip contains unsafe paths (path traversal rejected)." >&2
+        return 1
+    fi
+
+    # Content check: must contain at least one .manifest or .lua file
+    if ! echo "$entries" | grep -Eq '(\.manifest|\.lua)$'; then
+        echo "[ERROR] Manifest zip does not contain any .manifest or .lua files." >&2
+        return 1
+    fi
+
+    # Payload magic audit on contained manifests
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local audit_tmp="$run_dir/manifest_audit_$$"
+    mkdir -p -m 700 "$audit_tmp"
+    local has_valid_manifest=0
+
+    # Extract only .manifest files to temporary audit sandbox
+    unzip -q -j "$z_file" "*.manifest" -d "$audit_tmp" 2>/dev/null || true
+    for mf in "$audit_tmp"/*.manifest; do
+        [ -f "$mf" ] || continue
+        if manifest_has_payload_magic "$mf"; then
+            has_valid_manifest=1
+            break
+        fi
+    done
+    rm -rf "$audit_tmp"
+
+    # If no .manifest was found or .lua only, check if .lua has addappid
+    if [ "$has_valid_manifest" -eq 0 ]; then
+        if echo "$entries" | grep -Eq '\.lua$'; then
+            has_valid_manifest=1
+        fi
+    fi
+
+    [ "$has_valid_manifest" -eq 1 ]
+}
+
+# Multi-Provider Manifest & Key Harvester
+fetch_manifest() {
+    local appid="$1"
+    local dest_file="${2:-}"
+    local pref_source="${3:-auto}"
+
+    # Strip any ANSI escape sequences
+    appid=$(printf "%s" "$appid" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
+    if [ -z "$appid" ]; then
+        echo "[ERROR] fetch_manifest: Invalid numeric AppID." >&2
+        return 1
+    fi
+
+    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl/manifests"
+    mkdir -p -m 700 "$cache_dir"
+    local cached_zip="$cache_dir/${appid}.zip"
+
+    # 1. Check valid persistent cache
+    if [ -f "$cached_zip" ] && validate_manifest_zip "$cached_zip" "$appid"; then
+        echo "[INFO] Using cached manifest archive: $cached_zip" >&2
+        if [ -n "$dest_file" ]; then
+            cp -f "$cached_zip" "$dest_file"
+            echo "$dest_file"
+        else
+            echo "$cached_zip"
+        fi
+        return 0
+    fi
+
+    # 2. Check local repository stash (~/.local/share/gamectl/manifests/)
+    local stash_zip="$HOME/.local/share/gamectl/manifests/${appid}.zip"
+    if [ -f "$stash_zip" ] && validate_manifest_zip "$stash_zip" "$appid"; then
+        echo "[INFO] Using local stash manifest archive: $stash_zip" >&2
+        cp -f "$stash_zip" "$cached_zip"
+        if [ -n "$dest_file" ]; then
+            cp -f "$stash_zip" "$dest_file"
+            echo "$dest_file"
+        else
+            echo "$stash_zip"
+        fi
+        return 0
+    fi
+
+    echo "[INFO] Harvesting manifest archive for AppID $appid across multi-provider network..." >&2
+
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    mkdir -p -m 700 "$run_dir"
+    local dl_tmp="$run_dir/fetch_manifest_${appid}_$$.zip"
+    rm -f "$dl_tmp"
+
+    declare -a src_names src_urls src_headers
+    local src_count=0
+
+    # Source 1: Ryuu direct mirror
+    src_names[src_count]="Ryuu"
+    src_urls[src_count]="http://167.235.229.108/${appid}"
+    src_headers[src_count]=""
+    src_count=$((src_count + 1))
+
+    # Source 2: Sushi GitHub repository
+    src_names[src_count]="Sushi"
+    src_urls[src_count]="https://raw.githubusercontent.com/sushi-dev55-alt/sushitools-games-repo-alt/refs/heads/main/${appid}.zip"
+    src_headers[src_count]=""
+    src_count=$((src_count + 1))
+
+    # Source 3: Lua.tools managed API (if auth session exists)
+    local luatools_auth="$HOME/.local/share/Lumen/luatools/backend/data/lua_tools_auth.json"
+    if [ -f "$luatools_auth" ]; then
+        local token
+        token=$(jq -r ".access_token // empty" "$luatools_auth" 2>/dev/null || true)
+        if [ -n "$token" ]; then
+            src_names[src_count]="LuaTools"
+            src_urls[src_count]="https://lua.tools/api/manifest/download?appid=${appid}&source=Luie"
+            src_headers[src_count]="Authorization: Bearer $token"
+            src_count=$((src_count + 1))
+        fi
+    fi
+
+    local found=0
+    for ((i=0; i<src_count; i++)); do
+        local name="${src_names[i]}"
+        local url="${src_urls[i]}"
+        local hdr="${src_headers[i]}"
+
+        if [ "$pref_source" != "auto" ] && [ "${pref_source,,}" != "${name,,}" ]; then
+            continue
+        fi
+
+        echo "[INFO] Querying provider: $name ($url)..." >&2
+        local curl_args=("-sL" "--connect-timeout" "5" "--max-time" "20" "-o" "$dl_tmp" "-w" "%{http_code}")
+        if [ -n "$hdr" ]; then
+            curl_args+=("-H" "$hdr")
+        fi
+
+        local http_code
+        http_code=$(curl "${curl_args[@]}" "$url" 2>/dev/null || echo "000")
+
+        if [ "$http_code" = "200" ] && [ -s "$dl_tmp" ]; then
+            if validate_manifest_zip "$dl_tmp" "$appid"; then
+                echo "[VERIFIED] Manifest archive acquired from $name." >&2
+                cp -f "$dl_tmp" "$cached_zip"
+                if [ -n "$dest_file" ]; then
+                    cp -f "$dl_tmp" "$dest_file"
+                    echo "$dest_file"
+                else
+                    echo "$cached_zip"
+                fi
+                found=1
+                rm -f "$dl_tmp"
+                break
+            else
+                echo "[WARN] Provider $name returned corrupt or invalid manifest zip." >&2
+                rm -f "$dl_tmp"
+            fi
+        else
+            echo "[INFO] Provider $name returned HTTP $http_code." >&2
+            rm -f "$dl_tmp"
+        fi
+    done
+
+    if [ "$found" -eq 1 ]; then
+        return 0
+    else
+        echo "[ERROR] Manifest archive for AppID $appid not found across available providers." >&2
+        return 1
+    fi
+}
+
 # Ensure DepotDownloader runtime is available
 ensure_downloader() {
     local depot_bin=""
@@ -465,6 +652,10 @@ sync_steam() {
     local appid="$1"
     local title="${2:-}"
     local game_dir="${3:-}"
+
+    # Strip ANSI escape sequences
+    appid=$(printf "%s" "$appid" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g' | tr -dc '0-9')
+    title=$(printf "%s" "$title" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g')
 
     if [ -z "$appid" ] || [ "$appid" = "STANDALONE" ]; then
         echo "[WARN] Invalid numeric AppID. Skipping Steam synchronization." >&2

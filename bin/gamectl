@@ -413,6 +413,9 @@ scan_installed_games() {
 
         # 1. Scan Steam Libraries
         local steam_lib
+        local re_appid='"appid"[[:space:]]+"([0-9]+)"'
+        local re_name='"name"[[:space:]]+"([^"]+)"'
+        local re_installdir='"installdir"[[:space:]]+"([^"]+)"'
         while read -r steam_lib; do
             [ -d "$steam_lib" ] || continue
             for acf in "$steam_lib"/appmanifest_*.acf; do
@@ -421,11 +424,11 @@ scan_installed_games() {
                 # Single-pass regex parse of ACF manifest without subshell forks
                 local appid="" name="" installdir=""
                 while IFS= read -r acf_line; do
-                    if [[ "$acf_line" =~ \"appid\"[[:space:]]+\"([0-9]+)\" ]]; then
+                    if [[ "$acf_line" =~ $re_appid ]]; then
                         appid="${BASH_REMATCH[1]}"
-                    elif [[ "$acf_line" =~ \"name\"[[:space:]]+\"([^\"]+)\" ]]; then
+                    elif [[ "$acf_line" =~ $re_name ]]; then
                         name="${BASH_REMATCH[1]}"
-                    elif [[ "$acf_line" =~ \"installdir\"[[:space:]]+\"([^\"]+)\" ]]; then
+                    elif [[ "$acf_line" =~ $re_installdir ]]; then
                         installdir="${BASH_REMATCH[1]}"
                     fi
                     [ -n "$appid" ] && [ -n "$name" ] && [ -n "$installdir" ] && break
@@ -490,6 +493,7 @@ scan_installed_games() {
                     fi
                 fi
 
+                [ -z "$appid" ] && appid="STANDALONE"
                 printf "%s\t%s\t%s\t%s\t%s\n" "$appid" "$name" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
             done
         done < <(get_steam_libraries)
@@ -1552,6 +1556,193 @@ fetch_dlc() {
     fi
 }
 
+# Verify Valve manifest payload magic signature (0xd017f671)
+manifest_has_payload_magic() {
+    local m_file="$1"
+    [ -f "$m_file" ] || return 1
+    local sig
+    sig=$(od -An -tx1 -N4 "$m_file" 2>/dev/null | tr -d " \n")
+    [ "$sig" = "d017f671" ]
+}
+
+# Validate downloaded manifest ZIP archive for safety and payload contents
+validate_manifest_zip() {
+    local z_file="$1"
+    local appid="${2:-}"
+    [ -f "$z_file" ] || return 1
+    unzip -tq "$z_file" >/dev/null 2>&1 || return 1
+
+    local entries
+    entries=$(unzip -Z1 "$z_file" 2>/dev/null) || return 1
+    [ -n "$entries" ] || return 1
+
+    # Security: Path traversal & absolute path rejection
+    if echo "$entries" | grep -Eq '(^/|^[A-Za-z]:|(^|[/\\])\.\.([/\\]|$)|\\)'; then
+        echo "[ERROR] Manifest zip contains unsafe paths (path traversal rejected)." >&2
+        return 1
+    fi
+
+    # Content check: must contain at least one .manifest or .lua file
+    if ! echo "$entries" | grep -Eq '(\.manifest|\.lua)$'; then
+        echo "[ERROR] Manifest zip does not contain any .manifest or .lua files." >&2
+        return 1
+    fi
+
+    # Payload magic audit on contained manifests
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local audit_tmp="$run_dir/manifest_audit_$$"
+    mkdir -p -m 700 "$audit_tmp"
+    local has_valid_manifest=0
+
+    # Extract only .manifest files to temporary audit sandbox
+    unzip -q -j "$z_file" "*.manifest" -d "$audit_tmp" 2>/dev/null || true
+    for mf in "$audit_tmp"/*.manifest; do
+        [ -f "$mf" ] || continue
+        if manifest_has_payload_magic "$mf"; then
+            has_valid_manifest=1
+            break
+        fi
+    done
+    rm -rf "$audit_tmp"
+
+    # If no .manifest was found or .lua only, check if .lua has addappid
+    if [ "$has_valid_manifest" -eq 0 ]; then
+        if echo "$entries" | grep -Eq '\.lua$'; then
+            has_valid_manifest=1
+        fi
+    fi
+
+    [ "$has_valid_manifest" -eq 1 ]
+}
+
+# Multi-Provider Manifest & Key Harvester
+fetch_manifest() {
+    local appid="$1"
+    local dest_file="${2:-}"
+    local pref_source="${3:-auto}"
+
+    # Strip any ANSI escape sequences
+    appid=$(printf "%s" "$appid" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
+    if [ -z "$appid" ]; then
+        echo "[ERROR] fetch_manifest: Invalid numeric AppID." >&2
+        return 1
+    fi
+
+    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl/manifests"
+    mkdir -p -m 700 "$cache_dir"
+    local cached_zip="$cache_dir/${appid}.zip"
+
+    # 1. Check valid persistent cache
+    if [ -f "$cached_zip" ] && validate_manifest_zip "$cached_zip" "$appid"; then
+        echo "[INFO] Using cached manifest archive: $cached_zip" >&2
+        if [ -n "$dest_file" ]; then
+            cp -f "$cached_zip" "$dest_file"
+            echo "$dest_file"
+        else
+            echo "$cached_zip"
+        fi
+        return 0
+    fi
+
+    # 2. Check local repository stash (~/.local/share/gamectl/manifests/)
+    local stash_zip="$HOME/.local/share/gamectl/manifests/${appid}.zip"
+    if [ -f "$stash_zip" ] && validate_manifest_zip "$stash_zip" "$appid"; then
+        echo "[INFO] Using local stash manifest archive: $stash_zip" >&2
+        cp -f "$stash_zip" "$cached_zip"
+        if [ -n "$dest_file" ]; then
+            cp -f "$stash_zip" "$dest_file"
+            echo "$dest_file"
+        else
+            echo "$stash_zip"
+        fi
+        return 0
+    fi
+
+    echo "[INFO] Harvesting manifest archive for AppID $appid across multi-provider network..." >&2
+
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    mkdir -p -m 700 "$run_dir"
+    local dl_tmp="$run_dir/fetch_manifest_${appid}_$$.zip"
+    rm -f "$dl_tmp"
+
+    declare -a src_names src_urls src_headers
+    local src_count=0
+
+    # Source 1: Ryuu direct mirror
+    src_names[src_count]="Ryuu"
+    src_urls[src_count]="http://167.235.229.108/${appid}"
+    src_headers[src_count]=""
+    src_count=$((src_count + 1))
+
+    # Source 2: Sushi GitHub repository
+    src_names[src_count]="Sushi"
+    src_urls[src_count]="https://raw.githubusercontent.com/sushi-dev55-alt/sushitools-games-repo-alt/refs/heads/main/${appid}.zip"
+    src_headers[src_count]=""
+    src_count=$((src_count + 1))
+
+    # Source 3: Lua.tools managed API (if auth session exists)
+    local luatools_auth="$HOME/.local/share/Lumen/luatools/backend/data/lua_tools_auth.json"
+    if [ -f "$luatools_auth" ]; then
+        local token
+        token=$(jq -r ".access_token // empty" "$luatools_auth" 2>/dev/null || true)
+        if [ -n "$token" ]; then
+            src_names[src_count]="LuaTools"
+            src_urls[src_count]="https://lua.tools/api/manifest/download?appid=${appid}&source=Luie"
+            src_headers[src_count]="Authorization: Bearer $token"
+            src_count=$((src_count + 1))
+        fi
+    fi
+
+    local found=0
+    for ((i=0; i<src_count; i++)); do
+        local name="${src_names[i]}"
+        local url="${src_urls[i]}"
+        local hdr="${src_headers[i]}"
+
+        if [ "$pref_source" != "auto" ] && [ "${pref_source,,}" != "${name,,}" ]; then
+            continue
+        fi
+
+        echo "[INFO] Querying provider: $name ($url)..." >&2
+        local curl_args=("-sL" "--connect-timeout" "5" "--max-time" "20" "-o" "$dl_tmp" "-w" "%{http_code}")
+        if [ -n "$hdr" ]; then
+            curl_args+=("-H" "$hdr")
+        fi
+
+        local http_code
+        http_code=$(curl "${curl_args[@]}" "$url" 2>/dev/null || echo "000")
+
+        if [ "$http_code" = "200" ] && [ -s "$dl_tmp" ]; then
+            if validate_manifest_zip "$dl_tmp" "$appid"; then
+                echo "[VERIFIED] Manifest archive acquired from $name." >&2
+                cp -f "$dl_tmp" "$cached_zip"
+                if [ -n "$dest_file" ]; then
+                    cp -f "$dl_tmp" "$dest_file"
+                    echo "$dest_file"
+                else
+                    echo "$cached_zip"
+                fi
+                found=1
+                rm -f "$dl_tmp"
+                break
+            else
+                echo "[WARN] Provider $name returned corrupt or invalid manifest zip." >&2
+                rm -f "$dl_tmp"
+            fi
+        else
+            echo "[INFO] Provider $name returned HTTP $http_code." >&2
+            rm -f "$dl_tmp"
+        fi
+    done
+
+    if [ "$found" -eq 1 ]; then
+        return 0
+    else
+        echo "[ERROR] Manifest archive for AppID $appid not found across available providers." >&2
+        return 1
+    fi
+}
+
 # Ensure DepotDownloader runtime is available
 ensure_downloader() {
     local depot_bin=""
@@ -1962,6 +2153,10 @@ sync_steam() {
     local appid="$1"
     local title="${2:-}"
     local game_dir="${3:-}"
+
+    # Strip ANSI escape sequences
+    appid=$(printf "%s" "$appid" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g' | tr -dc '0-9')
+    title=$(printf "%s" "$title" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g')
 
     if [ -z "$appid" ] || [ "$appid" = "STANDALONE" ]; then
         echo "[WARN] Invalid numeric AppID. Skipping Steam synchronization." >&2
@@ -4117,6 +4312,10 @@ inject_game() {
     local appid="${2:-}"
     local sync_mode="${3:-all}"
 
+    # Strip ANSI escape sequences
+    target_dir=$(printf "%s" "$target_dir" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g')
+    [ -n "$appid" ] && appid=$(printf "%s" "$appid" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g' | tr -dc '0-9')
+
     if [ ! -d "$target_dir" ]; then
         echo "[ERROR] Target directory not found: $target_dir" >&2
         return 1
@@ -5490,7 +5689,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader resolve_target_library_dir detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command
+export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader resolve_target_library_dir detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -5723,6 +5922,14 @@ case "${1:-}" in
             sync_steam "$2" "${3:-}" "${4:-}"
         else
             echo "Usage: gamectl sync-steam <appid> [title] [game_dir]"
+            exit 1
+        fi
+        ;;
+    fetch-manifest|manifest)
+        if [ -n "${2:-}" ]; then
+            fetch_manifest "$2" "${3:-}" "${4:-auto}"
+        else
+            echo "Usage: gamectl fetch-manifest <appid> [dest_file] [source]"
             exit 1
         fi
         ;;

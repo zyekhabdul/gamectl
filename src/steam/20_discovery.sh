@@ -130,6 +130,9 @@ scan_installed_games() {
 
         # 1. Scan Steam Libraries
         local steam_lib
+        local re_appid='"appid"[[:space:]]+"([0-9]+)"'
+        local re_name='"name"[[:space:]]+"([^"]+)"'
+        local re_installdir='"installdir"[[:space:]]+"([^"]+)"'
         while read -r steam_lib; do
             [ -d "$steam_lib" ] || continue
             for acf in "$steam_lib"/appmanifest_*.acf; do
@@ -138,11 +141,11 @@ scan_installed_games() {
                 # Single-pass regex parse of ACF manifest without subshell forks
                 local appid="" name="" installdir=""
                 while IFS= read -r acf_line; do
-                    if [[ "$acf_line" =~ \"appid\"[[:space:]]+\"([0-9]+)\" ]]; then
+                    if [[ "$acf_line" =~ $re_appid ]]; then
                         appid="${BASH_REMATCH[1]}"
-                    elif [[ "$acf_line" =~ \"name\"[[:space:]]+\"([^\"]+)\" ]]; then
+                    elif [[ "$acf_line" =~ $re_name ]]; then
                         name="${BASH_REMATCH[1]}"
-                    elif [[ "$acf_line" =~ \"installdir\"[[:space:]]+\"([^\"]+)\" ]]; then
+                    elif [[ "$acf_line" =~ $re_installdir ]]; then
                         installdir="${BASH_REMATCH[1]}"
                     fi
                     [ -n "$appid" ] && [ -n "$name" ] && [ -n "$installdir" ] && break
@@ -207,6 +210,7 @@ scan_installed_games() {
                     fi
                 fi
 
+                [ -z "$appid" ] && appid="STANDALONE"
                 printf "%s\t%s\t%s\t%s\t%s\n" "$appid" "$name" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
             done
         done < <(get_steam_libraries)
