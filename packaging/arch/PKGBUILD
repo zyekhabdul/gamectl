@@ -1,7 +1,7 @@
 # Maintainer: Zyekh Abdul <zyekhabdul@users.noreply.github.com>
 
 pkgname=gamectl
-pkgver=1.3.0
+pkgver=1.4.0
 pkgrel=1
 pkgdesc="Sovereign TUI Game Manager & Launcher for Linux (Zero-Bloat)"
 arch=('any')

@@ -323,6 +323,26 @@ gamectl protondb "$HOME/Games/Terraria"
 gamectl make-desktop "$HOME/Games/Terraria" "Terraria"
 ```
 
+### 12. Automated Game Fixes & Steam Lifecycle Engine
+Directly queries community bypasses and Online-Fixes from LuaTools API & Cloudflare R2, extracts them with zip-slip safety audits, creates atomic rollback snapshots, and hooks Spacewar 480 automatically:
+
+```bash
+# Query available community fixes & Online-Fix bypasses (Public, zero auth required):
+gamectl fix-check 470220
+
+# Download, verify, backup, and deploy Online-Fix directly to game directory:
+gamectl fix-install 470220 "$HOME/Games/UNO" --type online --yes
+
+# Auto-resolve game directory from Steam libraries and restart Steam client:
+gamectl fix-install 470220 --restart
+
+# Revert deployed game fix and restore original pristine vanilla files:
+gamectl fix-revert "$HOME/Games/UNO"
+
+# Gracefully hot-reload running Steam client (SLSsteam & Steam Deck Game Mode):
+gamectl restart-steam
+```
+
 ### 11. Multi-Node Savegame Synchronization
 ```bash
 # Synchronize local savegame snapshots to configured remote companion host:

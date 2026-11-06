@@ -4,6 +4,25 @@ All notable changes to `gamectl` are documented in this file according to [Keep 
 
 ---
 
+## [1.4.0] - 2026-11-07
+
+### Added
+- **Automated Game Fix Harvester (`gamectl fix-check`, `gamectl fix-install`)**:
+  - Direct integration with LuaTools API (`/api/denuvo/fixes?appid=...`) and Cloudflare R2 presigned S3 downloads.
+  - Public unauthenticated querying for game fix availability across 1,861 catalogued titles.
+  - Prioritized ranking engine: Online-Fix (`online-fix`) > Voices38 (`voices38-crack`) > Generic (`generic`).
+  - Automatic game directory resolution from Steam `appmanifest_<appid>.acf`.
+  - Zip-Slip security audit defending against path traversal attacks in third-party archives.
+  - Steam Play (Proton) compatibility audit warning when Windows DLL fixes are applied to native Linux titles.
+  - Custom crack launcher detection (`Launcher.exe`) with recommended Steam Launch Options.
+  - Automated post-extraction chaining to `setup_onlinefix` (Spacewar 480 entitlement, PlayerName sync, WINEDLLOVERRIDES).
+- **Atomic Revert Engine (`gamectl fix-revert`)**:
+  - Automatically snapshots original files to `.gamectl_fix_backup/` before extraction.
+  - Purges fix-introduced DLLs/artifacts and restores original vanilla binaries on demand.
+- **Graceful Steam Client Hot-Reload (`gamectl restart-steam`, `--restart` flag)**:
+  - Supervisor-aware graceful restart supporting Steam Deck Game Mode (`steam-launcher.service` / `gamescope-session`) and desktop SLSsteam wrapper (`~/.local/share/SLSsteam/path/steam`).
+  - Flush writes (`sync`), SIGTERM graceful teardown with timeout, and clean process relaunch.
+
 ## [1.3.0] - 2026-11-07
 
 ### Added

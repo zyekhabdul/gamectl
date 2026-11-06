@@ -1010,6 +1010,71 @@ test_luatools_auth_cli_commands() {
 }
 run_test "Manifest Harvester: auth-status & login-luatools CLI contracts" test_luatools_auth_cli_commands
 
+test_fix_check_cli_contract() {
+    local out1
+    out1=$("$GAMECTL" fix-check 2>&1 || true)
+    echo "$out1" | grep -q "Usage: gamectl fix-check" || return 1
+
+    local out2
+    out2=$("$GAMECTL" fix-check invalid_appid 2>&1 || true)
+    echo "$out2" | grep -q "Invalid or missing Steam AppID" || return 1
+
+    local out3
+    out3=$("$GAMECTL" fix-check 470220 2>&1 || true)
+    echo "$out3" | grep -q "GAMECTL FIX CATALOG: UNO" || return 1
+    echo "$out3" | grep -q "Online Fix" || return 1
+}
+run_test "Fix Harvester: fix-check CLI catalog & public querying" test_fix_check_cli_contract
+
+test_restart_steam_cli_contract() {
+    local out
+    out=$("$GAMECTL" restart-steam 2>&1 || true)
+    echo "$out" | grep -q "Initiating graceful Steam Client reload"
+}
+run_test "Steam Lifecycle: restart-steam graceful hot-reload contract" test_restart_steam_cli_contract
+
+test_fix_revert_cli_contract() {
+    local out1
+    out1=$("$GAMECTL" fix-revert 2>&1 || true)
+    echo "$out1" | grep -q "Usage: gamectl fix-revert" || return 1
+
+    local out2
+    out2=$("$GAMECTL" fix-revert /nonexistent_dir_$$ 2>&1 || true)
+    echo "$out2" | grep -q "Game directory not found" || return 1
+}
+run_test "Fix Harvester: fix-revert parameter & directory validation" test_fix_revert_cli_contract
+
+test_fix_install_and_revert_lifecycle_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_fix_XXXXXX")
+    echo "ORIGINAL_VANILLA_PAYLOAD" > "$t_dir/steam_api64.dll"
+
+    # Execute fix-install for UNO (470220)
+    "$GAMECTL" fix-install 470220 "$t_dir" --type online --yes >/dev/null 2>&1 || {
+        rm -rf "$t_dir"
+        return 1
+    }
+
+    # Verify fix was extracted (version.dll is the proxy DLL for UNO online fix)
+    [ -f "$t_dir/version.dll" ] || { rm -rf "$t_dir"; return 1; }
+    [ -d "$t_dir/.gamectl_fix_backup" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Execute fix-revert
+    "$GAMECTL" fix-revert "$t_dir" >/dev/null 2>&1 || {
+        rm -rf "$t_dir"
+        return 1
+    }
+
+    # Verify version.dll was purged and original file remains
+    [ ! -f "$t_dir/version.dll" ] || { rm -rf "$t_dir"; return 1; }
+    [ -f "$t_dir/steam_api64.dll" ] || { rm -rf "$t_dir"; return 1; }
+    grep -q "ORIGINAL_VANILLA_PAYLOAD" "$t_dir/steam_api64.dll" || { rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    return 0
+}
+run_test "Fix Harvester: fix-install & fix-revert end-to-end lifecycle" test_fix_install_and_revert_lifecycle_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

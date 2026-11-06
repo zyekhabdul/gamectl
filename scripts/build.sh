@@ -16,6 +16,7 @@ MODULES=(
     "$REPO_ROOT/src/steam/20_discovery.sh"
     "$REPO_ROOT/src/steam/25_identity.sh"
     "$REPO_ROOT/src/steam/30_downloader.sh"
+    "$REPO_ROOT/src/steam/35_fixes.sh"
     "$REPO_ROOT/src/runners/40_wrappers.sh"
     "$REPO_ROOT/src/runners/50_launcher.sh"
     "$REPO_ROOT/src/diagnostics/60_doctor.sh"
