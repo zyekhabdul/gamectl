@@ -10,7 +10,7 @@
 [![Shell](https://img.shields.io/badge/Shell-POSIX%20Bash-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white)](https://github.com/zyekhabdul/gamectl)
 [![Memory](https://img.shields.io/badge/Memory-<%2015%20MB%20RSS-brightgreen?style=for-the-badge&logo=speedtest&logoColor=white)](https://github.com/zyekhabdul/gamectl)
 [![Startup](https://img.shields.io/badge/Startup-<%2080ms-success?style=for-the-badge&logo=lightning&logoColor=white)](https://github.com/zyekhabdul/gamectl)
-[![Tests](https://img.shields.io/badge/Tests-59%2F59%20Passing-success?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/zyekhabdul/gamectl)
+[![Tests](https://img.shields.io/badge/Tests-75%2F75%20Passing-success?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/zyekhabdul/gamectl)
 [![PyPI](https://img.shields.io/badge/PyPI-gamectl-3775A9?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/project/gamectl/)
 [![License](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](LICENSE)
 [![Display](https://img.shields.io/badge/Compositor-Wayland%20%7C%20X11-orange?style=for-the-badge&logo=wayland&logoColor=white)](https://github.com/zyekhabdul/gamectl)
@@ -93,7 +93,7 @@ Empirical comparisons measured on Arch Linux x86_64 (Linux kernel 6.x, AMD Ryzen
 - **Isolated Windows Runner & Prefix Engine**: Discovers installed Windows compatibility runners (`umu-run` -> `GE-Proton` / Steam `Proton` -> `wine`) and maintains strictly isolated prefixes in `$GAME_DIR/pfx`, keeping host `~/.wine` pristine.
 - **Modular Performance Wrappers**: On-the-fly toggle for `gamemoderun`, `mangohud`, `gamescope` dynamic FSR upscaling, and Mesa multithreaded GL via interactive dialogs (`<Ctrl-O>`) or CLI flags.
 - **LAN Multi-Identity & SteamID Manager (`gamectl set-id`)**: Generates deterministic 17-digit SteamID64 tokens and distinct LAN gamer tags to prevent co-op network collisions, with custom peer discovery (`custom_broadcasts.txt`).
-- **Headless Asset Downloader Engine (`gamectl download`)**: Downloads game files directly from content servers via DepotDownloader CLI in foreground or detached background modes without requiring a GUI client.
+- **High-Speed SLSsteam Native CDN Downloader (`gamectl download`)**: Downloads game files directly from official Valve Content Servers at line speeds via multi-provider manifest harvesting (Ryuu, Sushi, LuaTools) and stplug-in Lua key synthesis with zero third-party downloader bloat.
 - **Steam Entitlement & ACF Adoption Engine (`gamectl entitle`, `gamectl adopt-steam`)**: Adopts local/offline files into the official Steam client, unlocking community Steam Input mappings (gyro/touchpad), Valve CDN Vulkan shader pre-caching, and base-game DLC activation via `~/.config/SLSsteam/config.yaml` and native `appmanifest_<appid>.acf`. (Backward-compatible alias: `gamectl unlock`).
 - **Universal Mod DLL Overrides & P2P Hook Engine (`gamectl mod-overrides`)**: Detects mod loaders and P2P compatibility layers (BepInEx, UE4SS, REFramework, ReShade, OnlineFix), injects deduplicated `WINEDLLOVERRIDES`, and registers Spacewar AppID 480.
 - **Headless GE-Proton Release Manager (`gamectl proton-*`)**: Fetches upstream GitHub releases, streams tarball installation directly into `~/.local/share/Steam/compatibilitytools.d/`, and prunes older versions safely.
@@ -181,7 +181,7 @@ The turnkey installer automatically executes:
 2. Scaffolds configuration directory and templates in `~/.config/gamectl/`.
 3. Installs shell completion script to `~/.local/share/bash-completion/completions/gamectl`.
 4. Registers FreeDesktop entry `gamectl.desktop` for Wayland/X11 application launchers (rofi, fuzzel, wofi, dmenu).
-5. Verifies runtime availability of headless tools (DepotDownloader, compatibility templates).
+5. Verifies runtime availability of manifest harvesting tools (curl, jq, zip, unzip) and compatibility templates.
 
 ---
 

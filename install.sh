@@ -82,7 +82,7 @@ fi
 # Audit system dependencies
 echo "[INFO] Auditing core system dependencies..."
 MISSING_DEPS=()
-for cmd in fzf jq curl rsync ssh file unzip python3; do
+for cmd in fzf jq curl rsync ssh file zip unzip python3; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         MISSING_DEPS+=("$cmd")
     fi
@@ -239,19 +239,7 @@ EOF
         echo "[INFO] Configuration template created: $CONFIG_DIR/libraries.example"
     fi
 
-    if [ ! -f "$CONFIG_DIR/steam_user.example" ] || [ "$FORCE" = true ]; then
-        cat <<'EOF' > "$CONFIG_DIR/steam_user.example"
-# ==============================================================================
-# gamectl - Steam Account for DepotDownloader
-# ==============================================================================
-# Copy this file to 'steam_user' and fill with your licensed Steam username.
-# Used by DepotDownloader for headless game file downloads.
-#
-# Example content:
-# my_steam_account_name
-EOF
-        echo "[INFO] Configuration template created: $CONFIG_DIR/steam_user.example"
-    fi
+
 
     if [ ! -f "$CONFIG_DIR/remote_host.example" ] || [ "$FORCE" = true ]; then
         cat <<'EOF' > "$CONFIG_DIR/remote_host.example"
@@ -322,12 +310,11 @@ else
     echo "[VERIFIED] Desktop application entry installed: $APP_DIR/gamectl.desktop"
 fi
 
-# Provision DepotDownloader if missing
-if [ "$DRY_RUN" = false ] && ! command -v depotdownloader >/dev/null 2>&1; then
-    echo "[INFO] Provisioning headless downloader runtime (DepotDownloader)..."
-    if [ -x "$BIN_DIR/gamectl" ]; then
-        "$BIN_DIR/gamectl" ensure-downloader >/dev/null 2>&1 || true
-    fi
+# Verify Manifest Harvester & CDN tools
+if [ "$DRY_RUN" = false ]; then
+    for tool in curl jq zip unzip; do
+        command -v "$tool" >/dev/null 2>&1 || echo "[WARN] Harvester dependency '$tool' missing."
+    done
 fi
 
 # Check PATH

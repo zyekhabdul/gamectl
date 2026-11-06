@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Build .deb package using dpkg-deb
 PKG_NAME="gamectl"
-PKG_VER="1.2.1"
+PKG_VER="1.3.0"
 PKG_ARCH="all"
 DIST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="$DIST_DIR/build_deb/${PKG_NAME}_${PKG_VER}_${PKG_ARCH}"
@@ -20,7 +20,7 @@ mkdir -p "$WORK_DIR/usr/share/licenses/$PKG_NAME"
 
 cat << 'EOF' > "$WORK_DIR/DEBIAN/control"
 Package: gamectl
-Version: 1.2.1
+Version: 1.3.0
 Section: games
 Priority: optional
 Architecture: all

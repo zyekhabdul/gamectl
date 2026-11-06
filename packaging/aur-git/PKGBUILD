@@ -16,6 +16,7 @@ depends=(
     'python'
     'rsync'
     'unzip'
+    'zip'
 )
 makedepends=('git')
 optdepends=(
