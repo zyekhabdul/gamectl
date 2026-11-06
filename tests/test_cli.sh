@@ -941,6 +941,16 @@ test_format_bytes_representation() {
 }
 run_test "ACF Telemetry: format_bytes integer conversion" test_format_bytes_representation
 
+test_tui_dashboard_and_cli_help_integration() {
+    # Invariant: Dashboard cockpit exposes SLSsteam and Steam Client indicators
+    grep -q 'SLSsteam \$sls_status • Steam Client \$steam_status • DepotDownloader \$dl_status' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
+    grep -q 'fetch-manifest <appid>' "$REPO_ROOT/src/main.sh" && \
+    grep -q 'deploy-manifest <appid>' "$REPO_ROOT/src/main.sh" && \
+    "$GAMECTL" --help | grep -q 'fetch-manifest' && \
+    "$GAMECTL" --help | grep -q 'deploy-manifest'
+}
+run_test "Dashboard & CLI Integration: Cockpit indicators & command exposure" test_tui_dashboard_and_cli_help_integration
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

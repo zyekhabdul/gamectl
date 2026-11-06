@@ -296,7 +296,11 @@ Usage:
                       Configure per-game wrappers (GameMode/MangoHud/Gamescope FSR/MesaGL)
   gamectl download <appid> [dir] [title] [--engine <steam|depot>] [--source <auto|...>] [--raw|--inject-only|--all] [-f]
                       Download game via SLSsteam native CDN or headless DepotDownloader
-  gamectl downloads   Monitor active & recent download processes
+  gamectl downloads   Monitor active & recent downloads (Steam ACF telemetry & DepotDownloader)
+  gamectl fetch-manifest <appid> [dest] [source]
+                      Harvest manifest archive across Ryuu/Sushi/LuaTools providers
+  gamectl deploy-manifest <appid> [manifest_zip] [title]
+                      Deploy manifest & stplug-in keys into SLSsteam & Steam depotcache
   gamectl entitle <appid> [title]
                       Adopt local assets, Steam Input & shaders via Steam entitlement & ACF (aliases: unlock, adopt-steam)
   gamectl unlock <appid> [title] (Alias for entitle)

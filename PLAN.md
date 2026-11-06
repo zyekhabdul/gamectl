@@ -88,7 +88,7 @@ Mengganti ketergantungan rapuh pada DepotDownloader eksternal (.NET GC heap ting
        - Post-download Action: Jika `StateFlags == 4`, sediakan tombol 1-klik untuk `inject_game` (GBE Fork standalone).
 - DoD: Monitor download menampilkan persentase unduhan real-time dari file ACF resmi Steam tanpa polling log file mentah.
 
-### Chunk 5: Dashboard TUI & CLI Integration [PLANNED]
+### Chunk 5: Dashboard TUI ### Chunk 5: Dashboard TUI & CLI Integration [PLANNED] CLI Integration [DONE]
 - Target Files: `src/tui/70_dashboard.sh`, `src/main.sh`
 - Runtutan Eksekusi Teknis:
   1. Perbarui status bar indikator download di `src/tui/70_dashboard.sh`:
