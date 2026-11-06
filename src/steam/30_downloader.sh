@@ -396,7 +396,7 @@ list_downloads_interactive() {
             entries+="${appid}\t${status}\t${log}\t${last_line}\n"
         done
 
-        local selection
+        local selection fzf_rc=0
         selection=$(printf "%b" "$entries" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,4 \
@@ -407,7 +407,10 @@ list_downloads_interactive() {
             --preview="echo -e '\033[38;5;60mLog: {3}\033[0m\n──────────────────────────────────────────'; tail -n 30 {3}" \
             --preview-window=right:60%:border-rounded:wrap \
             --bind="ctrl-k:execute(appid={1}; pid=\$(pgrep -f \"DepotDownloader.*-app[[:space:]]+\${appid}([[:space:]]|$)\" 2>/dev/null | head -n 1); if [ -n \"\$pid\" ]; then kill \"\$pid\" 2>/dev/null && echo \"[INFO] AppID \$appid (PID \$pid) terminated.\"; else echo \"[INFO] AppID \$appid not active.\"; fi; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
-        ) || break
+        ) || fzf_rc=$?
+
+        [ "$fzf_rc" -eq 130 ] && break
+        [ -z "$selection" ] && continue
 
         if [ -n "$selection" ]; then
             local sel_appid sel_log sel_status
@@ -634,15 +637,18 @@ adopt_steam() { unlock_game "$@"; }
 
 # Interactive Steam Entitlement & ACF Adoption Wizard
 unlock_interactive() {
-    local u_appid_raw=""
-    u_appid_raw=$(echo "Enter Steam AppID (e.g. 105600, 48000, 730) and press ENTER" | fzf \
+    local u_appid_raw="" fzf_rc=0
+    u_appid_raw=$(: | fzf \
         --print-query \
         --border-label="  ╢ Steam Entitlement & ACF Adoption Wizard ╟  " \
         --border-label-pos=2 \
         --header="Enter numeric AppID (Enter: Adopt │ Esc: Cancel)" \
         --prompt="Steam AppID > " \
         --height=20% \
-        --reverse 2>/dev/null) || return 0
+        --reverse 2>/dev/null) || fzf_rc=$?
+
+    # Only abort if user cancelled via ESC or Ctrl-C (exit status 130)
+    [ "$fzf_rc" -eq 130 ] && return 0
 
     local u_appid
     u_appid=$(echo "$u_appid_raw" | head -n 1 | tr -d '[:space:]')

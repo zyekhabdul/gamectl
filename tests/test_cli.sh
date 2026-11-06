@@ -653,6 +653,33 @@ test_optimized_library_scanner() {
 }
 run_test "Library Scanner Optimization: Single-pass parser & runtime disk cache" test_optimized_library_scanner
 
+test_fzf_interactive_input_contract() {
+    # Invariant: Free-text fzf input prompts must not contaminate stdin and must distinguish ESC (130) from Enter (0 or 1)
+    ! grep -q 'query_raw=$(echo "Search Steam Store' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
+    ! grep -q 'u_appid_raw=$(echo "Enter Steam AppID' "$REPO_ROOT/src/steam/30_downloader.sh" && \
+    grep -q '\[ "$fzf_rc" -eq 130 \] && return 0' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
+    grep -q '\[ "$fzf_rc" -eq 130 \] && return 0' "$REPO_ROOT/src/steam/30_downloader.sh" && \
+    grep -q ': | fzf' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
+    grep -q ': | fzf' "$REPO_ROOT/src/steam/30_downloader.sh" && \
+    grep -q '\[ "$fzf_rc" -eq 130 \] && break' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
+    grep -q '\[ -z "$selection" \] && continue' "$REPO_ROOT/src/tui/70_dashboard.sh"
+}
+run_test "TUI Input Invariant: Resilient fzf exit-code handling on free-text entry" test_fzf_interactive_input_contract
+
+test_fzf_menu_loop_break_invariants() {
+    # Invariant: All menu loops must capture fzf_rc and only break on ESC/Ctrl-C (130)
+    local count_dash count_down
+    count_dash=$(grep -c '\[ "$fzf_rc" -eq 130 \] && break' "$REPO_ROOT/src/tui/70_dashboard.sh")
+    count_down=$(grep -c '\[ "$fzf_rc" -eq 130 \] && break' "$REPO_ROOT/src/steam/30_downloader.sh")
+    [ "$count_dash" -eq 3 ] && [ "$count_down" -eq 1 ] && \
+    grep -q '\[ -z "$selection" \] && continue' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
+    grep -q '\[ -z "$fzf_out" \] && continue' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
+    grep -q '\[ -z "$selection" \] && continue' "$REPO_ROOT/src/steam/30_downloader.sh" && \
+    grep -q '0|q|Q|cancel)' "$REPO_ROOT/src/runners/40_wrappers.sh" && \
+    grep -q 'continue' "$REPO_ROOT/src/runners/40_wrappers.sh"
+}
+run_test "TUI Menu Loops: Universal zero-match Enter decoupling across all fzf loops" test_fzf_menu_loop_break_invariants
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

@@ -1299,9 +1299,9 @@ EOF
                     echo "  ${UI_CYAN}6)${UI_RST} Preset: Balanced Performance (GameMode + MangoHud)"
                     echo "  ${UI_CYAN}7)${UI_RST} Preset: Handheld / FSR (GameMode + MangoHud + Gamescope FSR)"
                     echo "  ${UI_CYAN}8)${UI_RST} Reset: Safe Defaults (All Disabled)"
-                    echo "  ${UI_GREEN}9)${UI_RST} Save & Return"
+                    echo "  ${UI_GREEN}9)${UI_RST} Save & Return | ${UI_DIM}0) Cancel & Back${UI_RST}"
                     echo
-                    read -r -p "Select option [1-9]: " w_opt
+                    read -r -p "Select option [0-9]: " w_opt
                     case "$w_opt" in
                         1) gm=$((1 - gm)) ;;
                         2) hud=$((1 - hud)) ;;
@@ -1324,7 +1324,14 @@ EOF
                             sleep 0.8
                             break
                             ;;
-                        *) break ;;
+                        0|q|Q|cancel)
+                            echo "  [INFO] Changes discarded."
+                            sleep 0.5
+                            break
+                            ;;
+                        *)
+                            continue
+                            ;;
                     esac
                 done
                 ;;

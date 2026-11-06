@@ -349,7 +349,7 @@ dashboard_menu() {
 EOF
 )
 
-        local selection
+        local selection fzf_rc=0
         selection=$(echo "$menu_entries" | fzf \
             --delimiter=$'\t' \
             --with-nth=2,3 \
@@ -359,7 +359,10 @@ EOF
             --prompt="Dashboard > " \
             --preview="$SELF_BIN --preview-dashboard {1} $game_count" \
             --preview-window=right:55%:border-rounded:wrap \
-        ) || break
+        ) || fzf_rc=$?
+
+        [ "$fzf_rc" -eq 130 ] && break
+        [ -z "$selection" ] && continue
 
         local sel_key
         sel_key=$(echo "$selection" | awk -F'\t' '{print $1}')
@@ -397,7 +400,7 @@ library_menu() {
     clean_stale_locks
 
     while true; do
-        local selection
+        local selection fzf_rc=0
         selection=$(scan_installed_games --formatted | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
@@ -414,7 +417,10 @@ library_menu() {
             --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; bash -c 'read -n 1 -s -r -p \"Press any key to return to library...\"')+reload($SELF_BIN list-formatted)" \
             --bind="ctrl-s:execute($SELF_BIN --sync {4} {2}; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
             --bind="ctrl-b:execute($SELF_BIN --backup {4}; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
-        ) || break
+        ) || fzf_rc=$?
+
+        [ "$fzf_rc" -eq 130 ] && break
+        [ -z "$selection" ] && continue
 
         if [ -n "$selection" ]; then
             local sel_dir sel_bin sel_title
@@ -437,15 +443,18 @@ library_menu() {
 
 # Live Steam Search View (Actionable TUI Search)
 search_steam() {
-    local query_raw=""
-    query_raw=$(echo "Search Steam Store catalog (Type title and press ENTER)" | fzf \
+    local query_raw="" fzf_rc=0
+    query_raw=$(: | fzf \
         --print-query \
         --border-label="  ╢ gamectl :: Steam Store Search ╟  " \
         --border-label-pos=2 \
         --header="Type game title to search (Enter: Search │ Esc: Cancel)" \
         --prompt="Search Store > " \
         --height=20% \
-        --reverse 2>/dev/null) || return 0
+        --reverse 2>/dev/null) || fzf_rc=$?
+
+    # Only abort if user cancelled via ESC or Ctrl-C (exit status 130)
+    [ "$fzf_rc" -eq 130 ] && return 0
 
     local query
     query=$(echo "$query_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
@@ -502,7 +511,7 @@ search_steam() {
     done <<< "$items"
 
     while true; do
-        local fzf_out
+        local fzf_out fzf_rc=0
         fzf_out=$(echo -n "$results" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
@@ -515,11 +524,11 @@ search_steam() {
             --preview='
                 appid={1}
                 title={2}
-                status={3}
+                app_status={3}
                 echo -e "\033[38;5;60m╭─ STEAM METADATA & PROTONDB AUDIT ───────────────────╮\033[0m"
                 echo -e "│ \033[1m$title\033[0m \033[38;5;244m(AppID: $appid)\033[0m"
                 echo -e "\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m"
-                echo -e "  \033[1;38;5;117mLocal State\033[0m : $status"
+                echo -e "  \033[1;38;5;117mLocal State\033[0m : $app_status"
                 details=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=$appid&filters=platforms,genres" "steam_details_$appid" 3600 2>/dev/null | jq -r ".\"$appid\".data // empty" 2>/dev/null)
                 if [ -n "$details" ]; then
                     is_linux=$(echo "$details" | jq -r ".platforms.linux // false" 2>/dev/null)
@@ -556,7 +565,10 @@ search_steam() {
                 echo -e "\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m"
             ' \
             --preview-window=right:52%:border-rounded:wrap \
-        ) || break
+        ) || fzf_rc=$?
+
+        [ "$fzf_rc" -eq 130 ] && break
+        [ -z "$fzf_out" ] && continue
 
         local trigger_key selection
         trigger_key=$(echo "$fzf_out" | sed -n '1p')
@@ -714,18 +726,22 @@ EOF
                 case "$opt" in
                     1)
                         download_game "$sel_id" "$dest_dir" "$sel_name" --all --background --os "$target_os"
+                        sleep 1.2
                         ;;
                     2)
                         download_game "$sel_id" "$dest_dir" "$sel_name" --all --foreground --os "$target_os"
                         ;;
                     3)
                         download_game "$sel_id" "$dest_dir" "$sel_name" --inject-only --background --os "$target_os"
+                        sleep 1.2
                         ;;
                     4)
                         unlock_game "$sel_id" "$sel_name"
+                        sleep 1.2
                         ;;
                     5)
                         download_game "$sel_id" "$dest_dir" "$sel_name" --raw --background --os "$target_os"
+                        sleep 1.2
                         ;;
                     *)
                         ;;
