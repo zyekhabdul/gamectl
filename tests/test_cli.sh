@@ -434,6 +434,15 @@ test_nix_flake_validation() {
 }
 run_test "Nix Flake: Valid flake schema and package definition" test_nix_flake_validation
 
+test_python_wheel_validation() {
+    [ -f "$REPO_ROOT/pyproject.toml" ] && \
+    grep -q 'name = "gamectl"' "$REPO_ROOT/pyproject.toml" && \
+    grep -q 'gamectl = "gamectl_runner:main"' "$REPO_ROOT/pyproject.toml" && \
+    [ -f "$REPO_ROOT/src/gamectl_runner/__init__.py" ] && \
+    python3 -m py_compile "$REPO_ROOT/src/gamectl_runner/__init__.py"
+}
+run_test "Python Wheel: Valid pyproject.toml schema & runner compilation" test_python_wheel_validation
+
 test_artwork_fetch_missing_target() {
     local exit_code=0
     "$GAMECTL" fetch-art >/dev/null 2>&1 || exit_code=$?
