@@ -1,71 +1,108 @@
-# RFC: Windows Platform Support via Unified POSIX Bridge
+# RFC: Windows Platform Support via Native PowerShell Engine (Dual-Engine Architecture)
 
-- **Status**: [PROPOSED / BACKLOG]
-- **Target Work Packet**: Work Packet 4
+- **Status**: [PROPOSED / APPROVED_IN_PRINCIPLE]
+- **Target Work Packet**: Work Packet 13 (Windows Platform Expansion)
 - **Author**: Antigravity & User Pair
-- **Date**: 2026-11-04
+- **Date**: 2026-11-06
 
 ---
 
 ## 1. Konteks & Sasaran Arsitektur
 
-Saat ini `gamectl` beroperasi pada kernel Linux (POSIX Bash) dengan asumsi display server X11/Wayland, Wine/Proton/UMU runner untuk biner Windows PE, dan path Linux (`~/.local/share/Steam`, `~/.config/gamectl`).
+### 1.1 Evaluasi & Pergantian Pendekatan Awal
+Pendekatan awal berbasis *Unified POSIX Bridge (Git Bash / MSYS2)* dievaluasi ulang dan dihentikan atas pertimbangan adopsi global:
+1. **Barrier to Entry Fatal**: Git Bash bukan komponen default Windows. Memaksa gamer desktop atau pengguna handheld PC (ROG Ally, Lenovo Legion Go, MSI Claw) menginstal Git terlebih dahulu menciptakan friksi adopsi yang masif.
+2. **Penalti Fork Windows NT**: Emulasi `fork()` pada MSYS2/Cygwin berjalan 10x-30x lebih lambat daripada native Linux kernel, memicu latency dan UI stuttering pada parsing data dan subshell `fzf --preview`.
 
-Sasaran RFC ini adalah memungkinkan `gamectl` berjalan pada sistem operasi **Windows 10 / 11** secara seamless menggunakan **Unified POSIX Bridge (Git Bash / MSYS2)** tanpa perlu menulis ulang (rewrite) codebase ke bahasa lain, menjaga footprint tetap ultra-lean (<15MB RAM), dan mempertahankan 1 basis kode untuk Linux dan Windows.
+### 1.2 Sasaran Strategis: Dual-Engine Sovereign
+Sasaran arsitektur ini adalah menghadirkan dukungan native Windows 10 & Windows 11 melalui **Native PowerShell Engine (`.ps1`)**, membentuk arsitektur **Dual-Engine Sovereign**:
+- **Linux Engine**: Tetap 100% POSIX Bash (`src/*.sh` -> `bin/gamectl`) untuk Linux purists dan Steam Deck. Zero bloat, sub-80ms startup, cgroups v2, dan bwrap sandboxing.
+- **Windows Engine**: Native PowerShell (`src_win/*.ps1` -> `bin/gamectl.ps1` + `bin/gamectl.cmd`). Pre-installed pada 100% sistem Windows, zero external shell dependency, dan akses langsung ke Win32 API serta .NET runtime.
 
 ---
 
-## 2. Gap Analysis & Rencana Solusi
+## 2. Gap Analysis & Rencana Solusi Arsitektural
 
-| Sub-Sistem | Linux (Saat Ini) | Windows (Target) | Solusi Arsitektural |
+| Sub-Sistem | Linux Engine (POSIX Bash) | Windows Engine (Native PowerShell) | Solusi Arsitektural Windows |
 | :--- | :--- | :--- | :--- |
-| **OS & Shell** | `uname -s` = `Linux` | `uname -s` = `MINGW64_NT*` / `MSYS_NT*` | Deteksi `IS_WINDOWS=true` jika `uname -s` cocok dengan pattern MinGW/MSYS/Cygwin. |
-| **Steam & Library Paths** | `~/.local/share/Steam/steamapps` | `C:\Program Files (x86)\Steam` atau Registry | Query registry via `reg.exe query "HKCU\Software\Valve\Steam" /v SteamPath`. Normalisasi path Windows (`D:\\...`) ke format POSIX (`/d/...`). Tambahkan autodeteksi drive (`/c/Games`, `/d/Games`, `/e/Games`). |
-| **Game Execution** | Runner Wine / Proton / UMU (`find_runner`) | Eksekusi biner Windows PE (.exe) **NATIVE** | Pada Windows, bypass `find_runner`. Eksekusi biner `.exe` langsung via `"$gdir/$gbin"` atau `cmd.exe /c start "" "$gdir/$gbin"`. Tolak eksekusi biner Linux ELF. |
-| **GBE Fork Injection** | Dual-Arch (Linux `.so` + Windows `.dll`) | 100% biner target adalah Windows PE (`.exe`) | Hanya gunakan template `steam_api64.dll` & `steam_api.dll`. Template default disimpan di `%LOCALAPPDATA%/gbe-fork` atau `~/.local/share/gbe-fork/windows/`. |
-| **Runtime Wrappers** | `gamemoderun`, `mangohud`, `gamescope` FSR | Tidak ada native gamescope/gamemode di Windows | Bypass wrapper chaining di Windows tanpa memicu error `command not found`. |
-| **Downloader Engine** | `DepotDownloader-linux-x64.zip` | `DepotDownloader-windows-x64.zip` | Unduh target biner Windows dan panggil `DepotDownloader.exe`. Alihkan log ke `%TEMP%` atau `/tmp`. |
-| **Steam Sync & Symlink** | `ln -sf` & `~/.config/SLSsteam` | NTFS Junction (`mklink /J`) & `%APPDATA%\SLSsteam` | Gunakan directory junction (`cmd.exe /c mklink /J`) yang tidak memerlukan hak akses Administrator untuk mapping ke `steamapps/common`. |
-| **Host Entrypoint** | Bash CLI di `/usr/local/bin` atau `~/.local/bin` | CMD / PowerShell terminal | Sediakan shim launcher `gamectl.cmd` dan `gamectl.ps1` yang mendelegasikan ke `bash.exe bin/gamectl`. |
+| **Shell & Runtime** | POSIX Bash 4.x/5.x | Windows PowerShell 5.1 & PowerShell Core 7+ | Basis kode terpisah di `bin/gamectl.ps1` yang kompatibel penuh dengan Windows PowerShell 5.1 (bawaan Windows 10/11). |
+| **Entrypoint / Shim** | Standalone executable di `~/.local/bin/gamectl` | Batch wrapper `gamectl.cmd` & `gamectl.bat` | Wrapper CMD meneruskan argumen dengan `-NoProfile -ExecutionPolicy Bypass` untuk memintas restriksi security policy Windows. |
+| **Game Execution** | Runner Wine / Proton / UMU (`find_runner`) | **Direct Native Win32 PE (.exe)** | Bypass total setup Wine/Proton dan folder `pfx/`. Luncurkan proses langsung via `Start-Process` dengan working directory di folder game. |
+| **Process Tree Isolation** | `cgroups v2` (`systemd-run --user --scope`) | **Win32 Job Objects / Process Tree Tracking** | Bungkus PID game dan child process (crash reporter, overlay) menggunakan Win32 Job Object atau terminasi tree rekursif (`Stop-Process -Id $pid -Force`). |
+| **Security Sandboxing** | Bubblewrap (`bwrap`) tmpfs/namespaces | Windows Integrity Level / Token Restricted | Karena `bwrap` tidak ada di Windows, flag `--sandbox` beroperasi sebagai safe no-op dengan informasi diagnostik, atau token restricted jika elevation aktif. |
+| **Steam & Library Discovery**| `~/.local/share/Steam/steamapps/libraryfolders.vdf` | Registry Windows + Multi-Drive Probing | Query registry `HKCU:\Software\Valve\Steam\SteamPath` untuk primary library. Enumerasi partisi drive Windows (`C:\Games`, `D:\Games`, `E:\Games`). |
+| **Filesystem & Linking** | POSIX symlink `ln -sf` | **NTFS Directory Junctions** | Gunakan `New-Item -ItemType Junction` (ekivalen `mklink /J`) yang tidak memerlukan hak akses Administrator untuk mapping save dan Steam common. |
+| **Emulation Layer (GBE)** | Dual-Arch (Linux `.so` + Windows `.dll`) | 100% Windows DLLs (`steam_api.dll` / `steam_api64.dll`) | Salin template DLL target ke direktori game. Simpan template lokal di `%LOCALAPPDATA%\gamectl\gbe-fork\`. |
+| **TUI & Selection Engine** | `fzf` dari package manager Linux | Standalone `fzf.exe` Windows | Auto-probe `fzf.exe` di `$env:PATH`. Jika absen, download standalone single-binary `fzf.exe` otomatis ke `%LOCALAPPDATA%\gamectl\bin\`. |
+| **Asset Downloader** | `DepotDownloader-linux-x64.zip` | `DepotDownloader-windows-x64.zip` | Unduh runtime Windows dan panggil `DepotDownloader.exe` via `Start-Process`. |
 
 ---
 
-## 3. Blueprint Rencana Kerja (Work Packet 4 Chunks)
+## 3. Invarian Desain & Mitigasi Gotchas Windows
 
-### Chunk 1: OS Detection & Path Normalization Gate
-- Tambahkan flag `IS_WINDOWS=false`. Evaluasi `uname -s` saat bootstrap script.
-- Buat fungsi pembantu `normalize_path()` untuk menerjemahkan path Windows backslash (`C:\...`) dan POSIX forward slash (`/c/...`).
-- Query path instalasi Steam via `reg.exe query` dengan fallback ke default directory.
+### Invarian 1: Zero Linux Regression & Complete Decoupling
+Arsitektur engine Windows tidak boleh menyentuh atau memodifikasi modul runtime Linux di `src/`. Linux tetap menggunakan POSIX Bash tanpa dependensi PowerShell (`pwsh`).
 
-### Chunk 2: Native PE Execution & Runner Bypass
-- Modifikasi `launch_game()`: Jika `IS_WINDOWS=true`, jangan panggil `find_runner` atau inisialisasi Wine prefix (`pfx/`).
-- Eksekusi langsung biner `.exe` dengan argumen yang diberikan.
-- Nonaktifkan chaining Linux wrapper (`gamemoderun`, `mangohud`, `gamescope`).
+### Invarian 2: Strict PowerShell 5.1 Baseline (Zero PS7 Assumptions)
+Windows 10/11 hanya menjamin ketersediaan Windows PowerShell 5.1 (`powershell.exe`). Kode PowerShell `gamectl.ps1` dilarang menggunakan fitur eksklusif PowerShell 7+ (seperti operator ternary `?:`, null-coalescing `??`, atau flag pipeline baru) agar dapat berjalan instan pada instalasi Windows bersih.
 
-### Chunk 3: Windows Downloader Engine
-- Modifikasi `ensure_downloader()` untuk mendeteksi `IS_WINDOWS`.
-- Ambil rilis `DepotDownloader-windows-x64.zip` jika berjalan di Windows.
-- Eksekusi `DepotDownloader.exe`.
+### Invarian 3: ExecutionPolicy Immunity via CMD Wrapper
+File `bin/gamectl.cmd` menjadi entrypoint resmi di Windows:
+```cmd
+@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0gamectl.ps1" %*
+```
+Ini memastikan `gamectl` dapat dipanggil dari CMD, PowerShell, Windows Terminal, Run dialog (`Win+R`), maupun shortcut desktop tanpa memicu `PSSecurityException`.
 
-### Chunk 4: Windows SLSsteam Config & NTFS Junctions
-- Deteksi direktori config SLSsteam di Windows (`%APPDATA%/SLSsteam` / `/c/Users/<user>/AppData/Roaming/SLSsteam`).
-- Buat junction directory `mklink /J` saat sinkronisasi `steamapps/common`.
+### Invarian 4: Contract & Data Layout Parity
+Semua artefak konfigurasi offline wajib kompatibel 100% antara Linux dan Windows:
+- File identifier: `steam_appid.txt`
+- Struktur emulasi: `steam_settings/configs.user.ini` dan `steam_settings/DLC.txt`
+- Struktur savegame: `./saves/<appid>/remote/`
+Format ini memungkinkan drive eksternal atau partisi game portabel dimainkan bergantian antara Linux (Steam Deck) dan Windows (Handheld/Desktop) tanpa konversi data.
 
-### Chunk 5: Turnkey Shims & Installer Hardening
-- Buat `gamectl.cmd`:
-  ```cmd
-  @echo off
-  bash "%~dp0bin\gamectl" %*
+---
+
+## 4. Blueprint Rencana Kerja (Work Packet 13 Chunks)
+
+### Chunk 1: Windows Bootstrapper & PowerShell Core Skeleton
+- Buat `bin/gamectl.cmd` dengan parameter forwarding dan bypass policy.
+- Scaffold `bin/gamectl.ps1` dengan parser CLI (`--help`, `--version`, `launch`, `doctor`, `inject`, `list`).
+- Implementasikan ANSI color tokens yang kompatibel dengan ConPTY / Windows Terminal.
+
+### Chunk 2: Native Steam Registry & Multi-Drive Discovery
+- Implementasikan fungsi `Get-SteamRoot` via Registry Windows:
+  `Get-ItemPropertyValue -Path "HKCU:\Software\Valve\Steam" -Name "SteamPath"`
+- Implementasikan parser `libraryfolders.vdf` di PowerShell untuk mendeteksi seluruh library Steam di Windows.
+- Tambahkan auto-scanner untuk folder portabel di drive root (`C:\Games`, `D:\Games`, `E:\Games`).
+
+### Chunk 3: Win32 Native Execution Engine & Live HUD Controller
+- Implementasikan `Invoke-GameLaunch`:
+  - Validasi biner target `.exe`.
+  - Backup snapshot savegame 3-slot (`slot1`, `slot2`, `slot3`).
+  - Eksekusi proses via `Start-Process -FilePath $gbin -WorkingDirectory $gdir -PassThru`.
+- Buat Live Controller HUD di PowerShell (PID monitoring, log streaming via `Get-Content -Tail -Wait`, dan graceful/force kill via `Stop-Process -Id $pid -Force`).
+
+### Chunk 4: GBE Fork DLL Injection & NTFS Junction Save Mapping
+- Implementasikan `Invoke-GbeInject` untuk arsitektur Windows (x86 vs x64).
+- Unduh dan ekstrak template resmi `steam_api.dll` & `steam_api64.dll` ke `%LOCALAPPDATA%\gamectl\gbe-fork\`.
+- Implementasikan save redirection dan symlink menggunakan NTFS Directory Junction (`New-Item -ItemType Junction`).
+
+### Chunk 5: Standalone Downloader & Tool Auto-Fetcher
+- Implementasikan downloader bootstrapping untuk Windows:
+  - `fzf.exe` (Windows x64 standalone).
+  - `DepotDownloader.exe` (Windows x64 single file).
+- Simpan tool biner pendukung di `%LOCALAPPDATA%\gamectl\bin\` dan daftarkan sementara ke `$env:PATH`.
+
+### Chunk 6: Turnkey One-Liner Installer (`install.ps1`) & Distribution Manifests
+- Buat installer turnkey PowerShell `install.ps1`:
+  ```powershell
+  irm https://raw.githubusercontent.com/zyekhabdul/gamectl/main/install.ps1 | iex
   ```
-- Buat `gamectl.ps1` untuk pemanggilan bersih dari PowerShell.
-- Perbarui `install.sh` untuk mendeteksi environment Git Bash dan menginstal shim ke PATH pengguna.
+  Menyalin script ke `%LOCALAPPDATA%\gamectl`, mendaftarkan `%LOCALAPPDATA%\gamectl\bin` ke `User Path`, dan membuat shortcut Start Menu/Desktop.
+- Buat manifest distribusi [Scoop](https://scoop.sh) (`packaging/scoop/gamectl.json`) dan template [Winget](https://github.com/microsoft/winget-pkgs).
 
-### Chunk 6: Empirical Verification & Test Matrix
-- Uji eksekusi skrip di lingkungan Linux (pastikan zero regression pada fungsi native).
-- Uji mock environment Windows di Git Bash.
-
----
-
-## 4. Invarian Desain
-1. **Zero Linux Regression**: Seluruh percabangan Windows terisolasi di bawah `if [ "$IS_WINDOWS" = true ]`. Perilaku Linux tetap 100% utuh.
-2. **Zero Bloat / YAGNI**: Tidak menambahkan runtime tambahan (seperti Node.js, Electron, dll). Cukup Git Bash yang sudah umum terpasang.
+### Chunk 7: Regression Harness & Contract Verification
+- Tambahkan skrip verifikasi otomatis pada CI (`tests/test_windows_contract.sh` atau Pester test `tests/gamectl.Tests.ps1`).
+- Validasi paritas data schema antara engine Bash dan engine PowerShell.
+- Pastikan regression test Linux (`tests/test_cli.sh`) tetap menghasilkan 59/59 passing dengan Exit Code 0.
