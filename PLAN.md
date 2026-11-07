@@ -78,9 +78,9 @@ Memperkuat arsitektur Standalone Steam CDN Depot Downloader (`gamectl-depot-dl`)
      - Test co-located binary path contract.
      - Test dry-run installer verifikasi `gamectl-depot-dl`.
   2. Jalankan `./scripts/build.sh` untuk sinkronisasi `bin/gamectl`.
-  3. Jalankan regression suite `./tests/test_cli.sh` (83 assertions).
+  3. Jalankan regression suite `./tests/test_cli.sh` (84 assertions).
   4. Buktikan Exit Code 0 dengan 0 failures / 0 skips.
-- DoD: Seluruh 83 test assertions lulus dengan status Exit Code 0.
+- DoD: Seluruh 84 test assertions lulus dengan status Exit Code 0.
 
 ---
 
