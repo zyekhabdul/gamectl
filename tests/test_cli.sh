@@ -398,7 +398,9 @@ test_installer_dry_run() {
     out1=$("$REPO_ROOT/install.sh" --dry-run 2>&1)
     out2=$(cat "$REPO_ROOT/install.sh" | bash -s -- --dry-run 2>&1)
     echo "$out1" | grep -q "DRY-RUN mode" && \
+    echo "$out1" | grep -q "gamectl-depot-dl" && \
     echo "$out2" | grep -q "turnkey piped web installer" && \
+    echo "$out2" | grep -q "gamectl-depot-dl" && \
     echo "$out2" | grep -q "Dry-run pre-flight check completed successfully"
 }
 run_test "Turnkey Installer: Local and piped stdin dry-run execution" test_installer_dry_run
@@ -425,7 +427,8 @@ test_debian_packaging_validation() {
     local deb_pkg && \
     deb_pkg=$(ls "$REPO_ROOT/packaging/debian"/gamectl_*_all.deb 2>/dev/null | head -n 1) && \
     [ -n "$deb_pkg" ] && [ -f "$deb_pkg" ] && \
-    dpkg-deb -I "$deb_pkg" | grep "Package: gamectl" >/dev/null
+    dpkg-deb -I "$deb_pkg" | grep "Package: gamectl" >/dev/null && \
+    dpkg-deb -c "$deb_pkg" | grep "usr/bin/gamectl-depot-dl" >/dev/null
 }
 run_test "Debian Packaging: Valid .deb construction and control metadata" test_debian_packaging_validation
 

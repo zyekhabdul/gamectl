@@ -77,6 +77,16 @@ if [ "$IS_LOCAL" = true ]; then
             fi
         fi
     fi
+    if [ -f "$SRC_DIR/scripts/build-depot-dl.sh" ] && [ -d "$SRC_DIR/crates/depot-dl" ]; then
+        if [ ! -f "$SRC_DEPOT_DL" ] || ! "$SRC_DIR/scripts/build-depot-dl.sh" --check >/dev/null 2>&1; then
+            if [ "$DRY_RUN" = true ]; then
+                echo "[INFO] [DRY-RUN] Would compile native depot downloader into bin/gamectl-depot-dl"
+            else
+                echo "[INFO] Compiling native depot downloader into bin/gamectl-depot-dl..."
+                "$SRC_DIR/scripts/build-depot-dl.sh" || true
+            fi
+        fi
+    fi
 else
     echo "[INFO] Running turnkey piped web installer (remote endpoint: $REPO_RAW_URL)"
 fi
@@ -264,8 +274,12 @@ fi
 if [ "$DRY_RUN" = true ]; then
     echo "[INFO] [DRY-RUN] Would install executable to: $BIN_DIR/gamectl"
     echo "[INFO] [DRY-RUN] Would create shorthand symlink: $BIN_DIR/game -> gamectl"
-    if [ -n "$SRC_DEPOT_DL" ] && [ -f "$SRC_DEPOT_DL" ]; then
-        echo "[INFO] [DRY-RUN] Would install native depot downloader to: $BIN_DIR/gamectl-depot-dl"
+    if [ "$IS_LOCAL" = true ]; then
+        if [ -n "$SRC_DEPOT_DL" ] && [ -f "$SRC_DEPOT_DL" ]; then
+            echo "[INFO] [DRY-RUN] Would install native depot downloader to: $BIN_DIR/gamectl-depot-dl"
+        fi
+    else
+        echo "[INFO] [DRY-RUN] Would download native depot downloader to: $BIN_DIR/gamectl-depot-dl"
     fi
 else
     mkdir -p "$BIN_DIR"

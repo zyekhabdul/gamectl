@@ -8,15 +8,18 @@ echo "=================================================="
 echo "[ ORCHESTRATOR ] gamectl Multi-Platform Packaging"
 echo "=================================================="
 
-# 1. Monolithic Binary Compilation
+# 1. Monolithic Binary Compilation & Native Depot Downloader
 echo ""
-echo "[ 1/3 ] Compiling Monolithic Standalone Binary..."
+echo "[ 1/4 ] Compiling Monolithic Standalone Binary & Native Depot Downloader..."
 cd "$ROOT_DIR"
 ./scripts/build.sh
+if [ -f "$ROOT_DIR/scripts/build-depot-dl.sh" ]; then
+    ./scripts/build-depot-dl.sh --check >/dev/null 2>&1 || ./scripts/build-depot-dl.sh
+fi
 
 # 2. Debian / Ubuntu (.deb)
 echo ""
-echo "[ 2/3 ] Building Debian / Ubuntu (.deb) Package..."
+echo "[ 2/4 ] Building Debian / Ubuntu (.deb) Package..."
 bash "$ROOT_DIR/packaging/debian/build-deb.sh"
 
 # 3. Arch Linux (.SRCINFO)
@@ -42,6 +45,7 @@ echo "=================================================="
 echo "[ VERIFIED ] ALL PLATFORM PACKAGES SUCCESSFULLY BUILT:"
 echo "=================================================="
 ls -lh "$ROOT_DIR/bin/gamectl"
+ls -lh "$ROOT_DIR/bin/gamectl-depot-dl" 2>/dev/null || true
 ls -lh "$ROOT_DIR/packaging/debian"/*.deb 2>/dev/null || true
 ls -lh "$ROOT_DIR/packaging/arch/.SRCINFO"
 ls -lh "$ROOT_DIR/packaging/aur-git/.SRCINFO" 2>/dev/null || true

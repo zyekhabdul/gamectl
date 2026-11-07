@@ -17,6 +17,7 @@ help:
 
 build:
 	./scripts/build.sh
+	@if [ -f ./scripts/build-depot-dl.sh ]; then ./scripts/build-depot-dl.sh --check >/dev/null 2>&1 || ./scripts/build-depot-dl.sh; fi
 
 build-depot-dl:
 	./scripts/build-depot-dl.sh

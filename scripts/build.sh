@@ -88,6 +88,9 @@ mv -f "$DEST_TMP" "$OUTPUT_BIN"
 if [ -d "$REPO_ROOT/src/gamectl_runner" ]; then
     mkdir -p "$REPO_ROOT/src/gamectl_runner/bin"
     cp -p "$OUTPUT_BIN" "$REPO_ROOT/src/gamectl_runner/bin/gamectl"
+    if [ -f "$REPO_ROOT/bin/gamectl-depot-dl" ]; then
+        cp -p "$REPO_ROOT/bin/gamectl-depot-dl" "$REPO_ROOT/src/gamectl_runner/bin/gamectl-depot-dl"
+    fi
 fi
 
 line_count=$(wc -l < "$OUTPUT_BIN" | tr -d ' ')
