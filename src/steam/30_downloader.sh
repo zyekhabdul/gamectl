@@ -967,8 +967,7 @@ download_game() {
 
             if [ "$action" != "raw" ]; then
                 fetch_dlc "$target_dir" "$appid" 2>/dev/null || true
-                sync_steam "$appid" "$title" "$target_dir" 2>/dev/null || true
-                deploy_sls_manifest "$appid" "$manifest_zip" "$title" "$source" 2>/dev/null || true
+                inject_game "$target_dir" "$appid" --no-sync 2>/dev/null || true
             fi
 
             echo "[SUCCESS] Standalone download & provisioning complete for $title ($appid) in $target_dir."

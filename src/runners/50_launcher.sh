@@ -319,6 +319,29 @@ launch_game() {
 
     cd "$gdir"
 
+    # Pre-flight GBE auto-injection: Ensure game is shielded before execution
+    local has_steam_api=false
+    local is_gbe=false
+    local api_cand
+    for api_cand in \
+        "$gdir/steam_api64.dll" "$gdir/steam_api.dll" "$gdir/libsteam_api.so" \
+        "$gdir/lib64/libsteam_api.so" "$gdir/lib32/libsteam_api.so"; do
+        if [ -f "$api_cand" ]; then
+            has_steam_api=true
+            local c_sz
+            c_sz=$(stat -c%s "$api_cand" 2>/dev/null || echo 0)
+            if [ "$c_sz" -gt 7000000 ]; then
+                is_gbe=true
+                break
+            fi
+        fi
+    done
+
+    if [ "$has_steam_api" = true ] && [ "$is_gbe" = false ]; then
+        echo "[INFO] Steamworks API detected without emulator shield. Auto-injecting GBE Fork..."
+        inject_game "$gdir" "" --no-sync 2>/dev/null || true
+    fi
+
     # Check if target is a Windows executable (.exe / PE)
     local is_win=false
     case "$gbin" in
