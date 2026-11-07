@@ -1,95 +1,95 @@
-# WORK PACKET 14: STANDALONE DEPOT DOWNLOADER HARDENING, PACKAGING & WINDOWS EXPANSION [ACTIVE]
+# WORK PACKET 15: PURE STANDALONE REMEDIATION, OFFLINE DLC HARVESTER & STEAMSTUB DEFENSE [ACTIVE]
 
 ## 1. Objective & Technical Scope
-Memperkuat arsitektur Standalone Steam CDN Depot Downloader (`gamectl-depot-dl`), memperbaiki 5 defek temuan audit pasca-implementasi, menyelaraskan instalasi dan build system, serta mengekspansi kompatibilitas engine ke target Windows:
-1. **Source Code Tree Consolidation**: Memindahkan source Rust dari repositori referensi luar ke dalam repositori `gamectl` (`crates/depot-dl/` atau `src/rust/depot-dl/`) bersama script reproducible build `scripts/build-depot-dl.sh`.
-2. **Packaging & Installer Synchronization**: Memperbarui `install.sh`, `Makefile`, dan `packaging/debian/build-deb.sh` agar menyertakan `bin/gamectl-depot-dl` ke `$BIN_DIR` (`~/.local/bin/` / `/usr/bin/`).
-3. **Co-located Binary Path Resolution**: Menambahkan `"$script_dir/gamectl-depot-dl"` ke fungsi `resolve_depot_dl_bin` di `src/steam/30_downloader.sh`.
-4. **Resilient Lua Manifest Regex**: Memperbarui regex `addappid` agar mendukung petik tunggal (`'`) dan ganda (`"`), serta variasi whitespace/tab.
-5. **Terminal I/O Progress Throttling**: Mengoptimalkan progress event pada Rust binary agar tidak mencetak setiap file individual (`[FILE]`) yang memicu buffer flooding pada game puluhan ribu file.
-6. **Windows Path Sanitization & NTFS Limits**: Menambahkan normalisasi path separator POSIX-ke-Windows (`/` ke `\`), sanitasi karakter terlarang NTFS (`: * ? " < > |`), dan support `\\?\` prefix untuk bypass `MAX_PATH`.
-7. **Windows Cross-Compilation**: Mengompilasi binary release `bin/gamectl-depot-dl.exe` dengan target `x86_64-pc-windows-gnu`.
-8. **Regression Verification Harness**: Memperbarui `tests/test_cli.sh`, memastikan 100% assertions lulus dengan exit code 0.
+Merespon hasil postmortem insiden blunder "PURCHASE" (INC-2026-11-07) dan ratifikasi arsitektur Pure Standalone (ADR-022), Work Packet 15 mengeksekusi remediasi komprehensif agar `gamectl` berfungsi 100% mandiri tanpa ketergantungan pada Steam Client resmi maupun plugin SLSsteam:
+
+1. **Sovereign Library Path Resolution**: Menghilangkan hardcoding direktori Steam (`~/.local/share/Steam/steamapps/common/`) sebagai satu-satunya default. Menyediakan resolusi cerdas ke `$GAMECTL_LIBRARY_DIR` atau `$HOME/Games/` untuk instalasi standalone.
+2. **Offline-Resilient DLC Harvester**: Memperbaiki `fetch_dlc` agar tidak hanya mengandalkan curl ke Steam Store API publik. Jika internet offline/timeout, otomatis mem-parsing daftar AppID DLC langsung dari stplugin `.lua` lokal untuk menghasilkan `steam_settings/DLC.txt`.
+3. **SteamStub DRM Inspector & Pre-Flight Warning**: Mengintegrasikan deteksi seksi ELF `.bind` (Linux) dan SteamStub PE (Windows) ke dalam `preview_game` dan `launch_game` untuk mencegah silent crash / execution redirect ke `steam.sh`.
+4. **Hardened Pre-Flight GBE Auto-Injection**: Memperkuat deteksi arsitektur (x64 vs x86) dan auto-injection Goldberg Emulator (`libsteam_api.so`, `steam_api64.dll`, `steam_api.dll`) di `launch_game` sebelum proses biner dijalankan.
+5. **Standalone Savegame & Storage Sandbox**: Memastikan savegame redirection Goldberg (`./saves` atau `steam_settings/save_dir`) terkonfigurasi otomatis dan tercakup dalam 3-slot snapshot engine tanpa menyentuh Steam Cloud.
+6. **CLI Flag Decoupling & Engine Standardization**: Menjadikan `--standalone` sebagai default content & runtime engine pada `gamectl download` dan `gamectl launch`, serta membatasi `--sls` sebagai opt-in flag murni.
+7. **Regression Test Suite Expansion**: Menambahkan skenario uji verifikasi offline DLC, deteksi SteamStub ELF `.bind`, dan standalone download routing di `tests/test_cli.sh` dengan target 88+ assertions (exit code 0).
 
 ---
 
-## 2. Granular Technical Execution Plan (Work Packet 14)
+## 2. Granular Technical Execution Plan (Work Packet 15)
 
-### Chunk 1: Source Code Tree Integration & Build Automation [DONE]
-- Target Files: `crates/depot-dl/` (atau `src/rust/depot-dl/`), `scripts/build-depot-dl.sh`
-- Runtutan Eksekusi Teknis:
-  1. Buat direktori sub-crate `crates/depot-dl/` di repositori `gamectl`.
-  2. Salin `src/bin/gamectl-depot-dl.rs` dan konfigurasi `Cargo.toml` dari repo referensi ke dalam `crates/depot-dl/`.
-  3. Buat script automasi kompilasi `scripts/build-depot-dl.sh` untuk memproduksi binary release ke `bin/gamectl-depot-dl` secara reproducible.
-- DoD: Source code Rust terintegrasi di repo `gamectl` dan dapat dikompilasi ulang secara mandiri.
+### Chunk 1: Sovereign Library Path Resolution
+- **Target Files**: `src/steam/30_downloader.sh`, `src/core/10_utils.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Buat fungsi `resolve_standalone_library_dir()` yang memprioritaskan:
+     - Argument direktori eksplisit user.
+     - Environment variable `$GAMECTL_LIBRARY_DIR`.
+     - File config `$HOME/.config/gamectl/library_dir`.
+     - Default sovereign directory: `$HOME/Games`.
+  2. Pastikan `download_game` pada mode `--standalone` menggunakan path sovereign ini dan tidak memaksa instalasi ke folder `steamapps/common`.
+- **DoD**: Unduhan standalone tersimpan di `$HOME/Games/<Title>` tanpa membuat symlink atau manifest di direktori Steam.
 
-### Chunk 2: Packaging & Installation Sync [DONE]
-- Target Files: `install.sh`, `Makefile`, `packaging/debian/build-deb.sh`
-- Runtutan Eksekusi Teknis:
-  1. Perbarui `install.sh`: pasang/symlink `bin/gamectl-depot-dl` ke `$BIN_DIR` jika binary tersedia.
-  2. Perbarui `Makefile`: sertakan `bin/gamectl-depot-dl` pada target `install` dan `uninstall`.
-  3. Perbarui `packaging/debian/build-deb.sh`: sertakan binary ke paket `.deb`.
-- DoD: Menjalankan `./install.sh` memasang kedua binary (`gamectl` dan `gamectl-depot-dl`) ke `$HOME/.local/bin`.
+### Chunk 2: Offline-Resilient DLC Harvester
+- **Target Files**: `src/steam/30_downloader.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Modifikasi `fetch_dlc`:
+     - Coba ambil data dari Steam Store API via curl dengan timeout 3 detik.
+     - Jika curl gagal atau mengembalikan JSON kosong (kondisi offline), lakukan fallback parsing terhadap file `.lua` milik AppID tersebut:
+       Ekstrak seluruh `addappid(<id>)` yang bukan AppID induk game.
+     - Tulis setiap AppID DLC ke `<game_dir>/steam_settings/DLC.txt` format `<dlc_id>=DLC_<dlc_id>`.
+  2. Pastikan file `DLC.txt` ter-generate valid bahkan saat koneksi internet terputus total.
+- **DoD**: Gamectl mampu menghasilkan `steam_settings/DLC.txt` lengkap saat dijalankan tanpa akses jaringan (air-gapped/offline).
 
-### Chunk 3: Co-located Binary Path Resolution [DONE]
-- Target Files: `src/steam/30_downloader.sh`
-- Runtutan Eksekusi Teknis:
-  1. Tambahkan `"$script_dir/gamectl-depot-dl"` ke urutan teratas kandidat pencarian di `resolve_depot_dl_bin()`.
-  2. Pastikan binary yang diletakkan di direktori yang sama dengan `gamectl` langsung terdeteksi tanpa relying on `$PATH`.
-- DoD: Fungsi `resolve_depot_dl_bin` mendeteksi binary ketika diletakkan berdampingan di direktori custom manapun.
+### Chunk 3: SteamStub DRM Inspector & Pre-Flight Warning
+- **Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`, `src/tui/70_dashboard.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Buat fungsi `detect_steamstub_drm "$binary_path"`:
+     - Linux ELF: Periksa keberadaan seksi `.bind` (`readelf -S "$bin" 2>/dev/null | grep -q '\.bind'`).
+     - Windows PE: Periksa pola header SteamStub atau gunakan Steamless detection.
+  2. Tampilkan status SteamStub pada HUD controller dan TUI dashboard preview.
+  3. Jika terdeteksi di Linux ELF pada `launch_game`, cetak peringatan diagnostik terarah bahwa game memiliki enkripsi stub bawaan Valve.
+- **DoD**: `detect_steamstub_drm` mendeteksi seksi `.bind` pada binary Boson X secara akurat dan mengembalikan exit code 0.
 
-### Chunk 4: Resilient Lua Manifest Regex [DONE]
-- Target Files: `src/steam/30_downloader.sh`
-- Runtutan Eksekusi Teknis:
-  1. Modifikasi regex `re_key` pada `src/steam/30_downloader.sh`:
-     ```bash
-     local re_key='addappid\([[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*[0-9]+[[:space:]]*,[[:space:]]*['\''"]([0-9a-fA-F]{64})['\''"]'
-     ```
-  2. Dukung format single-quote `'...'` dan double-quote `"..."` dari seluruh ragam provider manifest.
-- DoD: Parser berhasil mengekstrak AES key baik dari format petik tunggal maupun ganda.
+### Chunk 4: Pre-Flight GBE Auto-Injection Hardening
+- **Target Files**: `src/runners/50_launcher.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Pertajam pre-flight inspection di `launch_game`:
+     - Deteksi arsitektur biner game target secara presisi (ELF 32-bit vs 64-bit via `file -b`).
+     - Jika target biner adalah 32-bit (seperti Boson X), pastikan emulator yang di-inject adalah x86 template (`gbe-fork/regular/x86/libsteam_api.so`).
+     - Jika target biner adalah 64-bit, gunakan x64 template.
+  2. Pastikan file backup `.orig` tersimpan aman dan tidak tertimpa jika injeksi diulang.
+- **DoD**: Setiap game yang dijalankan otomatis ter-shim dengan arsitektur yang cocok sebelum dieksekusi.
 
-### Chunk 5: Rust CLI Terminal Output Throttling [DONE]
-- Target Files: `crates/depot-dl/src/bin/gamectl-depot-dl.rs`
-- Runtutan Eksekusi Teknis:
-  1. Tambahkan flag `--quiet` / `-q` dan `--verbose` / `-v`.
-  2. Pada mode default, nonaktifkan logging per-file individual (`[FILE] ...`).
-  3. Pertahankan logging progress berbasis byte ter-throttle (`[PROGRESS] Transferred: ... MB`) dan ringkasan akhir (`[SUCCESS]`).
-- DoD: Terminal I/O bersih dan throughput download tidak terhambat pada game dengan puluhan ribu file.
+### Chunk 5: Standalone Savegame Redirection & Snapshot Isolation
+- **Target Files**: `src/runners/50_launcher.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Pada `inject_game`, pastikan direktori `<game_dir>/saves/` terbuat dengan izin `0700`.
+  2. Jika game menggunakan Goldberg Emulator, pastikan `local_save.txt` atau konfigurasi save redirection aktif mengarah ke `./saves/`.
+  3. Validasi bahwa fungsi `backup_save` tetap membackup slot snapshot dari folder `./saves/` lokal game sebelum sesi bermain dimulai.
+- **DoD**: Savegame tersimpan terlokalisasi di dalam folder game, bebas dari dependensi Steam Cloud.
 
-### Chunk 6: Windows Path Normalization & NTFS Sanitizer [DONE]
-- Target Files: `crates/depot-dl/src/util.rs`
-- Runtutan Eksekusi Teknis:
-  1. Implementasikan fungsi sanitasi path Windows:
-     - Ganti separator POSIX `/` dengan `\` pada platform Windows.
-     - Sanitasi karakter ilegal NTFS: `:`, `*`, `?`, `"`, `<`, `>`, `|`.
-     - Gunakan prefix `\\?\` untuk path absolut di Windows guna menghindari batas `MAX_PATH` 260 karakter.
-- DoD: Logika sanitasi path teruji melalui unit test dan aman untuk dieksekusi di filesystem Windows.
+### Chunk 6: CLI Engine Decoupling (`--standalone` Default)
+- **Target Files**: `src/main.sh`, `src/steam/30_downloader.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Ubah default engine pada `gamectl download` dari hybrid/steam menjadi `--engine standalone`.
+  2. Opsi `--sls` atau `--engine steam` hanya aktif jika user secara eksplisit memberikan flag tersebut.
+  3. Sinkronkan teks panduan CLI (`--help`) dan dokumentasi pengguna (`docs/GUIDE.md`).
+- **DoD**: Menjalankan `gamectl download <appid>` secara default menjalankan engine mandiri tanpa menyentuh Steam Client.
 
-### Chunk 7: Windows Cross-Compilation [DEFERRED TO WINDOWS BOOT]
-- Target Files: `scripts/build-depot-dl.sh`, `bin/gamectl-depot-dl.exe`
-- Status: Parameter `--target x86_64-pc-windows-gnu` dan mapping binary `.exe` sudah diimplementasikan di `scripts/build-depot-dl.sh`. Kompilasi binary `.exe` ditunda saat booting Windows (native toolchain) sesuai preferensi user untuk mencegah friksi toolchain mingw di Linux.
-- DoD: Script build siap mengeksekusi target Windows.
-
-### Chunk 8: Automated Regression Testing & Machine Verification [DONE]
-- Target Files: `tests/test_cli.sh`, `scripts/build.sh`
-- Runtutan Eksekusi Teknis:
-  1. Tambahkan skenario pengujian di `tests/test_cli.sh`:
-     - Test parsing Lua single-quote format.
-     - Test co-located binary path contract.
-     - Test dry-run installer verifikasi `gamectl-depot-dl`.
-  2. Jalankan `./scripts/build.sh` untuk sinkronisasi `bin/gamectl`.
-  3. Jalankan regression suite `./tests/test_cli.sh` (84 assertions).
-  4. Buktikan Exit Code 0 dengan 0 failures / 0 skips.
-- DoD: Seluruh 84 test assertions lulus dengan status Exit Code 0.
+### Chunk 7: Regression Harness Expansion & Machine Verification
+- **Target Files**: `tests/test_cli.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Tambahkan unit test untuk `detect_steamstub_drm` (menguji biner mock ber-seksi `.bind`).
+  2. Tambahkan unit test untuk offline `fetch_dlc` fallback dari file Lua stplugin.
+  3. Tambahkan unit test untuk resolusi path sovereign `$GAMECTL_LIBRARY_DIR`.
+  4. Jalankan `scripts/build.sh` untuk kompilasi biner `bin/gamectl`.
+  5. Jalankan `tests/test_cli.sh` dan pastikan seluruh test assertions (target 88+) lulus dengan Exit Code 0.
+- **DoD**: Test runner melaporkan 88+ passed, 0 failed, exit code 0.
 
 ---
 
-## 3. Matriks Milestone (Work Packet 14)
-- [x] Chunk 1: Source Code Tree Integration & Build Automation [DONE]
-- [x] Chunk 2: Packaging & Installation Sync [DONE]
-- [x] Chunk 3: Co-located Binary Path Resolution [DONE]
-- [x] Chunk 4: Resilient Lua Manifest Regex [DONE]
-- [x] Chunk 5: Rust CLI Terminal Output Throttling [DONE]
-- [x] Chunk 6: Windows Path Normalization & NTFS Sanitizer [DONE]
-- [ ] Chunk 7: Windows Cross-Compilation [DEFERRED TO WINDOWS BOOT]
-- [x] Chunk 8: Automated Regression Testing & Machine Verification [DONE]
+## 3. Matriks Milestone (Work Packet 15)
+- [ ] Chunk 1: Sovereign Library Path Resolution [PENDING]
+- [ ] Chunk 2: Offline-Resilient DLC Harvester [PENDING]
+- [ ] Chunk 3: SteamStub DRM Inspector & Pre-Flight Warning [PENDING]
+- [ ] Chunk 4: Pre-Flight GBE Auto-Injection Hardening [PENDING]
+- [ ] Chunk 5: Standalone Savegame Redirection & Snapshot Isolation [PENDING]
+- [ ] Chunk 6: CLI Engine Decoupling (`--standalone` Default) [PENDING]
+- [ ] Chunk 7: Regression Harness Expansion & Machine Verification [PENDING]
