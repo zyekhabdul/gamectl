@@ -581,6 +581,9 @@ deploy_sls_manifest() {
 
     if [ -n "$staged_lua" ] && [ -f "$staged_lua" ]; then
         cp -f "$staged_lua" "$target_lua"
+        if ! grep -Eq "^[[:space:]]*addappid[[:space:]]*\([[:space:]]*${appid}[[:space:]]*\)" "$target_lua"; then
+            sed -i "1i addappid(${appid})" "$target_lua"
+        fi
         chmod 600 "$target_lua"
         echo "[VERIFIED] Stplug-in Lua deployed from archive: $target_lua" >&2
     else
@@ -1358,6 +1361,21 @@ try:
 except Exception as e:
     print(f'[WARN] SLSsteam config sync notice: {e}', file=sys.stderr)
 " "$sls_cfg" "$appid" "$dlc_json" 2>/dev/null || true
+    fi
+
+    # 2b. Guarantee stplug-in Lua script has addappid($appid) entitlement
+    local stplug_dir
+    stplug_dir="$(get_steam_stplug_in_dir 2>/dev/null || echo "$HOME/.local/share/Steam/config/stplug-in")"
+    if [ -d "$stplug_dir" ]; then
+        local target_lua="$stplug_dir/${appid}.lua"
+        if [ -f "$target_lua" ]; then
+            if ! grep -Eq "^[[:space:]]*addappid[[:space:]]*\([[:space:]]*${appid}[[:space:]]*\)" "$target_lua"; then
+                sed -i "1i addappid(${appid})" "$target_lua"
+            fi
+        else
+            printf "addappid(%s)\n" "$appid" > "$target_lua"
+            chmod 600 "$target_lua"
+        fi
     fi
 
     # 3. Create appmanifest_<appid>.acf in Steam steamapps (unless --no-acf requested)

@@ -273,6 +273,11 @@ launch_game() {
     export PIPEWIRE_LATENCY="${GAMECTL_PIPEWIRE_LATENCY:-256/48000}"
     export PULSE_LATENCY_MSEC="${GAMECTL_PULSE_LATENCY:-60}"
 
+    # SLSsteam path prioritization for DRM stub wrapper intercept
+    if [ -d "$HOME/.local/share/SLSsteam/path" ]; then
+        export PATH="$HOME/.local/share/SLSsteam/path:$PATH"
+    fi
+
     # Capture current CPU scaling governor for clean restoration
     local prev_governor=""
     if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
@@ -423,6 +428,7 @@ launch_game() {
         echo "[INFO] Launching $title (Native Linux) in background..."
         echo "[INFO] Log stream: $log_file"
         (
+            export LD_LIBRARY_PATH=".:$gdir:${LD_LIBRARY_PATH:-}"
             _exec_in_scope "${wrappers[@]}" ./"$gbin" "${game_args[@]}"
         ) > "$log_file" 2>&1 &
         game_pid=$!
