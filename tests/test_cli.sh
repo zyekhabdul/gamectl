@@ -872,6 +872,70 @@ test_download_game_dual_mode_orchestration() {
 }
 run_test "Download Orchestrator: download_game --engine=steam native flow" test_download_game_dual_mode_orchestration
 
+test_resolve_depot_dl_bin_contract() {
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    local test_root="${TEST_TMP_DIR:-/tmp}/resolve_bin_test_$$"
+    mkdir -p "$test_root"
+    local mock_bin="$test_root/gamectl-depot-dl"
+    touch "$mock_bin" && chmod +x "$mock_bin"
+
+    export GAMECTL_DEPOT_DL_BIN="$mock_bin"
+    local resolved
+    resolved=$(resolve_depot_dl_bin)
+    unset GAMECTL_DEPOT_DL_BIN
+    rm -rf "$test_root"
+
+    [ "$resolved" = "$mock_bin" ]
+}
+run_test "Download Orchestrator: resolve_depot_dl_bin precedence & path contract" test_resolve_depot_dl_bin_contract
+
+test_download_game_standalone_mode_orchestration() {
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    local test_root="${TEST_TMP_DIR:-/tmp}/dl_orch_standalone_test_$$"
+    local test_cfg="$test_root/config"
+    local test_steam="$test_root/Steam"
+    local test_cache="$test_root/cache"
+    local test_target="$test_root/games/DummyTitle"
+    mkdir -p "$test_cfg/SLSsteam" "$test_steam/config/stplug-in" "$test_steam/depotcache" "$test_cache/gamectl/manifests" "$test_target"
+    echo "AppIds: []" > "$test_cfg/SLSsteam/config.yaml"
+
+    export XDG_CONFIG_HOME="$test_cfg"
+    export STEAM_ROOT="$test_steam"
+    export XDG_CACHE_HOME="$test_cache"
+
+    # Place a valid mock manifest zip with AES key in cache for AppID 99998
+    local mock_zip="$test_cache/gamectl/manifests/99998.zip"
+    local stage_dir="$test_root/stage"
+    mkdir -p "$stage_dir"
+    printf "\xd0\x17\xf6\x71test_payload_99998" > "$stage_dir/333_444.manifest"
+    echo 'addappid(333, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")' > "$stage_dir/99998.lua"
+    (cd "$stage_dir" && zip -q "$mock_zip" 333_444.manifest 99998.lua)
+
+    # Create mock gamectl-depot-dl runner
+    local mock_bin="$test_root/mock-depot-dl"
+    cat <<'MOCK' > "$mock_bin"
+#!/usr/bin/env bash
+echo "[INFO] Standalone Steam Depot Downloader Mock"
+echo "[SUCCESS] Download finished in 0.1s"
+exit 0
+MOCK
+    chmod +x "$mock_bin"
+    export GAMECTL_DEPOT_DL_BIN="$mock_bin"
+
+    local out
+    out=$(download_game "99998" "$test_target" "DummyTitle" --engine standalone)
+    local rc=$?
+
+    rm -rf "$test_root"
+    unset XDG_CONFIG_HOME STEAM_ROOT XDG_CACHE_HOME GAMECTL_DEPOT_DL_BIN
+
+    [ "$rc" -eq 0 ] && \
+    echo "$out" | grep -q 'STEAM STANDALONE CDN ENGINE' && \
+    echo "$out" | grep -q 'Standalone download & provisioning complete'
+}
+run_test "Download Orchestrator: download_game --engine=standalone native flow" test_download_game_standalone_mode_orchestration
+
 test_acf_telemetry_state_parsing() {
     source "$REPO_ROOT/src/steam/30_downloader.sh"
     local test_dir="${TEST_TMP_DIR:-/tmp}/acf_test_$$"

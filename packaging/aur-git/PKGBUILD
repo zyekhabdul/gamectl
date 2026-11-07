@@ -49,6 +49,7 @@ package() {
 
     # Install standalone executable and shorthand alias
     install -Dm755 bin/gamectl "$pkgdir/usr/bin/gamectl"
+    [ -f bin/gamectl-depot-dl ] && install -Dm755 bin/gamectl-depot-dl "$pkgdir/usr/bin/gamectl-depot-dl"
     ln -sf gamectl "$pkgdir/usr/bin/game"
 
     # Install shell autocompletion

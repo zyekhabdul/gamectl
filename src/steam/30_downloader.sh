@@ -601,9 +601,40 @@ deploy_sls_manifest() {
     return 0
 }
 
-# Ensure DepotDownloader runtime is available (Deprecated stub)
+# Resolve path to standalone Steam CDN depot downloader binary (gamectl-depot-dl)
+resolve_depot_dl_bin() {
+    if [ -n "${GAMECTL_DEPOT_DL_BIN:-}" ] && [ -x "$GAMECTL_DEPOT_DL_BIN" ]; then
+        echo "$GAMECTL_DEPOT_DL_BIN"
+        return 0
+    fi
+    local candidate
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || echo "")"
+    for candidate in \
+        "$script_dir/../../bin/gamectl-depot-dl" \
+        "$script_dir/../bin/gamectl-depot-dl" \
+        "$script_dir/bin/gamectl-depot-dl" \
+        "$HOME/.local/bin/gamectl-depot-dl" \
+        "/usr/local/bin/gamectl-depot-dl" \
+        "/usr/bin/gamectl-depot-dl"; do
+        if [ -x "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    if command -v gamectl-depot-dl >/dev/null 2>&1; then
+        command -v gamectl-depot-dl
+        return 0
+    fi
+    return 1
+}
+
+# Ensure Steam CDN depot downloader runtime is available
 ensure_downloader() {
-    echo "[WARN] DepotDownloader is deprecated and removed from gamectl. Native Steam client CDN engine is standard." >&2
+    if resolve_depot_dl_bin >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "[WARN] Standalone depot downloader binary (gamectl-depot-dl) not found." >&2
     return 1
 }
 
@@ -717,13 +748,13 @@ trigger_steam_install() {
     return 0
 }
 
-# Steam Native Game Downloader & Provisioner (SLSsteam-Moon Engine)
+# Steam Native Game Downloader & Provisioner (SLSsteam-Moon & Standalone CDN Engine)
 download_game() {
     local appid="${1:-}"
     # Strip ANSI escape sequences & non-digits
     appid=$(printf "%s" "$appid" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
     if [ -z "$appid" ]; then
-        echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|ryuu|sushi|luatools>] [--raw|--inject-only|--all]" >&2
+        echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|ryuu|sushi|luatools>] [--raw|--inject-only|--all|--standalone|--sls]" >&2
         return 1
     fi
     shift
@@ -732,22 +763,49 @@ download_game() {
     local title=""
     local action="all"     # "all", "inject", "raw"
     local source="auto"    # "auto", "ryuu", "sushi", "luatools"
+    local engine="auto"    # "auto", "standalone", "sls"
 
     while [ $# -gt 0 ]; do
         case "$1" in
             --engine)
                 shift
-                if [ "${1:-}" = "depot" ]; then
-                    echo "[WARN] DepotDownloader is deprecated and removed. Routing to native Steam CDN engine." >&2
-                fi
+                case "${1:-}" in
+                    depot)
+                        echo "[WARN] DepotDownloader is deprecated and removed. Routing to native Steam CDN engine." >&2
+                        ;;
+                    steam|sls)
+                        engine="sls"
+                        ;;
+                    standalone|direct)
+                        engine="standalone"
+                        ;;
+                esac
                 ;;
             --engine=*)
-                if [ "${1#--engine=}" = "depot" ]; then
-                    echo "[WARN] DepotDownloader is deprecated and removed. Routing to native Steam CDN engine." >&2
-                fi
+                local eng_val="${1#--engine=}"
+                case "$eng_val" in
+                    depot)
+                        echo "[WARN] DepotDownloader is deprecated and removed. Routing to native Steam CDN engine." >&2
+                        ;;
+                    steam|sls)
+                        engine="sls"
+                        ;;
+                    standalone|direct)
+                        engine="standalone"
+                        ;;
+                esac
+                ;;
+            --sls|--steam)
+                engine="sls"
+                ;;
+            --direct|--no-steam)
+                engine="standalone"
+                ;;
+            --standalone)
+                engine="standalone"
                 ;;
             --headless)
-                echo "[WARN] DepotDownloader is deprecated and removed. Routing to native Steam CDN engine." >&2
+                engine="standalone"
                 ;;
             --source)
                 shift
@@ -759,7 +817,7 @@ download_game() {
             --raw|--download-only|--no-inject)
                 action="raw"
                 ;;
-            --inject-only|--standalone|--no-sync)
+            --inject-only|--no-sync)
                 action="inject"
                 ;;
             --all)
@@ -787,6 +845,134 @@ download_game() {
         [ -z "$title" ] && title="AppID_${appid}"
     fi
 
+    # Auto-resolve engine preference
+    if [ "$engine" = "auto" ]; then
+        if [ "$action" = "inject" ]; then
+            engine="sls"
+        elif resolve_depot_dl_bin >/dev/null 2>&1; then
+            engine="standalone"
+        else
+            engine="sls"
+        fi
+    fi
+
+    # Verify standalone binary availability with graceful fallback
+    if [ "$engine" = "standalone" ]; then
+        local dl_bin
+        dl_bin="$(resolve_depot_dl_bin 2>/dev/null || true)"
+        if [ -z "$dl_bin" ] || [ ! -x "$dl_bin" ]; then
+            echo "[WARN] Standalone downloader binary (gamectl-depot-dl) not found. Falling back to SLSsteam engine." >&2
+            engine="sls"
+        fi
+    fi
+
+    # Route 1: Standalone Native Steam CDN Engine (Zero Steam Client required)
+    if [ "$engine" = "standalone" ]; then
+        local manifest_zip
+        echo "[INFO] Manifest archive not provided. Attempting automatic harvest (source: $source)..." >&2
+        manifest_zip=$(fetch_manifest "$appid" "" "$source" 2>/dev/null || true)
+        if [ -z "$manifest_zip" ] || [ ! -f "$manifest_zip" ]; then
+            echo "[ERROR] Manifest archive for AppID $appid could not be acquired across providers." >&2
+            return 1
+        fi
+
+        if ! validate_manifest_zip "$manifest_zip" "$appid"; then
+            echo "[ERROR] Manifest zip validation failed: $manifest_zip" >&2
+            return 1
+        fi
+
+        local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+        local stage_dir="$run_dir/depot_dl_${appid}_$$"
+        mkdir -p -m 700 "$stage_dir"
+        trap 'rm -rf "$stage_dir" 2>/dev/null || true' RETURN
+
+        if ! unzip -q "$manifest_zip" -d "$stage_dir" 2>/dev/null; then
+            echo "[ERROR] Failed to unpack manifest archive: $manifest_zip" >&2
+            return 1
+        fi
+
+        local staged_lua=""
+        if [ -f "$stage_dir/${appid}.lua" ]; then
+            staged_lua="$stage_dir/${appid}.lua"
+        else
+            shopt -s nullglob globstar
+            local cand_luas=("$stage_dir"/**/*.lua "$stage_dir"/*.lua)
+            shopt -u nullglob globstar
+            [ "${#cand_luas[@]}" -eq 1 ] && staged_lua="${cand_luas[0]}"
+        fi
+
+        declare -A depot_keys=()
+        if [ -n "$staged_lua" ] && [ -f "$staged_lua" ]; then
+            local re_key='addappid\([[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*[0-9]+[[:space:]]*,[[:space:]]*"([0-9a-fA-F]{64})"'
+            while IFS= read -r line || [ -n "$line" ]; do
+                if [[ "$line" =~ $re_key ]]; then
+                    depot_keys["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
+                fi
+            done < "$staged_lua"
+        fi
+
+        local depot_args=()
+        shopt -s nullglob globstar
+        local mf_files=("$stage_dir"/**/*.manifest "$stage_dir"/*.manifest)
+        declare -A seen_mf=()
+        for mf in "${mf_files[@]}"; do
+            [ -f "$mf" ] || continue
+            local mf_name="$(basename "$mf")"
+            [[ -v seen_mf["$mf_name"] ]] && continue
+            seen_mf["$mf_name"]=1
+
+            if manifest_has_payload_magic "$mf"; then
+                if [[ "$mf_name" =~ ^([0-9]+)_([0-9]+)\.manifest$ ]]; then
+                    local did="${BASH_REMATCH[1]}"
+                    local key="${depot_keys["$did"]:-}"
+                    if [ -n "$key" ]; then
+                        depot_args+=(--depot "$mf:$key")
+                    else
+                        echo "[WARN] No AES decryption key found for depot $did ($mf_name). Skipping." >&2
+                    fi
+                fi
+            fi
+        done
+        shopt -u nullglob globstar
+
+        if [ "${#depot_args[@]}" -eq 0 ]; then
+            echo "[WARN] No encrypted manifests with valid AES keys found. Falling back to SLSsteam engine." >&2
+            engine="sls"
+        else
+            if [ -z "$target_dir" ]; then
+                target_dir="$(resolve_target_library_dir "$title")"
+            fi
+            mkdir -p "$target_dir"
+
+            echo "=========================================="
+            echo " STEAM STANDALONE CDN ENGINE (gamectl-depot-dl)"
+            echo "=========================================="
+            echo " AppID      : $appid"
+            echo " Title      : $title"
+            echo " Target Dir : $target_dir"
+            echo " Depots     : $(( ${#depot_args[@]} / 2 ))"
+            echo " Engine     : Native Rust Standalone (Zero Steam Client)"
+            echo "=========================================="
+
+            local dl_bin
+            dl_bin="$(resolve_depot_dl_bin)"
+            if ! "$dl_bin" --app "$appid" --dir "$target_dir" "${depot_args[@]}"; then
+                echo "[ERROR] Standalone CDN download failed." >&2
+                return 1
+            fi
+
+            if [ "$action" != "raw" ]; then
+                fetch_dlc "$target_dir" "$appid" 2>/dev/null || true
+                sync_steam "$appid" "$title" "$target_dir" 2>/dev/null || true
+                deploy_sls_manifest "$appid" "$manifest_zip" "$title" "$source" 2>/dev/null || true
+            fi
+
+            echo "[SUCCESS] Standalone download & provisioning complete for $title ($appid) in $target_dir."
+            return 0
+        fi
+    fi
+
+    # Route 2: SLSsteam Native Content Engine (Steam Client URI install)
     echo "=========================================="
     echo " STEAM NATIVE CONTENT ENGINE (SLSsteam-Moon)"
     echo "=========================================="
@@ -799,7 +985,9 @@ download_game() {
 
     if deploy_sls_manifest "$appid" "" "$title" "$source"; then
         echo "[SUCCESS] SLSsteam manifests and stplug-in keys provisioned for $title ($appid)."
-        trigger_steam_install "$appid"
+        if [ "$action" != "inject" ]; then
+            trigger_steam_install "$appid"
+        fi
         return 0
     else
         echo "[ERROR] Manifest archive and keys for AppID $appid could not be acquired across providers." >&2

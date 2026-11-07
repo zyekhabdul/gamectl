@@ -1,5 +1,5 @@
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader resolve_target_library_dir detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client
+export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -231,7 +231,7 @@ case "${1:-}" in
         if [ -n "${2:-}" ]; then
             download_game "$2" "${@:3}"
         else
-            echo "Usage: gamectl download <appid> [dir] [title] [--source <auto|...>] [--raw|--inject-only|--all]"
+            echo "Usage: gamectl download <appid> [dir] [title] [--source <auto|...>] [--raw|--inject-only|--all|--standalone|--sls]"
             exit 1
         fi
         ;;
@@ -327,8 +327,8 @@ Usage:
                       Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]
                       Configure per-game wrappers (GameMode/MangoHud/Gamescope FSR/MesaGL)
-  gamectl download <appid> [dir] [title] [--source <auto|...>] [--raw|--inject-only|--all]
-                      Download game via SLSsteam native CDN (High-Speed Valve Content Servers)
+  gamectl download <appid> [dir] [title] [--source <auto|...>] [--raw|--inject-only|--all|--standalone|--sls]
+                      Download game via native Valve CDN (standalone zero-client or SLSsteam)
   gamectl downloads   Monitor active & recent downloads (Steam ACF telemetry)
   gamectl fetch-manifest <appid> [dest] [source]
                       Harvest manifest archive across Ryuu/Sushi/LuaTools providers
