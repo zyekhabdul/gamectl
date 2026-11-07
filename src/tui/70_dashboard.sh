@@ -445,22 +445,24 @@ library_menu() {
 
 # Live Steam Search View (Actionable TUI Search)
 search_steam() {
-    local query_raw="" fzf_rc=0
-    query_raw=$(: | fzf \
-        --print-query \
-        --border-label="  ╢ gamectl :: Steam Store Search ╟  " \
-        --border-label-pos=2 \
-        --header="Type game title to search (Enter: Search │ Esc: Cancel)" \
-        --prompt="Search Store > " \
-        --height=20% \
-        --reverse 2>/dev/null) || fzf_rc=$?
+    local query="${1:-}"
+    if [ -z "$query" ]; then
+        local query_raw="" fzf_rc=0
+        query_raw=$(: | fzf \
+            --print-query \
+            --border-label="  ╢ gamectl :: Steam Store Search ╟  " \
+            --border-label-pos=2 \
+            --header="Type game title to search (Enter: Search │ Esc: Cancel)" \
+            --prompt="Search Store > " \
+            --height=20% \
+            --reverse 2>/dev/null) || fzf_rc=$?
 
-    # Only abort if user cancelled via ESC or Ctrl-C (exit status 130)
-    [ "$fzf_rc" -eq 130 ] && return 0
+        # Only abort if user cancelled via ESC or Ctrl-C (exit status 130)
+        [ "$fzf_rc" -eq 130 ] && return 0
 
-    local query
-    query=$(echo "$query_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    [ -z "$query" ] && return 0
+        query=$(echo "$query_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        [ -z "$query" ] && return 0
+    fi
 
     echo "[INFO] Searching '$query' on Steam Store API..."
     local encoded_query

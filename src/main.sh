@@ -295,8 +295,8 @@ case "${1:-}" in
             backup_save "$2"
         fi
         ;;
-    --search)
-        search_steam
+    search|--search)
+        search_steam "${2:-}"
         ;;
     --sync|sync|sync-remote|sync-companion|sync-tuf)
         if [ -n "${2:-}" ]; then
@@ -377,7 +377,8 @@ Usage:
   gamectl detect-gpu       Audit and print detected secondary discrete GPU vendor
   gamectl check-scope      Check if cgroups v2 / systemd-run user scope isolation is supported
   gamectl check-sandbox    Check if bubblewrap (bwrap) rootless security sandbox is available
-  gamectl --search    Search Steam Store catalog & audit ProtonDB rating
+  gamectl search [query]   Search Steam Store catalog & audit ProtonDB rating
+  gamectl --search         Search Steam Store catalog (interactive TUI prompt)
   gamectl --list      Print detected installed games list
   gamectl list-formatted  Print formatted games list with ANSI badges
   gamectl --sync <dir> [title] [host]  Sync saves to remote companion host
