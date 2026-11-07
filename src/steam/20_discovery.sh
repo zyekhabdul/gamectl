@@ -249,6 +249,11 @@ scan_installed_games() {
         )
 
         # Allow extending library directories via ~/.config/gamectl/libraries or env
+        if [ -f "$HOME/.config/gamectl/library_dir" ]; then
+            local p_lib
+            p_lib=$(head -n 1 "$HOME/.config/gamectl/library_dir" 2>/dev/null | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            [ -n "$p_lib" ] && custom_search_dirs+=("${p_lib/#\~/$HOME}")
+        fi
         if [ -f "$HOME/.config/gamectl/libraries" ]; then
             while IFS= read -r line || [ -n "$line" ]; do
                 line="${line#"${line%%[![:space:]]*}"}" # trim leading
@@ -259,6 +264,9 @@ scan_installed_games() {
             done < "$HOME/.config/gamectl/libraries"
         fi
 
+        if [ -n "${GAMECTL_LIBRARY_DIR:-}" ]; then
+            custom_search_dirs+=("${GAMECTL_LIBRARY_DIR/#\~/$HOME}")
+        fi
         if [ -n "${GAMECTL_LIBRARY_DIRS:-}" ]; then
             IFS=":" read -r -a extra_dirs <<< "$GAMECTL_LIBRARY_DIRS"
             custom_search_dirs+=("${extra_dirs[@]}")
@@ -732,8 +740,8 @@ add_steam_shortcut() {
             gamectl_bin="$HOME/.local/bin/gamectl"
         elif [ -x "/usr/local/bin/gamectl" ]; then
             gamectl_bin="/usr/local/bin/gamectl"
-        elif [ -x "$REPO_ROOT/bin/gamectl" ]; then
-            gamectl_bin="$REPO_ROOT/bin/gamectl"
+        elif [ -x "${REPO_ROOT:-}/bin/gamectl" ]; then
+            gamectl_bin="${REPO_ROOT:-}/bin/gamectl"
         else
             gamectl_bin="gamectl"
         fi

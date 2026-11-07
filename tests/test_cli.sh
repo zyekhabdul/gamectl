@@ -141,7 +141,17 @@ test_list_formatted() {
 run_test "Formatted Game Library List (list-formatted)" test_list_formatted
 
 test_doctor_audit() {
-    "$GAMECTL" doctor >/dev/null
+    local t_gbe
+    t_gbe=$(mktemp -d)
+    touch "$t_gbe/libsteam_api.so" "$t_gbe/steam_api64.dll" "$t_gbe/steam_api.dll"
+    local rc=0
+    GAMECTL_GBE_X64="$t_gbe/libsteam_api.so" \
+    GAMECTL_GBE_X86="$t_gbe/libsteam_api.so" \
+    GAMECTL_GBE_WIN_X64="$t_gbe/steam_api64.dll" \
+    GAMECTL_GBE_WIN_X86="$t_gbe/steam_api.dll" \
+    "$GAMECTL" doctor >/dev/null || rc=$?
+    rm -rf "$t_gbe"
+    [ "$rc" -eq 0 ]
 }
 run_test "7-Layer Health Diagnostics Audit (doctor)" test_doctor_audit
 
@@ -649,10 +659,19 @@ run_test "Security Sandboxing: Rootless Bubblewrap (bwrap) isolation profile" te
 test_optimized_library_scanner() {
     local r_uid="${UID:-$(id -u)}"
     local c_file="${XDG_RUNTIME_DIR:-/tmp/gamectl-$r_uid}/scancache.tab"
+    local t_games
+    t_games=$(mktemp -d)
+    mkdir -p "$t_games/MockScannerGame"
+    touch "$t_games/MockScannerGame/game.exe"
     rm -f "$c_file"
-    "$GAMECTL" --list --refresh >/dev/null 2>&1
-    [ -f "$c_file" ] && [ -s "$c_file" ] && \
-    grep -qE '^(STANDALONE|[0-9]+)[[:space:]]' "$c_file"
+    local rc=0
+    GAMECTL_LIBRARY_DIR="$t_games" "$GAMECTL" --list --refresh >/dev/null 2>&1 || rc=$?
+    local cache_ok=0
+    if [ "$rc" -eq 0 ] && [ -f "$c_file" ] && [ -s "$c_file" ]; then
+        grep -qE '^(STANDALONE|[0-9]+)[[:space:]]' "$c_file" && cache_ok=1
+    fi
+    rm -rf "$t_games"
+    [ "$cache_ok" -eq 1 ]
 }
 run_test "Library Scanner Optimization: Single-pass parser & runtime disk cache" test_optimized_library_scanner
 

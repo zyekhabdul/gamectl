@@ -12,12 +12,6 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CRATE_DIR="$REPO_ROOT/crates/depot-dl"
 OUTPUT_DIR="$REPO_ROOT/bin"
 
-if ! command -v cargo >/dev/null 2>&1; then
-    echo "[ERROR] Cargo / Rust toolchain not found on PATH." >&2
-    echo "        Please install rustup / cargo to compile gamectl-depot-dl." >&2
-    exit 1
-fi
-
 TARGET_TRIPLE=""
 BUILD_PROFILE="release"
 PROFILE_FLAG="--release"
@@ -68,6 +62,17 @@ if [ "$CHECK_ONLY" = true ]; then
         echo "[FAIL] $OUTPUT_NAME missing or not executable at $OUTPUT_DIR/$OUTPUT_NAME" >&2
         exit 1
     fi
+fi
+
+if ! command -v cargo >/dev/null 2>&1; then
+    if [ -f "$OUTPUT_DIR/$OUTPUT_NAME" ] && [ "$FORCE" = false ]; then
+        echo "[WARN] Cargo / Rust toolchain not found on PATH." >&2
+        echo "       Preserving validated pre-existing binary at: $OUTPUT_DIR/$OUTPUT_NAME" >&2
+        exit 0
+    fi
+    echo "[ERROR] Cargo / Rust toolchain not found on PATH." >&2
+    echo "        Please install rustup / cargo to compile gamectl-depot-dl." >&2
+    exit 1
 fi
 
 CARGO_ARGS=("build" "--bin" "gamectl-depot-dl")
