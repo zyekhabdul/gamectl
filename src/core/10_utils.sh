@@ -222,3 +222,54 @@ find_game_binary() {
 
     return 1
 }
+
+# Resolve sovereign library path prioritizing explicit arg, env, config, and default $HOME/Games
+resolve_standalone_library_dir() {
+    local safe_title="${1:-}"
+    local explicit_dir="${2:-}"
+
+    local base_dir=""
+    if [ -n "$explicit_dir" ]; then
+        base_dir="$explicit_dir"
+    elif [ -n "${GAMECTL_LIBRARY_DIR:-}" ]; then
+        base_dir="$GAMECTL_LIBRARY_DIR"
+    elif [ -f "$HOME/.config/gamectl/library_dir" ]; then
+        local cfg_dir
+        cfg_dir=$(head -n 1 "$HOME/.config/gamectl/library_dir" 2>/dev/null | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        if [ -n "$cfg_dir" ]; then
+            base_dir="${cfg_dir/#\~/$HOME}"
+        fi
+    fi
+
+    if [ -z "$base_dir" ]; then
+        base_dir="$HOME/Games"
+    fi
+
+    if [ -n "$safe_title" ]; then
+        echo "$base_dir/$safe_title"
+    else
+        echo "$base_dir"
+    fi
+}
+
+# Detect SteamStub DRM wrapper in Linux ELF (.bind section) or Windows PE
+detect_steamstub_drm() {
+    local bin_path="$1"
+    [ -f "$bin_path" ] || return 1
+
+    # Check 1: Linux ELF .bind section (readelf or strings)
+    if command -v readelf >/dev/null 2>&1; then
+        if readelf -S "$bin_path" 2>/dev/null | grep -Eq '(\.bind|[[:space:]]\.bind[[:space:]])'; then
+            return 0
+        fi
+    fi
+
+    # Check 2: Strings heuristic for SteamStub / SteamDRM markers
+    if command -v strings >/dev/null 2>&1; then
+        if strings -n 6 "$bin_path" 2>/dev/null | head -n 500 | grep -Eq '(SteamDRM|\.bind|SteamStub)'; then
+            return 0
+        fi
+    fi
+
+    return 1
+}

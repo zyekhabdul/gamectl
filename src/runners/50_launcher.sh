@@ -319,13 +319,28 @@ launch_game() {
 
     cd "$gdir"
 
+    # Pre-flight SteamStub DRM inspection
+    if [ -f "$gdir/$gbin" ] && detect_steamstub_drm "$gdir/$gbin"; then
+        echo "  ${UI_AMBER}[WARN] SteamStub DRM (.bind) detected on binary ($gbin).${UI_RST}"
+        echo "  ${UI_DIM}       Valve stub wrapper may intercept execution without active Steam or Steamless unpacking.${UI_RST}"
+    fi
+
     # Pre-flight GBE auto-injection: Ensure game is shielded before execution
     local has_steam_api=false
     local is_gbe=false
     local api_cand
-    for api_cand in \
-        "$gdir/steam_api64.dll" "$gdir/steam_api.dll" "$gdir/libsteam_api.so" \
-        "$gdir/lib64/libsteam_api.so" "$gdir/lib32/libsteam_api.so"; do
+    local bin_sub=""
+    [ -n "$gbin" ] && [ -f "$gdir/$gbin" ] && bin_sub="$(dirname "$gdir/$gbin")"
+
+    local probe_candidates=(
+        "$gdir/steam_api64.dll" "$gdir/steam_api.dll" "$gdir/libsteam_api.so"
+        "$gdir/lib64/libsteam_api.so" "$gdir/lib32/libsteam_api.so"
+    )
+    if [ -n "$bin_sub" ] && [ "$bin_sub" != "$gdir" ] && [ -d "$bin_sub" ]; then
+        probe_candidates+=("$bin_sub/steam_api64.dll" "$bin_sub/steam_api.dll" "$bin_sub/libsteam_api.so")
+    fi
+
+    for api_cand in "${probe_candidates[@]}"; do
         if [ -f "$api_cand" ]; then
             has_steam_api=true
             local c_sz
@@ -806,7 +821,8 @@ EOF
     fi
 
     # 4. Setup isolated portable saves folder and markers
-    mkdir -p "$target_dir/saves"
+    mkdir -p -m 700 "$target_dir/saves"
+    chmod 700 "$target_dir/saves" 2>/dev/null || true
     echo -n "saves" > "$target_dir/local_save.txt"
     if [ "$primary_shim_dir" != "$target_dir" ] && [ -d "$primary_shim_dir" ]; then
         echo -n "saves" > "$primary_shim_dir/local_save.txt" 2>/dev/null || true

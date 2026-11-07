@@ -42,6 +42,36 @@ fetch_dlc() {
         fi
     fi
 
+    # Fallback 2: Offline local Lua manifest harvesting
+    if [ -z "$dlc_data" ]; then
+        local lua_candidates=()
+        [ -f "$target_dir/${appid}.lua" ] && lua_candidates+=("$target_dir/${appid}.lua")
+        shopt -s nullglob
+        for f in "$target_dir"/*.lua; do [ -f "$f" ] && lua_candidates+=("$f"); done
+        shopt -u nullglob
+        local stplug_dir
+        stplug_dir="$(get_steam_stplug_in_dir 2>/dev/null || echo "$HOME/.local/share/Steam/config/stplug-in")"
+        [ -f "$stplug_dir/${appid}.lua" ] && lua_candidates+=("$stplug_dir/${appid}.lua")
+        [ -f "$HOME/.config/SLSsteam/manifests/${appid}.lua" ] && lua_candidates+=("$HOME/.config/SLSsteam/manifests/${appid}.lua")
+        local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+        [ -f "$run_dir/${appid}.lua" ] && lua_candidates+=("$run_dir/${appid}.lua")
+
+        declare -A seen_dlc=()
+        for cand_lua in "${lua_candidates[@]}"; do
+            [ -f "$cand_lua" ] || continue
+            while read -r parsed_id; do
+                [ -n "$parsed_id" ] || continue
+                [ "$parsed_id" = "$appid" ] && continue
+                [[ -v seen_dlc["$parsed_id"] ]] && continue
+                seen_dlc["$parsed_id"]=1
+                dlc_data+="${parsed_id}=DLC_${parsed_id}"$'\n'
+            done < <(grep -E 'addappid[[:space:]]*\([[:space:]]*[0-9]+' "$cand_lua" 2>/dev/null | sed -E 's/.*addappid[[:space:]]*\([[:space:]]*([0-9]+).*/\1/')
+        done
+        if [ -n "$dlc_data" ]; then
+            echo "[INFO] Offline fallback: Discovered $(( ${#seen_dlc[@]} )) DLC(s) from local Lua manifests."
+        fi
+    fi
+
     if [ -n "$dlc_data" ]; then
         echo -n "$dlc_data" > "$dlc_file"
         # Ensure trailing newline
@@ -647,6 +677,15 @@ resolve_target_library_dir() {
     local safe_title="${1:-game}"
     local candidate_dirs=()
 
+    # 0. Primary sovereign library override
+    if [ -n "${GAMECTL_LIBRARY_DIR:-}" ]; then
+        candidate_dirs+=("$GAMECTL_LIBRARY_DIR")
+    elif [ -f "$HOME/.config/gamectl/library_dir" ]; then
+        local p_lib
+        p_lib=$(head -n 1 "$HOME/.config/gamectl/library_dir" 2>/dev/null | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        [ -n "$p_lib" ] && candidate_dirs+=("${p_lib/#\~/$HOME}")
+    fi
+
     # 1. Custom libraries from config
     local cfg_libs="$HOME/.config/gamectl/libraries"
     if [ -f "$cfg_libs" ]; then
@@ -765,9 +804,9 @@ download_game() {
 
     local target_dir=""
     local title=""
-    local action="all"     # "all", "inject", "raw"
-    local source="auto"    # "auto", "ryuu", "sushi", "luatools"
-    local engine="auto"    # "auto", "standalone", "sls"
+    local action="all"          # "all", "inject", "raw"
+    local source="auto"         # "auto", "ryuu", "sushi", "luatools"
+    local engine="standalone"   # Default to Pure Standalone CDN engine (Zero Steam Client)
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -944,7 +983,7 @@ download_game() {
             engine="sls"
         else
             if [ -z "$target_dir" ]; then
-                target_dir="$(resolve_target_library_dir "$title")"
+                target_dir="$(resolve_standalone_library_dir "$title")"
             fi
             mkdir -p "$target_dir"
 

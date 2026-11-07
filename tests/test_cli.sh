@@ -1238,6 +1238,136 @@ test_fix_install_and_revert_lifecycle_contract() {
 }
 run_test "Fix Harvester: fix-install & fix-revert end-to-end lifecycle" test_fix_install_and_revert_lifecycle_contract
 
+test_resolve_standalone_library_dir_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    # 1. Explicit directory argument priority
+    local res1
+    res1=$(resolve_standalone_library_dir "MyGame" "/mnt/custom_games")
+    [ "$res1" = "/mnt/custom_games/MyGame" ] || return 1
+
+    # 2. Environment variable priority
+    local res2
+    GAMECTL_LIBRARY_DIR="/mnt/fast_nvme" res2=$(resolve_standalone_library_dir "MyGame")
+    [ "$res2" = "/mnt/fast_nvme/MyGame" ] || return 1
+
+    # 3. Default sovereign directory fallback ($HOME/Games)
+    local res3
+    unset GAMECTL_LIBRARY_DIR
+    res3=$(resolve_standalone_library_dir "MyGame")
+    [ "$res3" = "$HOME/Games/MyGame" ] || return 1
+
+    # 4. CLI wrapper contract
+    local res4
+    res4=$("$GAMECTL" resolve-standalone-library "MyGame" 2>/dev/null || true)
+    [ "$res4" = "$HOME/Games/MyGame" ] || return 1
+    return 0
+}
+run_test "Sovereign Library Resolution: Priority order & CLI subcommand contract" test_resolve_standalone_library_dir_contract
+
+test_detect_steamstub_drm_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_stub_test_XXXXXX")
+
+    # 1. Nonexistent file returns 1
+    detect_steamstub_drm "$t_dir/nonexistent" && { rm -rf "$t_dir"; return 1; }
+
+    # 2. Clean binary returns 1
+    printf '\x7fELF\x01\x01\x01\x00' > "$t_dir/clean_elf"
+    detect_steamstub_drm "$t_dir/clean_elf" && { rm -rf "$t_dir"; return 1; }
+
+    # 3. Mock binary containing SteamDRM / .bind marker returns 0
+    printf '\x7fELF\x01\x01\x01\x00\x00\x00SteamDRM_header_test' > "$t_dir/stub_elf"
+    detect_steamstub_drm "$t_dir/stub_elf" || { rm -rf "$t_dir"; return 1; }
+
+    # 4. Real binary test if Boson X is installed on host
+    local real_boson="$HOME/.local/share/Steam/steamapps/common/Boson X/bosonx"
+    if [ -f "$real_boson" ]; then
+        detect_steamstub_drm "$real_boson" || { rm -rf "$t_dir"; return 1; }
+    fi
+
+    # 5. CLI subcommand invocation
+    "$GAMECTL" detect-steamstub "$t_dir/stub_elf" >/dev/null 2>&1 || { rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    return 0
+}
+run_test "SteamStub DRM Inspector: .bind ELF and PE marker detection contract" test_detect_steamstub_drm_contract
+
+test_fetch_dlc_offline_fallback_contract() {
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_dlc_test_XXXXXX")
+
+    # Scaffold mock game directory with local Lua manifest containing DLC entitlements
+    local test_appid="302610"
+    cat << 'EOF_LUA' > "$t_dir/302610.lua"
+addappid(302610)
+addappid(302611, 1, "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
+addappid(302612, 1, "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff")
+EOF_LUA
+
+    # Override curl in subshell to simulate 100% air-gapped / offline environment
+    local dlc_file="$t_dir/steam_settings/DLC.txt"
+    (
+        curl() { return 7; }
+        export -f curl
+        fetch_dlc "$t_dir" "$test_appid" >/dev/null 2>&1
+    )
+
+    [ -f "$dlc_file" ] || { rm -rf "$t_dir"; return 1; }
+    grep -q "302611=DLC_302611" "$dlc_file" || { rm -rf "$t_dir"; return 1; }
+    grep -q "302612=DLC_302612" "$dlc_file" || { rm -rf "$t_dir"; return 1; }
+    ! grep -q "^302610=" "$dlc_file" || { rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    return 0
+}
+run_test "Offline DLC Harvester: Air-gapped fallback to local Lua manifest" test_fetch_dlc_offline_fallback_contract
+
+test_download_game_default_standalone_engine_contract() {
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    local test_root="${TEST_TMP_DIR:-/tmp}/dl_orch_default_engine_test_$$"
+    local test_target="$test_root/games/DefaultTitle"
+    local test_cache="$test_root/cache"
+    mkdir -p "$test_root" "$test_cache/gamectl/manifests"
+
+    local test_zip="$test_cache/gamectl/manifests/99997.zip"
+    local stage_m="$test_root/stage_manifest"
+    mkdir -p "$stage_m"
+    printf "\xd0\x17\xf6\x71" > "$stage_m/99997_1.manifest"
+    cat << 'EOF_LUA' > "$stage_m/99997.lua"
+addappid(99997, 1, "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
+EOF_LUA
+    (cd "$stage_m" && zip -q -0 "$test_zip" 99997_1.manifest 99997.lua)
+    rm -rf "$stage_m"
+
+    local mock_bin="$test_root/mock_depot_dl"
+    cat << 'MOCK' > "$mock_bin"
+#!/usr/bin/env bash
+echo "MOCK_DEPOT_DL_INVOKED: $*"
+exit 0
+MOCK
+    chmod +x "$mock_bin"
+    export GAMECTL_DEPOT_DL_BIN="$mock_bin"
+    export XDG_CACHE_HOME="$test_cache"
+
+    # Invoke download_game WITHOUT any --engine or --sls flag
+    local out
+    out=$(download_game "99997" "$test_target" "DefaultTitle")
+    local rc=$?
+
+    rm -rf "$test_root"
+    unset GAMECTL_DEPOT_DL_BIN XDG_CACHE_HOME
+
+    [ "$rc" -eq 0 ] || return 1
+    echo "$out" | grep -q 'STEAM STANDALONE CDN ENGINE' || return 1
+    echo "$out" | grep -q 'Engine     : Native Rust Standalone' || return 1
+    return 0
+}
+run_test "Download Orchestrator: download_game defaults to Pure Standalone CDN engine" test_download_game_default_standalone_engine_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

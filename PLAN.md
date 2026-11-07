@@ -86,10 +86,10 @@ Merespon hasil postmortem insiden blunder "PURCHASE" (INC-2026-11-07) dan ratifi
 ---
 
 ## 3. Matriks Milestone (Work Packet 15)
-- [ ] Chunk 1: Sovereign Library Path Resolution [PENDING]
-- [ ] Chunk 2: Offline-Resilient DLC Harvester [PENDING]
-- [ ] Chunk 3: SteamStub DRM Inspector & Pre-Flight Warning [PENDING]
-- [ ] Chunk 4: Pre-Flight GBE Auto-Injection Hardening [PENDING]
-- [ ] Chunk 5: Standalone Savegame Redirection & Snapshot Isolation [PENDING]
-- [ ] Chunk 6: CLI Engine Decoupling (`--standalone` Default) [PENDING]
-- [ ] Chunk 7: Regression Harness Expansion & Machine Verification [PENDING]
+- [x] Chunk 1: Sovereign Library Path Resolution [VERIFIED]
+- [x] Chunk 2: Offline-Resilient DLC Harvester [VERIFIED]
+- [x] Chunk 3: SteamStub DRM Inspector & Pre-Flight Warning [VERIFIED]
+- [x] Chunk 4: Pre-Flight GBE Auto-Injection Hardening [VERIFIED]
+- [x] Chunk 5: Standalone Savegame Redirection & Snapshot Isolation [VERIFIED]
+- [x] Chunk 6: CLI Engine Decoupling (`--standalone` Default) [VERIFIED]
+- [x] Chunk 7: Regression Harness Expansion & Machine Verification [VERIFIED]

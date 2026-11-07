@@ -63,6 +63,9 @@ preview_game() {
         local arch_info
         arch_info=$(file -b "$gdir/$gbin" | cut -d',' -f1,2)
         echo "  ${UI_CYAN}Architecture${UI_RST}: ${UI_DIM}$arch_info${UI_RST}"
+        if detect_steamstub_drm "$gdir/$gbin"; then
+            echo "  ${UI_CYAN}DRM Stub    ${UI_RST}: ${UI_AMBER}[SteamStub .bind]${UI_RST} ${UI_DIM}(Valve Binary Stub Detected)${UI_RST}"
+        fi
         local is_win=false
         case "$gbin" in *.exe|*.EXE) is_win=true ;; esac
         if [ "$is_win" = false ] && file -b "$gdir/$gbin" 2>/dev/null | grep -qi "PE32"; then
