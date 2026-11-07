@@ -889,6 +889,75 @@ test_resolve_depot_dl_bin_contract() {
 }
 run_test "Download Orchestrator: resolve_depot_dl_bin precedence & path contract" test_resolve_depot_dl_bin_contract
 
+test_colocated_depot_dl_bin_contract() {
+    local test_root="${TEST_TMP_DIR:-/tmp}/colocated_bin_test_$$"
+    mkdir -p "$test_root"
+    local mock_script="$test_root/mock_module.sh"
+    local mock_bin="$test_root/gamectl-depot-dl"
+    touch "$mock_bin" && chmod +x "$mock_bin"
+
+    cat <<'EOF' > "$mock_script"
+resolve_depot_dl_bin() {
+    if [ -n "${GAMECTL_DEPOT_DL_BIN:-}" ] && [ -x "$GAMECTL_DEPOT_DL_BIN" ]; then
+        echo "$GAMECTL_DEPOT_DL_BIN"
+        return 0
+    fi
+    local candidate
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || echo "")"
+    for candidate in \
+        "$script_dir/gamectl-depot-dl" \
+        "$script_dir/../../bin/gamectl-depot-dl" \
+        "$script_dir/../bin/gamectl-depot-dl" \
+        "$script_dir/bin/gamectl-depot-dl" \
+        "$HOME/.local/bin/gamectl-depot-dl" \
+        "/usr/local/bin/gamectl-depot-dl" \
+        "/usr/bin/gamectl-depot-dl"; do
+        if [ -x "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+EOF
+    source "$mock_script"
+    unset GAMECTL_DEPOT_DL_BIN
+    local resolved
+    resolved=$(resolve_depot_dl_bin)
+    rm -rf "$test_root"
+
+    [ "$resolved" = "$mock_bin" ]
+}
+run_test "Download Orchestrator: resolve_depot_dl_bin co-located path contract" test_colocated_depot_dl_bin_contract
+
+test_lua_manifest_quotes_regex_contract() {
+    local test_root="${TEST_TMP_DIR:-/tmp}/lua_regex_test_$$"
+    mkdir -p "$test_root"
+    local lua_file="$test_root/manifest.lua"
+    cat <<'EOF' > "$lua_file"
+addappid(1001, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+addappid(1002, 1, 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210')
+addappid( 1003 , 2 , "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899" )
+addappid( 1004 , 3 , '11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff' )
+EOF
+
+    local re_key='addappid\([[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*[0-9]+[[:space:]]*,[[:space:]]*['\''"]([0-9a-fA-F]{64})['\''"]'
+    declare -A parsed_keys=()
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ "$line" =~ $re_key ]]; then
+            parsed_keys["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
+        fi
+    done < "$lua_file"
+    rm -rf "$test_root"
+
+    [ "${parsed_keys[1001]}" = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" ] && \
+    [ "${parsed_keys[1002]}" = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210" ] && \
+    [ "${parsed_keys[1003]}" = "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899" ] && \
+    [ "${parsed_keys[1004]}" = "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff" ]
+}
+run_test "Manifest Harvester: Lua AES key single and double quotes regex contract" test_lua_manifest_quotes_regex_contract
+
 test_download_game_standalone_mode_orchestration() {
     source "$REPO_ROOT/src/steam/20_discovery.sh"
     source "$REPO_ROOT/src/steam/30_downloader.sh"

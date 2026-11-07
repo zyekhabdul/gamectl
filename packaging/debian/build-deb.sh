@@ -44,6 +44,10 @@ fi
 # Install standalone binary and aliases
 cp "$PROJECT_ROOT/bin/gamectl" "$WORK_DIR/usr/bin/gamectl"
 chmod 755 "$WORK_DIR/usr/bin/gamectl"
+if [ -f "$PROJECT_ROOT/bin/gamectl-depot-dl" ]; then
+    cp "$PROJECT_ROOT/bin/gamectl-depot-dl" "$WORK_DIR/usr/bin/gamectl-depot-dl"
+    chmod 755 "$WORK_DIR/usr/bin/gamectl-depot-dl"
+fi
 ln -sf gamectl "$WORK_DIR/usr/bin/game"
 
 # Install shell completion

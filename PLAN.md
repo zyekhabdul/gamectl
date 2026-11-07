@@ -1,125 +1,95 @@
-# WORK PACKET 13: SLSSTEAM-MOON BACKEND ADOPTION & STANDALONE DOWNLOAD ARCHITECTURE [ACTIVE]
+# WORK PACKET 14: STANDALONE DEPOT DOWNLOADER HARDENING, PACKAGING & WINDOWS EXPANSION [ACTIVE]
 
 ## 1. Objective & Technical Scope
-Mengganti ketergantungan rapuh pada DepotDownloader eksternal (.NET GC heap tinggi, 401 unauthenticated rate-limit) dengan mengadopsi arsitektur backend SLSsteam-Moon / Lumen langsung ke dalam core `gamectl`:
-1. **Multi-Source Manifest Harvester (`fetch_manifest`)**: Pengambilan otomatis archive manifest (.manifest + AES keys) dari multi-mirror publik (lua.tools, Ryuu, Sushi, local stash) secara paralel dan deterministik dengan verifikasi payload magic `0xd017f671`.
-2. **SLSsteam Stplug-in & Manifest Linker (`deploy_sls_manifest`)**: Penempatan otomatis file `.manifest` ke `~/.config/SLSsteam/manifests/` & `depotcache/`, pembuatan skrip Lua `~/.local/share/Steam/config/stplug-in/<appid>.lua` (`addappid(depotid, 1, "AES_KEY")`), serta sinkronisasi entitlement `config.yaml`.
-3. **Dual-Mode Download Orchestrator**: Mode default Steam Native Background (`steam://install/<appid>`) dengan fallback ke engine standalone.
-4. **Real-time ACF Telemetry Monitor (`list_downloads`)**: Memantau progres unduhan presisi langsung dari `appmanifest_<appid>.acf` (`BytesDownloaded`, `BytesToDownload`, `StateFlags`).
-5. **Dashboard TUI & CLI Integration**: Integrasi kontrol download, pause/resume, dan post-install auto-injection GBE Fork pada TUI `gamectl`.
-6. **Machine Verification & Automated Regression Suite**: Memperbarui test suite `tests/test_cli.sh` (60+ assertions) dan memastikan `exit code 0` tanpa regresi.
+Memperkuat arsitektur Standalone Steam CDN Depot Downloader (`gamectl-depot-dl`), memperbaiki 5 defek temuan audit pasca-implementasi, menyelaraskan instalasi dan build system, serta mengekspansi kompatibilitas engine ke target Windows:
+1. **Source Code Tree Consolidation**: Memindahkan source Rust dari repositori referensi luar ke dalam repositori `gamectl` (`crates/depot-dl/` atau `src/rust/depot-dl/`) bersama script reproducible build `scripts/build-depot-dl.sh`.
+2. **Packaging & Installer Synchronization**: Memperbarui `install.sh`, `Makefile`, dan `packaging/debian/build-deb.sh` agar menyertakan `bin/gamectl-depot-dl` ke `$BIN_DIR` (`~/.local/bin/` / `/usr/bin/`).
+3. **Co-located Binary Path Resolution**: Menambahkan `"$script_dir/gamectl-depot-dl"` ke fungsi `resolve_depot_dl_bin` di `src/steam/30_downloader.sh`.
+4. **Resilient Lua Manifest Regex**: Memperbarui regex `addappid` agar mendukung petik tunggal (`'`) dan ganda (`"`), serta variasi whitespace/tab.
+5. **Terminal I/O Progress Throttling**: Mengoptimalkan progress event pada Rust binary agar tidak mencetak setiap file individual (`[FILE]`) yang memicu buffer flooding pada game puluhan ribu file.
+6. **Windows Path Sanitization & NTFS Limits**: Menambahkan normalisasi path separator POSIX-ke-Windows (`/` ke `\`), sanitasi karakter terlarang NTFS (`: * ? " < > |`), dan support `\\?\` prefix untuk bypass `MAX_PATH`.
+7. **Windows Cross-Compilation**: Mengompilasi binary release `bin/gamectl-depot-dl.exe` dengan target `x86_64-pc-windows-gnu`.
+8. **Regression Verification Harness**: Memperbarui `tests/test_cli.sh`, memastikan 100% assertions lulus dengan exit code 0.
 
 ---
 
-## 2. Granular Technical Execution Plan (Work Packet 13)
+## 2. Granular Technical Execution Plan (Work Packet 14)
 
-### Chunk 1: Multi-Provider Manifest Harvester (`fetch_manifest`) [DONE]
+### Chunk 1: Source Code Tree Integration & Build Automation [DONE]
+- Target Files: `crates/depot-dl/` (atau `src/rust/depot-dl/`), `scripts/build-depot-dl.sh`
+- Runtutan Eksekusi Teknis:
+  1. Buat direktori sub-crate `crates/depot-dl/` di repositori `gamectl`.
+  2. Salin `src/bin/gamectl-depot-dl.rs` dan konfigurasi `Cargo.toml` dari repo referensi ke dalam `crates/depot-dl/`.
+  3. Buat script automasi kompilasi `scripts/build-depot-dl.sh` untuk memproduksi binary release ke `bin/gamectl-depot-dl` secara reproducible.
+- DoD: Source code Rust terintegrasi di repo `gamectl` dan dapat dikompilasi ulang secara mandiri.
+
+### Chunk 2: Packaging & Installation Sync [DONE]
+- Target Files: `install.sh`, `Makefile`, `packaging/debian/build-deb.sh`
+- Runtutan Eksekusi Teknis:
+  1. Perbarui `install.sh`: pasang/symlink `bin/gamectl-depot-dl` ke `$BIN_DIR` jika binary tersedia.
+  2. Perbarui `Makefile`: sertakan `bin/gamectl-depot-dl` pada target `install` dan `uninstall`.
+  3. Perbarui `packaging/debian/build-deb.sh`: sertakan binary ke paket `.deb`.
+- DoD: Menjalankan `./install.sh` memasang kedua binary (`gamectl` dan `gamectl-depot-dl`) ke `$HOME/.local/bin`.
+
+### Chunk 3: Co-located Binary Path Resolution [DONE]
 - Target Files: `src/steam/30_downloader.sh`
 - Runtutan Eksekusi Teknis:
-  1. Implementasikan fungsi `fetch_manifest "$appid" [dest_dir]`:
-     - Periksa cache lokal terlebih dahulu: `${XDG_CACHE_HOME:-~/.cache}/gamectl/manifests/${appid}.zip`.
-     - Susun daftar kandidat provider secara terurut:
-       - Source 1 (Ryuu Mirror): `http://167.235.229.108/${appid}`
-       - Source 2 (Sushi Repo): `https://raw.githubusercontent.com/sushi-dev55-alt/sushitools-games-repo-alt/refs/heads/main/${appid}.zip`
-       - Source 3 (Lua.tools API): `https://lua.tools/api/manifest/download?appid=${appid}&source=Luie` (menggunakan Bearer token dari `~/.local/share/Lumen/luatools/backend/data/lua_tools_auth.json` jika tersedia).
-     - Jalankan unduhan kandidat dengan timeout ketat (10 detik) dan validasi HTTP status code 200.
-  2. Implementasikan validasi integritas archive:
-     - Cek apakah file merupakan valid ZIP (`unzip -tq`).
-     - Cegah path traversal (tolak archive dengan entri `..` atau absolute path `/`).
-     - Pastikan terdapat minimal satu file `.manifest` atau file `<appid>.lua`.
-     - Verifikasi Valve manifest payload magic signature `0xd017f671` pada file `.manifest`.
-  3. Kembalikan path zip tervalidasi ke caller.
-- DoD: Fungsi `fetch_manifest` berhasil mengunduh, memverifikasi, dan mengembalikan file manifest archive untuk AppID valid dengan exit code 0.
+  1. Tambahkan `"$script_dir/gamectl-depot-dl"` ke urutan teratas kandidat pencarian di `resolve_depot_dl_bin()`.
+  2. Pastikan binary yang diletakkan di direktori yang sama dengan `gamectl` langsung terdeteksi tanpa relying on `$PATH`.
+- DoD: Fungsi `resolve_depot_dl_bin` mendeteksi binary ketika diletakkan berdampingan di direktori custom manapun.
 
-### Chunk 2: SLSsteam Stplug-in & Manifest Linker (`deploy_sls_manifest`) [DONE]
-- Target Files: `src/steam/30_downloader.sh`, `src/steam/20_discovery.sh`
-- Runtutan Eksekusi Teknis:
-  1. Implementasikan fungsi `deploy_sls_manifest "$appid" "$manifest_zip"`:
-     - Ekstrak archive ke direktori temporer terisolasi `${XDG_RUNTIME_DIR:-/tmp}/gamectl-$UID/manifest_${appid}`.
-     - Pindahkan semua file `*.manifest` ke:
-       - `~/.config/SLSsteam/manifests/`
-       - Symlink / salin ke `~/.local/share/Steam/depotcache/`
-     - Deteksi depot ID dan generate file marker `.preferred_<depotid>` berisikan GID manifest terbaru.
-  2. Ekstraksi atau Sintesis Skrip Lua Stplug-in:
-     - Jika archive menyertakan file `<appid>.lua`, salin ke `~/.local/share/Steam/config/stplug-in/<appid>.lua`.
-     - Jika archive hanya menyertakan manifest dan file kunci teks, sintesis file Lua dengan format resmi:
-       ```lua
-       addappid(<appid>)
-       addappid(<depotid>, 1, "<aes_256_key>")
-       ```
-     - Amankan permissions file stplug-in ke `0600`.
-  3. Panggil `sync_steam "$appid"` untuk mendaftarkan AppID dan DLC ke `~/.config/SLSsteam/config.yaml`.
-- DoD: File manifest terpasang di SLSsteam manifests, file Lua stplug-in terbuat di `config/stplug-in/<appid>.lua`, dan AppID terdaftar di config SLSsteam.
-
-### Chunk 3: Dual-Mode Download Orchestrator Refactoring (`download_game`) [DONE]
-- Target Files: `src/steam/30_downloader.sh`, `src/main.sh`
-- Runtutan Eksekusi Teknis:
-  1. Refactor parameter dan engine selector pada `download_game`:
-     - Tambahkan flag CLI `--engine [steam|depot]` (default: `steam`).
-     - Tambahkan flag `--source [auto|ryuu|sushi|luatools]`.
-  2. Mode A (Default: Steam Native Content Engine):
-     - Jalankan `fetch_manifest "$appid"` untuk mengunduh manifest dan kunci.
-     - Jalankan `deploy_sls_manifest "$appid" "$manifest_zip"`.
-     - Verifikasi kesiapan Steam Client:
-       - Jika Steam aktif: trigger `steam "steam://install/${appid}" >/dev/null 2>&1 &`.
-       - Jika Steam mati: tampilkan opsi jalankan silent background `steam -silent &` atau ingatkan pengguna.
-     - Berikan umpan balik instan ke terminal bahwa tugas download telah didelegasikan ke engine Valve CDN berkecepatan penuh.
-  3. Mode B (Fallback: Headless DepotDownloader):
-     - Pertahankan alur eksekusi `ensure_downloader` dan `DepotDownloader -app "$appid"` saat user memberikan flag `--engine=depot` atau `--headless`.
-- DoD: Perintah `gamectl download <appid>` sukses mengekstrak manifest, menulis stplug-in, dan mentrigger Steam client tanpa error 401.
-
-### Chunk 4: Real-Time ACF Telemetry ### Chunk 4: Real-Time ACF Telemetry & Interactive Monitor (`list_downloads`) [PLANNED] Interactive Monitor (`list_downloads`) [DONE]
+### Chunk 4: Resilient Lua Manifest Regex [DONE]
 - Target Files: `src/steam/30_downloader.sh`
 - Runtutan Eksekusi Teknis:
-  1. Implementasikan parser telemetri ACF `parse_acf_download_state "$appid"`:
-     - Baca langsung dari `~/.local/share/Steam/steamapps/appmanifest_${appid}.acf`.
-     - Ekstrak atribut: `StateFlags`, `BytesDownloaded`, `BytesToDownload`, `BytesToStage`, `BytesStaged`.
-     - Parsing StateFlags:
-       - `1024` atau `1026`: `[DOWNLOADING]`
-       - `512`: `[PAUSED]`
-       - `4`: `[INSTALLED]`
-       - `2`: `[UPDATE REQUIRED]`
-  2. Refactor `list_downloads`:
-     - Tampilkan tabel progres aktif: AppID, Title, Status, Progress %, Bytes Downloaded / Total.
-  3. Refactor `list_downloads_interactive`:
-     - Gunakan interface FZF untuk memantau status secara live.
-     - Tambahkan action menu:
-       - Pause / Resume via protokol Steam (`steam://pause/<appid>` / `steam://resume/<appid>`).
-       - Post-download Action: Jika `StateFlags == 4`, sediakan tombol 1-klik untuk `inject_game` (GBE Fork standalone).
-- DoD: Monitor download menampilkan persentase unduhan real-time dari file ACF resmi Steam tanpa polling log file mentah.
+  1. Modifikasi regex `re_key` pada `src/steam/30_downloader.sh`:
+     ```bash
+     local re_key='addappid\([[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*[0-9]+[[:space:]]*,[[:space:]]*['\''"]([0-9a-fA-F]{64})['\''"]'
+     ```
+  2. Dukung format single-quote `'...'` dan double-quote `"..."` dari seluruh ragam provider manifest.
+- DoD: Parser berhasil mengekstrak AES key baik dari format petik tunggal maupun ganda.
 
-### Chunk 5: Dashboard TUI ### Chunk 5: Dashboard TUI & CLI Integration [PLANNED] CLI Integration [DONE]
-- Target Files: `src/tui/70_dashboard.sh`, `src/main.sh`
+### Chunk 5: Rust CLI Terminal Output Throttling [DONE]
+- Target Files: `crates/depot-dl/src/bin/gamectl-depot-dl.rs`
 - Runtutan Eksekusi Teknis:
-  1. Perbarui status bar indikator download di `src/tui/70_dashboard.sh`:
-     - Ganti label `DepotDownloader` dengan `SLSsteam-Moon Engine: [READY]`.
-     - Deteksi status runtime Steam client (`[RUNNING]` vs `[IDLE]`).
-  2. Perbarui shortcut aksi di TUI Dashboard:
-     - `<Ctrl-A>` (All-in-One Download): otomatis memanggil mode native SLSsteam manifest fetcher.
-     - `<Ctrl-D>` (Live Downloads Monitor): membuka monitor telemetri ACF.
-  3. Perbarui CLI help & completion di `src/main.sh`:
-     - Dokumentasikan opsi baru `gamectl download <appid> [--engine=steam|depot] [--source=...]`.
-- DoD: TUI Dashboard terintegrasi penuh dengan download engine baru, shortcut keyboard berfungsi mulus.
+  1. Tambahkan flag `--quiet` / `-q` dan `--verbose` / `-v`.
+  2. Pada mode default, nonaktifkan logging per-file individual (`[FILE] ...`).
+  3. Pertahankan logging progress berbasis byte ter-throttle (`[PROGRESS] Transferred: ... MB`) dan ringkasan akhir (`[SUCCESS]`).
+- DoD: Terminal I/O bersih dan throughput download tidak terhambat pada game dengan puluhan ribu file.
 
-### Chunk 6: Test Suite & Empirical Machine Verification [DONE]
+### Chunk 6: Windows Path Normalization & NTFS Sanitizer [DONE]
+- Target Files: `crates/depot-dl/src/util.rs`
+- Runtutan Eksekusi Teknis:
+  1. Implementasikan fungsi sanitasi path Windows:
+     - Ganti separator POSIX `/` dengan `\` pada platform Windows.
+     - Sanitasi karakter ilegal NTFS: `:`, `*`, `?`, `"`, `<`, `>`, `|`.
+     - Gunakan prefix `\\?\` untuk path absolut di Windows guna menghindari batas `MAX_PATH` 260 karakter.
+- DoD: Logika sanitasi path teruji melalui unit test dan aman untuk dieksekusi di filesystem Windows.
+
+### Chunk 7: Windows Cross-Compilation [DEFERRED TO WINDOWS BOOT]
+- Target Files: `scripts/build-depot-dl.sh`, `bin/gamectl-depot-dl.exe`
+- Status: Parameter `--target x86_64-pc-windows-gnu` dan mapping binary `.exe` sudah diimplementasikan di `scripts/build-depot-dl.sh`. Kompilasi binary `.exe` ditunda saat booting Windows (native toolchain) sesuai preferensi user untuk mencegah friksi toolchain mingw di Linux.
+- DoD: Script build siap mengeksekusi target Windows.
+
+### Chunk 8: Automated Regression Testing & Machine Verification [DONE]
 - Target Files: `tests/test_cli.sh`, `scripts/build.sh`
 - Runtutan Eksekusi Teknis:
-  1. Buat unit test baru di `tests/test_cli.sh`:
-     - Test validasi ZIP manifest & magic signature check (`manifest_has_payload_magic`).
-     - Test parser stplug-in Lua generator output.
-     - Test parser ACF telemetry flags (1024, 512, 4).
-     - Test engine argument parsing (`--engine=steam`, `--engine=depot`).
-  2. Eksekusi `./scripts/build.sh` untuk menghasilkan monolithic bundle `bin/gamectl`.
-  3. Jalankan regression suite `./tests/test_cli.sh` (target 65+ assertions).
+  1. Tambahkan skenario pengujian di `tests/test_cli.sh`:
+     - Test parsing Lua single-quote format.
+     - Test co-located binary path contract.
+     - Test dry-run installer verifikasi `gamectl-depot-dl`.
+  2. Jalankan `./scripts/build.sh` untuk sinkronisasi `bin/gamectl`.
+  3. Jalankan regression suite `./tests/test_cli.sh` (83 assertions).
   4. Buktikan Exit Code 0 dengan 0 failures / 0 skips.
-- DoD: Seluruh rangkaian tes lulus dengan exit code 0 tanpa regresi pada fitur eksisting.
+- DoD: Seluruh 83 test assertions lulus dengan status Exit Code 0.
 
 ---
 
-## 3. Matriks Milestone (Work Packet 13)
-- [x] Chunk 1: Multi-Provider Manifest Harvester (`fetch_manifest`) [DONE]
-- [x] Chunk 2: SLSsteam Stplug-in & Manifest Linker (`deploy_sls_manifest`) [DONE]
-- [x] Chunk 3: Dual-Mode Download Orchestrator Refactoring (`download_game`) [DONE]
-- [x] Chunk 4: Real-Time ACF Telemetry & Interactive Monitor (`list_downloads`) [DONE]
-- [x] Chunk 5: Dashboard TUI & CLI Integration (`70_dashboard.sh` & `main.sh`) [DONE]
-- [x] Chunk 6: Test Suite & Empirical Machine Verification (`tests/test_cli.sh`) [DONE]
+## 3. Matriks Milestone (Work Packet 14)
+- [x] Chunk 1: Source Code Tree Integration & Build Automation [DONE]
+- [x] Chunk 2: Packaging & Installation Sync [DONE]
+- [x] Chunk 3: Co-located Binary Path Resolution [DONE]
+- [x] Chunk 4: Resilient Lua Manifest Regex [DONE]
+- [x] Chunk 5: Rust CLI Terminal Output Throttling [DONE]
+- [x] Chunk 6: Windows Path Normalization & NTFS Sanitizer [DONE]
+- [ ] Chunk 7: Windows Cross-Compilation [DEFERRED TO WINDOWS BOOT]
+- [x] Chunk 8: Automated Regression Testing & Machine Verification [DONE]

@@ -54,12 +54,14 @@ SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 IS_LOCAL=false
 SRC_DIR=""
 SRC_BIN=""
+SRC_DEPOT_DL=""
 
 if [ -n "$SCRIPT_SOURCE" ] && [ "$SCRIPT_SOURCE" != "bash" ] && [ -f "$SCRIPT_SOURCE" ]; then
     SRC_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
     if [ -f "$SRC_DIR/bin/gamectl" ] || [ -f "$SRC_DIR/scripts/build.sh" ]; then
         IS_LOCAL=true
         SRC_BIN="$SRC_DIR/bin/gamectl"
+        SRC_DEPOT_DL="$SRC_DIR/bin/gamectl-depot-dl"
     fi
 fi
 
@@ -262,17 +264,31 @@ fi
 if [ "$DRY_RUN" = true ]; then
     echo "[INFO] [DRY-RUN] Would install executable to: $BIN_DIR/gamectl"
     echo "[INFO] [DRY-RUN] Would create shorthand symlink: $BIN_DIR/game -> gamectl"
+    if [ -n "$SRC_DEPOT_DL" ] && [ -f "$SRC_DEPOT_DL" ]; then
+        echo "[INFO] [DRY-RUN] Would install native depot downloader to: $BIN_DIR/gamectl-depot-dl"
+    fi
 else
     mkdir -p "$BIN_DIR"
     if [ "$IS_LOCAL" = true ]; then
         chmod +x "$SRC_BIN"
         ln -sf "$SRC_BIN" "$BIN_DIR/gamectl"
         ln -sf "$SRC_BIN" "$BIN_DIR/game"
+        if [ -f "$SRC_DEPOT_DL" ]; then
+            chmod +x "$SRC_DEPOT_DL"
+            ln -sf "$SRC_DEPOT_DL" "$BIN_DIR/gamectl-depot-dl"
+            echo "[VERIFIED] Depot downloader installed: $BIN_DIR/gamectl-depot-dl"
+        fi
     else
         echo "[INFO] Downloading standalone binary from $REPO_RAW_URL/bin/gamectl..."
         curl -fsSL "$REPO_RAW_URL/bin/gamectl" -o "$BIN_DIR/gamectl"
         chmod +x "$BIN_DIR/gamectl"
         ln -sf "$BIN_DIR/gamectl" "$BIN_DIR/game"
+        if curl -fsSL -I "$REPO_RAW_URL/bin/gamectl-depot-dl" >/dev/null 2>&1; then
+            echo "[INFO] Downloading native depot downloader from $REPO_RAW_URL/bin/gamectl-depot-dl..."
+            curl -fsSL "$REPO_RAW_URL/bin/gamectl-depot-dl" -o "$BIN_DIR/gamectl-depot-dl"
+            chmod +x "$BIN_DIR/gamectl-depot-dl"
+            echo "[VERIFIED] Depot downloader installed: $BIN_DIR/gamectl-depot-dl"
+        fi
     fi
     echo "[VERIFIED] Binary installed: $BIN_DIR/gamectl (alias: $BIN_DIR/game)"
 fi

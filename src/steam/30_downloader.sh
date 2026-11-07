@@ -611,6 +611,7 @@ resolve_depot_dl_bin() {
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || echo "")"
     for candidate in \
+        "$script_dir/gamectl-depot-dl" \
         "$script_dir/../../bin/gamectl-depot-dl" \
         "$script_dir/../bin/gamectl-depot-dl" \
         "$script_dir/bin/gamectl-depot-dl" \
@@ -903,7 +904,7 @@ download_game() {
 
         declare -A depot_keys=()
         if [ -n "$staged_lua" ] && [ -f "$staged_lua" ]; then
-            local re_key='addappid\([[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*[0-9]+[[:space:]]*,[[:space:]]*"([0-9a-fA-F]{64})"'
+            local re_key='addappid\([[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*[0-9]+[[:space:]]*,[[:space:]]*['\''"]([0-9a-fA-F]{64})['\''"]'
             while IFS= read -r line || [ -n "$line" ]; do
                 if [[ "$line" =~ $re_key ]]; then
                     depot_keys["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
