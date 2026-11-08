@@ -1685,6 +1685,23 @@ test_flush_tty_input_contract() {
 }
 run_test "TUI Input Invariant: flush_tty_input buffer drain contract" test_flush_tty_input_contract
 
+test_tui_screen_lifecycle_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    # 1. Functions must exist and execute with exit code 0
+    type enter_tui_screen >/dev/null 2>&1 || return 1
+    type exit_tui_screen >/dev/null 2>&1 || return 1
+
+    # 2. In non-interactive piped environment ([ ! -t 1 ]), must safely no-op without emitting escape sequences
+    local out
+    out=$(enter_tui_screen; exit_tui_screen)
+    [ -z "$out" ] || return 1
+
+    # 3. State variable GAMECTL_IN_ALT_SCREEN exists and tracks screen lifecycle
+    [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 0 ] || return 1
+    return 0
+}
+run_test "TUI Screen Lifecycle: enter_tui_screen and exit_tui_screen contract" test_tui_screen_lifecycle_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

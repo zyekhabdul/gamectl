@@ -307,6 +307,26 @@ flush_tty_input() {
     return 0
 }
 
+# Terminal Screen Lifecycle Management (Alternate Screen Buffer)
+GAMECTL_IN_ALT_SCREEN=0
+
+enter_tui_screen() {
+    if [ -t 1 ] && [ "${TERM:-}" != "dumb" ] && [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 0 ]; then
+        tput smcup 2>/dev/null || printf '\033[?1049h'
+        GAMECTL_IN_ALT_SCREEN=1
+        trap 'trap - EXIT INT TERM; exit_tui_screen; exit' EXIT INT TERM
+    fi
+    return 0
+}
+
+exit_tui_screen() {
+    if [ -t 1 ] && [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 1 ]; then
+        tput rmcup 2>/dev/null || printf '\033[?1049l'
+        GAMECTL_IN_ALT_SCREEN=0
+    fi
+    return 0
+}
+
 # Ephemeral cache tier for JSON APIs (Steam Store & ProtonDB) with TTL
 fetch_cached_json() {
     local url="${1:-}"
@@ -7290,6 +7310,7 @@ preview_dashboard() {
 
 # Master Dashboard Hub (Two-Panel Interactive TUI)
 dashboard_menu() {
+    enter_tui_screen
     clean_stale_locks
 
     while true; do
@@ -7352,11 +7373,13 @@ EOF
         esac
         flush_tty_input
     done
+    exit_tui_screen
 }
 
 # Main Library View
 library_menu() {
     local standalone="${1:-false}"
+    [ "$standalone" = "true" ] && enter_tui_screen
     clean_stale_locks
 
     while true; do
@@ -7407,6 +7430,7 @@ library_menu() {
 search_steam() {
     local query="${1:-}"
     local standalone="${2:-false}"
+    [ "$standalone" = "true" ] && enter_tui_screen
     flush_tty_input
     if [ -z "$query" ]; then
         local query_raw="" fzf_rc=0
@@ -7735,7 +7759,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input
+export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

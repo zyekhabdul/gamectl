@@ -368,6 +368,7 @@ preview_dashboard() {
 
 # Master Dashboard Hub (Two-Panel Interactive TUI)
 dashboard_menu() {
+    enter_tui_screen
     clean_stale_locks
 
     while true; do
@@ -430,11 +431,13 @@ EOF
         esac
         flush_tty_input
     done
+    exit_tui_screen
 }
 
 # Main Library View
 library_menu() {
     local standalone="${1:-false}"
+    [ "$standalone" = "true" ] && enter_tui_screen
     clean_stale_locks
 
     while true; do
@@ -485,6 +488,7 @@ library_menu() {
 search_steam() {
     local query="${1:-}"
     local standalone="${2:-false}"
+    [ "$standalone" = "true" ] && enter_tui_screen
     flush_tty_input
     if [ -z "$query" ]; then
         local query_raw="" fzf_rc=0

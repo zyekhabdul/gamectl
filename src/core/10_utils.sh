@@ -250,6 +250,26 @@ flush_tty_input() {
     return 0
 }
 
+# Terminal Screen Lifecycle Management (Alternate Screen Buffer)
+GAMECTL_IN_ALT_SCREEN=0
+
+enter_tui_screen() {
+    if [ -t 1 ] && [ "${TERM:-}" != "dumb" ] && [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 0 ]; then
+        tput smcup 2>/dev/null || printf '\033[?1049h'
+        GAMECTL_IN_ALT_SCREEN=1
+        trap 'trap - EXIT INT TERM; exit_tui_screen; exit' EXIT INT TERM
+    fi
+    return 0
+}
+
+exit_tui_screen() {
+    if [ -t 1 ] && [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 1 ]; then
+        tput rmcup 2>/dev/null || printf '\033[?1049l'
+        GAMECTL_IN_ALT_SCREEN=0
+    fi
+    return 0
+}
+
 # Ephemeral cache tier for JSON APIs (Steam Store & ProtonDB) with TTL
 fetch_cached_json() {
     local url="${1:-}"
