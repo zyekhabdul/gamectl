@@ -477,6 +477,7 @@ EOF
                 flush_tty_input
                 doctor_audit 2>&1 | fzf \
                     --ansi \
+                    --no-sort \
                     --border-label="  ╢ gamectl :: System Diagnostics Audit ╟  " \
                     --border-label-pos=2 \
                     --header="SYSTEM DIAGNOSTICS (Arrows: Scroll │ Esc / q / Enter: Return to Dashboard)" \
