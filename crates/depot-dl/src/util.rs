@@ -63,6 +63,7 @@ pub(crate) fn parse_hex_key(input: &str) -> Option<[u8; 32]> {
 
 /// Sanitizes a path component for Windows NTFS filesystem compatibility.
 /// Replaces illegal NTFS characters (`:`, `*`, `?`, `"`, `<`, `>`, `|`) with `_`.
+#[allow(dead_code)]
 pub(crate) fn sanitize_ntfs_component(component: &str) -> String {
     component
         .chars()

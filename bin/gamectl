@@ -5865,6 +5865,7 @@ launch_game() {
     export PULSE_LATENCY_MSEC="${GAMECTL_PULSE_LATENCY:-60}"
 
     # Sovereign Steam Interceptor: traps and silences unshielded Steam Client calls
+    local prev_path="$PATH"
     local interceptor_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/interceptor"
     setup_steam_interceptor "$interceptor_dir"
     export PATH="$interceptor_dir:$PATH"
@@ -5904,6 +5905,7 @@ launch_game() {
             [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -w 2>/dev/null || true
         fi
         unset __NV_PRIME_RENDER_OFFLOAD __GLX_VENDOR_LIBRARY_NAME __VK_LAYER_NV_optimus DRI_PRIME
+        [ -n "${prev_path:-}" ] && export PATH="$prev_path"
         type clean_stale_locks >/dev/null 2>&1 && clean_stale_locks || true
     }
     trap '_restore_launch_state; trap - INT TERM EXIT; return 130 2>/dev/null || exit 130' INT
@@ -6592,6 +6594,21 @@ doctor_audit() {
             miss_cnt=$((miss_cnt + 1))
         fi
     done
+
+    local has_7z_bin=""
+    for c in 7z 7za 7zr; do
+        if command -v "$c" >/dev/null 2>&1; then
+            has_7z_bin="$(command -v "$c")"
+            break
+        fi
+    done
+    if [ -n "$has_7z_bin" ]; then
+        echo "    • $(printf '%-10s' "7z") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($has_7z_bin)${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "    • $(printf '%-10s' "7z") : ${UI_AMBER}[WARN]${UI_RST} Optional (Install p7zip/7zip for Windows GBE templates)"
+        warn_cnt=$((warn_cnt + 1))
+    fi
 
     # Layer 2: Python Runtime & YAML Engine
     echo
@@ -7632,7 +7649,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client
+export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

@@ -274,6 +274,7 @@ launch_game() {
     export PULSE_LATENCY_MSEC="${GAMECTL_PULSE_LATENCY:-60}"
 
     # Sovereign Steam Interceptor: traps and silences unshielded Steam Client calls
+    local prev_path="$PATH"
     local interceptor_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/interceptor"
     setup_steam_interceptor "$interceptor_dir"
     export PATH="$interceptor_dir:$PATH"
@@ -313,6 +314,7 @@ launch_game() {
             [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -w 2>/dev/null || true
         fi
         unset __NV_PRIME_RENDER_OFFLOAD __GLX_VENDOR_LIBRARY_NAME __VK_LAYER_NV_optimus DRI_PRIME
+        [ -n "${prev_path:-}" ] && export PATH="$prev_path"
         type clean_stale_locks >/dev/null 2>&1 && clean_stale_locks || true
     }
     trap '_restore_launch_state; trap - INT TERM EXIT; return 130 2>/dev/null || exit 130' INT

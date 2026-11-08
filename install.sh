@@ -145,7 +145,7 @@ if [ -f "$GBE_X64" ]; then
     echo "[VERIFIED] Decentralized LAN runtime Linux x64 detected: $GBE_X64"
 else
     echo "[WARN] Decentralized LAN runtime Linux x64 template missing in: $GBE_X64"
-    echo "       Install libsteam_api.so to ~/.local/share/gbe-fork/regular/x64/ for 'gamectl inject'."
+    echo "       Run 'gamectl setup-gbe' to automatically provision Goldberg Emulator templates."
 fi
 
 if [ -f "$GBE_X86" ]; then
@@ -156,12 +156,14 @@ if [ -n "$GBE_WIN_X64" ]; then
     echo "[VERIFIED] Decentralized LAN runtime Windows x64 detected: $GBE_WIN_X64"
 else
     echo "[WARN] Decentralized LAN runtime Windows x64 template missing (steam_api64.dll)."
+    echo "       Run 'gamectl setup-gbe' to automatically provision Goldberg Emulator templates."
 fi
 
 if [ -n "$GBE_WIN_X86" ]; then
     echo "[VERIFIED] Decentralized LAN runtime Windows x86 detected: $GBE_WIN_X86"
 else
     echo "[WARN] Decentralized LAN runtime Windows x86 template missing (steam_api.dll)."
+    echo "       Run 'gamectl setup-gbe' to automatically provision Goldberg Emulator templates."
 fi
 
 # Audit Windows compatibility runners (umu-run, GE-Proton, Wine)

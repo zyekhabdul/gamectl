@@ -23,6 +23,21 @@ doctor_audit() {
         fi
     done
 
+    local has_7z_bin=""
+    for c in 7z 7za 7zr; do
+        if command -v "$c" >/dev/null 2>&1; then
+            has_7z_bin="$(command -v "$c")"
+            break
+        fi
+    done
+    if [ -n "$has_7z_bin" ]; then
+        echo "    • $(printf '%-10s' "7z") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($has_7z_bin)${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "    • $(printf '%-10s' "7z") : ${UI_AMBER}[WARN]${UI_RST} Optional (Install p7zip/7zip for Windows GBE templates)"
+        warn_cnt=$((warn_cnt + 1))
+    fi
+
     # Layer 2: Python Runtime & YAML Engine
     echo
     echo "  ${UI_PURPLE}[LAYER 2] Python Runtime & YAML Engine${UI_RST}"

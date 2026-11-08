@@ -292,6 +292,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "fixtures")]
     fn parses_real_plaintext_fixture() {
         // Spacewar depot 481 manifest captured from Steam (plaintext names).
         let bytes = include_bytes!("../../tests/fixtures/space war, decrypted filenames.manifest");
@@ -308,6 +309,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "fixtures")]
     fn parses_real_encrypted_fixture_and_decrypts() {
         // Aion 2 (free game) manifest captured via the Steam console - filenames encrypted,
         // depot key captured alongside. This guards decryption against real-world data:
