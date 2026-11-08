@@ -231,6 +231,7 @@ launch_game() {
     shift 3 || true
 
     echo "[INFO] Preparing launch: $title..."
+    log_msg "INFO" "LAUNCH" "Preparing launch: $title ($gdir/$gbin)"
     backup_save "$gdir" true || true
 
     # Resolve wrappers and extra flags
@@ -578,10 +579,12 @@ EOF
             [ -n "$ws_bin" ] && WINEPREFIX="$pfx_dir" "$ws_bin" -w 2>/dev/null || true
         fi
         rm -f "$info_file" 2>/dev/null || true
+        log_msg "INFO" "LAUNCH" "Game '$title' (PID: $game_pid) exited"
         _restore_launch_state
     ) &
 
     echo "[VERIFIED] Game '$title' running in background (PID: $game_pid)."
+    log_msg "INFO" "LAUNCH" "Game '$title' running in background (PID: $game_pid, Log: $log_file)"
 
     # If running interactively, invoke Game Controller HUD
     local hud_exit=0
@@ -936,6 +939,7 @@ EOF
 
     invalidate_scan_cache
     echo "[VERIFIED] GBE Fork successfully injected (Platform: $target_platform, Arch: $arch, Save: ./saves, AppID: ${appid:-None})"
+    log_msg "INFO" "INJECT" "GBE Fork successfully injected for $(basename "$target_dir") (Platform: $target_platform, Arch: $arch, Save: ./saves, AppID: ${appid:-None})"
 }
 
 

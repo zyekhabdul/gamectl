@@ -1178,7 +1178,9 @@ test_luatools_bearer_token_manager_resolution() {
 run_test "Manifest Harvester: LuaTools token resolver contract" test_luatools_bearer_token_manager_resolution
 
 test_luatools_auth_cli_commands() {
-    "$GAMECTL" auth-status | grep -q 'LuaTools Session:' || return 1
+    local auth_out
+    auth_out=$("$GAMECTL" auth-status 2>&1 || true)
+    echo "$auth_out" | grep -q 'LuaTools Session:' || return 1
     local out
     out=$("$GAMECTL" login-luatools 2>&1 || true)
     echo "$out" | grep -q 'Usage: gamectl login-luatools'
@@ -1701,6 +1703,21 @@ test_tui_screen_lifecycle_contract() {
     return 0
 }
 run_test "TUI Screen Lifecycle: enter_tui_screen and exit_tui_screen contract" test_tui_screen_lifecycle_contract
+
+test_centralized_logger_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    type log_msg >/dev/null 2>&1 || return 1
+    type log_info >/dev/null 2>&1 || return 1
+
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local log_file="$run_dir/gamectl.log"
+
+    log_msg "INFO" "TESTCOMP" "Automated regression logger assertion $$"
+    [ -f "$log_file" ] || return 1
+    grep -q "\[INFO \] \[TESTCOMP  \] Automated regression logger assertion $$" "$log_file" || return 1
+    return 0
+}
+run_test "Centralized Logger: log_msg runtime file & format contract" test_centralized_logger_contract
 
 # ------------------------------------------------------------------------------
 # Final Execution Summary

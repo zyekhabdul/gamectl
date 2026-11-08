@@ -961,6 +961,8 @@ download_game() {
         [ -z "$title" ] && title="AppID_${appid}"
     fi
 
+    log_msg "INFO" "DOWNLOAD" "Starting download for $title (AppID: $appid, Action: $action, Source: $source)"
+
     # Auto-resolve engine preference
     if [ "$engine" = "auto" ]; then
         if [ "$action" = "inject" ]; then
@@ -1091,6 +1093,7 @@ download_game() {
 
             invalidate_scan_cache
             echo "[SUCCESS] Standalone download & provisioning complete for $title ($appid) in $target_dir."
+            log_msg "INFO" "DOWNLOAD" "Standalone download & provisioning complete for $title ($appid) in $target_dir"
             return 0
         fi
     fi
@@ -1109,12 +1112,14 @@ download_game() {
     if deploy_sls_manifest "$appid" "" "$title" "$source"; then
         invalidate_scan_cache
         echo "[SUCCESS] SLSsteam manifests and stplug-in keys provisioned for $title ($appid)."
+        log_msg "INFO" "DOWNLOAD" "SLSsteam manifests and stplug-in keys provisioned for $title ($appid)"
         if [ "$action" != "inject" ]; then
             trigger_steam_install "$appid"
         fi
         return 0
     else
         echo "[ERROR] Manifest archive and keys for AppID $appid could not be acquired across providers." >&2
+        log_msg "ERROR" "DOWNLOAD" "Manifest archive and keys for AppID $appid could not be acquired across providers"
         return 1
     fi
 }

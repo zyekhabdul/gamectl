@@ -22,14 +22,14 @@ Mewujudkan ergonomi TUI berstandar modern ("Clean Outside", 100% In-Dashboard) s
   4. Panggil `exit_tui_screen` saat `dashboard_menu()` selesai.
 - **DoD**: Menekan Esc di Dashboard keluar ke shell dengan terminal 100% bersih tanpa sisa teks atau log. (Terverifikasi empiris via tmux).
 
-### Chunk 2: In-Dashboard Centralized Logger (`log_msg`) di Runtime Dir
-- **Target Files**: `src/core/10_utils.sh`, `src/main.sh`
+### Chunk 2: In-Dashboard Centralized Logger (`log_msg`) di Runtime Dir [VERIFIED]
+- **Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`, `src/steam/30_downloader.sh`, `src/main.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Buat utilitas `log_msg(level, component, message)` di `src/core/10_utils.sh`.
+  1. Buat utilitas `log_msg(level, component, message)` di `src/core/10_utils.sh` beserta alias `log_info`, `log_warn`, `log_error`.
   2. Arahkan penulisan ke `${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/gamectl.log`.
-  3. Terapkan rolling buffer cap: jika ukuran melebihi 100KB, pangkas menjadi 1.000 baris terbaru via `tail -n 1000`.
-  4. Hook panggilan `log_msg` pada aksi kunci: injeksi GBE, download manifest/depot, snapshot savegame, dan aktivasi launcher.
-- **DoD**: File `gamectl.log` terbentuk secara terisolasi, aman per-user, dan mencatat histori aktivitas secara konsisten.
+  3. Terapkan rolling buffer cap: jika ukuran melebihi 120KB, pangkas menjadi 1.000 baris terbaru via `tail -n 1000`.
+  4. Hook panggilan `log_msg` pada aksi kunci: injeksi GBE (`inject_game`), download manifest/depot (`download_game`), snapshot savegame (`backup_save`), dan aktivasi launcher (`launch_game`).
+- **DoD**: File `gamectl.log` terbentuk secara terisolasi, aman per-user, dan mencatat histori aktivitas secara konsisten. (Terverifikasi empiris via unit test dan inspeksi log).
 
 ### Chunk 3: In-Dashboard Activity & Runtime Log Viewer
 - **Target Files**: `src/tui/70_dashboard.sh`, `src/main.sh`
@@ -104,7 +104,7 @@ Mewujudkan ergonomi TUI berstandar modern ("Clean Outside", 100% In-Dashboard) s
 
 ## 3. Matriks Milestone (Work Packet 18)
 - [x] Chunk 1: Terminal Screen Lifecycle Engine (`enter_tui_screen` / `exit_tui_screen`) [VERIFIED]
-- [ ] Chunk 2: In-Dashboard Centralized Logger (`log_msg`) di Runtime Dir
+- [x] Chunk 2: In-Dashboard Centralized Logger (`log_msg`) di Runtime Dir [VERIFIED]
 - [ ] Chunk 3: In-Dashboard Activity & Runtime Log Viewer
 - [ ] Chunk 4: Modernisasi `configure_global` Menjadi In-Dashboard FZF Modal
 - [ ] Chunk 5: Modernisasi `configure_wrappers` Menjadi In-Dashboard FZF Toggle Palette

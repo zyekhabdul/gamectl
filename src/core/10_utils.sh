@@ -270,6 +270,36 @@ exit_tui_screen() {
     return 0
 }
 
+# Centralized Runtime Logger (user-isolated, rolling buffer max 1000 lines)
+log_msg() {
+    local level="${1:-INFO}"
+    local comp="${2:-CORE}"
+    shift 2 || true
+    local msg="$*"
+
+    local run_uid="${UID:-$(id -u)}"
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
+    mkdir -p -m 700 "$run_dir" 2>/dev/null || true
+    local log_file="$run_dir/gamectl.log"
+
+    local ts
+    ts=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date)
+    printf "[%s] [%-5s] [%-10s] %s\n" "$ts" "${level^^}" "${comp^^}" "$msg" >> "$log_file" 2>/dev/null || true
+
+    # Rolling buffer cap: keep last 1000 lines if log file exceeds ~120KB
+    local sz=0
+    sz=$(stat -c%s "$log_file" 2>/dev/null || echo 0)
+    if [ "$sz" -gt 120000 ]; then
+        local tmp_log="$log_file.tmp.$$"
+        tail -n 1000 "$log_file" > "$tmp_log" 2>/dev/null && mv -f "$tmp_log" "$log_file" 2>/dev/null || rm -f "$tmp_log" 2>/dev/null || true
+    fi
+    return 0
+}
+
+log_info() { log_msg "INFO" "$@"; }
+log_warn() { log_msg "WARN" "$@"; }
+log_error() { log_msg "ERROR" "$@"; }
+
 # Ephemeral cache tier for JSON APIs (Steam Store & ProtonDB) with TTL
 fetch_cached_json() {
     local url="${1:-}"
@@ -337,11 +367,13 @@ backup_save() {
         [ -d "$snap_dir/slot1" ] && mv "$snap_dir/slot1" "$snap_dir/slot2"
         cp -a "$save_dir" "$snap_dir/slot1"
         echo "[INFO] Save snapshot created successfully in slot1 ($snap_dir/slot1)"
+        log_msg "INFO" "SAVE" "Save snapshot created in slot1 for $(basename "$game_dir")"
     else
         if [ "$is_quiet" = true ]; then
             return 0
         fi
         echo "[WARN] Portable saves directory ($save_dir) not found." >&2
+        log_msg "WARN" "SAVE" "Portable saves directory ($save_dir) not found"
         echo "       Game has not been injected with GBE Fork or lacks an isolated save directory." >&2
         echo "       Press <CTRL-I> first to enable portable saves." >&2
         return 1
