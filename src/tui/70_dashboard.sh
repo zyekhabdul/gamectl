@@ -306,6 +306,18 @@ preview_dashboard() {
     echo "  ${UI_CYAN}Integration ${UI_RST}: SLSsteam $sls_status • Steam Client $steam_status"
     echo
 
+    local log_file="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/gamectl.log"
+    echo "${UI_BOX}╭─ RECENT ACTIVITY LOGS ────────────────────────────────╮${UI_RST}"
+    if [ -s "$log_file" ]; then
+        tail -n 5 "$log_file" 2>/dev/null | while IFS= read -r line; do
+            echo "  ${UI_DIM}${line:0:68}${UI_RST}"
+        done
+    else
+        echo "  ${UI_DIM}(No recent activity logged yet)${UI_RST}"
+    fi
+    echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
+    echo
+
     case "$item_key" in
         *1*|*LIBRARY*|*PUSTAKA*)
             echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
@@ -354,6 +366,14 @@ preview_dashboard() {
             echo "  • Verify 7-layer system readiness: CLI tools, runners, drivers, templates."
             echo "  • Early detection of GPU hardware limitations & Mesa driver advice."
             ;;
+        *7*|*LOG*|*LOGS*|*ACTIVITY*|*RIWAYAT*)
+            echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
+            echo "│ ${UI_BOLD}[07] ACTIVITY & RUNTIME LOGS${UI_RST}"
+            echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
+            echo "  • Inspect centralized operational log (gamectl.log)."
+            echo "  • Audit recent download events, GBE injections & save backups."
+            echo "  • Interactive log navigation with Ctrl-X log purge."
+            ;;
         *)
             echo "${UI_BOX}╭─ NAVIGATION INSTRUCTIONS ─────────────────────────────╮${UI_RST}"
             echo "  Select a module from the left panel using arrow keys or numbers."
@@ -364,6 +384,36 @@ preview_dashboard() {
     echo "${UI_BOX}╭─ HUB CONTROLS ────────────────────────────────────────╮${UI_RST}"
     echo "  ${UI_PILL_ENTER} ${UI_BOLD}Open Selected Module${UI_RST}    ${UI_PILL_ESC} ${UI_BOLD}Exit / Close gamectl${UI_RST}"
     echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
+}
+
+# Interactive Centralized Activity & Runtime Log Viewer
+view_logs_interactive() {
+    flush_tty_input
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local log_file="$run_dir/gamectl.log"
+
+    if [ ! -s "$log_file" ]; then
+        log_msg "INFO" "SYSTEM" "Log file initialized"
+    fi
+
+    local fzf_rc=0
+    if command -v tac >/dev/null 2>&1; then
+        tac "$log_file" 2>/dev/null
+    else
+        sed -e '1!G;h;$!d' "$log_file" 2>/dev/null
+    fi | fzf \
+        --border-label="  ╢ gamectl :: Activity & Runtime Logs ╟  " \
+        --border-label-pos=2 \
+        --header="ACTIVITY LOGS (Arrows: Navigate │ Ctrl-X: Clear Log │ Esc: Return)" \
+        --prompt="Logs > " \
+        --preview="echo -e '\033[38;5;60m╭─ LOG ENTRY DETAILS ─────────────────────────────────╮\033[0m\n{}\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m'" \
+        --preview-window=down:30%:border-rounded:wrap \
+        --bind="ctrl-x:execute(: > '$log_file'; echo '[INFO] Logs cleared.')+reload(command -v tac >/dev/null 2>&1 && tac '$log_file' 2>/dev/null || sed -e '1!G;h;\$!d' '$log_file' 2>/dev/null)" \
+        --height=85% \
+        --reverse 2>/dev/null || fzf_rc=$?
+
+    flush_tty_input
+    return 0
 }
 
 # Master Dashboard Hub (Two-Panel Interactive TUI)
@@ -384,6 +434,7 @@ dashboard_menu() {
 4	${UI_PURPLE}[04]${UI_RST} ${UI_BOLD}STEAM ENTITLEMENT & ACF${UI_RST}	${UI_DIM}Adopt files, Steam Input & shaders (Full DLC)${UI_RST}
 5	${UI_PURPLE}[05]${UI_RST} ${UI_BOLD}GLOBAL SETTINGS${UI_RST}	${UI_DIM}Configure LAN persona, default wrappers & remote host${UI_RST}
 6	${UI_PURPLE}[06]${UI_RST} ${UI_BOLD}SYSTEM DIAGNOSTICS${UI_RST}	${UI_DIM}Audit 7-layer dependencies, runners & GPU health${UI_RST}
+7	${UI_PURPLE}[07]${UI_RST} ${UI_BOLD}ACTIVITY LOGS${UI_RST}	${UI_DIM}Inspect operational events, runner traces & error history${UI_RST}
 EOF
 )
 
@@ -393,10 +444,11 @@ EOF
             --with-nth=2,3 \
             --border-label="  ╢ gamectl :: Master Dashboard Hub ╟  " \
             --border-label-pos=2 \
-            --header="MASTER DASHBOARD (Arrows/Numbers: Select │ Enter: Open │ Esc: Exit)" \
+            --header="MASTER DASHBOARD (Arrows/Numbers: Select │ Enter: Open │ Ctrl-L: Logs │ Esc: Exit)" \
             --prompt="Dashboard > " \
             --preview="$SELF_BIN --preview-dashboard {1} $game_count" \
             --preview-window=right:55%:border-rounded:wrap \
+            --bind="ctrl-l:execute($SELF_BIN logs)" \
         ) || fzf_rc=$?
 
         [ "$fzf_rc" -eq 130 ] && break
@@ -425,6 +477,9 @@ EOF
                 doctor_audit
                 read -r -p "Press [ENTER] to return to Dashboard..."
                 ;;
+            7)
+                view_logs_interactive
+                ;;
             *)
                 break
                 ;;
@@ -448,12 +503,13 @@ library_menu() {
             --with-nth=1,2,3 \
             --border-label="  ╢ gamectl :: Game Library ╟  " \
             --border-label-pos=2 \
-            --header=$'GAME LIBRARY (Enter: Launch │ Esc: Dashboard Hub)\nShortcuts: Ctrl-F (Search Store) │ Ctrl-D (Downloads) │ Ctrl-I (Inject GBE) │ Ctrl-O (Wrappers) │ Ctrl-P (LAN ID) │ Ctrl-S (Sync) │ Ctrl-B (Backup)' \
+            --header=$'GAME LIBRARY (Enter: Launch │ Esc: Dashboard Hub)\nShortcuts: Ctrl-F (Search Store) │ Ctrl-D (Downloads) │ Ctrl-L (Logs) │ Ctrl-I (Inject GBE) │ Ctrl-O (Wrappers) │ Ctrl-P (LAN ID) │ Ctrl-S (Sync) │ Ctrl-B (Backup)' \
             --prompt="Library > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:border-rounded:wrap \
             --bind="ctrl-f:execute($SELF_BIN --search --no-dashboard)+reload($SELF_BIN list-formatted --refresh)" \
             --bind="ctrl-d:execute($SELF_BIN downloads)+reload($SELF_BIN list-formatted --refresh)" \
+            --bind="ctrl-l:execute($SELF_BIN logs)" \
             --bind="ctrl-o:execute($SELF_BIN configure-wrappers {4} {2})+reload($SELF_BIN list-formatted --refresh)" \
             --bind="ctrl-p:execute($SELF_BIN set-id-interactive {4} {2})+reload($SELF_BIN list-formatted --refresh)" \
             --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; bash -c 'read -n 1 -s -r -p \"Press any key to return to library...\"')+reload($SELF_BIN list-formatted --refresh)" \

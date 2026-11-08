@@ -31,7 +31,7 @@ Mewujudkan ergonomi TUI berstandar modern ("Clean Outside", 100% In-Dashboard) s
   4. Hook panggilan `log_msg` pada aksi kunci: injeksi GBE (`inject_game`), download manifest/depot (`download_game`), snapshot savegame (`backup_save`), dan aktivasi launcher (`launch_game`).
 - **DoD**: File `gamectl.log` terbentuk secara terisolasi, aman per-user, dan mencatat histori aktivitas secara konsisten. (Terverifikasi empiris via unit test dan inspeksi log).
 
-### Chunk 3: In-Dashboard Activity & Runtime Log Viewer
+### Chunk 3: In-Dashboard Activity & Runtime Log Viewer [VERIFIED]
 - **Target Files**: `src/tui/70_dashboard.sh`, `src/main.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Tambahkan menu `7) [07] ACTIVITY & RUNTIME LOGS` pada `dashboard_menu()`.

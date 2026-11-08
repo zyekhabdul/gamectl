@@ -1719,6 +1719,24 @@ test_centralized_logger_contract() {
 }
 run_test "Centralized Logger: log_msg runtime file & format contract" test_centralized_logger_contract
 
+test_view_logs_cli_contract() {
+    source "$REPO_ROOT/src/core/00_header.sh"
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/tui/70_dashboard.sh"
+    type view_logs_interactive >/dev/null 2>&1 || return 1
+
+    local out
+    out=$("$GAMECTL" --help)
+    echo "$out" | grep -q 'gamectl logs' || return 1
+
+    local p_out
+    p_out=$(preview_dashboard 7 3)
+    echo "$p_out" | grep -q 'ACTIVITY & RUNTIME LOGS' || return 1
+    echo "$p_out" | grep -q 'RECENT ACTIVITY LOGS' || return 1
+    return 0
+}
+run_test "Activity Log Viewer: In-Dashboard preview & CLI subcommand contract" test_view_logs_cli_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
