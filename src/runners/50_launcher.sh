@@ -709,8 +709,13 @@ inject_game() {
             t_template=$(get_gbe_template "windows" "$t_arch") || true
 
             if [ -z "$t_template" ] || [ ! -f "$t_template" ]; then
-                echo "[WARN] Windows GBE Fork template ($t_arch) not found." >&2
-                continue
+                echo "[WARN] Windows GBE Fork template ($t_arch) not found. Attempting automatic provisioning..." >&2
+                setup_gbe_templates --yes --win-only >/dev/null 2>&1 || true
+                t_template=$(get_gbe_template "windows" "$t_arch") || true
+                if [ -z "$t_template" ] || [ ! -f "$t_template" ]; then
+                    echo "[WARN] Windows GBE Fork template ($t_arch) not found. Run 'gamectl setup-gbe' to install." >&2
+                    continue
+                fi
             fi
 
             # Backup original Valve DLL if present (<7MB and .orig not existing)
@@ -753,6 +758,11 @@ inject_game() {
 
         local src_so
         src_so=$(get_gbe_template "linux" "$linux_arch") || true
+        if [ -z "$src_so" ] || [ ! -f "$src_so" ]; then
+            echo "[WARN] Linux GBE Fork template ($linux_arch) not found. Attempting automatic provisioning..." >&2
+            setup_gbe_templates --yes --linux-only >/dev/null 2>&1 || true
+            src_so=$(get_gbe_template "linux" "$linux_arch") || true
+        fi
         if [ -n "$src_so" ] && [ -f "$src_so" ]; then
             # Backup original Valve SO if present (<7MB and .orig not existing)
             if [ -f "$target_so" ]; then

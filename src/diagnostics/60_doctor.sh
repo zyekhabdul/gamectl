@@ -64,7 +64,7 @@ doctor_audit() {
             echo "    • $(printf '%-11s' "$g_label") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($g_path)${UI_RST}"
             pass_cnt=$((pass_cnt + 1))
         else
-            echo "    • $(printf '%-11s' "$g_label") : ${UI_RED}[MISSING]${UI_RST} Place template in ~/.local/share/gbe-fork/"
+            echo "    • $(printf '%-11s' "$g_label") : ${UI_RED}[MISSING]${UI_RST} Run 'gamectl setup-gbe' to install"
             miss_cnt=$((miss_cnt + 1))
         fi
     done

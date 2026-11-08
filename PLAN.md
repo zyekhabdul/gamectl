@@ -24,13 +24,14 @@ Mewujudkan 100% Turnkey Sovereign Gaming Experience sesuai Piagam Dasar `docs/SO
   5. Sinkronisasi biner via `scripts/build.sh` dan jalankan `tests/test_cli.sh` hingga exit code 0 (88/88 passed).
 - **DoD**: Seluruh 88 test assertion lulus 100% dengan status Exit Code 0.
 
-### Chunk 2: Implementasi `gamectl setup-gbe` (Auto-download & provisioning Goldberg templates) [PENDING]
+### Chunk 2: Implementasi `gamectl setup-gbe` (Auto-download & provisioning Goldberg templates) [VERIFIED]
 - **Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`, `src/main.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Buat fungsi `setup_gbe_templates()` untuk mengunduh rilis Goldberg Emulator resmi/fork dari sovereign mirror.
+  1. Buat fungsi `setup_gbe_templates()` untuk mengunduh rilis Goldberg Emulator resmi/fork dari upstream release (`Detanup01/gbe_fork`).
   2. Ekstrak biner template (`libsteam_api.so`, `steam_api64.dll`, `steam_api.dll`) ke `~/.local/share/gbe-fork/`.
-  3. Daftarkan CLI subcommand `gamectl setup-gbe` dan opsi auto-prompt di TUI.
-- **DoD**: Template GBE terpasang lengkap di `~/.local/share/gbe-fork/` tanpa intervensi manual user.
+  3. Daftarkan CLI subcommand `gamectl setup-gbe` dan auto-provisioning di `inject_game`.
+  4. Perluas test suite regression dengan `test_setup_gbe_cli_contract` dan `test_setup_gbe_mock_provisioning_contract`.
+- **DoD**: Template GBE terpasang lengkap di `~/.local/share/gbe-fork/` tanpa intervensi manual user, 90/90 test assertions lulus dengan Exit Code 0.
 
 ### Chunk 3: Pre-flight Hard-Stop & GBE Guard di `launch_game` [PENDING]
 - **Target Files**: `src/runners/50_launcher.sh`
@@ -59,7 +60,7 @@ Mewujudkan 100% Turnkey Sovereign Gaming Experience sesuai Piagam Dasar `docs/SO
 
 ## 3. Matriks Milestone (Work Packet 16)
 - [x] Chunk 1: Bugfix ${REPO_ROOT:-} & Isolasi Mock Fixture di test_cli.sh [VERIFIED]
-- [ ] Chunk 2: Implementasi `gamectl setup-gbe` (Auto-download & provisioning Goldberg templates) [PENDING]
+- [x] Chunk 2: Implementasi `gamectl setup-gbe` (Auto-download & provisioning Goldberg templates) [VERIFIED]
 - [ ] Chunk 3: Pre-flight Hard-Stop & GBE Guard di `launch_game` [PENDING]
 - [ ] Chunk 4: SteamStub Unpack/Interceptor Hook [PENDING]
 - [ ] Chunk 5: Full DLC Manifest Resolution Harvester Expansion [PENDING]

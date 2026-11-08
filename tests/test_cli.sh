@@ -1387,6 +1387,55 @@ MOCK
 }
 run_test "Download Orchestrator: download_game defaults to Pure Standalone CDN engine" test_download_game_default_standalone_engine_contract
 
+test_setup_gbe_cli_contract() {
+    local help_out
+    help_out=$("$GAMECTL" setup-gbe --help 2>&1 || true)
+    echo "$help_out" | grep -q "Usage: gamectl setup-gbe" || return 1
+    echo "$help_out" | grep -q -- "--linux-only" || return 1
+
+    local t_dest
+    t_dest=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_gbe_dest_XXXXXX")
+    local dry_out
+    dry_out=$("$GAMECTL" setup-gbe --dry-run --dest "$t_dest" 2>&1 || true)
+    local rc=$?
+    rm -rf "$t_dest"
+
+    [ "$rc" -eq 0 ] || return 1
+    echo "$dry_out" | grep -q '\[DRY-RUN\] Target destination verified' || return 1
+    return 0
+}
+run_test "GBE Provisioning: CLI help and dry-run contract (setup-gbe)" test_setup_gbe_cli_contract
+
+test_setup_gbe_mock_provisioning_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    local t_work
+    t_work=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_gbe_prov_XXXXXX")
+    local mock_src="$t_work/mock_src"
+    mkdir -p "$mock_src/release/regular/x64" "$mock_src/release/regular/x86"
+    touch "$mock_src/release/regular/x64/libsteam_api.so"
+    touch "$mock_src/release/regular/x86/libsteam_api.so"
+
+    local mock_tar="$t_work/mock_linux.tar.bz2"
+    (cd "$mock_src" && tar -cjf "$mock_tar" release)
+
+    local target_gbe="$t_work/gbe_dest"
+    setup_gbe_templates --linux-only --dest "$target_gbe" --source-linux "$mock_tar" >/dev/null 2>&1
+    local rc=$?
+
+    [ "$rc" -eq 0 ] || { rm -rf "$t_work"; return 1; }
+    [ -f "$target_gbe/regular/x64/libsteam_api.so" ] || { rm -rf "$t_work"; return 1; }
+    [ -f "$target_gbe/regular/x86/libsteam_api.so" ] || { rm -rf "$t_work"; return 1; }
+
+    # Test idempotency (skip if already provisioned)
+    local skip_out
+    skip_out=$(setup_gbe_templates --linux-only --dest "$target_gbe" 2>&1 || true)
+    echo "$skip_out" | grep -q "already provisioned" || { rm -rf "$t_work"; return 1; }
+
+    rm -rf "$t_work"
+    return 0
+}
+run_test "GBE Provisioning: Local archive extraction and idempotency contract" test_setup_gbe_mock_provisioning_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
