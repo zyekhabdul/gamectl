@@ -1676,6 +1676,15 @@ test_preview_game_live_inspection_contract() {
 }
 run_test "Dynamic Preview: Live filesystem inspection & status override contract" test_preview_game_live_inspection_contract
 
+test_flush_tty_input_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    # Should complete without error when input is empty or piped
+    flush_tty_input || return 1
+    echo "test_buffer_drain" | flush_tty_input || return 1
+    return 0
+}
+run_test "TUI Input Invariant: flush_tty_input buffer drain contract" test_flush_tty_input_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

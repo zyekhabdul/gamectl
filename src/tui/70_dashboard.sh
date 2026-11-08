@@ -371,6 +371,7 @@ dashboard_menu() {
     clean_stale_locks
 
     while true; do
+        flush_tty_input
         local game_count
         game_count=$(scan_installed_games 2>/dev/null | wc -l || echo "0")
 
@@ -408,7 +409,7 @@ EOF
                 library_menu false
                 ;;
             2)
-                search_steam
+                search_steam "" false
                 ;;
             3)
                 list_downloads_interactive
@@ -427,6 +428,7 @@ EOF
                 break
                 ;;
         esac
+        flush_tty_input
     done
 }
 
@@ -436,6 +438,7 @@ library_menu() {
     clean_stale_locks
 
     while true; do
+        flush_tty_input
         local selection fzf_rc=0
         selection=$(scan_installed_games --formatted | fzf \
             --delimiter=$'\t' \
@@ -446,7 +449,7 @@ library_menu() {
             --prompt="Library > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:border-rounded:wrap \
-            --bind="ctrl-f:execute($SELF_BIN --search)+reload($SELF_BIN list-formatted --refresh)" \
+            --bind="ctrl-f:execute($SELF_BIN --search --no-dashboard)+reload($SELF_BIN list-formatted --refresh)" \
             --bind="ctrl-d:execute($SELF_BIN downloads)+reload($SELF_BIN list-formatted --refresh)" \
             --bind="ctrl-o:execute($SELF_BIN configure-wrappers {4} {2})+reload($SELF_BIN list-formatted --refresh)" \
             --bind="ctrl-p:execute($SELF_BIN set-id-interactive {4} {2})+reload($SELF_BIN list-formatted --refresh)" \
@@ -481,6 +484,8 @@ library_menu() {
 # Live Steam Search View (Actionable TUI Search)
 search_steam() {
     local query="${1:-}"
+    local standalone="${2:-false}"
+    flush_tty_input
     if [ -z "$query" ]; then
         local query_raw="" fzf_rc=0
         query_raw=$(: | fzf \
@@ -493,10 +498,18 @@ search_steam() {
             --reverse 2>/dev/null) || fzf_rc=$?
 
         # Only abort if user cancelled via ESC or Ctrl-C (exit status 130)
-        [ "$fzf_rc" -eq 130 ] && return 0
+        if [ "$fzf_rc" -eq 130 ]; then
+            flush_tty_input
+            [ "$standalone" = "true" ] && dashboard_menu
+            [ "$fzf_rc" -eq 130 ] && return 0
+        fi
 
         query=$(echo "$query_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-        [ -z "$query" ] && return 0
+        if [ -z "$query" ]; then
+            flush_tty_input
+            [ "$standalone" = "true" ] && dashboard_menu
+            return 0
+        fi
     fi
 
     echo "[INFO] Searching '$query' on Steam Store API..."
@@ -559,6 +572,7 @@ search_steam() {
     _refresh_search_results
 
     while true; do
+        flush_tty_input
         local fzf_out fzf_rc=0
         fzf_out=$(echo -n "$results" | fzf \
             --delimiter=$'\t' \
@@ -789,5 +803,10 @@ EOF
         fi
         _refresh_search_results
     done
+
+    flush_tty_input
+    if [ "$standalone" = "true" ]; then
+        dashboard_menu
+    fi
 }
 

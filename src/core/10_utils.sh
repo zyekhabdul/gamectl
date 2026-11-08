@@ -240,6 +240,16 @@ invalidate_scan_cache() {
     rm -f "$cache_dir/scancache.tab" "$cache_dir/scancache.tab.tmp" 2>/dev/null || true
 }
 
+# Flush pending keyboard input to prevent ghost keypress propagation across TUI views
+flush_tty_input() {
+    if [ -t 0 ] || [ -r /dev/tty ]; then
+        while read -r -t 0.05 -n 10000 _ < /dev/tty 2>/dev/null || read -r -t 0.05 -n 10000 _ 2>/dev/null; do
+            :
+        done
+    fi
+    return 0
+}
+
 # Ephemeral cache tier for JSON APIs (Steam Store & ProtonDB) with TTL
 fetch_cached_json() {
     local url="${1:-}"
