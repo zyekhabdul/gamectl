@@ -584,3 +584,96 @@ EOF_INTERCEPTOR
     cp -f "$target_dir/steam" "$target_dir/steam.sh" 2>/dev/null || true
     return 0
 }
+
+# Forensic diagnostics report for SteamStub DRM inspection
+diagnose_steamstub() {
+    local bin_path="$1"
+    if [ ! -f "$bin_path" ]; then
+        echo "[ERROR] File not found: $bin_path" >&2
+        return 1
+    fi
+
+    local b_name
+    b_name="$(basename "$bin_path")"
+    local b_dir
+    b_dir="$(dirname "$bin_path")"
+    local b_type
+    b_type=$(file -b "$bin_path" 2>/dev/null || echo "Unknown")
+
+    echo "╭─ STEAMSTUB FORENSIC DIAGNOSTICS ────────────────────────────╮"
+    echo "│ Target Binary : $b_name"
+    echo "│ Full Path     : $bin_path"
+    echo "│ Architecture  : $b_type"
+
+    local is_stub=false
+    local stub_type="none"
+
+    if detect_steamstub_drm "$bin_path"; then
+        is_stub=true
+        stub_type=$(detect_steamstub_type "$bin_path" 2>/dev/null || echo "unknown")
+    fi
+
+    if [ "$is_stub" = true ]; then
+        if [ "$stub_type" = "windows_pe" ]; then
+            echo "│ DRM Status    : ${UI_AMBER}[DETECTED] Windows PE SteamStub DRM${UI_RST}"
+            local up_bin
+            up_bin=$(resolve_unpacked_binary "$b_dir" "$b_name" 2>/dev/null || true)
+            if [ -n "$up_bin" ]; then
+                echo "│ Unpack Status : ${UI_GREEN}[READY] Unpacked counterpart found: $up_bin${UI_RST}"
+                echo "│ Remediation   : launch_game will automatically execute $up_bin"
+            else
+                echo "│ Unpack Status : ${UI_AMBER}[PENDING] No unpacked binary found${UI_RST}"
+                local s_cli
+                s_cli=$(find_steamless_cli 2>/dev/null || true)
+                if [ -n "$s_cli" ]; then
+                    echo "│ Steamless CLI : ${UI_GREEN}[AVAILABLE] $s_cli${UI_RST}"
+                    echo "│ Action        : Run 'gamectl unpack-stub \"$bin_path\"'"
+                else
+                    echo "│ Steamless CLI : ${UI_AMBER}[NOT FOUND] Place Steamless in ~/.local/share/steamless/${UI_RST}"
+                    echo "│ Remediation   : Unpack $b_name with Steamless or provide ${b_name%.*}.unpacked.exe"
+                fi
+            fi
+        elif [ "$stub_type" = "linux_elf" ]; then
+            echo "│ DRM Status    : ${UI_AMBER}[DETECTED] Linux ELF SteamStub (.bind section)${UI_RST}"
+            echo "│ Interceptor   : ${UI_GREEN}[ACTIVE] Sovereign steam.sh trap prevents Steam Client launch${UI_RST}"
+            local cand_win
+            cand_win=$(find "$b_dir" -maxdepth 2 -iname "*.exe" 2>/dev/null | head -n 1 || true)
+            if [ -n "$cand_win" ]; then
+                echo "│ Runner Option : Windows executable found ($(basename "$cand_win")). Can run via Proton with Steamless."
+            else
+                echo "│ Runner Option : Pure Linux native. Runs with sovereign interceptor trapping steam.sh calls."
+            fi
+        else
+            echo "│ DRM Status    : ${UI_AMBER}[DETECTED] SteamStub / SteamDRM markers found${UI_RST}"
+        fi
+    else
+        echo "│ DRM Status    : ${UI_GREEN}[CLEAN] No SteamStub DRM markers detected${UI_RST}"
+    fi
+    echo "╰─────────────────────────────────────────────────────────────╯"
+
+    [ "$is_stub" = true ] && return 0 || return 1
+}
+
+# CLI subcommand handler for unpacking SteamStub Windows PE binaries
+cli_unpack_stub() {
+    local target="$1"
+    if [ ! -f "$target" ]; then
+        echo "[ERROR] Target file not found: $target" >&2
+        return 1
+    fi
+    local up_res
+    up_res=$(resolve_unpacked_binary "$(dirname "$target")" "$(basename "$target")" 2>/dev/null || true)
+    if [ -n "$up_res" ]; then
+        echo "[VERIFIED] Binary is already unpacked: $up_res"
+        return 0
+    fi
+    echo "[INFO] Attempting to unpack $target via Steamless CLI..."
+    if unpack_steamstub_pe "$target"; then
+        up_res=$(resolve_unpacked_binary "$(dirname "$target")" "$(basename "$target")" 2>/dev/null || true)
+        echo "[SUCCESS] Binary successfully unpacked: $up_res"
+        return 0
+    else
+        echo "[ERROR] Failed to unpack binary. Ensure Steamless CLI is installed or run under Wine." >&2
+        return 1
+    fi
+}

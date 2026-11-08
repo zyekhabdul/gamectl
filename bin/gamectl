@@ -641,6 +641,99 @@ EOF_INTERCEPTOR
     return 0
 }
 
+# Forensic diagnostics report for SteamStub DRM inspection
+diagnose_steamstub() {
+    local bin_path="$1"
+    if [ ! -f "$bin_path" ]; then
+        echo "[ERROR] File not found: $bin_path" >&2
+        return 1
+    fi
+
+    local b_name
+    b_name="$(basename "$bin_path")"
+    local b_dir
+    b_dir="$(dirname "$bin_path")"
+    local b_type
+    b_type=$(file -b "$bin_path" 2>/dev/null || echo "Unknown")
+
+    echo "╭─ STEAMSTUB FORENSIC DIAGNOSTICS ────────────────────────────╮"
+    echo "│ Target Binary : $b_name"
+    echo "│ Full Path     : $bin_path"
+    echo "│ Architecture  : $b_type"
+
+    local is_stub=false
+    local stub_type="none"
+
+    if detect_steamstub_drm "$bin_path"; then
+        is_stub=true
+        stub_type=$(detect_steamstub_type "$bin_path" 2>/dev/null || echo "unknown")
+    fi
+
+    if [ "$is_stub" = true ]; then
+        if [ "$stub_type" = "windows_pe" ]; then
+            echo "│ DRM Status    : ${UI_AMBER}[DETECTED] Windows PE SteamStub DRM${UI_RST}"
+            local up_bin
+            up_bin=$(resolve_unpacked_binary "$b_dir" "$b_name" 2>/dev/null || true)
+            if [ -n "$up_bin" ]; then
+                echo "│ Unpack Status : ${UI_GREEN}[READY] Unpacked counterpart found: $up_bin${UI_RST}"
+                echo "│ Remediation   : launch_game will automatically execute $up_bin"
+            else
+                echo "│ Unpack Status : ${UI_AMBER}[PENDING] No unpacked binary found${UI_RST}"
+                local s_cli
+                s_cli=$(find_steamless_cli 2>/dev/null || true)
+                if [ -n "$s_cli" ]; then
+                    echo "│ Steamless CLI : ${UI_GREEN}[AVAILABLE] $s_cli${UI_RST}"
+                    echo "│ Action        : Run 'gamectl unpack-stub \"$bin_path\"'"
+                else
+                    echo "│ Steamless CLI : ${UI_AMBER}[NOT FOUND] Place Steamless in ~/.local/share/steamless/${UI_RST}"
+                    echo "│ Remediation   : Unpack $b_name with Steamless or provide ${b_name%.*}.unpacked.exe"
+                fi
+            fi
+        elif [ "$stub_type" = "linux_elf" ]; then
+            echo "│ DRM Status    : ${UI_AMBER}[DETECTED] Linux ELF SteamStub (.bind section)${UI_RST}"
+            echo "│ Interceptor   : ${UI_GREEN}[ACTIVE] Sovereign steam.sh trap prevents Steam Client launch${UI_RST}"
+            local cand_win
+            cand_win=$(find "$b_dir" -maxdepth 2 -iname "*.exe" 2>/dev/null | head -n 1 || true)
+            if [ -n "$cand_win" ]; then
+                echo "│ Runner Option : Windows executable found ($(basename "$cand_win")). Can run via Proton with Steamless."
+            else
+                echo "│ Runner Option : Pure Linux native. Runs with sovereign interceptor trapping steam.sh calls."
+            fi
+        else
+            echo "│ DRM Status    : ${UI_AMBER}[DETECTED] SteamStub / SteamDRM markers found${UI_RST}"
+        fi
+    else
+        echo "│ DRM Status    : ${UI_GREEN}[CLEAN] No SteamStub DRM markers detected${UI_RST}"
+    fi
+    echo "╰─────────────────────────────────────────────────────────────╯"
+
+    [ "$is_stub" = true ] && return 0 || return 1
+}
+
+# CLI subcommand handler for unpacking SteamStub Windows PE binaries
+cli_unpack_stub() {
+    local target="$1"
+    if [ ! -f "$target" ]; then
+        echo "[ERROR] Target file not found: $target" >&2
+        return 1
+    fi
+    local up_res
+    up_res=$(resolve_unpacked_binary "$(dirname "$target")" "$(basename "$target")" 2>/dev/null || true)
+    if [ -n "$up_res" ]; then
+        echo "[VERIFIED] Binary is already unpacked: $up_res"
+        return 0
+    fi
+    echo "[INFO] Attempting to unpack $target via Steamless CLI..."
+    if unpack_steamstub_pe "$target"; then
+        up_res=$(resolve_unpacked_binary "$(dirname "$target")" "$(basename "$target")" 2>/dev/null || true)
+        echo "[SUCCESS] Binary successfully unpacked: $up_res"
+        return 0
+    else
+        echo "[ERROR] Failed to unpack binary. Ensure Steamless CLI is installed or run under Wine." >&2
+        return 1
+    fi
+}
+
 # --- [MODULE] src/steam/20_discovery.sh ---
 
 # Discover active Steam root directory across standard, custom, Flatpak, and Snap installations
@@ -7519,7 +7612,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client
+export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -7704,11 +7797,19 @@ case "${1:-}" in
     resolve-standalone-library)
         resolve_standalone_library_dir "${2:-}" "${3:-}"
         ;;
-    detect-steamstub)
+    detect-steamstub|steamstub|check-stub)
         if [ -n "${2:-}" ]; then
-            detect_steamstub_drm "$2"
+            diagnose_steamstub "$2"
         else
             echo "Usage: gamectl detect-steamstub <binary>"
+            exit 2
+        fi
+        ;;
+    unpack-stub|unpack|steamless)
+        if [ -n "${2:-}" ]; then
+            cli_unpack_stub "$2"
+        else
+            echo "Usage: gamectl unpack-stub <binary.exe>"
             exit 2
         fi
         ;;
@@ -7917,6 +8018,10 @@ Usage:
   gamectl --search         Search Steam Store catalog (interactive TUI prompt)
   gamectl --list      Print detected installed games list
   gamectl list-formatted  Print formatted games list with ANSI badges
+  gamectl detect-steamstub <bin>
+                      Audit SteamStub (.bind ELF & PE markers) and print forensic diagnostics
+  gamectl unpack-stub <bin.exe>
+                      Unpack Windows PE SteamStub DRM binary via Steamless CLI
   gamectl --sync <dir> [title] [host]  Sync saves to remote companion host
   gamectl --backup <dir>        Create manual savegame backup snapshot
   gamectl --help      Show this help documentation
