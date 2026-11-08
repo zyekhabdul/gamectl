@@ -1775,6 +1775,14 @@ test_ghost_acf_defense_contract() {
 }
 run_test "Ghost ACF Defense: Reject dummy manifest when game files absent" test_ghost_acf_defense_contract
 
+test_set_id_interactive_cli_contract() {
+    local out
+    out=$("$GAMECTL" set-id-interactive /nonexistent 2>&1 || true)
+    echo "$out" | grep -q 'Invalid game directory' || return 1
+    return 0
+}
+run_test "LAN Persona: Reject set-id-interactive on invalid directory" test_set_id_interactive_cli_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
