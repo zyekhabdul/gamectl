@@ -233,6 +233,13 @@ clean_stale_locks() {
     rm -f "$HOME/.config/SLSsteam/cache/.picsbuffer.lock" 2>/dev/null || true
 }
 
+# Invalidate ephemeral library scanner cache
+invalidate_scan_cache() {
+    local run_uid="${UID:-$(id -u)}"
+    local cache_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
+    rm -f "$cache_dir/scancache.tab" "$cache_dir/scancache.tab.tmp" 2>/dev/null || true
+}
+
 # Ephemeral cache tier for JSON APIs (Steam Store & ProtonDB) with TTL
 fetch_cached_json() {
     local url="${1:-}"

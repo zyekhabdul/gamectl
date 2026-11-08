@@ -1089,6 +1089,7 @@ download_game() {
                 inject_game "$target_dir" "$appid" --no-sync 2>/dev/null || true
             fi
 
+            invalidate_scan_cache
             echo "[SUCCESS] Standalone download & provisioning complete for $title ($appid) in $target_dir."
             return 0
         fi
@@ -1106,6 +1107,7 @@ download_game() {
     echo "=========================================="
 
     if deploy_sls_manifest "$appid" "" "$title" "$source"; then
+        invalidate_scan_cache
         echo "[SUCCESS] SLSsteam manifests and stplug-in keys provisioned for $title ($appid)."
         if [ "$action" != "inject" ]; then
             trigger_steam_install "$appid"
@@ -1555,6 +1557,7 @@ ACF
         fi
         echo "[VERIFIED] appmanifest_${appid}.acf registered (Status: Installed in Steam, Size: $size_bytes bytes)."
     fi
+    invalidate_scan_cache
 }
 
 # Entitle game and adopt assets in official Steam client without downloading
@@ -1579,6 +1582,7 @@ unlock_game() {
     echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
 
     sync_steam "$appid" "$title" ""
+    invalidate_scan_cache
     echo "  ${UI_GREEN}[SUCCESS] Game '$title' ($appid) entitled in Steam Client with Full DLC & ACF manifest.${UI_RST}"
 }
 

@@ -421,6 +421,7 @@ launch_game() {
                     return 1
                 fi
             else
+                invalidate_scan_cache
                 echo "  ${UI_GREEN}[VERIFIED] GBE Fork emulator shield successfully engaged.${UI_RST}"
             fi
         else
@@ -933,6 +934,7 @@ EOF
         fi
     fi
 
+    invalidate_scan_cache
     echo "[VERIFIED] GBE Fork successfully injected (Platform: $target_platform, Arch: $arch, Save: ./saves, AppID: ${appid:-None})"
 }
 

@@ -3,9 +3,40 @@ preview_game() {
     local appid title status gdir gbin
     appid=$(echo "$1" | sed -r 's/\x1b\[[0-9;]*m//g' | tr -d '[:space:]')
     title=$(echo "$2" | sed -r 's/\x1b\[[0-9;]*m//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    status=$(echo "$3" | sed -r 's/\x1b\[[0-9;]*m//g' | tr -d '[]:space:')
+    status=$(echo "$3" | sed -r 's/\x1b\[[0-9;]*m//g' | tr -d '][[:space:]]')
     gdir="$4"
     gbin="$5"
+
+    # Real-time dynamic live inspection from filesystem
+    if [ -n "$gdir" ] && [ -d "$gdir" ]; then
+        local live_api=""
+        if [ -f "$gdir/steam_api64.dll" ]; then
+            live_api="$gdir/steam_api64.dll"
+        elif [ -f "$gdir/steam_api.dll" ]; then
+            live_api="$gdir/steam_api.dll"
+        elif [ -f "$gdir/libsteam_api.so" ]; then
+            live_api="$gdir/libsteam_api.so"
+        elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
+            live_api="$gdir/lib64/libsteam_api.so"
+        else
+            live_api=$(find "$gdir" -maxdepth 3 \( -name "steam_api64.dll" -o -name "steam_api.dll" -o -name "libsteam_api.so" \) 2>/dev/null | head -n 1)
+        fi
+
+        if [ -n "$live_api" ] && [ -f "$live_api" ]; then
+            local live_sz
+            live_sz=$(stat -c%s "$live_api" 2>/dev/null || echo 0)
+            if [ "$live_sz" -gt 7000000 ]; then
+                status="GBE_FORK"
+            else
+                case "$live_api" in
+                    *.dll) status="VALVE_DLL" ;;
+                    *)     status="VALVE_SO" ;;
+                esac
+            fi
+        else
+            status="STANDALONE"
+        fi
+    fi
 
     local status_badge="${UI_CYAN}[${status}]${UI_RST}"
     local status_desc=""
@@ -415,11 +446,11 @@ library_menu() {
             --prompt="Library > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:border-rounded:wrap \
-            --bind="ctrl-f:execute($SELF_BIN --search)+reload($SELF_BIN list-formatted)" \
-            --bind="ctrl-d:execute($SELF_BIN downloads)+reload($SELF_BIN list-formatted)" \
-            --bind="ctrl-o:execute($SELF_BIN configure-wrappers {4} {2})+reload($SELF_BIN list-formatted)" \
-            --bind="ctrl-p:execute($SELF_BIN set-id-interactive {4} {2})+reload($SELF_BIN list-formatted)" \
-            --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; bash -c 'read -n 1 -s -r -p \"Press any key to return to library...\"')+reload($SELF_BIN list-formatted)" \
+            --bind="ctrl-f:execute($SELF_BIN --search)+reload($SELF_BIN list-formatted --refresh)" \
+            --bind="ctrl-d:execute($SELF_BIN downloads)+reload($SELF_BIN list-formatted --refresh)" \
+            --bind="ctrl-o:execute($SELF_BIN configure-wrappers {4} {2})+reload($SELF_BIN list-formatted --refresh)" \
+            --bind="ctrl-p:execute($SELF_BIN set-id-interactive {4} {2})+reload($SELF_BIN list-formatted --refresh)" \
+            --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; bash -c 'read -n 1 -s -r -p \"Press any key to return to library...\"')+reload($SELF_BIN list-formatted --refresh)" \
             --bind="ctrl-s:execute($SELF_BIN --sync {4} {2}; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
             --bind="ctrl-b:execute($SELF_BIN --backup {4}; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
         ) || fzf_rc=$?
@@ -434,6 +465,7 @@ library_menu() {
             sel_title=$(echo "$selection" | awk -F'\t' '{print $2}')
             local launch_rc=0
             launch_game "$sel_dir" "$sel_bin" "$sel_title" || launch_rc=$?
+            invalidate_scan_cache
             if [ "$launch_rc" -eq 10 ]; then
                 # User selected return directly to Master Dashboard
                 break
@@ -488,34 +520,43 @@ search_steam() {
     declare -A installed_by_title=()
     declare -A installed_dir=()
 
-    local sc_id sc_name sc_st sc_dir sc_bin
-    while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
-        sc_id="${sc_id//[[:space:]]/}"
-        sc_name="${sc_name#"${sc_name%%[![:space:]]*}"}"
-        sc_name="${sc_name%"${sc_name##*[![:space:]]}"}"
-        sc_dir="${sc_dir//$'\r'/}"
-        if [ -n "$sc_id" ] && [ "$sc_id" != "STANDALONE" ]; then
-            installed_by_id["$sc_id"]=1
-            installed_dir["$sc_id"]="$sc_dir"
-        fi
-        if [ -n "$sc_name" ]; then
-            local clean_title="${sc_name,,}"
-            installed_by_title["$clean_title"]=1
-            [ -z "${installed_dir["$clean_title"]:-}" ] && installed_dir["$clean_title"]="$sc_dir"
-        fi
-    done < <(scan_installed_games)
+    _refresh_search_results() {
+        results=""
+        installed_by_id=()
+        installed_by_title=()
+        installed_dir=()
 
-    while IFS=$'\t' read -r appid name; do
-        [ -z "$appid" ] && continue
-        local is_installed=0
-        local clean_name="${name,,}"
-        if [[ -v installed_by_id["$appid"] ]] || [[ -v installed_by_title["$clean_name"] ]]; then
-            is_installed=1
-        fi
-        local status="${UI_DIM}[NOT INSTALLED]${UI_RST}"
-        [ "$is_installed" -eq 1 ] && status="${UI_GREEN}[INSTALLED]    ${UI_RST}"
-        results+="${appid}"$'\t'"${name}"$'\t'"${status}"$'\n'
-    done <<< "$items"
+        local sc_id sc_name sc_st sc_dir sc_bin
+        while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
+            sc_id="${sc_id//[[:space:]]/}"
+            sc_name="${sc_name#"${sc_name%%[![:space:]]*}"}"
+            sc_name="${sc_name%"${sc_name##*[![:space:]]}"}"
+            sc_dir="${sc_dir//$'\r'/}"
+            if [ -n "$sc_id" ] && [ "$sc_id" != "STANDALONE" ]; then
+                installed_by_id["$sc_id"]=1
+                installed_dir["$sc_id"]="$sc_dir"
+            fi
+            if [ -n "$sc_name" ]; then
+                local clean_title="${sc_name,,}"
+                installed_by_title["$clean_title"]=1
+                [ -z "${installed_dir["$clean_title"]:-}" ] && installed_dir["$clean_title"]="$sc_dir"
+            fi
+        done < <(scan_installed_games --refresh)
+
+        while IFS=$'\t' read -r appid name; do
+            [ -z "$appid" ] && continue
+            local is_installed=0
+            local clean_name="${name,,}"
+            if [[ -v installed_by_id["$appid"] ]] || [[ -v installed_by_title["$clean_name"] ]]; then
+                is_installed=1
+            fi
+            local status="${UI_DIM}[NOT INSTALLED]${UI_RST}"
+            [ "$is_installed" -eq 1 ] && status="${UI_GREEN}[INSTALLED]    ${UI_RST}"
+            results+="${appid}"$'\t'"${name}"$'\t'"${status}"$'\n'
+        done <<< "$items"
+    }
+
+    _refresh_search_results
 
     while true; do
         local fzf_out fzf_rc=0
@@ -746,6 +787,7 @@ EOF
                 esac
             fi
         fi
+        _refresh_search_results
     done
 }
 

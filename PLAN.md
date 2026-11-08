@@ -1,73 +1,61 @@
-# WORK PACKET 16: TURNKEY SOVEREIGN RUNTIME, GBE AUTO-PROVISIONING & DRUG-FREE HARNESS [COMPLETE]
+# WORK PACKET 17: REAL-TIME REACTIVE TAGS & DYNAMIC STATE SYNCHRONIZATION [COMPLETE]
 
 **Track**: Maintenance
 
 ## 1. Objective & Technical Scope
-Mewujudkan 100% Turnkey Sovereign Gaming Experience sesuai Piagam Dasar `docs/SOVEREIGN_ORIGINAL_PURPOSE.md`:
-1. **Zero-Defect Harness & Environment Hardening**: Memperbaiki bug unbound variable `${REPO_ROOT:-}`, menstabilkan fixture mock di `test_cli.sh`, dan memastikan script build graceful tanpa toolchain Rust eksternal. (88/88 test pass, exit 0).
-2. **Turnkey GBE Provisioning (`setup-gbe`)**: Menghilangkan akar masalah kegagalan injeksi emulator dengan menyediakan mekanisme otomatis untuk mengunduh dan menata template biner Goldberg Emulator resmi ke `~/.local/share/gbe-fork/`.
-3. **Pre-Flight Hard-Stop Guard di `launch_game`**: Menolak peluncuran game unshielded secara deterministik jika biner Valve belum ter-shim Goldberg Emulator.
-4. **Active SteamStub Mitigation Hook**: Mengintegrasikan unpacker otomatis Steamless CLI untuk PE Windows dan interceptor stub untuk Linux ELF `.bind`.
-5. **Full DLC Manifest Resolution**: Menjamin depot fisik DLC terunduh lengkap bersama game dasar dari CDN Valve.
+Mengeliminasi latensi dan keharusan me-restart `gamectl` untuk melihat perubahan status/tag game (`[INSTALLED]`, `[GBE_FORK]`, `[VALVE_DLL]`, `[VALVE_SO]`, `[STANDALONE]`):
+1. **Fungsi Global `invalidate_scan_cache()`**: Utilitas atomik untuk membersihkan `scancache.tab` yang dipanggil pada setiap mutasi filesystem (injeksi GBE, unduhan, unlock/entitlement, auto-injeksi launcher).
+2. **Perbaikan Reload FZF di `library_menu()`**: Mendukung flag `--refresh` / `-r` pada `list-formatted` dan memasang `reload($SELF_BIN list-formatted --refresh)` pada binding FZF.
+3. **Dynamic Live Inspection di `preview_game()`**: Mengaudit status biner Steamworks langsung dari `$gdir` secara lightweight (<1ms) saat preview dirender, tanpa mengandalkan kolom string statis/cache.
+4. **Re-evaluasi `$results` di `search_steam()`**: Menyegarkan status lokal di dalam loop pencarian setelah aksi `<Ctrl-A>`, `<Ctrl-S>`, atau `<Ctrl-U>` dieksekusi agar tag `[INSTALLED]` berubah seketika.
 
 ---
 
-## 2. Granular Technical Execution Plan (Work Packet 16)
+## 2. Granular Technical Execution Plan (Work Packet 17)
 
-### Chunk 1: Bugfix ${REPO_ROOT:-} & Isolasi Mock Fixture di test_cli.sh [VERIFIED]
-- **Target Files**: `src/steam/20_discovery.sh`, `scripts/build-depot-dl.sh`, `tests/test_cli.sh`
+### Chunk 1: Implementasi `invalidate_scan_cache()` & Hook Titik Mutasi [VERIFIED]
+- **Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`, `src/steam/30_downloader.sh`, `src/main.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Perbaiki ekspansi `REPO_ROOT` di `src/steam/20_discovery.sh` menjadi `${REPO_ROOT:-}` untuk mencegah crash `unbound variable` saat `set -u` aktif.
-  2. Modifikasi `scripts/build-depot-dl.sh` agar mem-parse flag `--check` sebelum memeriksa dependensi `cargo`, dan mempertahankan precompiled binary yang sudah ada jika cargo tidak terpasang.
-  3. Perbarui `test_doctor_audit()` di `tests/test_cli.sh` dengan mock fixture GBE terisolasi.
-  4. Perbarui `test_optimized_library_scanner()` di `tests/test_cli.sh` dengan mock library game mandiri.
-  5. Sinkronisasi biner via `scripts/build.sh` dan jalankan `tests/test_cli.sh` hingga exit code 0 (88/88 passed).
-- **DoD**: Seluruh 88 test assertion lulus 100% dengan status Exit Code 0.
+  1. Definisikan `invalidate_scan_cache()` di `src/core/10_utils.sh` untuk menghapus `${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/scancache.tab*`.
+  2. Ekspor `invalidate_scan_cache` di `src/main.sh`.
+  3. Panggil `invalidate_scan_cache` di:
+     - `inject_game` (`src/runners/50_launcher.sh`)
+     - `launch_game` pasca auto-injeksi GBE (`src/runners/50_launcher.sh`)
+     - `download_game` pasca download selesai (`src/steam/30_downloader.sh`)
+     - `sync_steam` dan `unlock_game` (`src/steam/30_downloader.sh`)
+     - `install_game_fix` dan `revert_game_fix` (`src/steam/35_fixes.sh`)
+- **DoD**: File cache terhapus secara atomik setiap kali terjadi modifikasi status atau file game.
 
-### Chunk 2: Implementasi `gamectl setup-gbe` (Auto-download & provisioning Goldberg templates) [VERIFIED]
-- **Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`, `src/main.sh`
+### Chunk 2: Hardening FZF Reload Binding & Dukungan `--refresh` pada CLI `list-formatted` [VERIFIED]
+- **Target Files**: `src/main.sh`, `src/tui/70_dashboard.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Buat fungsi `setup_gbe_templates()` untuk mengunduh rilis Goldberg Emulator resmi/fork dari upstream release (`Detanup01/gbe_fork`).
-  2. Ekstrak biner template (`libsteam_api.so`, `steam_api64.dll`, `steam_api.dll`) ke `~/.local/share/gbe-fork/`.
-  3. Daftarkan CLI subcommand `gamectl setup-gbe` dan auto-provisioning di `inject_game`.
-  4. Perluas test suite regression dengan `test_setup_gbe_cli_contract` dan `test_setup_gbe_mock_provisioning_contract`.
-- **DoD**: Template GBE terpasang lengkap di `~/.local/share/gbe-fork/` tanpa intervensi manual user, 90/90 test assertions lulus dengan Exit Code 0.
+  1. Pastikan subcommand `list-formatted` di `src/main.sh` meneruskan flag argumen (`--refresh` / `-r`) ke `scan_installed_games --formatted "$@"`.
+  2. Pada `src/tui/70_dashboard.sh` (`library_menu`), perbarui seluruh binding reload FZF (`ctrl-i`, `ctrl-o`, `ctrl-p`, `ctrl-f`, `ctrl-d`) agar memanggil `$SELF_BIN list-formatted --refresh`.
+  3. Bersihkan cache (`invalidate_scan_cache`) saat kembali dari eksekusi `launch_game` di dalam loop `library_menu`.
+- **DoD**: Penekanan `<Ctrl-I>` atau kembali dari peluncuran game langsung memicu pembacaan segar dan tag di list FZF berubah seketika tanpa exit.
 
-### Chunk 3: Pre-flight Hard-Stop & GBE Guard di `launch_game` [VERIFIED]
-- **Target Files**: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `tests/test_cli.sh`
+### Chunk 3: Dynamic Live Inspection pada Preview Pane (`preview_game`) [VERIFIED]
+- **Target Files**: `src/tui/70_dashboard.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Pada `src/runners/40_wrappers.sh`, tambahkan flag `--allow-unshielded` untuk bypass darurat.
-  2. Pada `src/runners/50_launcher.sh` (`launch_game`), periksa kandidat library Steamworks (`steam_api64.dll`, `steam_api.dll`, `libsteam_api.so`) hingga kedalaman folder 4.
-  3. Lakukan auto-injeksi GBE (`inject_game`) jika ditemukan library Valve unshielded.
-  4. Lakukan evaluasi ulang pasca-injeksi. Jika masih unshielded dan `--allow-unshielded` tidak diaktifkan, lakukan hard-stop terstruktur dengan exit code 1 dan instruksi remediasi.
-  5. Perbaiki penanganan sinyal dan pembersihan status (`_restore_launch_state`) agar bebas dari unbound variables dan dependencies missing.
-  6. Tambahkan 2 uji regresi di `tests/test_cli.sh` (`test_launch_hardstop_unshielded_contract` & `test_launch_allow_unshielded_override_contract`).
-- **DoD**: Tidak ada game ber-Steamworks yang diizinkan jalan tanpa perlindungan emulator GBE (92/92 test assertions lulus Exit 0).
+  1. Pada `preview_game()`, jika `$gdir` valid, lakukan probe dinamis ke direktori target:
+     - Cari biner `steam_api64.dll`, `steam_api.dll`, `libsteam_api.so`.
+     - Hitung ukuran file (`stat -c%s`): jika >7MB maka `GBE_FORK`, jika <=7MB maka `VALVE_DLL` / `VALVE_SO`.
+     - Jika tidak ditemukan library Steamworks, status adalah `STANDALONE`.
+  2. Gunakan status live terverifikasi ini untuk menampilkan badge status dan deskripsi preview.
+- **DoD**: Preview pane menampilkan status real-time akurat dari storage bahkan sebelum cache kiri ter-refresh.
 
-### Chunk 4: SteamStub Unpack/Interceptor Hook [VERIFIED]
-- **Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`, `tests/test_cli.sh`
+### Chunk 4: Re-evaluasi `$results` Dinamis di `search_steam` & Regression Harness [VERIFIED]
+- **Target Files**: `src/tui/70_dashboard.sh`, `tests/test_cli.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Implementasikan utilitas pendukung SteamStub di `src/core/10_utils.sh`: `detect_steamstub_type`, `resolve_unpacked_binary`, `find_steamless_cli`, `unpack_steamstub_pe`, dan `setup_steam_interceptor`.
-  2. Pasang sovereign interceptor `setup_steam_interceptor` pada `src/runners/50_launcher.sh` (`launch_game`) di posisi terdepan `$PATH` untuk mencegat dan membungkam pemanggilan biner `steam` / `steam.sh` secara mandiri.
-  3. Tambahkan logika mitigasi otomatis SteamStub PE pada `launch_game`: otomatis mendeteksi biner `*.unpacked.exe`, mengeksekusi Steamless CLI jika tersedia, dan mengalihkan binary peluncuran ke versi unpacked.
-  4. Tambahkan pengujian regresi di `tests/test_cli.sh`: `test_steam_interceptor_contract` dan `test_steamstub_pe_unpack_resolution_contract`.
-- **DoD**: Biner SteamStub ter-unpack atau ter-intercept sebelum proses game dieksekusi (94/94 test assertions lulus Exit 0).
-
-### Chunk 5: Full DLC Manifest Resolution Harvester Expansion [VERIFIED]
-- **Target Files**: `src/steam/30_downloader.sh`, `src/runners/50_launcher.sh`, `tests/test_cli.sh`
-- **Runtutan Eksekusi Teknis**:
-  1. Implementasikan fungsi `harvest_dlc_manifests()` di `src/steam/30_downloader.sh` untuk mengekstraksi AppID DLC dari manifest Lua dasar dan mengunduh archive manifest fisik DLC secara otomatis dari multi-provider network.
-  2. Perluas pembacaan kunci depot di `download_game` agar memindai seluruh file manifest Lua (`*.lua`) dalam stage directory, sehingga seluruh depot fisik DLC ikut diunduh oleh `gamectl-depot-dl`.
-  3. Simpan manifest Lua ke folder target instalasi guna mendukung penemuan DLC offline oleh `fetch_dlc`.
-  4. Konfigurasikan `steam_settings/configs.app.ini` di `inject_game` (`src/runners/50_launcher.sh`) dengan opsi `[app::dlc] unlock_all=1` untuk menjamin seluruh DLC aktif di runtime Goldberg Emulator.
-  5. Tambahkan uji regresi di `tests/test_cli.sh`: `test_harvest_dlc_manifests_contract`.
-- **DoD**: Unduhan game mencakup file fisik depot DLC secara utuh dan ter-unlock penuh di runtime emulator (95/95 test assertions lulus Exit 0).
+  1. Ekstrak logika pembentukan list `$results` di `search_steam` menjadi fungsi internal helper `_refresh_search_results` dan panggil dalam loop setelah aksi dieksekusi.
+  2. Tambahkan test assertion baru di `tests/test_cli.sh` untuk memverifikasi kontrak real-time cache invalidation, `--refresh` list-formatted, dan live inspection.
+  3. Rebuild bundle dan verifikasi 100% test assertions pass dengan Exit Code 0 (98/98 passed).
+- **DoD**: Tag `[INSTALLED]` pada hasil pencarian berubah real-time setelah diunduh/di-unlock, seluruh suite pengujian lulus.
 
 ---
 
-## 3. Matriks Milestone (Work Packet 16)
-- [x] Chunk 1: Bugfix ${REPO_ROOT:-} & Isolasi Mock Fixture di test_cli.sh [VERIFIED]
-- [x] Chunk 2: Implementasi `gamectl setup-gbe` (Auto-download & provisioning Goldberg templates) [VERIFIED]
-- [x] Chunk 3: Pre-flight Hard-Stop & GBE Guard di `launch_game` [VERIFIED]
-- [x] Chunk 4: SteamStub Unpack/Interceptor Hook [VERIFIED]
-- [x] Chunk 5: Full DLC Manifest Resolution Harvester Expansion [VERIFIED]
+## 3. Matriks Milestone (Work Packet 17)
+- [x] Chunk 1: Implementasi `invalidate_scan_cache()` & Hook Titik Mutasi [VERIFIED]
+- [x] Chunk 2: Hardening FZF Reload Binding & Dukungan `--refresh` pada CLI `list-formatted` [VERIFIED]
+- [x] Chunk 3: Dynamic Live Inspection pada Preview Pane (`preview_game`) [VERIFIED]
+- [x] Chunk 4: Re-evaluasi `$results` Dinamis di `search_steam` & Regression Harness [VERIFIED]

@@ -417,6 +417,7 @@ META
     setup_onlinefix "$resolved_dir" --yes || true
 
     echo "=============================================================================="
+    invalidate_scan_cache
     echo " [SUCCESS] Fix successfully deployed for: $(basename "$resolved_dir")"
     echo "           To revert changes at any time: gamectl fix-revert \"$resolved_dir\""
     echo "=============================================================================="
@@ -486,6 +487,7 @@ revert_game_fix() {
         )
     fi
 
+    invalidate_scan_cache
     echo "[VERIFIED] Game fix reverted. Pristine files restored and fix artifacts purged."
     return 0
 }

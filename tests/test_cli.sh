@@ -1620,6 +1620,62 @@ EOF_DLC
 }
 run_test "DLC Manifest Harvester: Multi-depot DLC resolution & unlock_all contract" test_harvest_dlc_manifests_contract
 
+test_invalidate_scan_cache_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    local r_uid="${UID:-$(id -u)}"
+    local c_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$r_uid}"
+    mkdir -p -m 700 "$c_dir" 2>/dev/null || true
+    local c_file="$c_dir/scancache.tab"
+    touch "$c_file" "$c_file.tmp"
+
+    [ -f "$c_file" ] || return 1
+    invalidate_scan_cache
+    if [ -f "$c_file" ] || [ -f "$c_file.tmp" ]; then
+        return 1
+    fi
+    return 0
+}
+run_test "Real-Time Cache: invalidate_scan_cache atomic purge contract" test_invalidate_scan_cache_contract
+
+test_list_formatted_refresh_contract() {
+    local out
+    out=$("$GAMECTL" list-formatted --refresh)
+    local r_uid="${UID:-$(id -u)}"
+    local c_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$r_uid}"
+    [ -f "$c_dir/scancache.tab" ] || return 1
+    return 0
+}
+run_test "Real-Time Cache: list-formatted --refresh CLI contract" test_list_formatted_refresh_contract
+
+test_preview_game_live_inspection_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_preview_test_XXXXXX")
+    local t_game="$t_dir/MyGame"
+    mkdir -p "$t_game"
+
+    # Case 1: GBE Fork (>7MB)
+    head -c 8000000 /dev/zero > "$t_game/steam_api64.dll"
+    local out1
+    out1=$("$GAMECTL" --preview "12345" "MyGame" "STANDALONE" "$t_game" "game.exe")
+    echo "$out1" | grep -q "\[GBE_FORK\]" || { rm -rf "$t_dir"; return 1; }
+
+    # Case 2: Valve DLL (<=7MB)
+    head -c 1000000 /dev/zero > "$t_game/steam_api64.dll"
+    local out2
+    out2=$("$GAMECTL" --preview "12345" "MyGame" "STANDALONE" "$t_game" "game.exe")
+    echo "$out2" | grep -q "\[VALVE_DLL\]" || { rm -rf "$t_dir"; return 1; }
+
+    # Case 3: Standalone (no steam_api file)
+    rm -f "$t_game/steam_api64.dll"
+    local out3
+    out3=$("$GAMECTL" --preview "12345" "MyGame" "GBE_FORK" "$t_game" "game.exe")
+    echo "$out3" | grep -q "\[STANDALONE\]" || { rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    return 0
+}
+run_test "Dynamic Preview: Live filesystem inspection & status override contract" test_preview_game_live_inspection_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

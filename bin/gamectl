@@ -290,6 +290,13 @@ clean_stale_locks() {
     rm -f "$HOME/.config/SLSsteam/cache/.picsbuffer.lock" 2>/dev/null || true
 }
 
+# Invalidate ephemeral library scanner cache
+invalidate_scan_cache() {
+    local run_uid="${UID:-$(id -u)}"
+    local cache_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
+    rm -f "$cache_dir/scancache.tab" "$cache_dir/scancache.tab.tmp" 2>/dev/null || true
+}
+
 # Ephemeral cache tier for JSON APIs (Steam Store & ProtonDB) with TTL
 fetch_cached_json() {
     local url="${1:-}"
@@ -3079,6 +3086,7 @@ download_game() {
                 inject_game "$target_dir" "$appid" --no-sync 2>/dev/null || true
             fi
 
+            invalidate_scan_cache
             echo "[SUCCESS] Standalone download & provisioning complete for $title ($appid) in $target_dir."
             return 0
         fi
@@ -3096,6 +3104,7 @@ download_game() {
     echo "=========================================="
 
     if deploy_sls_manifest "$appid" "" "$title" "$source"; then
+        invalidate_scan_cache
         echo "[SUCCESS] SLSsteam manifests and stplug-in keys provisioned for $title ($appid)."
         if [ "$action" != "inject" ]; then
             trigger_steam_install "$appid"
@@ -3545,6 +3554,7 @@ ACF
         fi
         echo "[VERIFIED] appmanifest_${appid}.acf registered (Status: Installed in Steam, Size: $size_bytes bytes)."
     fi
+    invalidate_scan_cache
 }
 
 # Entitle game and adopt assets in official Steam client without downloading
@@ -3569,6 +3579,7 @@ unlock_game() {
     echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
 
     sync_steam "$appid" "$title" ""
+    invalidate_scan_cache
     echo "  ${UI_GREEN}[SUCCESS] Game '$title' ($appid) entitled in Steam Client with Full DLC & ACF manifest.${UI_RST}"
 }
 
@@ -4034,6 +4045,7 @@ META
     setup_onlinefix "$resolved_dir" --yes || true
 
     echo "=============================================================================="
+    invalidate_scan_cache
     echo " [SUCCESS] Fix successfully deployed for: $(basename "$resolved_dir")"
     echo "           To revert changes at any time: gamectl fix-revert \"$resolved_dir\""
     echo "=============================================================================="
@@ -4103,6 +4115,7 @@ revert_game_fix() {
         )
     fi
 
+    invalidate_scan_cache
     echo "[VERIFIED] Game fix reverted. Pristine files restored and fix artifacts purged."
     return 0
 }
@@ -6012,6 +6025,7 @@ launch_game() {
                     return 1
                 fi
             else
+                invalidate_scan_cache
                 echo "  ${UI_GREEN}[VERIFIED] GBE Fork emulator shield successfully engaged.${UI_RST}"
             fi
         else
@@ -6524,6 +6538,7 @@ EOF
         fi
     fi
 
+    invalidate_scan_cache
     echo "[VERIFIED] GBE Fork successfully injected (Platform: $target_platform, Arch: $arch, Save: ./saves, AppID: ${appid:-None})"
 }
 
@@ -6900,9 +6915,40 @@ preview_game() {
     local appid title status gdir gbin
     appid=$(echo "$1" | sed -r 's/\x1b\[[0-9;]*m//g' | tr -d '[:space:]')
     title=$(echo "$2" | sed -r 's/\x1b\[[0-9;]*m//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    status=$(echo "$3" | sed -r 's/\x1b\[[0-9;]*m//g' | tr -d '[]:space:')
+    status=$(echo "$3" | sed -r 's/\x1b\[[0-9;]*m//g' | tr -d '][[:space:]]')
     gdir="$4"
     gbin="$5"
+
+    # Real-time dynamic live inspection from filesystem
+    if [ -n "$gdir" ] && [ -d "$gdir" ]; then
+        local live_api=""
+        if [ -f "$gdir/steam_api64.dll" ]; then
+            live_api="$gdir/steam_api64.dll"
+        elif [ -f "$gdir/steam_api.dll" ]; then
+            live_api="$gdir/steam_api.dll"
+        elif [ -f "$gdir/libsteam_api.so" ]; then
+            live_api="$gdir/libsteam_api.so"
+        elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
+            live_api="$gdir/lib64/libsteam_api.so"
+        else
+            live_api=$(find "$gdir" -maxdepth 3 \( -name "steam_api64.dll" -o -name "steam_api.dll" -o -name "libsteam_api.so" \) 2>/dev/null | head -n 1)
+        fi
+
+        if [ -n "$live_api" ] && [ -f "$live_api" ]; then
+            local live_sz
+            live_sz=$(stat -c%s "$live_api" 2>/dev/null || echo 0)
+            if [ "$live_sz" -gt 7000000 ]; then
+                status="GBE_FORK"
+            else
+                case "$live_api" in
+                    *.dll) status="VALVE_DLL" ;;
+                    *)     status="VALVE_SO" ;;
+                esac
+            fi
+        else
+            status="STANDALONE"
+        fi
+    fi
 
     local status_badge="${UI_CYAN}[${status}]${UI_RST}"
     local status_desc=""
@@ -7312,11 +7358,11 @@ library_menu() {
             --prompt="Library > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:border-rounded:wrap \
-            --bind="ctrl-f:execute($SELF_BIN --search)+reload($SELF_BIN list-formatted)" \
-            --bind="ctrl-d:execute($SELF_BIN downloads)+reload($SELF_BIN list-formatted)" \
-            --bind="ctrl-o:execute($SELF_BIN configure-wrappers {4} {2})+reload($SELF_BIN list-formatted)" \
-            --bind="ctrl-p:execute($SELF_BIN set-id-interactive {4} {2})+reload($SELF_BIN list-formatted)" \
-            --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; bash -c 'read -n 1 -s -r -p \"Press any key to return to library...\"')+reload($SELF_BIN list-formatted)" \
+            --bind="ctrl-f:execute($SELF_BIN --search)+reload($SELF_BIN list-formatted --refresh)" \
+            --bind="ctrl-d:execute($SELF_BIN downloads)+reload($SELF_BIN list-formatted --refresh)" \
+            --bind="ctrl-o:execute($SELF_BIN configure-wrappers {4} {2})+reload($SELF_BIN list-formatted --refresh)" \
+            --bind="ctrl-p:execute($SELF_BIN set-id-interactive {4} {2})+reload($SELF_BIN list-formatted --refresh)" \
+            --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; bash -c 'read -n 1 -s -r -p \"Press any key to return to library...\"')+reload($SELF_BIN list-formatted --refresh)" \
             --bind="ctrl-s:execute($SELF_BIN --sync {4} {2}; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
             --bind="ctrl-b:execute($SELF_BIN --backup {4}; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
         ) || fzf_rc=$?
@@ -7331,6 +7377,7 @@ library_menu() {
             sel_title=$(echo "$selection" | awk -F'\t' '{print $2}')
             local launch_rc=0
             launch_game "$sel_dir" "$sel_bin" "$sel_title" || launch_rc=$?
+            invalidate_scan_cache
             if [ "$launch_rc" -eq 10 ]; then
                 # User selected return directly to Master Dashboard
                 break
@@ -7385,34 +7432,43 @@ search_steam() {
     declare -A installed_by_title=()
     declare -A installed_dir=()
 
-    local sc_id sc_name sc_st sc_dir sc_bin
-    while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
-        sc_id="${sc_id//[[:space:]]/}"
-        sc_name="${sc_name#"${sc_name%%[![:space:]]*}"}"
-        sc_name="${sc_name%"${sc_name##*[![:space:]]}"}"
-        sc_dir="${sc_dir//$'\r'/}"
-        if [ -n "$sc_id" ] && [ "$sc_id" != "STANDALONE" ]; then
-            installed_by_id["$sc_id"]=1
-            installed_dir["$sc_id"]="$sc_dir"
-        fi
-        if [ -n "$sc_name" ]; then
-            local clean_title="${sc_name,,}"
-            installed_by_title["$clean_title"]=1
-            [ -z "${installed_dir["$clean_title"]:-}" ] && installed_dir["$clean_title"]="$sc_dir"
-        fi
-    done < <(scan_installed_games)
+    _refresh_search_results() {
+        results=""
+        installed_by_id=()
+        installed_by_title=()
+        installed_dir=()
 
-    while IFS=$'\t' read -r appid name; do
-        [ -z "$appid" ] && continue
-        local is_installed=0
-        local clean_name="${name,,}"
-        if [[ -v installed_by_id["$appid"] ]] || [[ -v installed_by_title["$clean_name"] ]]; then
-            is_installed=1
-        fi
-        local status="${UI_DIM}[NOT INSTALLED]${UI_RST}"
-        [ "$is_installed" -eq 1 ] && status="${UI_GREEN}[INSTALLED]    ${UI_RST}"
-        results+="${appid}"$'\t'"${name}"$'\t'"${status}"$'\n'
-    done <<< "$items"
+        local sc_id sc_name sc_st sc_dir sc_bin
+        while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
+            sc_id="${sc_id//[[:space:]]/}"
+            sc_name="${sc_name#"${sc_name%%[![:space:]]*}"}"
+            sc_name="${sc_name%"${sc_name##*[![:space:]]}"}"
+            sc_dir="${sc_dir//$'\r'/}"
+            if [ -n "$sc_id" ] && [ "$sc_id" != "STANDALONE" ]; then
+                installed_by_id["$sc_id"]=1
+                installed_dir["$sc_id"]="$sc_dir"
+            fi
+            if [ -n "$sc_name" ]; then
+                local clean_title="${sc_name,,}"
+                installed_by_title["$clean_title"]=1
+                [ -z "${installed_dir["$clean_title"]:-}" ] && installed_dir["$clean_title"]="$sc_dir"
+            fi
+        done < <(scan_installed_games --refresh)
+
+        while IFS=$'\t' read -r appid name; do
+            [ -z "$appid" ] && continue
+            local is_installed=0
+            local clean_name="${name,,}"
+            if [[ -v installed_by_id["$appid"] ]] || [[ -v installed_by_title["$clean_name"] ]]; then
+                is_installed=1
+            fi
+            local status="${UI_DIM}[NOT INSTALLED]${UI_RST}"
+            [ "$is_installed" -eq 1 ] && status="${UI_GREEN}[INSTALLED]    ${UI_RST}"
+            results+="${appid}"$'\t'"${name}"$'\t'"${status}"$'\n'
+        done <<< "$items"
+    }
+
+    _refresh_search_results
 
     while true; do
         local fzf_out fzf_rc=0
@@ -7643,13 +7699,14 @@ EOF
                 esac
             fi
         fi
+        _refresh_search_results
     done
 }
 
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam
+export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -7985,11 +8042,11 @@ case "${1:-}" in
             echo "Usage: gamectl --sync <game_dir> [title] [remote_host]"
         fi
         ;;
-    --list)
-        scan_installed_games
+    --list|list)
+        scan_installed_games "${@:2}"
         ;;
     list-formatted|--list-formatted)
-        scan_installed_games --formatted
+        scan_installed_games --formatted "${@:2}"
         ;;
     --version|-v)
         echo "gamectl v1.4.0 (sovereign native TUI)"
