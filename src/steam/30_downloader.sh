@@ -1313,15 +1313,24 @@ list_downloads_interactive() {
             fi
         done
 
+        shopt -s nullglob
+        for st_dir in "$run_dir"/depot_dl_*; do
+            [ -d "$st_dir" ] || continue
+            local st_appid
+            st_appid=$(basename "$st_dir" | sed -E 's/depot_dl_([0-9]+)_.*/\1/')
+            [ -z "$st_appid" ] && continue
+            local st_ui="${UI_GREEN}[STANDALONE ACTIVE]${UI_RST}"
+            local st_detail="Native CDN Download in progress"
+            entries+="${st_appid}\tStandalone\t${st_ui}\t100%\t${st_detail}\t${st_dir}\n"
+            total_items=$((total_items + 1))
+        done
+        shopt -u nullglob
+
         if [ "$total_items" -eq 0 ]; then
-            clear
-            echo "${UI_BOX}╭─ DOWNLOAD MANAGER (Steam Native) ───────────────────────────╮${UI_RST}"
-            echo "│ ${UI_CYAN}No active or recent download tasks found in Steam client.${UI_RST}"
-            echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-            read -r -p "Press [ENTER] to return to Dashboard..."
-            return 0
+            entries+="0\tInfo\t${UI_DIM}[NO ACTIVE DOWNLOADS]${UI_RST}\t0%\tNo active downloads found in Steam or Standalone engine. Press Esc to return.\t\n"
         fi
 
+        flush_tty_input
         local selection fzf_rc=0
         selection=$(printf "%b" "$entries" | fzf \
             --delimiter=$'\t' \
@@ -1330,7 +1339,7 @@ list_downloads_interactive() {
             --border-label-pos=2 \
             --header="DOWNLOADS (Enter: Actions │ Ctrl-K: Pause │ Esc: Back)" \
             --prompt="Downloads > " \
-            --preview="echo -e '\033[38;5;60mSteam AppManifest: {6}\033[0m\n──────────────────────────────────────────'; grep -E '\"(appid|name|StateFlags|BytesDownloaded|BytesToDownload|installdir)\"' {6} 2>/dev/null" \
+            --preview="echo -e '\033[38;5;60mDownload Reference: {6}\033[0m\n──────────────────────────────────────────'; [ -f {6} ] && grep -E '\"(appid|name|StateFlags|BytesDownloaded|BytesToDownload|installdir)\"' {6} 2>/dev/null || echo 'Standalone download reference or empty state.'" \
             --preview-window=right:60%:border-rounded:wrap \
             --bind="ctrl-k:execute(appid={1}; steam \"steam://pause/\$appid\" 2>/dev/null; echo \"[INFO] Dispatched pause to Steam client for AppID \$appid.\"; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
         ) || fzf_rc=$?
@@ -1347,49 +1356,61 @@ list_downloads_interactive() {
             sel_title=$(echo "$selection" | awk -F'\t' '{print $5}')
             sel_ref=$(echo "$selection" | awk -F'\t' '{print $6}')
 
-            clear
-            echo "${UI_BOX}╭─ DOWNLOAD ACTIONS: AppID ${UI_BOLD}$sel_appid${UI_RST} $sel_status ─────────────╮${UI_RST}"
-            echo "│ ${UI_CYAN}Manifest${UI_RST}: ${UI_DIM}$sel_ref${UI_RST}"
-            echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-            echo "  ${UI_PURPLE}1)${UI_RST} Pause download (steam://pause/$sel_appid)"
-            echo "  ${UI_PURPLE}2)${UI_RST} Resume download (steam://resume/$sel_appid)"
-            echo "  ${UI_PURPLE}3)${UI_RST} Inject Standalone GBE Fork LAN runtime"
-            echo "  ${UI_DIM}4)${UI_RST} Return to download list"
-            echo
-            read -r -p "Select option [1-4]: " dl_opt
+            [ "$sel_appid" = "0" ] && break
+
+            local action_entries
+            action_entries=$(cat <<EOF
+1	Pause Download	steam://pause/$sel_appid
+2	Resume Download	steam://resume/$sel_appid
+3	Inject Standalone GBE Fork LAN Runtime	Deploy Goldberg emulator
+4	Return to Download List	Back
+EOF
+)
+            flush_tty_input
+            local act_sel act_rc=0
+            act_sel=$(echo "$action_entries" | fzf \
+                --delimiter=$'\t' \
+                --with-nth=2,3 \
+                --border-label="  ╢ Actions: AppID $sel_appid ╟  " \
+                --border-label-pos=2 \
+                --header="DOWNLOAD ACTIONS (Enter: Execute │ Esc: Return)" \
+                --prompt="Action > " \
+                --height=35% \
+                --reverse 2>/dev/null) || act_rc=$?
+
+            [ "$act_rc" -eq 130 ] && continue
+            [ -z "$act_sel" ] && continue
+
+            local dl_opt
+            dl_opt=$(echo "$act_sel" | cut -f1 | tr -d '[:space:]')
 
             case "$dl_opt" in
                 1)
                     if command -v steam >/dev/null 2>&1; then
                         steam "steam://pause/$sel_appid" >/dev/null 2>&1 &
-                        echo "  ${UI_GREEN}[SUCCESS] Dispatched steam://pause/$sel_appid${UI_RST}"
-                    else
-                        echo "  [WARN] Steam executable not found on PATH."
+                        log_msg "INFO" "DOWNLOAD" "Paused download for AppID $sel_appid"
                     fi
-                    read -r -p "Press [ENTER] to continue..."
                     ;;
                 2)
                     if command -v steam >/dev/null 2>&1; then
                         steam "steam://resume/$sel_appid" >/dev/null 2>&1 &
-                        echo "  ${UI_GREEN}[SUCCESS] Dispatched steam://resume/$sel_appid${UI_RST}"
-                    else
-                        echo "  [WARN] Steam executable not found on PATH."
+                        log_msg "INFO" "DOWNLOAD" "Resumed download for AppID $sel_appid"
                     fi
-                    read -r -p "Press [ENTER] to continue..."
                     ;;
                 3)
                     local g_dir
-                    g_dir="$(dirname "$sel_ref")/common/$(grep -m1 '"installdir"' "$sel_ref" 2>/dev/null | awk -F'"' '{print $4}')"
-                    if [ -d "$g_dir" ]; then
-                        echo "[INFO] Injecting GBE Fork LAN runtime into: $g_dir"
-                        "$SELF_BIN" inject "$g_dir" "$sel_appid"
+                    if [ -f "$sel_ref" ]; then
+                        g_dir="$(dirname "$sel_ref")/common/$(grep -m1 '"installdir"' "$sel_ref" 2>/dev/null | awk -F'"' '{print $4}')"
                     else
-                        echo "  [WARN] Game common directory does not exist yet: $g_dir"
-                        echo "  [INFO] Please wait until the download finishes in Steam."
+                        g_dir="$sel_ref"
                     fi
-                    read -r -p "Press [ENTER] to continue..."
+                    if [ -d "$g_dir" ]; then
+                        log_msg "INFO" "DOWNLOAD" "Injecting GBE Fork LAN runtime into: $g_dir"
+                        "$SELF_BIN" inject "$g_dir" "$sel_appid"
+                    fi
                     ;;
                 *)
+                    continue
                     ;;
             esac
         fi
@@ -1509,25 +1530,31 @@ except Exception as e:
     fi
 
     local steam_apps
-    steam_apps="$(get_steam_primary_apps)"
+    steam_apps="$(get_steam_primary_apps 2>/dev/null || echo "$HOME/.local/share/Steam/steamapps")"
     if [ -d "$steam_apps" ]; then
         # Guard against concurrent Steam client memory lock on manifests
         check_steam_active "Writing appmanifest_${appid}.acf" || true
 
-        local acf_file="$steam_apps/appmanifest_${appid}.acf"
-        local install_name="$safe_title"
-        local size_bytes="1000000000"
-        local steamid
-        steamid=$(resolve_active_steamid)
-
-        if [ -n "$game_dir" ] && [ -d "$game_dir" ]; then
-            install_name="$(basename "$game_dir")"
-            local calc_sz
-            calc_sz=$(du -sb "$game_dir" 2>/dev/null | awk '{print $1}')
-            [ -n "$calc_sz" ] && [ "$calc_sz" -gt 0 ] && size_bytes="$calc_sz"
+        local resolved_dir="$game_dir"
+        if [ -z "$resolved_dir" ]; then
+            if [ -d "$steam_apps/common/$safe_title" ] && [ -n "$(ls -A "$steam_apps/common/$safe_title" 2>/dev/null)" ]; then
+                resolved_dir="$steam_apps/common/$safe_title"
+            elif [ -d "$steam_apps/common/$title" ] && [ -n "$(ls -A "$steam_apps/common/$title" 2>/dev/null)" ]; then
+                resolved_dir="$steam_apps/common/$title"
+            fi
         fi
 
-        cat <<ACF > "$acf_file"
+        # Ghost ACF Defense: do not generate empty 1GB dummy ACF if files do not exist physically
+        if [ -n "$resolved_dir" ] && [ -d "$resolved_dir" ]; then
+            local acf_file="$steam_apps/appmanifest_${appid}.acf"
+            local install_name="$(basename "$resolved_dir")"
+            local size_bytes
+            size_bytes=$(du -sb "$resolved_dir" 2>/dev/null | awk '{print $1}')
+            [ -z "$size_bytes" ] || [ "$size_bytes" -le 0 ] && size_bytes=1000000000
+            local steamid
+            steamid=$(resolve_active_steamid)
+
+            cat <<ACF > "$acf_file"
 "AppState"
 {
 	"appid"		"$appid"
@@ -1549,18 +1576,19 @@ except Exception as e:
 	}
 }
 ACF
-        # Symlink in steamapps/common if game_dir is external, or ensure install dir exists
-        mkdir -p "$steam_apps/common"
-        if [ -n "$game_dir" ] && [ -d "$game_dir" ]; then
+            mkdir -p "$steam_apps/common"
             local common_target="$steam_apps/common/$install_name"
-            if [ ! -e "$common_target" ]; then
-                ln -sf "$game_dir" "$common_target"
-                echo "[INFO] Created common symlink: $common_target -> $game_dir"
+            if [ "$resolved_dir" != "$common_target" ] && [ ! -e "$common_target" ]; then
+                ln -sf "$resolved_dir" "$common_target"
+                echo "[INFO] Created common symlink: $common_target -> $resolved_dir"
             fi
+            echo "[VERIFIED] appmanifest_${appid}.acf registered (Status: Installed in Steam, Size: $size_bytes bytes)."
+            log_msg "INFO" "STEAM" "Registered physical ACF manifest for $title ($appid) in $common_target"
         else
-            mkdir -p "$steam_apps/common/$install_name"
+            echo "  ${UI_AMBER}[NOTE] No physical game files detected on disk for AppID $appid.${UI_RST}"
+            echo "  ${UI_DIM}Entitlement registered in SLSsteam. ACF manifest creation skipped to prevent Ghost Game.${UI_RST}"
+            log_msg "INFO" "STEAM" "SLSsteam entitlement registered for $title ($appid); ACF creation deferred"
         fi
-        echo "[VERIFIED] appmanifest_${appid}.acf registered (Status: Installed in Steam, Size: $size_bytes bytes)."
     fi
     invalidate_scan_cache
 }

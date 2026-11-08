@@ -1096,9 +1096,18 @@ build_wrapper_command() {
 
 # Interactive wrapper configuration for a game or global defaults
 configure_wrappers() {
-    local gdir="$1"
-    local title="${2:-$(basename "$gdir")}"
-    local w_file="$gdir/.wrappers"
+    local gdir="${1:-}"
+    local title="${2:-}"
+    local w_file
+
+    if [ -n "$gdir" ] && [ -d "$gdir" ]; then
+        [ -z "$title" ] && title="$(basename "$gdir")"
+        w_file="$gdir/.wrappers"
+    else
+        title="Global Default Wrappers"
+        mkdir -p "$HOME/.config/gamectl"
+        w_file="$HOME/.config/gamectl/wrappers"
+    fi
 
     local gm=0 hud=0 scope=0 fsr=0 glt=0
     local gscope_args
@@ -1146,23 +1155,42 @@ configure_wrappers() {
         local glt_hint="${UI_DIM}(Opt-in Performance)${UI_RST}"
         is_haswell_gpu && glt_hint="${UI_AMBER}(Intel Haswell: Keep OFF)${UI_RST}"
 
-        clear
-        echo "${UI_BOX}╭─ CONFIGURE RUNTIME WRAPPERS: ${UI_BOLD}${title}${UI_RST}${UI_BOX} ────────────╮${UI_RST}"
-        echo "│ ${UI_CYAN}Host Tools${UI_RST}: GameMode $h_gm • MangoHud $h_hud • Gamescope $h_scope"
-        echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-        echo "  ${UI_PURPLE}1)${UI_RST} GameMode (gamemoderun)       : $b_gm"
-        echo "  ${UI_PURPLE}2)${UI_RST} MangoHud (FPS & Telemetry)   : $b_hud"
-        echo "  ${UI_PURPLE}3)${UI_RST} Gamescope (Isolated Window)  : $b_scope"
-        echo "  ${UI_PURPLE}4)${UI_RST} Gamescope FSR Upscaling      : $b_fsr"
-        echo "  ${UI_PURPLE}5)${UI_RST} Mesa GL Threading (mesa_gl)  : $b_glt $glt_hint"
-        echo "${UI_BOX}  ─────────────────────────────────────────────────────────────${UI_RST}"
-        echo "  ${UI_CYAN}6)${UI_RST} Preset: Balanced Performance (GameMode + MangoHud)"
-        echo "  ${UI_CYAN}7)${UI_RST} Preset: Handheld / FSR (GameMode + MangoHud + Gamescope FSR)"
-        echo "  ${UI_CYAN}8)${UI_RST} Reset: Safe Defaults (All Disabled)"
-        echo "  ${UI_GREEN}9)${UI_RST} Save & Return to Library"
-        echo "  ${UI_RED}0)${UI_RST} Cancel / Discard Changes"
-        echo
-        read -r -p "Select option [0-9]: " opt
+        local entries
+        entries=$(cat <<EOF
+1	GameMode (gamemoderun)	$b_gm
+2	MangoHud (FPS & Telemetry)	$b_hud
+3	Gamescope (Isolated Window)	$b_scope
+4	Gamescope FSR Upscaling	$b_fsr
+5	Mesa GL Threading (mesa_gl)	$b_glt $glt_hint
+6	Preset: Balanced Performance	GameMode + MangoHud
+7	Preset: Handheld / FSR	GameMode + MangoHud + Gamescope FSR
+8	Reset: Safe Defaults	All Disabled
+9	Save & Return	Save configuration
+0	Cancel / Discard Changes	Discard changes and return
+EOF
+)
+
+        flush_tty_input
+        local selection fzf_rc=0
+        selection=$(echo "$entries" | fzf \
+            --delimiter=$'\t' \
+            --with-nth=2,3 \
+            --border-label="  ╢ gamectl :: Wrappers : $title ╟  " \
+            --border-label-pos=2 \
+            --header="RUNTIME WRAPPERS (Enter: Toggle/Select │ Esc: Save & Return)" \
+            --prompt="Wrappers > " \
+            --height=45% \
+            --reverse 2>/dev/null) || fzf_rc=$?
+
+        local opt
+        if [ "$fzf_rc" -eq 130 ]; then
+            opt="9"
+        elif [ -z "$selection" ]; then
+            continue
+        else
+            opt=$(echo "$selection" | cut -f1 | tr -d '[:space:]')
+        fi
+
         case "$opt" in
             1) gm=$((1 - gm)) ;;
             2) hud=$((1 - hud)) ;;
@@ -1182,14 +1210,14 @@ fsr=$fsr
 glthread=$glt
 gamescope_args=$gscope_args
 EOF
-                echo "[VERIFIED] Wrapper configuration saved to: $w_file"
-                sleep 0.8
+                log_msg "INFO" "WRAPPERS" "Saved wrapper configuration for $title -> $w_file (gm=$gm,hud=$hud,scope=$scope,fsr=$fsr,glt=$glt)"
                 break
                 ;;
-            0|q|Q)
+            0|q|Q|cancel)
                 return 0
                 ;;
             *)
+                continue
                 ;;
         esac
     done
@@ -1200,10 +1228,6 @@ configure_global() {
     mkdir -p "$HOME/.config/gamectl"
 
     while true; do
-        clear
-        echo "${UI_BOX}╭─ GLOBAL SETTINGS (~/.config/gamectl/) ──────────────────────╮${UI_RST}"
-        echo "│ ${UI_CYAN}Default Persona, Runtime Wrappers, Libraries & Companion${UI_RST}"
-        echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
         local p_name="Player" p_id=""
         if [ -f "$HOME/.config/gamectl/persona" ]; then
             p_name=$(grep -E '^[[:space:]]*account_name[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_name[[:space:]]*=[[:space:]]*//' | tr -d '\r')
@@ -1231,175 +1255,181 @@ configure_global() {
             [ -z "$r_host" ] && r_host="Not Configured"
         fi
 
-        echo "  ${UI_PURPLE}1)${UI_RST} Global LAN Persona     : ${UI_BOLD}$p_name${UI_RST} ${UI_DIM}(SteamID: ${p_id:-Auto})${UI_RST}"
-        echo "  ${UI_PURPLE}2)${UI_RST} Default Wrappers       : ${UI_BOLD}$w_desc${UI_RST}"
-        echo "  ${UI_PURPLE}3)${UI_RST} Custom Game Libraries  : ${UI_BOLD}$lib_count${UI_RST} ${UI_DIM}paths registered${UI_RST}"
-        echo "  ${UI_PURPLE}4)${UI_RST} Remote Companion Host  : ${UI_BOLD}$r_host${UI_RST}"
-        echo "${UI_BOX}  ─────────────────────────────────────────────────────────────${UI_RST}"
-        echo "  ${UI_GREEN}5)${UI_RST} Return to Master Dashboard Hub"
-        echo
-        read -r -p "Select option [1-5]: " cfg_opt
+        local menu_entries
+        menu_entries=$(cat <<EOF
+1	Global LAN Persona	Name: $p_name | SteamID: ${p_id:-Auto}
+2	Default Runtime Wrappers	$w_desc
+3	Custom Game Libraries	$lib_count paths registered
+4	Remote Companion Host	$r_host
+5	Return to Master Dashboard Hub	Return
+EOF
+)
+
+        flush_tty_input
+        local selection fzf_rc=0
+        selection=$(echo "$menu_entries" | fzf \
+            --delimiter=$'\t' \
+            --with-nth=2,3 \
+            --border-label="  ╢ gamectl :: Global Settings (~/.config/gamectl/) ╟  " \
+            --border-label-pos=2 \
+            --header="GLOBAL SETTINGS (Enter: Configure │ Esc: Return to Dashboard)" \
+            --prompt="Settings > " \
+            --height=40% \
+            --reverse 2>/dev/null) || fzf_rc=$?
+
+        [ "$fzf_rc" -eq 130 ] && break
+        [ -z "$selection" ] && continue
+
+        local cfg_opt
+        cfg_opt=$(echo "$selection" | cut -f1 | tr -d '[:space:]')
 
         case "$cfg_opt" in
             1)
-                echo
-                echo "${UI_BOX}╭─ GLOBAL LAN PERSONA SETTINGS ───────────────────────────────╮${UI_RST}"
-                echo -n "  Player Name [$p_name]: "; read -r new_name
+                flush_tty_input
+                local in_name_raw in_id_raw rc=0
+                in_name_raw=$(: | fzf \
+                    --print-query \
+                    --border-label="  ╢ Configure LAN Persona Name ╟  " \
+                    --border-label-pos=2 \
+                    --header="Enter Player Name (Current: $p_name │ Enter: Confirm │ Esc: Cancel)" \
+                    --prompt="Player Name > " \
+                    --height=20% \
+                    --reverse 2>/dev/null) || rc=$?
+                [ "$rc" -eq 130 ] && continue
+                local new_name
+                new_name=$(echo "$in_name_raw" | head -n 1 | tr -d '\r\n')
                 [ -n "$new_name" ] && p_name="$new_name"
-                echo -n "  SteamID64 [${p_id:-Auto}] ('gen' for random ID): "; read -r new_id
+
+                flush_tty_input
+                in_id_raw=$(: | fzf \
+                    --print-query \
+                    --border-label="  ╢ Configure SteamID64 ╟  " \
+                    --border-label-pos=2 \
+                    --header="Enter 17-digit SteamID64, 'gen' for random ID, or blank for Auto (Current: ${p_id:-Auto})" \
+                    --prompt="SteamID64 > " \
+                    --height=20% \
+                    --reverse 2>/dev/null) || rc=$?
+                [ "$rc" -eq 130 ] && continue
+                local new_id
+                new_id=$(echo "$in_id_raw" | head -n 1 | tr -d '[:space:]')
                 if [ "$new_id" = "gen" ]; then
                     p_id=$(generate_steamid64)
-                    echo "  [INFO] Generated SteamID64: $p_id"
                 elif [ -n "$new_id" ]; then
                     p_id="$new_id"
                 fi
+
                 cat <<EOF > "$HOME/.config/gamectl/persona"
 [user::general]
 account_name=$p_name
 account_steamid=$p_id
 language=english
 EOF
-                echo "  ${UI_GREEN}[SUCCESS] Persona saved: $p_name | $p_id${UI_RST}"
-                sleep 0.8
+                log_msg "INFO" "CONFIG" "Saved global LAN persona: $p_name | $p_id"
                 ;;
             2)
-                local gm=0 hud=0 scope=0 fsr=0 glt=0
-                local gscope_args
-                gscope_args=$(get_default_gamescope_args)
-                if [ -f "$HOME/.config/gamectl/wrappers" ]; then
-                    grep -q "^gamemode=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && gm=1
-                    grep -q -E "^(hud|mangohud)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && hud=1
-                    grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && scope=1
-                    grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && fsr=1
-                    grep -q -E "^(glthread|mesa_glthread)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && glt=1
-                    local g_custom
-                    g_custom=$(grep -E '^[[:space:]]*gamescope_args[[:space:]]*=' "$HOME/.config/gamectl/wrappers" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*gamescope_args[[:space:]]*=[[:space:]]*//' | tr -d '\r')
-                    [ -n "$g_custom" ] && gscope_args="$g_custom"
-                fi
-                while true; do
-                    local b_gm="${UI_DIM}[OFF]${UI_RST}" b_hud="${UI_DIM}[OFF]${UI_RST}"
-                    local b_scope="${UI_DIM}[OFF]${UI_RST}" b_fsr="${UI_DIM}[OFF]${UI_RST}" b_glt="${UI_DIM}[OFF]${UI_RST}"
-                    [ "$gm" = 1 ] && b_gm="${UI_GREEN}[ACTIVE]${UI_RST}"
-                    [ "$hud" = 1 ] && b_hud="${UI_GREEN}[ACTIVE]${UI_RST}"
-                    [ "$scope" = 1 ] && b_scope="${UI_GREEN}[ACTIVE]${UI_RST}"
-                    [ "$fsr" = 1 ] && b_fsr="${UI_GREEN}[ACTIVE]${UI_RST}"
-                    [ "$glt" = 1 ] && b_glt="${UI_GREEN}[ACTIVE]${UI_RST}"
-
-                    local glt_hint="${UI_DIM}(Opt-in Performance)${UI_RST}"
-                    is_haswell_gpu && glt_hint="${UI_AMBER}(Intel Haswell: Keep OFF)${UI_RST}"
-
-                    clear
-                    echo "${UI_BOX}╭─ DEFAULT GLOBAL RUNTIME WRAPPERS ───────────────────────────╮${UI_RST}"
-                    echo "│ ${UI_CYAN}These wrappers apply to all games unless overridden per-game${UI_RST}"
-                    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-                    echo "  ${UI_PURPLE}1)${UI_RST} GameMode (gamemoderun)       : $b_gm"
-                    echo "  ${UI_PURPLE}2)${UI_RST} MangoHud (FPS & Telemetry)   : $b_hud"
-                    echo "  ${UI_PURPLE}3)${UI_RST} Gamescope (Isolated Window)  : $b_scope"
-                    echo "  ${UI_PURPLE}4)${UI_RST} Gamescope FSR Upscaling      : $b_fsr"
-                    echo "  ${UI_PURPLE}5)${UI_RST} Mesa GL Threading (mesa_gl)  : $b_glt $glt_hint"
-                    echo "${UI_BOX}  ─────────────────────────────────────────────────────────────${UI_RST}"
-                    echo "  ${UI_CYAN}6)${UI_RST} Preset: Balanced Performance (GameMode + MangoHud)"
-                    echo "  ${UI_CYAN}7)${UI_RST} Preset: Handheld / FSR (GameMode + MangoHud + Gamescope FSR)"
-                    echo "  ${UI_CYAN}8)${UI_RST} Reset: Safe Defaults (All Disabled)"
-                    echo "  ${UI_GREEN}9)${UI_RST} Save & Return | ${UI_DIM}0) Cancel & Back${UI_RST}"
-                    echo
-                    read -r -p "Select option [0-9]: " w_opt
-                    case "$w_opt" in
-                        1) gm=$((1 - gm)) ;;
-                        2) hud=$((1 - hud)) ;;
-                        3) scope=$((1 - scope)) ;;
-                        4) fsr=$((1 - fsr)); [ "$fsr" = 1 ] && scope=1 ;;
-                        5) glt=$((1 - glt)) ;;
-                        6) gm=1; hud=1; scope=0; fsr=0; glt=0 ;;
-                        7) gm=1; hud=1; scope=1; fsr=1; glt=0 ;;
-                        8) gm=0; hud=0; scope=0; fsr=0; glt=0 ;;
-                        9)
-                            cat <<EOF > "$HOME/.config/gamectl/wrappers"
-gamemode=$gm
-hud=$hud
-gamescope=$scope
-fsr=$fsr
-glthread=$glt
-gamescope_args=$gscope_args
-EOF
-                            echo "  ${UI_GREEN}[SUCCESS] Global wrappers saved.${UI_RST}"
-                            sleep 0.8
-                            break
-                            ;;
-                        0|q|Q|cancel)
-                            echo "  [INFO] Changes discarded."
-                            sleep 0.5
-                            break
-                            ;;
-                        *)
-                            continue
-                            ;;
-                    esac
-                done
+                configure_wrappers ""
                 ;;
             3)
-                clear
-                echo "${UI_BOX}╭─ CUSTOM GAME LIBRARIES (~/.config/gamectl/libraries) ───────╮${UI_RST}"
-                echo "│ ${UI_CYAN}Direct scan paths for game binaries and appmanifests${UI_RST}"
-                echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-                [ -f "$HOME/.config/gamectl/libraries" ] && grep -v -E '^[[:space:]]*(#|$)' "$HOME/.config/gamectl/libraries" 2>/dev/null | nl -w2 -s'. ' || echo "  ${UI_DIM}(No custom libraries registered)${UI_RST}"
-                echo "${UI_BOX}  ─────────────────────────────────────────────────────────────${UI_RST}"
-                echo "  ${UI_CYAN}1)${UI_RST} Add Directory | ${UI_CYAN}2)${UI_RST} Remove Directory | ${UI_CYAN}3)${UI_RST} Back"
-                read -r -p "Select option [1-3]: " lib_opt
-                case "$lib_opt" in
-                    1)
-                        echo -n "  Enter path (e.g. ~/Games): "; read -r new_path
+                while true; do
+                    local lib_items=""
+                    local l_idx=1
+                    if [ -f "$HOME/.config/gamectl/libraries" ]; then
+                        while IFS= read -r l_path; do
+                            [ -z "$l_path" ] && continue
+                            [[ "$l_path" =~ ^[[:space:]]*# ]] && continue
+                            lib_items+="${l_idx}\t[REMOVE] $l_path\tSelect to remove this library path\n"
+                            l_idx=$((l_idx + 1))
+                        done < "$HOME/.config/gamectl/libraries"
+                    fi
+                    local lib_menu
+                    lib_menu=$(cat <<EOF
+add	[+] Register New Library Path	Enter filesystem path (e.g. ~/Games)
+EOF
+)
+                    [ -n "$lib_items" ] && lib_menu="${lib_menu}"$'\n'"$(printf '%b' "$lib_items")"
+                    lib_menu="${lib_menu}"$'\n'"back	[<] Return to Global Settings	Back"
+
+                    flush_tty_input
+                    local lib_sel l_rc=0
+                    lib_sel=$(echo "$lib_menu" | fzf \
+                        --delimiter=$'\t' \
+                        --with-nth=2,3 \
+                        --border-label="  ╢ gamectl :: Custom Game Libraries ╟  " \
+                        --border-label-pos=2 \
+                        --header="CUSTOM LIBRARIES (Enter: Select │ Esc: Return)" \
+                        --prompt="Libraries > " \
+                        --height=40% \
+                        --reverse 2>/dev/null) || l_rc=$?
+
+                    [ "$l_rc" -eq 130 ] && break
+                    [ -z "$lib_sel" ] && continue
+
+                    local l_action
+                    l_action=$(echo "$lib_sel" | cut -f1 | tr -d '[:space:]')
+
+                    if [ "$l_action" = "add" ]; then
+                        flush_tty_input
+                        local in_p_raw p_rc=0
+                        in_p_raw=$(: | fzf \
+                            --print-query \
+                            --border-label="  ╢ Add Game Library Directory ╟  " \
+                            --border-label-pos=2 \
+                            --header="Enter directory path (e.g. ~/Games │ Enter: Add │ Esc: Cancel)" \
+                            --prompt="Path > " \
+                            --height=20% \
+                            --reverse 2>/dev/null) || p_rc=$?
+                        [ "$p_rc" -eq 130 ] && continue
+                        local new_path
+                        new_path=$(echo "$in_p_raw" | head -n 1 | tr -d '\r\n')
                         if [ -n "$new_path" ]; then
                             new_path="${new_path/#\~/$HOME}"
                             echo "$new_path" >> "$HOME/.config/gamectl/libraries"
-                            echo "  ${UI_GREEN}[SUCCESS] Path '$new_path' added.${UI_RST}"
+                            log_msg "INFO" "CONFIG" "Added custom library: $new_path"
+                            invalidate_scan_cache
                         fi
-                        read -r -p "Press [ENTER] to continue..."
-                        ;;
-                    2)
-                        if [ -f "$HOME/.config/gamectl/libraries" ]; then
-                            echo -n "  Enter line number to remove: "; read -r del_num
-                            if [[ "$del_num" =~ ^[0-9]+$ ]]; then
-                                local target_line
-                                target_line=$(grep -v -E '^[[:space:]]*(#|$)' "$HOME/.config/gamectl/libraries" 2>/dev/null | sed -n "${del_num}p")
-                                if [ -n "$target_line" ]; then
-                                    grep -v -F "$target_line" "$HOME/.config/gamectl/libraries" > "$HOME/.config/gamectl/libraries.tmp" && mv "$HOME/.config/gamectl/libraries.tmp" "$HOME/.config/gamectl/libraries"
-                                    echo "  ${UI_GREEN}[SUCCESS] '$target_line' removed.${UI_RST}"
-                                fi
-                            fi
-                        fi
-                        read -r -p "Press [ENTER] to continue..."
-                        ;;
-                    *) ;;
-                esac
-                ;;
-            4)
-                echo
-                echo "${UI_BOX}╭─ REMOTE COMPANION HOST (~/.config/gamectl/remote_host) ─────╮${UI_RST}"
-                echo "│ ${UI_CYAN}Target SSH server for savegame synchronization${UI_RST}"
-                echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-                echo "  Current Host: ${UI_BOLD}$r_host${UI_RST}"
-                echo -n "  Enter new hostname or SSH alias ('-' to clear): "; read -r new_rhost
-                if [ "$new_rhost" = "-" ]; then
-                    rm -f "$HOME/.config/gamectl/remote_host"
-                    echo "  [INFO] Remote host configuration cleared."
-                elif [ -n "$new_rhost" ]; then
-                    echo "$new_rhost" > "$HOME/.config/gamectl/remote_host"
-                    echo "  ${UI_GREEN}[SUCCESS] Remote host '$new_rhost' saved.${UI_RST}"
-                    echo -n "  Test SSH connectivity to '$new_rhost'? [y/N]: "; read -r test_ssh
-                    if [[ "$test_ssh" =~ ^[yY] ]]; then
-                        echo "  [INFO] Testing SSH connection to $new_rhost (3s timeout)..."
-                        if ssh -q -o BatchMode=yes -o ConnectTimeout=3 "$new_rhost" exit 2>/dev/null; then
-                            echo "  ${UI_GREEN}[VERIFIED] SSH connection successful!${UI_RST}"
-                        else
-                            echo "  ${UI_AMBER}[WARN] Host did not respond with public key auth. Ensure host is in ~/.ssh/config.${UI_RST}"
+                    elif [ "$l_action" = "back" ]; then
+                        break
+                    else
+                        local target_line
+                        target_line=$(grep -v -E '^[[:space:]]*(#|$)' "$HOME/.config/gamectl/libraries" 2>/dev/null | sed -n "${l_action}p")
+                        if [ -n "$target_line" ]; then
+                            grep -v -F "$target_line" "$HOME/.config/gamectl/libraries" > "$HOME/.config/gamectl/libraries.tmp" 2>/dev/null && mv "$HOME/.config/gamectl/libraries.tmp" "$HOME/.config/gamectl/libraries"
+                            log_msg "INFO" "CONFIG" "Removed custom library: $target_line"
+                            invalidate_scan_cache
                         fi
                     fi
+                done
+                ;;
+            4)
+                flush_tty_input
+                local in_host_raw rc=0
+                in_host_raw=$(: | fzf \
+                    --print-query \
+                    --border-label="  ╢ Remote Companion Host ╟  " \
+                    --border-label-pos=2 \
+                    --header="Enter SSH hostname/alias or '-' to clear (Current: $r_host │ Enter: Save │ Esc: Cancel)" \
+                    --prompt="SSH Host > " \
+                    --height=20% \
+                    --reverse 2>/dev/null) || rc=$?
+                [ "$rc" -eq 130 ] && continue
+                local new_rhost
+                new_rhost=$(echo "$in_host_raw" | head -n 1 | tr -d '[:space:]')
+                if [ "$new_rhost" = "-" ]; then
+                    rm -f "$HOME/.config/gamectl/remote_host"
+                    log_msg "INFO" "CONFIG" "Cleared remote companion host"
+                elif [ -n "$new_rhost" ]; then
+                    echo "$new_rhost" > "$HOME/.config/gamectl/remote_host"
+                    log_msg "INFO" "CONFIG" "Saved remote companion host: $new_rhost"
                 fi
-                read -r -p "Press [ENTER] to continue..."
+                ;;
+            5)
+                break
+                ;;
+            0|q|Q|cancel)
+                break
                 ;;
             *)
-                break
+                continue
                 ;;
         esac
     done

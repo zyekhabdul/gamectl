@@ -319,33 +319,80 @@ set_id_interactive() {
         echo
     fi
 
-    echo -n "  Player Name [${cur_name:-Player}]: "; read -r in_name
+    flush_tty_input
+    local in_name_raw rc=0
+    in_name_raw=$(: | fzf \
+        --print-query \
+        --border-label="  ╢ LAN Persona :: Player Name ╟  " \
+        --border-label-pos=2 \
+        --header="Enter Player Name (Current: ${cur_name:-Player} │ Enter: Next │ Esc: Cancel)" \
+        --prompt="Player Name > " \
+        --height=20% \
+        --reverse 2>/dev/null) || rc=$?
+    [ "$rc" -eq 130 ] && return 0
+    local in_name
+    in_name=$(echo "$in_name_raw" | head -n 1 | tr -d '\r\n')
     [ -z "$in_name" ] && in_name="$cur_name"
     [ -z "$in_name" ] && in_name="${USER:-Player}"
 
+    flush_tty_input
     local suggested_id
     suggested_id=$(generate_steamid64)
-    echo -n "  SteamID64 ('gen' or 'random' to generate) [${cur_id:-$suggested_id}]: "; read -r in_id
+    local in_id_raw
+    in_id_raw=$(: | fzf \
+        --print-query \
+        --border-label="  ╢ LAN Persona :: SteamID64 ╟  " \
+        --border-label-pos=2 \
+        --header="Enter SteamID64, 'gen' for random ID, or leave blank (Current: ${cur_id:-$suggested_id})" \
+        --prompt="SteamID64 > " \
+        --height=20% \
+        --reverse 2>/dev/null) || rc=$?
+    [ "$rc" -eq 130 ] && return 0
+    local in_id
+    in_id=$(echo "$in_id_raw" | head -n 1 | tr -d '[:space:]')
     [ -z "$in_id" ] && in_id="${cur_id:-$suggested_id}"
     if [ "$in_id" = "random" ] || [ "$in_id" = "auto" ] || [ "$in_id" = "gen" ]; then
         in_id=$(generate_steamid64)
     fi
 
-    echo
-    echo "  LAN Custom Broadcast Peers (Optional):"
-    echo "  Enter friend's LAN IP (e.g. 192.168.1.50) or press Enter to skip."
-    echo -n "  Peer/Broadcast IP: "; read -r in_bc
+    flush_tty_input
+    local in_bc_raw
+    in_bc_raw=$(: | fzf \
+        --print-query \
+        --border-label="  ╢ LAN Custom Broadcast Peer IP (Optional) ╟  " \
+        --border-label-pos=2 \
+        --header="Enter friend's LAN IP (e.g. 192.168.1.50) or leave blank (Enter: Next │ Esc: Skip)" \
+        --prompt="Peer IP > " \
+        --height=20% \
+        --reverse 2>/dev/null) || true
+    local in_bc
+    in_bc=$(echo "$in_bc_raw" | head -n 1 | tr -d '[:space:]')
 
-    echo -n "  Also save as global default persona? (y/N): "; read -r in_glob
+    local glob_entries
+    glob_entries=$(cat <<EOF
+no	No, apply to this game only	Keep global defaults untouched
+yes	Yes, also save as global persona	Update ~/.config/gamectl/persona
+EOF
+)
+    flush_tty_input
+    local glob_sel
+    glob_sel=$(echo "$glob_entries" | fzf \
+        --delimiter=$'\t' \
+        --with-nth=2,3 \
+        --border-label="  ╢ Global Persona Sync ╟  " \
+        --border-label-pos=2 \
+        --header="Also save this persona as global default for future games?" \
+        --prompt="Save Global > " \
+        --height=25% \
+        --reverse 2>/dev/null) || true
 
     local extra_args=()
     [ -n "$in_bc" ] && extra_args+=(--broadcast "$in_bc")
-    case "$in_glob" in
-        y|Y|yes|YES) extra_args+=(--global) ;;
-    esac
+    if echo "$glob_sel" | grep -q '^yes'; then
+        extra_args+=(--global)
+    fi
 
     set_id "$in_name" "$in_id" "$target_dir" "${extra_args[@]}"
-    echo
-    read -r -p "Press [ENTER] to return to Library..."
+    log_msg "INFO" "PERSONA" "Configured LAN identity for $title: $in_name ($in_id)"
 }
 

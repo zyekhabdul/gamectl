@@ -474,8 +474,15 @@ EOF
                 configure_global
                 ;;
             6)
-                doctor_audit
-                read -r -p "Press [ENTER] to return to Dashboard..."
+                flush_tty_input
+                doctor_audit 2>&1 | fzf \
+                    --ansi \
+                    --border-label="  ╢ gamectl :: System Diagnostics Audit ╟  " \
+                    --border-label-pos=2 \
+                    --header="SYSTEM DIAGNOSTICS (Arrows: Scroll │ Esc / q / Enter: Return to Dashboard)" \
+                    --prompt="Audit > " \
+                    --bind="q:abort" \
+                    --reverse 2>/dev/null || true
                 ;;
             7)
                 view_logs_interactive

@@ -1737,6 +1737,44 @@ test_view_logs_cli_contract() {
 }
 run_test "Activity Log Viewer: In-Dashboard preview & CLI subcommand contract" test_view_logs_cli_contract
 
+test_ghost_acf_defense_contract() {
+    source "$REPO_ROOT/src/core/00_header.sh"
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+
+    local t_home
+    t_home=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_ghost_acf_XXXXXX")
+    local steam_apps="$t_home/.local/share/Steam/steamapps"
+    mkdir -p "$steam_apps"
+
+    # Call sync_steam without an existing game directory (files not present)
+    HOME="$t_home" sync_steam 999999 "GhostGame" "" >/dev/null 2>&1 || true
+
+    # Invariant: Must NOT create appmanifest_999999.acf when game files are absent
+    if [ -f "$steam_apps/appmanifest_999999.acf" ]; then
+        rm -rf "$t_home"
+        return 1
+    fi
+
+    # Now create a physical game directory with files and adopt it
+    local g_dir="$t_home/Games/RealGame"
+    mkdir -p "$g_dir"
+    echo "binary_content" > "$g_dir/game.exe"
+
+    HOME="$t_home" sync_steam 999999 "RealGame" "$g_dir" >/dev/null 2>&1 || true
+
+    # Invariant: Must create appmanifest_999999.acf when physical game files are provided
+    if [ ! -f "$steam_apps/appmanifest_999999.acf" ]; then
+        rm -rf "$t_home"
+        return 1
+    fi
+
+    rm -rf "$t_home"
+    return 0
+}
+run_test "Ghost ACF Defense: Reject dummy manifest when game files absent" test_ghost_acf_defense_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

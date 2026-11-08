@@ -1,4 +1,4 @@
-# WORK PACKET 18: CLEAN TUI LIFECYCLE, CENTRALIZED LOGS & DANGLING FEATURE REMEDIATION [PLANNED]
+# WORK PACKET 18: CLEAN TUI LIFECYCLE, CENTRALIZED LOGS & DANGLING FEATURE REMEDIATION [COMPLETED]
 
 **Track**: Spec-Driven Engineering (SDD) / Maintenance
 
@@ -40,7 +40,7 @@ Mewujudkan ergonomi TUI berstandar modern ("Clean Outside", 100% In-Dashboard) s
   4. Tambahkan kartu informasi "Recent Activity Logs" (5 baris terbaru) pada preview cockpit kanan di `preview_dashboard()`.
 - **DoD**: User dapat memeriksa riwayat aktivitas dan error langsung dari dalam TUI tanpa perlu keluar ke terminal.
 
-### Chunk 4: Modernisasi `configure_global` Menjadi In-Dashboard FZF Modal
+### Chunk 4: Modernisasi `configure_global` Menjadi In-Dashboard FZF Modal [VERIFIED]
 - **Target Files**: `src/runners/40_wrappers.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Hapus pemanggilan `clear` dan loop `read -r -p "Select option [1-5]: "` pada `configure_global()`.
@@ -49,7 +49,7 @@ Mewujudkan ergonomi TUI berstandar modern ("Clean Outside", 100% In-Dashboard) s
   4. Pilihan toggle wrappers langsung membuka modal wrapper FZF tanpa keluar dashboard.
 - **DoD**: `configure_global` berjalan 100% di dalam antarmuka FZF tanpa melempar user ke terminal mentah.
 
-### Chunk 5: Modernisasi `configure_wrappers` Menjadi In-Dashboard FZF Toggle Palette
+### Chunk 5: Modernisasi `configure_wrappers` Menjadi In-Dashboard FZF Toggle Palette [VERIFIED]
 - **Target Files**: `src/runners/40_wrappers.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Hapus `clear` dan `read -r -p "Select option [0-9]: "` pada `configure_wrappers()`.
@@ -59,7 +59,7 @@ Mewujudkan ergonomi TUI berstandar modern ("Clean Outside", 100% In-Dashboard) s
   5. Pertahankan token literal `0|q|Q|cancel)` dan `continue` pada blok evaluasi untuk memuaskan invariant `test_fzf_menu_loop_break_invariants`.
 - **DoD**: Konfigurasi wrappers game/global berjalan interaktif dan reaktif di dalam FZF modal.
 
-### Chunk 6: Modernisasi `set_id_interactive` Menjadi In-Dashboard FZF Query Prompts
+### Chunk 6: Modernisasi `set_id_interactive` Menjadi In-Dashboard FZF Query Prompts [VERIFIED]
 - **Target Files**: `src/steam/25_identity.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Ganti prompt baris perintah `read -r in_name`, `read -r in_id`, dan `read -r in_bc` dengan dialog modal input berbasis FZF (`: | fzf --print-query`).
@@ -67,7 +67,7 @@ Mewujudkan ergonomi TUI berstandar modern ("Clean Outside", 100% In-Dashboard) s
   3. Berikan opsi toggle penyimpanan global via modal konfirmasi FZF.
 - **DoD**: Pengaturan LAN persona dan SteamID64 selesai seluruhnya di dalam dialog modal FZF.
 
-### Chunk 7: Modernisasi Eksekusi `doctor_audit` di Dashboard
+### Chunk 7: Modernisasi Eksekusi `doctor_audit` di Dashboard [VERIFIED]
 - **Target Files**: `src/tui/70_dashboard.sh`, `src/diagnostics/60_doctor.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Pada menu `[06] SYSTEM DIAGNOSTICS` di `dashboard_menu`, alihkan eksekusi `doctor_audit` ke viewer scrollable FZF atau pager internal (`less -R`).
@@ -75,7 +75,7 @@ Mewujudkan ergonomi TUI berstandar modern ("Clean Outside", 100% In-Dashboard) s
   3. Pertahankan output stdout normal ketika `doctor_audit` dipanggil dari CLI non-interaktif (`gamectl doctor`).
 - **DoD**: Hasil diagnosa sistem dapat di-scroll dan dibaca di dalam dashboard, lalu kembali ke menu utama dengan menekan `Esc` / `q`.
 
-### Chunk 8: Remediasi Ghost ACF & Validasi Entitlement
+### Chunk 8: Remediasi Ghost ACF & Validasi Entitlement [VERIFIED]
 - **Target Files**: `src/steam/30_downloader.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Pada `sync_steam()`, validasi keberadaan direktori game fisik: jika `$game_dir` kosong atau tidak memiliki file binary executable, tolak pendaftaran file dummy `appmanifest_${appid}.acf`.
@@ -83,7 +83,7 @@ Mewujudkan ergonomi TUI berstandar modern ("Clean Outside", 100% In-Dashboard) s
   3. Pertahankan banner teks literal yang diuji pada `test_cli.sh` (`STEAM ENTITLEMENT & ACF ADOPTION ENGINE` dan `entitled in Steam Client with Full DLC & ACF manifest`) untuk mempertahankan kompatibilitas uji regresi.
 - **DoD**: Tidak ada lagi pembuatan "Ghost Game" kosong di Steam maupun library `gamectl`.
 
-### Chunk 9: Perluasan `list_downloads_interactive` untuk Sovereign Standalone Downloads
+### Chunk 9: Perluasan `list_downloads_interactive` untuk Sovereign Standalone Downloads [VERIFIED]
 - **Target Files**: `src/steam/30_downloader.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Perluas pembacaan unduhan aktif di `list_downloads_interactive()` untuk memindai log dan PID `depot_dl_*` di `${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}`.
@@ -91,7 +91,7 @@ Mewujudkan ergonomi TUI berstandar modern ("Clean Outside", 100% In-Dashboard) s
   3. Ganti pesan terminal `clear` + `read -r -p` saat daftar kosong dengan empty-state item di dalam FZF: `[EMPTY] No active downloads found. Press Esc to return.`
 - **DoD**: Seluruh unduhan (baik Steam Client maupun Standalone CDN) terpantau di dalam Download Manager tanpa keluar ke terminal.
 
-### Chunk 10: Regression Harness & Empirical Machine Verification
+### Chunk 10: Regression Harness & Empirical Machine Verification [VERIFIED]
 - **Target Files**: `tests/test_cli.sh`, `bin/gamectl`
 - **Runtutan Eksekusi Teknis**:
   1. Tambahkan test assertion baru di `tests/test_cli.sh` untuk memverifikasi kontrak `enter_tui_screen`/`exit_tui_screen`, kontrak logging `log_msg`, dan validasi ghost ACF guard.
@@ -105,11 +105,11 @@ Mewujudkan ergonomi TUI berstandar modern ("Clean Outside", 100% In-Dashboard) s
 ## 3. Matriks Milestone (Work Packet 18)
 - [x] Chunk 1: Terminal Screen Lifecycle Engine (`enter_tui_screen` / `exit_tui_screen`) [VERIFIED]
 - [x] Chunk 2: In-Dashboard Centralized Logger (`log_msg`) di Runtime Dir [VERIFIED]
-- [ ] Chunk 3: In-Dashboard Activity & Runtime Log Viewer
-- [ ] Chunk 4: Modernisasi `configure_global` Menjadi In-Dashboard FZF Modal
-- [ ] Chunk 5: Modernisasi `configure_wrappers` Menjadi In-Dashboard FZF Toggle Palette
-- [ ] Chunk 6: Modernisasi `set_id_interactive` Menjadi In-Dashboard FZF Query Prompts
-- [ ] Chunk 7: Modernisasi Eksekusi `doctor_audit` di Dashboard
-- [ ] Chunk 8: Remediasi Ghost ACF & Validasi Entitlement
-- [ ] Chunk 9: Perluasan `list_downloads_interactive` untuk Sovereign Standalone Downloads
-- [ ] Chunk 10: Regression Harness & Empirical Machine Verification
+- [x] Chunk 3: In-Dashboard Activity & Runtime Log Viewer [VERIFIED]
+- [x] Chunk 4: Modernisasi `configure_global` Menjadi In-Dashboard FZF Modal [VERIFIED]
+- [x] Chunk 5: Modernisasi `configure_wrappers` Menjadi In-Dashboard FZF Toggle Palette [VERIFIED]
+- [x] Chunk 6: Modernisasi `set_id_interactive` Menjadi In-Dashboard FZF Query Prompts [VERIFIED]
+- [x] Chunk 7: Modernisasi Eksekusi `doctor_audit` di Dashboard [VERIFIED]
+- [x] Chunk 8: Remediasi Ghost ACF & Validasi Entitlement [VERIFIED]
+- [x] Chunk 9: Perluasan `list_downloads_interactive` untuk Sovereign Standalone Downloads [VERIFIED]
+- [x] Chunk 10: Regression Harness & Empirical Machine Verification [VERIFIED]
