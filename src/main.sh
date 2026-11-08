@@ -300,6 +300,14 @@ case "${1:-}" in
             exit 1
         fi
         ;;
+    harvest-dlc|dlc-manifests|fetch-dlc-manifests)
+        if [ -n "${2:-}" ]; then
+            harvest_dlc_manifests "$2" "${3:-.}" "${4:-auto}"
+        else
+            echo "Usage: gamectl harvest-dlc <appid> [stage_dir] [source]"
+            exit 1
+        fi
+        ;;
     login-luatools|auth-luatools)
         login_luatools "${2:-}"
         ;;
@@ -393,6 +401,8 @@ Usage:
   gamectl set-id <player> [steamid] [dir] [--broadcast <ip>] [--global]
                       Configure LAN player name & SteamID for offline co-op
   gamectl fetch-dlc <dir> [appid] Fetch & generate steam_settings/DLC.txt
+  gamectl harvest-dlc <appid> [dir]
+                      Harvest & unpack multi-depot DLC manifests across CDN providers
   gamectl sync-steam <appid> [title] [dir] Sync Steam Client & SLSsteam entitlements
   gamectl get-resolution Print detected native display resolution
   gamectl get-gamescope-args Print dynamically scaled Gamescope FSR parameters
