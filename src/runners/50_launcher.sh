@@ -884,6 +884,14 @@ language=english
 local_save_path=./saves
 EOF
 
+    # Scaffold configs.app.ini to unlock all DLCs in GBE Fork
+    if [ ! -f "$target_dir/steam_settings/configs.app.ini" ]; then
+        cat <<EOF > "$target_dir/steam_settings/configs.app.ini"
+[app::dlc]
+unlock_all=1
+EOF
+    fi
+
     # Scaffold custom_broadcasts.txt if missing
     if [ ! -f "$target_dir/steam_settings/custom_broadcasts.txt" ]; then
         cat <<EOF > "$target_dir/steam_settings/custom_broadcasts.txt"

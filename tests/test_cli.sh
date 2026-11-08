@@ -1560,6 +1560,66 @@ EOF_UNPACKED
 }
 run_test "SteamStub PE Unpacker: Automatic selection of unpacked binary" test_steamstub_pe_unpack_resolution_contract
 
+test_harvest_dlc_manifests_contract() {
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+    source "$REPO_ROOT/src/runners/50_launcher.sh"
+
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_dlc_harvest_XXXXXX")
+    local stage_dir="$t_dir/stage"
+    local mock_cache="$t_dir/cache"
+    mkdir -p "$stage_dir" "$mock_cache"
+
+    # 1. Base game lua containing DLC AppID 200
+    cat << 'EOF_BASE' > "$stage_dir/100.lua"
+addappid(100)
+addappid(101, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+addappid(200)
+EOF_BASE
+
+    # 2. Prepare mock DLC zip for AppID 200
+    local dlc_staging="$t_dir/dlc_build"
+    mkdir -p "$dlc_staging"
+    cat << 'EOF_DLC' > "$dlc_staging/200.lua"
+addappid(200)
+addappid(201, 1, "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210")
+EOF_DLC
+    printf '\xd0\x17\xf6\x71\x00\x00\x00\x00' > "$dlc_staging/201_9999.manifest"
+    (cd "$dlc_staging" && zip -q -r "$mock_cache/200.zip" .)
+
+    # 3. Mock fetch_manifest to return our prepared mock DLC zip
+    fetch_manifest() {
+        local q_id="$1"
+        if [ "$q_id" = "200" ]; then
+            echo "$mock_cache/200.zip"
+            return 0
+        fi
+        return 1
+    }
+
+    # 4. Run harvest_dlc_manifests
+    harvest_dlc_manifests "100" "$stage_dir" "mock" || { rm -rf "$t_dir"; return 1; }
+
+    # 5. Assert DLC files exist in stage directory
+    [ -f "$stage_dir/200.lua" ] || { rm -rf "$t_dir"; return 1; }
+    [ -f "$stage_dir/201_9999.manifest" ] || { rm -rf "$t_dir"; return 1; }
+
+    # 6. Verify GBE configs.app.ini has unlock_all=1
+    local t_game="$t_dir/game"
+    mkdir -p "$t_game"
+    touch "$t_game/game.sh"
+    chmod +x "$t_game/game.sh"
+    setup_gbe_templates() { return 0; }
+    get_gbe_template() { return 1; }
+    inject_game "$t_game" "100" --no-sync >/dev/null 2>&1 || true
+    [ -f "$t_game/steam_settings/configs.app.ini" ] || { rm -rf "$t_dir"; return 1; }
+    grep -q "unlock_all=1" "$t_game/steam_settings/configs.app.ini" || { rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    return 0
+}
+run_test "DLC Manifest Harvester: Multi-depot DLC resolution & unlock_all contract" test_harvest_dlc_manifests_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

@@ -2407,6 +2407,59 @@ fetch_manifest() {
     fi
 }
 
+# Harvest and integrate additional DLC manifest archives for an AppID into stage directory
+harvest_dlc_manifests() {
+    local base_appid="$1"
+    local stage_dir="$2"
+    local source="${3:-auto}"
+    [ -d "$stage_dir" ] || return 0
+
+    local lua_file="$stage_dir/${base_appid}.lua"
+    if [ ! -f "$lua_file" ]; then
+        shopt -s nullglob
+        local found_luas=("$stage_dir"/*.lua)
+        shopt -u nullglob
+        [ ${#found_luas[@]} -gt 0 ] && lua_file="${found_luas[0]}"
+    fi
+    [ -f "$lua_file" ] || return 0
+
+    # Discover candidate DLC AppIDs from addappid(<id>)
+    local dlc_appids=()
+    while read -r cand_id; do
+        [ -n "$cand_id" ] || continue
+        [ "$cand_id" = "$base_appid" ] && continue
+        dlc_appids+=("$cand_id")
+    done < <(grep -E '^[[:space:]]*addappid\([[:space:]]*[0-9]+[[:space:]]*\)' "$lua_file" 2>/dev/null | sed -E 's/.*addappid\([[:space:]]*([0-9]+).*/\1/')
+
+    if [ ${#dlc_appids[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    echo "[INFO] Discovered ${#dlc_appids[@]} candidate DLC AppID(s) in Lua manifest: ${dlc_appids[*]}" >&2
+
+    local harvested=0
+    for dlc_id in "${dlc_appids[@]}"; do
+        # Avoid re-harvesting if already staged
+        if [ -f "$stage_dir/${dlc_id}.lua" ]; then
+            continue
+        fi
+
+        local dlc_zip
+        dlc_zip=$(fetch_manifest "$dlc_id" "" "$source" 2>/dev/null || true)
+        if [ -n "$dlc_zip" ] && [ -f "$dlc_zip" ] && validate_manifest_zip "$dlc_zip" "$dlc_id"; then
+            if unzip -qo "$dlc_zip" -d "$stage_dir" 2>/dev/null; then
+                echo "  [INFO] Successfully integrated DLC manifest archive: AppID $dlc_id" >&2
+                harvested=$((harvested + 1))
+            fi
+        fi
+    done
+
+    if [ "$harvested" -gt 0 ]; then
+        echo "[VERIFIED] Integrated $harvested additional DLC manifest archive(s) into stage directory." >&2
+    fi
+    return 0
+}
+
 # Deploy manifest archive into SLSsteam manifests, stplug-in Lua, and config.yaml
 deploy_sls_manifest() {
     local appid="$1"
@@ -2831,25 +2884,25 @@ download_game() {
             return 1
         fi
 
-        local staged_lua=""
-        if [ -f "$stage_dir/${appid}.lua" ]; then
-            staged_lua="$stage_dir/${appid}.lua"
-        else
-            shopt -s nullglob globstar
-            local cand_luas=("$stage_dir"/**/*.lua "$stage_dir"/*.lua)
-            shopt -u nullglob globstar
-            [ "${#cand_luas[@]}" -eq 1 ] && staged_lua="${cand_luas[0]}"
-        fi
+        # Integrate any physical DLC manifest archives
+        harvest_dlc_manifests "$appid" "$stage_dir" "$source" 2>/dev/null || true
 
         declare -A depot_keys=()
-        if [ -n "$staged_lua" ] && [ -f "$staged_lua" ]; then
-            local re_key='addappid\([[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*[0-9]+[[:space:]]*,[[:space:]]*['\''"]([0-9a-fA-F]{64})['\''"]'
+        shopt -s nullglob globstar
+        local cand_luas=("$stage_dir"/**/*.lua "$stage_dir"/*.lua)
+        shopt -u nullglob globstar
+        local re_key='addappid\([[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*[0-9]+[[:space:]]*,[[:space:]]*['\''"]([0-9a-fA-F]{64})['\''"]'
+        declare -A seen_lua=()
+        for clua in "${cand_luas[@]}"; do
+            [ -f "$clua" ] || continue
+            [[ -v seen_lua["$clua"] ]] && continue
+            seen_lua["$clua"]=1
             while IFS= read -r line || [ -n "$line" ]; do
                 if [[ "$line" =~ $re_key ]]; then
                     depot_keys["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
                 fi
-            done < "$staged_lua"
-        fi
+            done < "$clua"
+        done
 
         local depot_args=()
         shopt -s nullglob globstar
@@ -2900,6 +2953,13 @@ download_game() {
                 echo "[ERROR] Standalone CDN download failed." >&2
                 return 1
             fi
+
+            # Preserve staged lua manifests in target_dir for offline DLC discovery
+            shopt -s nullglob globstar
+            for l in "$stage_dir"/**/*.lua "$stage_dir"/*.lua; do
+                [ -f "$l" ] && cp -f "$l" "$target_dir/" 2>/dev/null || true
+            done
+            shopt -u nullglob globstar
 
             if [ "$action" != "raw" ]; then
                 fetch_dlc "$target_dir" "$appid" 2>/dev/null || true
@@ -6301,6 +6361,14 @@ language=english
 [user::saves]
 local_save_path=./saves
 EOF
+
+    # Scaffold configs.app.ini to unlock all DLCs in GBE Fork
+    if [ ! -f "$target_dir/steam_settings/configs.app.ini" ]; then
+        cat <<EOF > "$target_dir/steam_settings/configs.app.ini"
+[app::dlc]
+unlock_all=1
+EOF
+    fi
 
     # Scaffold custom_broadcasts.txt if missing
     if [ ! -f "$target_dir/steam_settings/custom_broadcasts.txt" ]; then

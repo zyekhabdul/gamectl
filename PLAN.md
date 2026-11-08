@@ -1,4 +1,4 @@
-# WORK PACKET 16: TURNKEY SOVEREIGN RUNTIME, GBE AUTO-PROVISIONING & DRUG-FREE HARNESS [ACTIVE]
+# WORK PACKET 16: TURNKEY SOVEREIGN RUNTIME, GBE AUTO-PROVISIONING & DRUG-FREE HARNESS [COMPLETE]
 
 **Track**: Maintenance
 
@@ -53,12 +53,15 @@ Mewujudkan 100% Turnkey Sovereign Gaming Experience sesuai Piagam Dasar `docs/SO
   4. Tambahkan pengujian regresi di `tests/test_cli.sh`: `test_steam_interceptor_contract` dan `test_steamstub_pe_unpack_resolution_contract`.
 - **DoD**: Biner SteamStub ter-unpack atau ter-intercept sebelum proses game dieksekusi (94/94 test assertions lulus Exit 0).
 
-### Chunk 5: Full DLC Manifest Resolution Harvester Expansion [PENDING]
-- **Target Files**: `src/steam/30_downloader.sh`
+### Chunk 5: Full DLC Manifest Resolution Harvester Expansion [VERIFIED]
+- **Target Files**: `src/steam/30_downloader.sh`, `src/runners/50_launcher.sh`, `tests/test_cli.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Perluas `fetch_manifest` dan `download_game` untuk memvalidasi ketersediaan depot fisik DLC.
-  2. Unduh depot manifest DLC tambahan jika tersedia di provider.
-- **DoD**: Unduhan game mencakup file fisik depot DLC secara utuh.
+  1. Implementasikan fungsi `harvest_dlc_manifests()` di `src/steam/30_downloader.sh` untuk mengekstraksi AppID DLC dari manifest Lua dasar dan mengunduh archive manifest fisik DLC secara otomatis dari multi-provider network.
+  2. Perluas pembacaan kunci depot di `download_game` agar memindai seluruh file manifest Lua (`*.lua`) dalam stage directory, sehingga seluruh depot fisik DLC ikut diunduh oleh `gamectl-depot-dl`.
+  3. Simpan manifest Lua ke folder target instalasi guna mendukung penemuan DLC offline oleh `fetch_dlc`.
+  4. Konfigurasikan `steam_settings/configs.app.ini` di `inject_game` (`src/runners/50_launcher.sh`) dengan opsi `[app::dlc] unlock_all=1` untuk menjamin seluruh DLC aktif di runtime Goldberg Emulator.
+  5. Tambahkan uji regresi di `tests/test_cli.sh`: `test_harvest_dlc_manifests_contract`.
+- **DoD**: Unduhan game mencakup file fisik depot DLC secara utuh dan ter-unlock penuh di runtime emulator (95/95 test assertions lulus Exit 0).
 
 ---
 
@@ -67,4 +70,4 @@ Mewujudkan 100% Turnkey Sovereign Gaming Experience sesuai Piagam Dasar `docs/SO
 - [x] Chunk 2: Implementasi `gamectl setup-gbe` (Auto-download & provisioning Goldberg templates) [VERIFIED]
 - [x] Chunk 3: Pre-flight Hard-Stop & GBE Guard di `launch_game` [VERIFIED]
 - [x] Chunk 4: SteamStub Unpack/Interceptor Hook [VERIFIED]
-- [ ] Chunk 5: Full DLC Manifest Resolution Harvester Expansion [PENDING]
+- [x] Chunk 5: Full DLC Manifest Resolution Harvester Expansion [VERIFIED]
