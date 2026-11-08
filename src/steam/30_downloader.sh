@@ -46,9 +46,9 @@ fetch_dlc() {
     if [ -z "$dlc_data" ]; then
         local lua_candidates=()
         [ -f "$target_dir/${appid}.lua" ] && lua_candidates+=("$target_dir/${appid}.lua")
-        shopt -s nullglob
-        for f in "$target_dir"/*.lua; do [ -f "$f" ] && lua_candidates+=("$f"); done
-        shopt -u nullglob
+        shopt -s nullglob globstar
+        for f in "$target_dir"/**/"${appid}.lua" "$target_dir"/**/*.lua "$target_dir"/*.lua; do [ -f "$f" ] && lua_candidates+=("$f"); done
+        shopt -u nullglob globstar
         local stplug_dir
         stplug_dir="$(get_steam_stplug_in_dir 2>/dev/null || echo "$HOME/.local/share/Steam/config/stplug-in")"
         [ -f "$stplug_dir/${appid}.lua" ] && lua_candidates+=("$stplug_dir/${appid}.lua")
@@ -426,19 +426,31 @@ fetch_manifest() {
     declare -a src_names src_urls src_headers
     local src_count=0
 
-    # Source 1: Ryuu direct mirror
+    # Source 1: ManifestHub (Official GitHub archive per AppID branch)
+    src_names[src_count]="ManifestHub"
+    src_urls[src_count]="https://codeload.github.com/steamtoolsapp/ManifestHub/zip/refs/heads/${appid}"
+    src_headers[src_count]=""
+    src_count=$((src_count + 1))
+
+    # Source 2: Ryuu direct mirror
     src_names[src_count]="Ryuu"
     src_urls[src_count]="http://167.235.229.108/${appid}"
     src_headers[src_count]=""
     src_count=$((src_count + 1))
 
-    # Source 2: Sushi GitHub repository
+    # Source 3: Sushi GitHub repository (alt)
     src_names[src_count]="Sushi"
     src_urls[src_count]="https://raw.githubusercontent.com/sushi-dev55-alt/sushitools-games-repo-alt/refs/heads/main/${appid}.zip"
     src_headers[src_count]=""
     src_count=$((src_count + 1))
 
-    # Source 3: Lua.tools managed API (if auth session exists)
+    # Source 4: Sushi GitHub repository (main)
+    src_names[src_count]="SushiMain"
+    src_urls[src_count]="https://raw.githubusercontent.com/sushi-dev55/sushitools-games-repo/main/${appid}.zip"
+    src_headers[src_count]=""
+    src_count=$((src_count + 1))
+
+    # Source 5: Lua.tools managed API (if auth session exists)
     local token
     token=$(get_valid_luatools_token 2>/dev/null || true)
     if [ -n "$token" ]; then
@@ -519,9 +531,9 @@ harvest_dlc_manifests() {
 
     local lua_file="$stage_dir/${base_appid}.lua"
     if [ ! -f "$lua_file" ]; then
-        shopt -s nullglob
-        local found_luas=("$stage_dir"/*.lua)
-        shopt -u nullglob
+        shopt -s nullglob globstar
+        local found_luas=("$stage_dir"/**/"${base_appid}.lua" "$stage_dir"/**/*.lua "$stage_dir"/*.lua)
+        shopt -u nullglob globstar
         [ ${#found_luas[@]} -gt 0 ] && lua_file="${found_luas[0]}"
     fi
     [ -f "$lua_file" ] || return 0
@@ -543,7 +555,10 @@ harvest_dlc_manifests() {
     local harvested=0
     for dlc_id in "${dlc_appids[@]}"; do
         # Avoid re-harvesting if already staged
-        if [ -f "$stage_dir/${dlc_id}.lua" ]; then
+        shopt -s nullglob globstar
+        local existing_dlc_lua=("$stage_dir"/**/"${dlc_id}.lua" "$stage_dir"/*"${dlc_id}.lua")
+        shopt -u nullglob globstar
+        if [ ${#existing_dlc_lua[@]} -gt 0 ]; then
             continue
         fi
 
@@ -655,11 +670,16 @@ deploy_sls_manifest() {
         staged_lua="$stage_dir/${appid}.lua"
     else
         shopt -s nullglob globstar
-        local candidate_luas=("$stage_dir"/**/*.lua "$stage_dir"/*.lua)
-        shopt -u nullglob globstar
-        if [ "${#candidate_luas[@]}" -eq 1 ]; then
-            staged_lua="${candidate_luas[0]}"
+        local app_luas=("$stage_dir"/**/"${appid}.lua")
+        if [ "${#app_luas[@]}" -gt 0 ]; then
+            staged_lua="${app_luas[0]}"
+        else
+            local candidate_luas=("$stage_dir"/**/*.lua "$stage_dir"/*.lua)
+            if [ "${#candidate_luas[@]}" -eq 1 ]; then
+                staged_lua="${candidate_luas[0]}"
+            fi
         fi
+        shopt -u nullglob globstar
     fi
 
     if [ -n "$staged_lua" ] && [ -f "$staged_lua" ]; then
@@ -850,7 +870,7 @@ download_game() {
     # Strip ANSI escape sequences & non-digits
     appid=$(printf "%s" "$appid" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
     if [ -z "$appid" ]; then
-        echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|ryuu|sushi|luatools>] [--raw|--inject-only|--all|--standalone|--sls]" >&2
+        echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|manifesthub|ryuu|sushi|luatools>] [--raw|--inject-only|--all|--standalone|--sls]" >&2
         return 1
     fi
     shift

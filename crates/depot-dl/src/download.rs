@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use futures::stream::{FuturesUnordered, StreamExt};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
+use tokio::sync::{Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::cdn::client::CdnClient;
@@ -110,8 +110,6 @@ struct ChunkJob {
     display_path: PathBuf,
     file_size: u64,
     chunk: ManifestChunk,
-    /// Held for the lifetime of the future; caps global network concurrency.
-    _permit: OwnedSemaphorePermit,
 }
 
 impl DownloadEngine {
@@ -530,10 +528,6 @@ impl DownloadEngine {
             if ctx.depot_cancel.is_cancelled() || self.cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
-            let permit = Arc::clone(&ctx.downloads_sem)
-                .acquire_owned()
-                .await
-                .map_err(|e| Error::TaskFailed(e.to_string()))?;
             jobs.push(self.download_chunk(
                 ctx,
                 ChunkJob {
@@ -542,7 +536,6 @@ impl DownloadEngine {
                     display_path: display_path.clone(),
                     file_size: file.size,
                     chunk,
-                    _permit: permit,
                 },
             ));
         }
@@ -613,8 +606,16 @@ impl DownloadEngine {
             display_path,
             file_size,
             chunk,
-            _permit,
         } = job;
+
+        if ctx.depot_cancel.is_cancelled() || self.cancel.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+
+        let _permit = Arc::clone(&ctx.downloads_sem)
+            .acquire_owned()
+            .await
+            .map_err(|e| Error::TaskFailed(e.to_string()))?;
 
         if ctx.depot_cancel.is_cancelled() || self.cancel.is_cancelled() {
             return Err(Error::Cancelled);
