@@ -273,9 +273,14 @@ launch_game() {
     export PIPEWIRE_LATENCY="${GAMECTL_PIPEWIRE_LATENCY:-256/48000}"
     export PULSE_LATENCY_MSEC="${GAMECTL_PULSE_LATENCY:-60}"
 
-    # SLSsteam path prioritization for DRM stub wrapper intercept
+    # Sovereign Steam Interceptor: traps and silences unshielded Steam Client calls
+    local interceptor_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/interceptor"
+    setup_steam_interceptor "$interceptor_dir"
+    export PATH="$interceptor_dir:$PATH"
+
+    # SLSsteam path prioritization for DRM stub wrapper intercept (fallback)
     if [ -d "$HOME/.local/share/SLSsteam/path" ]; then
-        export PATH="$HOME/.local/share/SLSsteam/path:$PATH"
+        export PATH="$PATH:$HOME/.local/share/SLSsteam/path"
     fi
 
     # Capture current CPU scaling governor for clean restoration
@@ -320,10 +325,35 @@ launch_game() {
 
     cd "$gdir"
 
-    # Pre-flight SteamStub DRM inspection
+    # Pre-flight SteamStub DRM inspection & mitigation
     if [ -f "$gdir/$gbin" ] && detect_steamstub_drm "$gdir/$gbin"; then
-        echo "  ${UI_AMBER}[WARN] SteamStub DRM (.bind) detected on binary ($gbin).${UI_RST}"
-        echo "  ${UI_DIM}       Valve stub wrapper may intercept execution without active Steam or Steamless unpacking.${UI_RST}"
+        local stub_type
+        stub_type=$(detect_steamstub_type "$gdir/$gbin" 2>/dev/null || echo "unknown")
+        if [ "$stub_type" = "windows_pe" ]; then
+            local unpacked_bin
+            unpacked_bin=$(resolve_unpacked_binary "$gdir" "$gbin" 2>/dev/null || true)
+            if [ -n "$unpacked_bin" ] && [ -f "$gdir/$unpacked_bin" ]; then
+                echo "  ${UI_GREEN}[SUCCESS] SteamStub PE: Automatically switched to unpacked binary: $unpacked_bin${UI_RST}"
+                gbin="$unpacked_bin"
+            else
+                echo "  ${UI_AMBER}[INFO] SteamStub PE DRM detected on ($gbin). Attempting Steamless unpacking...${UI_RST}"
+                if unpack_steamstub_pe "$gdir/$gbin" "${runner_bin:-}" "${pfx_dir:-}"; then
+                    unpacked_bin=$(resolve_unpacked_binary "$gdir" "$gbin" 2>/dev/null || true)
+                    if [ -n "$unpacked_bin" ] && [ -f "$gdir/$unpacked_bin" ]; then
+                        echo "  ${UI_GREEN}[SUCCESS] SteamStub PE: Unpacked binary generated: $unpacked_bin${UI_RST}"
+                        gbin="$unpacked_bin"
+                    fi
+                else
+                    echo "  ${UI_AMBER}[WARN] SteamStub PE detected on ($gbin) but Steamless CLI not available or unpacking failed.${UI_RST}"
+                    echo "  ${UI_DIM}       If launch fails, unpack $gbin with Steamless (producing ${gbin%.*}.unpacked.exe).${UI_RST}"
+                fi
+            fi
+        elif [ "$stub_type" = "linux_elf" ]; then
+            echo "  ${UI_AMBER}[WARN] SteamStub DRM (.bind section) detected on Linux binary ($gbin).${UI_RST}"
+            echo "  ${UI_CYAN}[INFO] Sovereign steam.sh interceptor active in PATH to trap unsolicited Steam Client calls.${UI_RST}"
+        else
+            echo "  ${UI_AMBER}[WARN] SteamStub DRM markers detected on binary ($gbin).${UI_RST}"
+        fi
     fi
 
     # Pre-flight savegame redirection & offline DLC check

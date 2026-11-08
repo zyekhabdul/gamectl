@@ -44,12 +44,14 @@ Mewujudkan 100% Turnkey Sovereign Gaming Experience sesuai Piagam Dasar `docs/SO
   6. Tambahkan 2 uji regresi di `tests/test_cli.sh` (`test_launch_hardstop_unshielded_contract` & `test_launch_allow_unshielded_override_contract`).
 - **DoD**: Tidak ada game ber-Steamworks yang diizinkan jalan tanpa perlindungan emulator GBE (92/92 test assertions lulus Exit 0).
 
-### Chunk 4: SteamStub Unpack/Interceptor Hook [PENDING]
-- **Target Files**: `src/runners/50_launcher.sh`, `src/core/10_utils.sh`
+### Chunk 4: SteamStub Unpack/Interceptor Hook [VERIFIED]
+- **Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`, `tests/test_cli.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Tambahkan handler untuk biner Windows PE SteamStub via Steamless CLI.
-  2. Tambahkan stub interceptor untuk Linux ELF `.bind` guna mencegah redirect paksa ke `steam.sh`.
-- **DoD**: Biner SteamStub ter-unpack atau ter-intercept sebelum proses game dieksekusi.
+  1. Implementasikan utilitas pendukung SteamStub di `src/core/10_utils.sh`: `detect_steamstub_type`, `resolve_unpacked_binary`, `find_steamless_cli`, `unpack_steamstub_pe`, dan `setup_steam_interceptor`.
+  2. Pasang sovereign interceptor `setup_steam_interceptor` pada `src/runners/50_launcher.sh` (`launch_game`) di posisi terdepan `$PATH` untuk mencegat dan membungkam pemanggilan biner `steam` / `steam.sh` secara mandiri.
+  3. Tambahkan logika mitigasi otomatis SteamStub PE pada `launch_game`: otomatis mendeteksi biner `*.unpacked.exe`, mengeksekusi Steamless CLI jika tersedia, dan mengalihkan binary peluncuran ke versi unpacked.
+  4. Tambahkan pengujian regresi di `tests/test_cli.sh`: `test_steam_interceptor_contract` dan `test_steamstub_pe_unpack_resolution_contract`.
+- **DoD**: Biner SteamStub ter-unpack atau ter-intercept sebelum proses game dieksekusi (94/94 test assertions lulus Exit 0).
 
 ### Chunk 5: Full DLC Manifest Resolution Harvester Expansion [PENDING]
 - **Target Files**: `src/steam/30_downloader.sh`
@@ -64,5 +66,5 @@ Mewujudkan 100% Turnkey Sovereign Gaming Experience sesuai Piagam Dasar `docs/SO
 - [x] Chunk 1: Bugfix ${REPO_ROOT:-} & Isolasi Mock Fixture di test_cli.sh [VERIFIED]
 - [x] Chunk 2: Implementasi `gamectl setup-gbe` (Auto-download & provisioning Goldberg templates) [VERIFIED]
 - [x] Chunk 3: Pre-flight Hard-Stop & GBE Guard di `launch_game` [VERIFIED]
-- [ ] Chunk 4: SteamStub Unpack/Interceptor Hook [PENDING]
+- [x] Chunk 4: SteamStub Unpack/Interceptor Hook [VERIFIED]
 - [ ] Chunk 5: Full DLC Manifest Resolution Harvester Expansion [PENDING]

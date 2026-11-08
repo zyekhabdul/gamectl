@@ -450,3 +450,137 @@ detect_steamstub_drm() {
 
     return 1
 }
+
+# Distinguish SteamStub type (windows_pe, linux_elf, or unknown)
+detect_steamstub_type() {
+    local bin_path="$1"
+    [ -f "$bin_path" ] || return 1
+    if ! detect_steamstub_drm "$bin_path"; then
+        return 1
+    fi
+    local btype
+    btype=$(file -b "$bin_path" 2>/dev/null || echo "")
+    if echo "$btype" | grep -qi -E "PE32|MS Windows"; then
+        echo "windows_pe"
+    elif case "$bin_path" in *.exe|*.EXE) true ;; *) false ;; esac; then
+        echo "windows_pe"
+    elif echo "$btype" | grep -qi "ELF"; then
+        echo "linux_elf"
+    else
+        echo "unknown"
+    fi
+    return 0
+}
+
+# Resolve candidate unpacked binary for Windows PE SteamStub
+resolve_unpacked_binary() {
+    local gdir="$1"
+    local gbin="$2"
+    [ -d "$gdir" ] || return 1
+    [ -n "$gbin" ] || return 1
+
+    local base_no_ext="${gbin%.*}"
+    local cand
+    for cand in "${base_no_ext}.unpacked.exe" \
+                "${base_no_ext}_unpacked.exe" \
+                "${base_no_ext}-unpacked.exe" \
+                "${gbin}.unpacked.exe" \
+                "${gbin}.unpacked"; do
+        if [ -f "$gdir/$cand" ]; then
+            echo "$cand"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Find Steamless CLI executable on system
+find_steamless_cli() {
+    local cand
+    for cand in "${GAMECTL_STEAMLESS_PATH:-}" \
+                "$(command -v steamless 2>/dev/null || true)" \
+                "$(command -v Steamless.CLI.exe 2>/dev/null || true)" \
+                "$HOME/.local/share/steamless/Steamless.CLI.exe" \
+                "$HOME/.local/share/steamless/Steamless.exe" \
+                "$HOME/.config/gamectl/tools/Steamless.CLI.exe"; do
+        if [ -n "$cand" ] && [ -f "$cand" ]; then
+            echo "$cand"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Unpack Windows PE SteamStub binary via Steamless CLI
+unpack_steamstub_pe() {
+    local target_exe="$1"
+    local runner_bin="${2:-}"
+    local pfx_dir="${3:-}"
+    [ -f "$target_exe" ] || return 1
+
+    local gdir
+    gdir="$(dirname "$target_exe")"
+    local gbin
+    gbin="$(basename "$target_exe")"
+
+    # If already unpacked, nothing to do
+    if resolve_unpacked_binary "$gdir" "$gbin" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local steamless_bin
+    steamless_bin=$(find_steamless_cli 2>/dev/null || true)
+    if [ -z "$steamless_bin" ]; then
+        return 1
+    fi
+
+    echo "  ${UI_CYAN}[INFO] Invoking Steamless CLI: $steamless_bin on $gbin...${UI_RST}"
+    local unpack_rc=0
+    if [ -x "$steamless_bin" ] && ! echo "$steamless_bin" | grep -qi '\.exe$'; then
+        "$steamless_bin" "$target_exe" >/dev/null 2>&1 || unpack_rc=$?
+    elif command -v mono >/dev/null 2>&1; then
+        mono "$steamless_bin" "$target_exe" >/dev/null 2>&1 || unpack_rc=$?
+    elif command -v dotnet >/dev/null 2>&1; then
+        dotnet "$steamless_bin" "$target_exe" >/dev/null 2>&1 || unpack_rc=$?
+    elif [ -n "$runner_bin" ] && [ -x "$runner_bin" ]; then
+        WINEPREFIX="${pfx_dir:-$gdir/pfx}" "$runner_bin" "$steamless_bin" "$target_exe" >/dev/null 2>&1 || unpack_rc=$?
+    elif command -v wine >/dev/null 2>&1; then
+        WINEPREFIX="${pfx_dir:-$gdir/pfx}" wine "$steamless_bin" "$target_exe" >/dev/null 2>&1 || unpack_rc=$?
+    else
+        return 1
+    fi
+
+    # Check if unpacked binary was produced
+    if resolve_unpacked_binary "$gdir" "$gbin" >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+# Setup sovereign Steam interceptor scripts in target directory
+setup_steam_interceptor() {
+    local target_dir="${1:-${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/interceptor}"
+    mkdir -p -m 700 "$target_dir" 2>/dev/null || mkdir -p "$target_dir"
+    cat << 'EOF_INTERCEPTOR' > "$target_dir/steam"
+#!/usr/bin/env bash
+# Sovereign Steam Interceptor: traps and silences unshielded Steam Client calls
+target_appid=""
+for arg in "$@"; do
+    case "$arg" in
+        steam://run/*)
+            target_appid="${arg##steam://run/}"
+            target_appid="${target_appid%%/*}"
+            ;;
+    esac
+done
+if [ -n "$target_appid" ]; then
+    echo "[gamectl interceptor] Blocked unsolicited Steam Client launch (steam://run/$target_appid)" >&2
+else
+    echo "[gamectl interceptor] Blocked unsolicited Steam Client launch ($*)" >&2
+fi
+exit 0
+EOF_INTERCEPTOR
+    chmod +x "$target_dir/steam" 2>/dev/null || true
+    cp -f "$target_dir/steam" "$target_dir/steam.sh" 2>/dev/null || true
+    return 0
+}

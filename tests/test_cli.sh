@@ -1493,6 +1493,73 @@ EOF_BIN
 }
 run_test "Pre-Flight GBE Guard: User override flag (--allow-unshielded)" test_launch_allow_unshielded_override_contract
 
+test_steam_interceptor_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_interceptor_XXXXXX")
+
+    setup_steam_interceptor "$t_dir" || { rm -rf "$t_dir"; return 1; }
+    [ -x "$t_dir/steam" ] || { rm -rf "$t_dir"; return 1; }
+    [ -x "$t_dir/steam.sh" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Test intercepting steam://run/302610
+    local out rc=0
+    out=$("$t_dir/steam" steam://run/302610 2>&1) || rc=$?
+    [ "$rc" -eq 0 ] || { rm -rf "$t_dir"; return 1; }
+    echo "$out" | grep -q 'Blocked unsolicited Steam Client launch (steam://run/302610)' || { rm -rf "$t_dir"; return 1; }
+
+    # Test intercepting steam.sh
+    out=$("$t_dir/steam.sh" --silent 2>&1) || rc=$?
+    [ "$rc" -eq 0 ] || { rm -rf "$t_dir"; return 1; }
+    echo "$out" | grep -q 'Blocked unsolicited Steam Client launch' || { rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    return 0
+}
+run_test "Sovereign Steam Interceptor: Silence unshielded Steam client calls" test_steam_interceptor_contract
+
+test_steamstub_pe_unpack_resolution_contract() {
+    source "$REPO_ROOT/src/core/00_header.sh"
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/runners/40_wrappers.sh"
+    source "$REPO_ROOT/src/runners/50_launcher.sh"
+
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_stub_pe_XXXXXX")
+    mkdir -p "$t_dir"
+
+    # 1. Scaffold PE SteamStub binary and unpacked counterpart
+    printf 'MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00SteamDRM_encrypted_stub' > "$t_dir/Game.exe"
+    cat << 'EOF_UNPACKED' > "$t_dir/Game.unpacked.exe"
+#!/usr/bin/env bash
+exit 0
+EOF_UNPACKED
+    chmod +x "$t_dir/Game.unpacked.exe"
+
+    # 2. Test detect_steamstub_type
+    local stype
+    stype=$(detect_steamstub_type "$t_dir/Game.exe")
+    [ "$stype" = "windows_pe" ] || { rm -rf "$t_dir"; return 1; }
+
+    # 3. Test resolve_unpacked_binary
+    local up_bin
+    up_bin=$(resolve_unpacked_binary "$t_dir" "Game.exe")
+    [ "$up_bin" = "Game.unpacked.exe" ] || { rm -rf "$t_dir"; return 1; }
+
+    # 4. Test launch_game automatic switch to unpacked binary
+    # Provide shielded GBE mock DLL so hard-stop is satisfied
+    mkdir -p "$t_dir/saves"
+    head -c 6000000 /dev/zero > "$t_dir/steam_api64.dll"
+
+    local out
+    out=$(launch_game "$t_dir" "Game.exe" "SteamStubTest" < /dev/null 2>&1 || true)
+
+    rm -rf "$t_dir"
+    echo "$out" | grep -q 'SteamStub PE: Automatically switched to unpacked binary: Game.unpacked.exe' || return 1
+    return 0
+}
+run_test "SteamStub PE Unpacker: Automatic selection of unpacked binary" test_steamstub_pe_unpack_resolution_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
