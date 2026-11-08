@@ -1436,6 +1436,63 @@ test_setup_gbe_mock_provisioning_contract() {
 }
 run_test "GBE Provisioning: Local archive extraction and idempotency contract" test_setup_gbe_mock_provisioning_contract
 
+test_launch_hardstop_unshielded_contract() {
+    source "$REPO_ROOT/src/core/00_header.sh"
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/runners/40_wrappers.sh"
+    source "$REPO_ROOT/src/runners/50_launcher.sh"
+    local t_game
+    t_game=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_hardstop_XXXXXX")
+    mkdir -p "$t_game"
+    cat << 'EOF_BIN' > "$t_game/game.sh"
+#!/usr/bin/env bash
+exit 0
+EOF_BIN
+    chmod +x "$t_game/game.sh"
+    printf "VALVE_ORIGINAL_TEST" > "$t_game/libsteam_api.so"
+
+    # Stub inject_game so auto-injection fails to shield the binary
+    inject_game() { return 1; }
+
+    local out
+    local rc=0
+    out=$(GAMECTL_GBE_DIR="/tmp/nonexistent_gbe_$$" GAMECTL_GBE_X64="" GAMECTL_GBE_X86="" launch_game "$t_game" "game.sh" "HardstopTest" < /dev/null 2>&1) || rc=$?
+
+    rm -rf "$t_game"
+    [ "$rc" -ne 0 ] || return 1
+    echo "$out" | grep -q 'HARD-STOP' || return 1
+    echo "$out" | grep -q 'Valve Steamworks API detected without emulator shield' || return 1
+    return 0
+}
+run_test "Pre-Flight GBE Guard: Hard-stop on unshielded Steamworks binary" test_launch_hardstop_unshielded_contract
+
+test_launch_allow_unshielded_override_contract() {
+    source "$REPO_ROOT/src/core/00_header.sh"
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/runners/40_wrappers.sh"
+    source "$REPO_ROOT/src/runners/50_launcher.sh"
+    local t_game
+    t_game=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_override_XXXXXX")
+    mkdir -p "$t_game"
+    cat << 'EOF_BIN' > "$t_game/game.sh"
+#!/usr/bin/env bash
+exit 0
+EOF_BIN
+    chmod +x "$t_game/game.sh"
+    printf "VALVE_ORIGINAL_TEST" > "$t_game/libsteam_api.so"
+
+    # Stub inject_game so binary remains unshielded
+    inject_game() { return 1; }
+
+    local out
+    out=$(GAMECTL_GBE_DIR="/tmp/nonexistent_gbe_$$" launch_game "$t_game" "game.sh" "OverrideTest" --allow-unshielded < /dev/null 2>&1 || true)
+
+    rm -rf "$t_game"
+    echo "$out" | grep -q 'Launching unshielded Steamworks binary by user override' || return 1
+    return 0
+}
+run_test "Pre-Flight GBE Guard: User override flag (--allow-unshielded)" test_launch_allow_unshielded_override_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

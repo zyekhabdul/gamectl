@@ -933,7 +933,7 @@ build_sandbox_command() {
 build_wrapper_command() {
     local gdir="$1"
     shift || true
-    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr="" opt_systemd_scope="" opt_prime="" opt_sandbox=""
+    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr="" opt_systemd_scope="" opt_prime="" opt_sandbox="" opt_allow_unshielded=""
     local remaining_args=()
 
     while [ $# -gt 0 ]; do
@@ -954,6 +954,7 @@ build_wrapper_command() {
             --no-prime) opt_prime=0; shift ;;
             --sandbox) opt_sandbox=1; shift ;;
             --no-sandbox) opt_sandbox=0; shift ;;
+            --allow-unshielded) opt_allow_unshielded=1; shift ;;
             --) shift; remaining_args+=("$@"); break ;;
             *) remaining_args+=("$1"); shift ;;
         esac
@@ -1051,6 +1052,7 @@ build_wrapper_command() {
     GAMECTL_ACTIVE_PRIME="$use_prime"
     GAMECTL_ACTIVE_PRIME_VENDOR="$dgpu_vendor"
     GAMECTL_ACTIVE_SANDBOX="$use_sandbox"
+    GAMECTL_ACTIVE_ALLOW_UNSHIELDED="${opt_allow_unshielded:-0}"
 
     local prefix=()
     if [ "$use_gm" = "1" ]; then

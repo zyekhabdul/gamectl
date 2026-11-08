@@ -33,14 +33,16 @@ Mewujudkan 100% Turnkey Sovereign Gaming Experience sesuai Piagam Dasar `docs/SO
   4. Perluas test suite regression dengan `test_setup_gbe_cli_contract` dan `test_setup_gbe_mock_provisioning_contract`.
 - **DoD**: Template GBE terpasang lengkap di `~/.local/share/gbe-fork/` tanpa intervensi manual user, 90/90 test assertions lulus dengan Exit Code 0.
 
-### Chunk 3: Pre-flight Hard-Stop & GBE Guard di `launch_game` [PENDING]
-- **Target Files**: `src/runners/50_launcher.sh`
+### Chunk 3: Pre-flight Hard-Stop & GBE Guard di `launch_game` [VERIFIED]
+- **Target Files**: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `tests/test_cli.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Pada `launch_game`, jika game terdeteksi memiliki dependensi `steam_api` dan belum ter-shim GBE:
-     - Jalankan `inject_game`.
-     - Jika GBE template belum ada, picu `setup_gbe_templates` secara otomatis.
-     - Jika tetap gagal, hard-stop peluncuran dengan instruksi solutif guna mencegah game memanggil Steam Client ("PURCHASE").
-- **DoD**: Tidak ada game ber-Steamworks yang diizinkan jalan tanpa perlindungan emulator GBE.
+  1. Pada `src/runners/40_wrappers.sh`, tambahkan flag `--allow-unshielded` untuk bypass darurat.
+  2. Pada `src/runners/50_launcher.sh` (`launch_game`), periksa kandidat library Steamworks (`steam_api64.dll`, `steam_api.dll`, `libsteam_api.so`) hingga kedalaman folder 4.
+  3. Lakukan auto-injeksi GBE (`inject_game`) jika ditemukan library Valve unshielded.
+  4. Lakukan evaluasi ulang pasca-injeksi. Jika masih unshielded dan `--allow-unshielded` tidak diaktifkan, lakukan hard-stop terstruktur dengan exit code 1 dan instruksi remediasi.
+  5. Perbaiki penanganan sinyal dan pembersihan status (`_restore_launch_state`) agar bebas dari unbound variables dan dependencies missing.
+  6. Tambahkan 2 uji regresi di `tests/test_cli.sh` (`test_launch_hardstop_unshielded_contract` & `test_launch_allow_unshielded_override_contract`).
+- **DoD**: Tidak ada game ber-Steamworks yang diizinkan jalan tanpa perlindungan emulator GBE (92/92 test assertions lulus Exit 0).
 
 ### Chunk 4: SteamStub Unpack/Interceptor Hook [PENDING]
 - **Target Files**: `src/runners/50_launcher.sh`, `src/core/10_utils.sh`
@@ -61,6 +63,6 @@ Mewujudkan 100% Turnkey Sovereign Gaming Experience sesuai Piagam Dasar `docs/SO
 ## 3. Matriks Milestone (Work Packet 16)
 - [x] Chunk 1: Bugfix ${REPO_ROOT:-} & Isolasi Mock Fixture di test_cli.sh [VERIFIED]
 - [x] Chunk 2: Implementasi `gamectl setup-gbe` (Auto-download & provisioning Goldberg templates) [VERIFIED]
-- [ ] Chunk 3: Pre-flight Hard-Stop & GBE Guard di `launch_game` [PENDING]
+- [x] Chunk 3: Pre-flight Hard-Stop & GBE Guard di `launch_game` [VERIFIED]
 - [ ] Chunk 4: SteamStub Unpack/Interceptor Hook [PENDING]
 - [ ] Chunk 5: Full DLC Manifest Resolution Harvester Expansion [PENDING]

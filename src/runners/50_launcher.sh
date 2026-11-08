@@ -294,20 +294,21 @@ launch_game() {
     # Local state cleanup helper & signal trap
     local unit_name=""
     _restore_launch_state() {
-        if [ -n "$unit_name" ]; then
+        trap - INT TERM EXIT
+        if [ -n "${unit_name:-}" ]; then
             systemctl --user stop "$unit_name.scope" 2>/dev/null || true
         fi
-        if [ -n "$prev_governor" ] && [ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
+        if [ -n "${prev_governor:-}" ] && [ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
             echo "$prev_governor" | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
         fi
-        if [ "$is_win" = true ] && [ -d "$gdir/pfx" ]; then
+        if [ "${is_win:-false}" = true ] && [ -n "${gdir:-}" ] && [ -d "$gdir/pfx" ]; then
             # Remediation DEFECT-02: Flush wine prefix writes to disk (wineserver -w)
             local ws_bin
             ws_bin="$(get_wineserver_bin "${runner_bin:-}" 2>/dev/null || true)"
             [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -w 2>/dev/null || true
         fi
         unset __NV_PRIME_RENDER_OFFLOAD __GLX_VENDOR_LIBRARY_NAME __VK_LAYER_NV_optimus DRI_PRIME
-        clean_stale_locks
+        type clean_stale_locks >/dev/null 2>&1 && clean_stale_locks || true
     }
     trap '_restore_launch_state; trap - INT TERM EXIT; return 130 2>/dev/null || exit 130' INT
     trap '_restore_launch_state; trap - INT TERM EXIT; return 143 2>/dev/null || exit 143' TERM
@@ -325,36 +326,74 @@ launch_game() {
         echo "  ${UI_DIM}       Valve stub wrapper may intercept execution without active Steam or Steamless unpacking.${UI_RST}"
     fi
 
-    # Pre-flight GBE auto-injection: Ensure game is shielded before execution
-    local has_steam_api=false
-    local is_gbe=false
-    local api_cand
-    local bin_sub=""
-    [ -n "$gbin" ] && [ -f "$gdir/$gbin" ] && bin_sub="$(dirname "$gdir/$gbin")"
-
-    local probe_candidates=(
-        "$gdir/steam_api64.dll" "$gdir/steam_api.dll" "$gdir/libsteam_api.so"
-        "$gdir/lib64/libsteam_api.so" "$gdir/lib32/libsteam_api.so"
-    )
-    if [ -n "$bin_sub" ] && [ "$bin_sub" != "$gdir" ] && [ -d "$bin_sub" ]; then
-        probe_candidates+=("$bin_sub/steam_api64.dll" "$bin_sub/steam_api.dll" "$bin_sub/libsteam_api.so")
+    # Pre-flight savegame redirection & offline DLC check
+    mkdir -p -m 700 "$gdir/saves" 2>/dev/null || true
+    if [ -f "$gdir/steam_appid.txt" ]; then
+        local raw_appid
+        raw_appid=$(tr -dc '0-9' < "$gdir/steam_appid.txt" 2>/dev/null || echo "")
+        if [ -n "$raw_appid" ] && [ ! -f "$gdir/steam_settings/DLC.txt" ]; then
+            fetch_dlc "$gdir" "$raw_appid" 2>/dev/null || true
+        fi
     fi
 
-    for api_cand in "${probe_candidates[@]}"; do
-        if [ -f "$api_cand" ]; then
-            has_steam_api=true
+    # Pre-flight GBE auto-injection & Sovereign Hard-Stop Guard
+    local allow_unshielded="${GAMECTL_ACTIVE_ALLOW_UNSHIELDED:-${GAMECTL_ALLOW_UNSHIELDED:-0}}"
+    local has_steam_api=false
+    local probe_candidates=()
+    while IFS= read -r api_found || [ -n "$api_found" ]; do
+        [ -f "$api_found" ] && probe_candidates+=("$api_found")
+    done < <(find "$gdir" -maxdepth 4 \
+        \( -name "pfx" -o -name ".git" -o -name "saves" -o -name ".save_snapshots" \) -prune \
+        -o \( -name "steam_api64.dll" -o -name "steam_api.dll" -o -name "libsteam_api.so" \) -print 2>/dev/null)
+
+    if [ ${#probe_candidates[@]} -gt 0 ]; then
+        has_steam_api=true
+        local unshielded_candidates=()
+        for api_cand in "${probe_candidates[@]}"; do
             local c_sz
             c_sz=$(stat -c%s "$api_cand" 2>/dev/null || echo 0)
-            if [ "$c_sz" -gt 7000000 ]; then
-                is_gbe=true
-                break
+            if [ "$c_sz" -ge 5000000 ] || [ -f "$api_cand.orig" ]; then
+                : # Already shielded
+            else
+                unshielded_candidates+=("$api_cand")
             fi
-        fi
-    done
+        done
 
-    if [ "$has_steam_api" = true ] && [ "$is_gbe" = false ]; then
-        echo "[INFO] Steamworks API detected without emulator shield. Auto-injecting GBE Fork..."
-        inject_game "$gdir" "" --no-sync 2>/dev/null || true
+        if [ ${#unshielded_candidates[@]} -gt 0 ]; then
+            echo "  ${UI_AMBER}[INFO] Steamworks API detected without emulator shield. Attempting auto-injection...${UI_RST}"
+            inject_game "$gdir" "" --no-sync 2>/dev/null || true
+
+            local still_unshielded=()
+            for api_cand in "${unshielded_candidates[@]}"; do
+                if [ -f "$api_cand" ]; then
+                    local re_sz
+                    re_sz=$(stat -c%s "$api_cand" 2>/dev/null || echo 0)
+                    if [ "$re_sz" -lt 5000000 ] && [ ! -f "$api_cand.orig" ]; then
+                        still_unshielded+=("$api_cand")
+                    fi
+                fi
+            done
+
+            if [ ${#still_unshielded[@]} -gt 0 ]; then
+                if [ "$allow_unshielded" = "1" ]; then
+                    echo "  ${UI_AMBER}[WARN] Launching unshielded Steamworks binary by user override (--allow-unshielded).${UI_RST}"
+                else
+                    echo "  ${UI_RED}================================================================${UI_RST}" >&2
+                    echo "  ${UI_RED}[HARD-STOP] Valve Steamworks API detected without emulator shield!${UI_RST}" >&2
+                    echo "  ${UI_AMBER}Unshielded library: ${still_unshielded[*]}${UI_RST}" >&2
+                    echo "  ${UI_AMBER}Launch halted to prevent Valve DRM from spawning Steam Client ('PURCHASE' prompt).${UI_RST}" >&2
+                    echo "  ${UI_DIM}Remedy: Run 'gamectl setup-gbe' to provision templates or 'gamectl inject \"$gdir\"'.${UI_RST}" >&2
+                    echo "  ${UI_DIM}Bypass: Pass --allow-unshielded to override this sovereign safety gate.${UI_RST}" >&2
+                    echo "  ${UI_RED}================================================================${UI_RST}" >&2
+                    _restore_launch_state
+                    return 1
+                fi
+            else
+                echo "  ${UI_GREEN}[VERIFIED] GBE Fork emulator shield successfully engaged.${UI_RST}"
+            fi
+        else
+            echo "  ${UI_GREEN}[VERIFIED] GBE Fork emulator shield confirmed active.${UI_RST}"
+        fi
     fi
 
     # Check if target is a Windows executable (.exe / PE)
