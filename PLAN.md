@@ -33,7 +33,7 @@ Mengatasi temuan audit eksternal yang valid untuk memperkuat continuous integrat
 - **Definition of Done (DoD)**:
   - Pengujian rotasi savegame lulus 100% dengan Exit Code 0 tanpa error, membuktikan proteksi progres pemain aktif.
 
-### [ ] Chunk 2: GitHub Actions Automated CI Pipeline (`.github/workflows/ci.yml`)
+### [x] Chunk 2: GitHub Actions Automated CI Pipeline (`.github/workflows/ci.yml`) [VERIFIED]
 - **Target Files**: `.github/workflows/ci.yml`
 - **Runtutan Eksekusi Teknis**:
   1. Buat `.github/workflows/ci.yml`:
