@@ -580,33 +580,79 @@ manage_prefix() {
     # Interactive menu if action is empty and stdin is terminal
     if [ -z "$action" ]; then
         if [ -t 0 ]; then
-            clear
-            echo "${UI_BOX}╭─ WINE PREFIX SWISS ARMY KNIFE ──────────────────────────────╮${UI_RST}"
-            echo "│ ${UI_CYAN}Game Directory${UI_RST} : ${UI_BOLD}$game_dir${UI_RST}"
-            echo "│ ${UI_CYAN}Prefix Path   ${UI_RST} : ${UI_BOLD}$pfx_dir${UI_RST}"
-            echo "│ ${UI_CYAN}Active Runner ${UI_RST} : ${UI_GREEN}$runner_bin${UI_RST}"
-            echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-            echo "  ${UI_PURPLE}1)${UI_RST} winecfg      ${UI_DIM}(Wine Audio, Graphics & Windows Version Config)${UI_RST}"
-            echo "  ${UI_PURPLE}2)${UI_RST} regedit      ${UI_DIM}(Windows Registry Editor)${UI_RST}"
-            echo "  ${UI_PURPLE}3)${UI_RST} cmd          ${UI_DIM}(Windows Command Prompt)${UI_RST}"
-            echo "  ${UI_PURPLE}4)${UI_RST} shell        ${UI_DIM}(Host Bash Subshell with active WINEPREFIX)${UI_RST}"
-            echo "  ${UI_PURPLE}5)${UI_RST} winetricks   ${UI_DIM}(Winetricks GUI / Package Manager)${UI_RST}"
-            echo "  ${UI_AMBER}6)${UI_RST} kill         ${UI_DIM}(Terminate locked / hung Wineserver)${UI_RST}"
-            echo "  ${UI_RED}7)${UI_RST} clean        ${UI_DIM}(Backup Saves & Wipe Entire Wine Prefix)${UI_RST}"
-            echo "  ${UI_CYAN}8)${UI_RST} Exit"
-            echo
-            local choice=""
-            read -t 15 -r -p "Select action [1-8]: " choice || choice="8"
-            case "$choice" in
-                1) action="winecfg" ;;
-                2) action="regedit" ;;
-                3) action="cmd" ;;
-                4) action="shell" ;;
-                5) action="winetricks" ;;
-                6) action="kill" ;;
-                7) action="clean" ;;
-                *) echo "[INFO] Operation canceled."; return 0 ;;
-            esac
+            if command -v fzf >/dev/null 2>&1; then
+                flush_tty_input
+                local game_name
+                game_name="$(basename "$game_dir")"
+                local pfx_status="[NOT FOUND]"
+                local pfx_color="\033[38;5;203m"
+                local pfx_size="0 B"
+                if [ -d "$pfx_dir" ]; then
+                    pfx_status="[ACTIVE]"
+                    pfx_color="\033[38;5;120m"
+                    pfx_size="$(du -sh "$pfx_dir" 2>/dev/null | awk '{print $1}' || echo "N/A")"
+                fi
+
+                local pfx_palette
+                pfx_palette=$(cat <<EOF
+winecfg	Wine Configuration	Configure Audio, Graphics, Windows Version & DLL Overrides
+regedit	Registry Editor	Windows Registry Editor (regedit.exe)
+cmd	Command Prompt	Windows Command Prompt (cmd.exe)
+shell	Host Bash Subshell	Spawn bash subshell with active WINEPREFIX & PATH
+winetricks	Winetricks Manager	Launch winetricks GUI / Package Manager helper
+kill	Kill Wineserver	Terminate locked / hung Wineserver process
+clean	Wipe Wine Prefix	Create save snapshot backup & wipe entire pfx directory
+EOF
+)
+
+                local preview_cmd
+                preview_cmd="echo -e '\033[38;5;60m╭─ WINE PREFIX OVERVIEW ──────────────────────────────╮\033[0m\n  Game Title  : \033[1m$game_name\033[0m\n  Directory   : $game_dir\n  Prefix Path : $pfx_dir\n  Active Wine : \033[38;5;111m$runner_bin\033[0m\n  Status      : ${pfx_color}${pfx_status}\033[0m (Size: $pfx_size)\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n\033[38;5;60m╭─ ACTION DETAIL ─────────────────────────────────────╮\033[0m\n  Tool   : \033[1m{1}\033[0m - {2}\n  Desc   : {3}\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m'"
+
+                local pfx_sel fzf_rc=0
+                pfx_sel=$(echo "$pfx_palette" | fzf \
+                    --delimiter=$'\t' \
+                    --with-nth=1,2 \
+                    --border-label="  ╢ gamectl :: Wine Prefix Manager :: $game_name ╟  " \
+                    --border-label-pos=2 \
+                    --header="PREFIX PALETTE (Enter: Execute │ Esc: Return)" \
+                    --prompt="Prefix > " \
+                    --preview="$preview_cmd" \
+                    --preview-window=down:50%:border-rounded:wrap \
+                    --height=70% \
+                    --reverse 2>/dev/null) || fzf_rc=$?
+
+                [ "$fzf_rc" -eq 130 ] && return 0
+                [ -z "$pfx_sel" ] && return 0
+
+                action=$(echo "$pfx_sel" | awk -F'\t' '{print $1}')
+            else
+                echo "${UI_BOX}╭─ WINE PREFIX SWISS ARMY KNIFE ──────────────────────────────╮${UI_RST}"
+                echo "│ ${UI_CYAN}Game Directory${UI_RST} : ${UI_BOLD}$game_dir${UI_RST}"
+                echo "│ ${UI_CYAN}Prefix Path   ${UI_RST} : ${UI_BOLD}$pfx_dir${UI_RST}"
+                echo "│ ${UI_CYAN}Active Runner ${UI_RST} : ${UI_GREEN}$runner_bin${UI_RST}"
+                echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
+                echo "  ${UI_PURPLE}1)${UI_RST} winecfg      ${UI_DIM}(Wine Audio, Graphics & Windows Version Config)${UI_RST}"
+                echo "  ${UI_PURPLE}2)${UI_RST} regedit      ${UI_DIM}(Windows Registry Editor)${UI_RST}"
+                echo "  ${UI_PURPLE}3)${UI_RST} cmd          ${UI_DIM}(Windows Command Prompt)${UI_RST}"
+                echo "  ${UI_PURPLE}4)${UI_RST} shell        ${UI_DIM}(Host Bash Subshell with active WINEPREFIX)${UI_RST}"
+                echo "  ${UI_PURPLE}5)${UI_RST} winetricks   ${UI_DIM}(Winetricks GUI / Package Manager)${UI_RST}"
+                echo "  ${UI_AMBER}6)${UI_RST} kill         ${UI_DIM}(Terminate locked / hung Wineserver)${UI_RST}"
+                echo "  ${UI_RED}7)${UI_RST} clean        ${UI_DIM}(Backup Saves & Wipe Entire Wine Prefix)${UI_RST}"
+                echo "  ${UI_CYAN}8)${UI_RST} Exit"
+                echo
+                local choice=""
+                read -t 15 -r -p "Select action [1-8]: " choice || choice="8"
+                case "$choice" in
+                    1) action="winecfg" ;;
+                    2) action="regedit" ;;
+                    3) action="cmd" ;;
+                    4) action="shell" ;;
+                    5) action="winetricks" ;;
+                    6) action="kill" ;;
+                    7) action="clean" ;;
+                    *) echo "[INFO] Operation canceled."; return 0 ;;
+                esac
+            fi
         else
             echo "Usage: gamectl pfx <game_dir> [winecfg|regedit|cmd|shell|kill|clean|winetricks] [args...]" >&2
             return 1
