@@ -2044,6 +2044,52 @@ test_makefile_clean_rust_contract() {
 }
 run_test "Clean Target (Chunk 5): Makefile clean and distclean rust & cache targets contract" test_makefile_clean_rust_contract
 
+test_savegame_snapshot_rotation_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    local t_game
+    t_game=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_save_XXXXXX")
+    local s_dir="$t_game/saves"
+    mkdir -p "$s_dir"
+
+    # Step 1: Initial save snapshot (v1)
+    echo "save_v1_data" > "$s_dir/save.dat"
+    backup_save "$t_game" true >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
+    [ -f "$t_game/.save_snapshots/slot1/save.dat" ] || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$t_game/.save_snapshots/slot1/save.dat")" = "save_v1_data" ] || { rm -rf "$t_game"; return 1; }
+    [ ! -d "$t_game/.save_snapshots/slot2" ] || { rm -rf "$t_game"; return 1; }
+
+    # Step 2: Second save snapshot (v2) -> slot1=v2, slot2=v1
+    echo "save_v2_data" > "$s_dir/save.dat"
+    backup_save "$t_game" true >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$t_game/.save_snapshots/slot1/save.dat")" = "save_v2_data" ] || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$t_game/.save_snapshots/slot2/save.dat")" = "save_v1_data" ] || { rm -rf "$t_game"; return 1; }
+    [ ! -d "$t_game/.save_snapshots/slot3" ] || { rm -rf "$t_game"; return 1; }
+
+    # Step 3: Third save snapshot (v3) -> slot1=v3, slot2=v2, slot3=v1
+    echo "save_v3_data" > "$s_dir/save.dat"
+    backup_save "$t_game" true >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$t_game/.save_snapshots/slot1/save.dat")" = "save_v3_data" ] || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$t_game/.save_snapshots/slot2/save.dat")" = "save_v2_data" ] || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$t_game/.save_snapshots/slot3/save.dat")" = "save_v1_data" ] || { rm -rf "$t_game"; return 1; }
+
+    # Step 4: Fourth save snapshot (v4) -> slot1=v4, slot2=v3, slot3=v2 (slot with v1 purged)
+    echo "save_v4_data" > "$s_dir/save.dat"
+    backup_save "$t_game" true >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$t_game/.save_snapshots/slot1/save.dat")" = "save_v4_data" ] || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$t_game/.save_snapshots/slot2/save.dat")" = "save_v3_data" ] || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$t_game/.save_snapshots/slot3/save.dat")" = "save_v2_data" ] || { rm -rf "$t_game"; return 1; }
+    [ ! -d "$t_game/.save_snapshots/slot4" ] || { rm -rf "$t_game"; return 1; }
+
+    # Step 5: Test quiet mode vs loud mode when saves/ is missing
+    rm -rf "$s_dir"
+    backup_save "$t_game" true >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
+    ! backup_save "$t_game" false >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
+
+    rm -rf "$t_game"
+    return 0
+}
+run_test "Savegame Protection (Chunk 1): Rolling 3-slot savegame snapshot rotation contract" test_savegame_snapshot_rotation_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
