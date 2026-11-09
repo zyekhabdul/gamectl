@@ -1914,6 +1914,24 @@ test_standalone_tui_exit_contract() {
 }
 run_test "Standalone Navigation Invariant (Chunk 5): Direct shell exit on Esc without dashboard trap" test_standalone_tui_exit_contract
 
+test_dual_input_acf_adoption_contract() {
+    # 1. unlock_interactive accepts title or numeric AppID without non-numeric hardblock
+    ! grep -q 'AppID must contain only numeric characters' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+
+    # 2. Contains Steam Store API search branch for title resolution
+    grep -q 'Searching Steam Store API for title:' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    grep -q 'storesearch/?term=' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+
+    # 3. Contains target game selector FZF palette for title adoption
+    grep -q 'SELECT GAME FOR ACF ADOPTION' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+
+    # 4. Dashboard preview reflects dual-input capability
+    grep -q 'Dual-input adoption by Game Title or numeric AppID' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
+
+    return 0
+}
+run_test "ACF Adoption Dual-Input: Resolve by Game Title or numeric AppID" test_dual_input_acf_adoption_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

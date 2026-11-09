@@ -348,7 +348,7 @@ preview_dashboard() {
             echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
             echo "│ ${UI_BOLD}[04] STEAM ACF ADOPTION & ASSET MANAGER${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
-            echo "  • Adopt local files across libraries, community Steam Input & shaders."
+            echo "  • Dual-input adoption by Game Title or numeric AppID without prior lookup."
             echo "  • Automatically resolve physical game directories & generate real ACF."
             echo "  • Integrated bridge to Standalone CDN or Steam native install."
             ;;

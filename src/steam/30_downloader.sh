@@ -1683,35 +1683,70 @@ unlock_game() {
 entitle_game() { unlock_game "$@"; }
 adopt_steam() { unlock_game "$@"; }
 
-# Interactive Steam ACF Adoption & Asset Manager Wizard
+# Interactive Steam ACF Adoption & Asset Manager Wizard (Dual Input: Title or AppID)
 unlock_interactive() {
-    local u_appid_raw="" fzf_rc=0
-    u_appid_raw=$(: | fzf \
+    flush_tty_input
+    local u_input_raw="" fzf_rc=0
+    u_input_raw=$(: | fzf \
         --print-query \
         --border-label="  ╢ Steam ACF Adoption & Asset Manager ╟  " \
         --border-label-pos=2 \
-        --header="Enter numeric AppID (Enter: Adopt │ Esc: Cancel)" \
-        --prompt="Steam AppID > " \
+        --header="Enter game title or numeric AppID (Enter: Adopt │ Esc: Cancel)" \
+        --prompt="Game Title or ID > " \
         --height=20% \
         --reverse 2>/dev/null) || fzf_rc=$?
 
     # Only abort if user cancelled via ESC or Ctrl-C (exit status 130)
     [ "$fzf_rc" -eq 130 ] && return 0
 
-    local u_appid
-    u_appid=$(echo "$u_appid_raw" | head -n 1 | tr -d '[:space:]')
-    [ -z "$u_appid" ] && return 0
+    local u_input
+    u_input=$(echo "$u_input_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [ -z "$u_input" ] && return 0
 
-    if [[ ! "$u_appid" =~ ^[0-9]+$ ]]; then
-        log_msg "WARN" "ADOPT" "Invalid non-numeric AppID input: '$u_appid'"
-        tui_modal_notice "Invalid AppID" "AppID must contain only numeric characters (e.g. 105600).\nProvided value: '$u_appid'"
-        return 1
+    local u_appid=""
+    local u_title=""
+
+    if [[ "$u_input" =~ ^[0-9]+$ ]]; then
+        u_appid="$u_input"
+        log_msg "INFO" "ADOPT" "Fetching title from Steam Store API for AppID $u_appid..."
+        u_title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${u_appid}&filters=basic" | jq -r ".\"${u_appid}\".data.name // empty" 2>/dev/null || true)
+        [ -z "$u_title" ] && u_title="AppID_${u_appid}"
+    else
+        log_msg "INFO" "ADOPT" "Searching Steam Store API for title: '$u_input'..."
+        local encoded_query
+        encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$u_input" 2>/dev/null || echo "$u_input")
+        local raw_results
+        raw_results=$(curl -s --connect-timeout 5 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
+        local search_items
+        search_items=$(echo "$raw_results" | jq -r '.items[]? | "\(.id)\t\(.name)"' 2>/dev/null || true)
+
+        if [ -z "$search_items" ]; then
+            log_msg "WARN" "ADOPT" "Game title '$u_input' not found on Steam Store API"
+            tui_modal_notice "Game Not Found" "Game title '$u_input' was not found on Steam Store.\nPlease verify title or provide numeric AppID."
+            return 1
+        fi
+
+        local sel_item fzf_sel_rc=0
+        sel_item=$(echo "$search_items" | fzf \
+            --delimiter=$'\t' \
+            --with-nth=1,2 \
+            --border-label="  ╢ Steam Store Search :: Pick Target Game ╟  " \
+            --border-label-pos=2 \
+            --header="SELECT GAME FOR ACF ADOPTION (Enter: Select │ Esc: Cancel)" \
+            --prompt="Adopt Game > " \
+            --preview="echo -e '\033[38;5;60m╭─ SELECTED STORE GAME ──────────────────────────────╮\033[0m\n  AppID : \033[1m{1}\033[0m\n  Title : \033[1m{2}\033[0m\n\033[38;5;60m╰────────────────────────────────────────────────────╯\033[0m'" \
+            --preview-window=down:30%:border-rounded \
+            --height=50% \
+            --reverse 2>/dev/null) || fzf_sel_rc=$?
+
+        [ "$fzf_sel_rc" -eq 130 ] && return 0
+        [ -z "$sel_item" ] && return 0
+
+        u_appid=$(echo "$sel_item" | awk -F'\t' '{print $1}')
+        u_title=$(echo "$sel_item" | awk -F'\t' '{print $2}')
     fi
 
-    log_msg "INFO" "ADOPT" "Fetching title from Steam Store API for AppID $u_appid..."
-    local u_title
-    u_title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${u_appid}&filters=basic" | jq -r ".\"${u_appid}\".data.name // empty" 2>/dev/null || true)
-    [ -z "$u_title" ] && u_title="AppID_${u_appid}"
+    [ -z "$u_appid" ] && return 0
 
     # Check for physical game files across all active libraries
     local existing_dir=""
