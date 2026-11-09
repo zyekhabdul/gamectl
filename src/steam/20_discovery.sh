@@ -128,9 +128,8 @@ scan_installed_games() {
         esac
     done
 
-    local run_uid="${UID:-$(id -u)}"
-    local cache_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
-    mkdir -p -m 700 "$cache_dir" 2>/dev/null || true
+    local cache_dir
+    cache_dir="$(get_runtime_dir)"
     local cache_file="$cache_dir/scancache.tab"
 
     # Fast-path: Check cache validity (TTL: 60s, invalidated if candidate library directories are newer)

@@ -209,7 +209,7 @@ find_runner() {
     for cdir in "${compat_dirs[@]}"; do
         [ -d "$cdir" ] || continue
         local w
-        w=$(find "$cdir" -type f -name "wine64" -o -name "wine" 2>/dev/null | head -n 1)
+        w=$(find "$cdir" -type f \( -name "wine64" -o -name "wine" \) 2>/dev/null | head -n 1)
         if [ -n "$w" ] && [ -x "$w" ]; then
             echo "$w"
             return 0

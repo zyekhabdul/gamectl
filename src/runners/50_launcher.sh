@@ -286,7 +286,7 @@ launch_game() {
 
     # Sovereign Steam Interceptor: traps and silences unshielded Steam Client calls
     local prev_path="$PATH"
-    local interceptor_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/interceptor"
+    local interceptor_dir="$(get_runtime_dir)/interceptor"
     setup_steam_interceptor "$interceptor_dir"
     export PATH="$interceptor_dir:$PATH"
 
@@ -452,7 +452,8 @@ launch_game() {
     fi
 
     # Prepare runtime directory and log stream
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     mkdir -p -m 700 "$run_dir/active_games"
     local safe_gbin
     safe_gbin=$(basename "$gbin" | tr -cd '[:alnum:]_-')
@@ -645,8 +646,8 @@ sync_save_remote() {
     fi
     rel_path="${rel_path#/}"
 
-    ssh "$rhost" "mkdir -p ~/$rel_path"
-    rsync -avzP --exclude="*.tmp" "$sdir/" "$rhost:~/$rel_path/saves/"
+    ssh "$rhost" "mkdir -p \"~/$rel_path\""
+    rsync -avzP --exclude="*.tmp" "$sdir/" "$rhost:\"~/$rel_path/saves/\""
     echo "[VERIFIED] Savegame synchronization to $rhost completed."
 }
 
@@ -667,8 +668,8 @@ inject_game() {
     local sync_mode="${3:-all}"
 
     # Strip ANSI escape sequences
-    target_dir=$(printf "%s" "$target_dir" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g')
-    [ -n "$appid" ] && appid=$(printf "%s" "$appid" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g' | tr -dc '0-9')
+    target_dir=$(strip_ansi "$target_dir")
+    [ -n "$appid" ] && appid=$(strip_ansi "$appid" | tr -dc '0-9')
 
     if [ ! -d "$target_dir" ]; then
         echo "[ERROR] Target directory not found: $target_dir" >&2

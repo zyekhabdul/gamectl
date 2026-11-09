@@ -1,3 +1,18 @@
+if ! declare -F strip_ansi >/dev/null 2>&1; then
+    strip_ansi() {
+        printf "%s" "${1:-}" | sed -E $'s/\033\\[[0-9;]*[a-zA-Z]//g'
+    }
+fi
+
+if ! declare -F get_runtime_dir >/dev/null 2>&1; then
+    get_runtime_dir() {
+        local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
+        local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+        mkdir -p -m 700 "$run_dir" 2>/dev/null || true
+        echo "$run_dir"
+    }
+fi
+
 # Fetch and generate steam_settings/DLC.txt for GBE Fork
 fetch_dlc() {
     local target_dir="$1"
@@ -53,7 +68,8 @@ fetch_dlc() {
         stplug_dir="$(get_steam_stplug_in_dir 2>/dev/null || echo "$HOME/.local/share/Steam/config/stplug-in")"
         [ -f "$stplug_dir/${appid}.lua" ] && lua_candidates+=("$stplug_dir/${appid}.lua")
         [ -f "$HOME/.config/SLSsteam/manifests/${appid}.lua" ] && lua_candidates+=("$HOME/.config/SLSsteam/manifests/${appid}.lua")
-        local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+        local run_dir
+        run_dir="$(get_runtime_dir)"
         [ -f "$run_dir/${appid}.lua" ] && lua_candidates+=("$run_dir/${appid}.lua")
 
         declare -A seen_dlc=()
@@ -118,7 +134,8 @@ validate_manifest_zip() {
     fi
 
     # Payload magic audit on contained manifests
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     local audit_tmp="$run_dir/manifest_audit_$$"
     mkdir -p -m 700 "$audit_tmp"
     local has_valid_manifest=0
@@ -380,7 +397,7 @@ fetch_manifest() {
     local pref_source="${3:-auto}"
 
     # Strip any ANSI escape sequences
-    appid=$(printf "%s" "$appid" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
+    appid=$(strip_ansi "$appid" | tr -dc "0-9")
     if [ -z "$appid" ]; then
         echo "[ERROR] fetch_manifest: Invalid numeric AppID." >&2
         return 1
@@ -418,9 +435,8 @@ fetch_manifest() {
 
     echo "[INFO] Harvesting manifest archive for AppID $appid across multi-provider network..." >&2
 
-    local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
-    mkdir -p -m 700 "$run_dir"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     local dl_tmp="$run_dir/fetch_manifest_${appid}_$$.zip"
     rm -f "$dl_tmp"
 
@@ -587,8 +603,8 @@ deploy_sls_manifest() {
     local source="${4:-auto}"
 
     # Strip ANSI escape sequences
-    appid=$(printf "%s" "$appid" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
-    title=$(printf "%s" "$title" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
+    appid=$(strip_ansi "$appid" | tr -dc "0-9")
+    title=$(strip_ansi "$title")
 
     if [ -z "$appid" ]; then
         echo "[ERROR] deploy_sls_manifest: Invalid numeric AppID." >&2
@@ -610,7 +626,8 @@ deploy_sls_manifest() {
         return 1
     fi
 
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     local stage_dir="$run_dir/sls_deploy_${appid}_$$"
     mkdir -p -m 700 "$stage_dir"
     trap 'rm -rf "$stage_dir" 2>/dev/null || true' RETURN
@@ -869,7 +886,7 @@ trigger_steam_install() {
 download_game() {
     local appid="${1:-}"
     # Strip ANSI escape sequences & non-digits
-    appid=$(printf "%s" "$appid" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
+    appid=$(strip_ansi "$appid" | tr -dc "0-9")
     if [ -z "$appid" ]; then
         echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|manifesthub|ryuu|sushi|luatools>] [--raw|--inject-only|--all|--standalone|--sls]" >&2
         return 1
@@ -1000,7 +1017,8 @@ download_game() {
             return 1
         fi
 
-        local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+        local run_dir
+        run_dir="$(get_runtime_dir)"
         local stage_dir="$run_dir/depot_dl_${appid}_$$"
         mkdir -p -m 700 "$stage_dir"
         trap 'rm -rf "$stage_dir" 2>/dev/null || true' RETURN
@@ -1179,7 +1197,7 @@ parse_acf_download_state() {
     if [ -f "$target" ]; then
         acf_file="$target"
     else
-        appid=$(printf "%s" "$target" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
+        appid=$(strip_ansi "$target" | tr -dc "0-9")
         [ -z "$appid" ] && return 1
         acf_file=$(find_app_acf "$appid" 2>/dev/null || true)
     fi
@@ -1278,9 +1296,8 @@ list_downloads() {
 
 # Interactive Download Monitor TUI
 list_downloads_interactive() {
-    local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
-    mkdir -p -m 700 "$run_dir"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     while true; do
         local entries=""
         local total_items=0
@@ -1440,8 +1457,8 @@ sync_steam() {
     local game_dir="${3:-}"
 
     # Strip ANSI escape sequences
-    appid=$(printf "%s" "$appid" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g' | tr -dc '0-9')
-    title=$(printf "%s" "$title" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g')
+    appid=$(strip_ansi "$appid" | tr -dc '0-9')
+    title=$(strip_ansi "$title")
 
     if [ -z "$appid" ] || [ "$appid" = "STANDALONE" ]; then
         echo "[WARN] Invalid numeric AppID. Skipping Steam synchronization." >&2

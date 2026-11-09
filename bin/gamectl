@@ -284,16 +284,17 @@ get_remote_host() {
 
 # Pre-flight cleanup of orphaned sockets and locks
 clean_stale_locks() {
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
-    rm -f /tmp/SteaMidra-* /tmp/steam_chrome_shmem_* /tmp/steam_chrome_overlay_* 2>/dev/null || true
-    rm -f "$run_dir"/SteaMidra-* "$run_dir"/steam_chrome_* 2>/dev/null || true
+    local run_dir
+    run_dir="$(get_runtime_dir)"
+    rm -f /tmp/steam_chrome_shmem_* /tmp/steam_chrome_overlay_* 2>/dev/null || true
+    rm -f "$run_dir"/steam_chrome_* 2>/dev/null || true
     rm -f "$HOME/.config/SLSsteam/cache/.picsbuffer.lock" 2>/dev/null || true
 }
 
 # Invalidate ephemeral library scanner cache
 invalidate_scan_cache() {
-    local run_uid="${UID:-$(id -u)}"
-    local cache_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
+    local cache_dir
+    cache_dir="$(get_runtime_dir)"
     rm -f "$cache_dir/scancache.tab" "$cache_dir/scancache.tab.tmp" 2>/dev/null || true
 }
 
@@ -348,11 +349,23 @@ tui_modal_notice() {
     return 0
 }
 
-# Centralized Runtime Logger (user-isolated, rolling buffer max 1000 lines)
-get_runtime_log_file() {
+# Canonical user-isolated runtime directory (0700 permissions)
+get_runtime_dir() {
     local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
     local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
     mkdir -p -m 700 "$run_dir" 2>/dev/null || true
+    echo "$run_dir"
+}
+
+# Canonical POSIX-compliant ANSI escape sequence stripper
+strip_ansi() {
+    printf "%s" "${1:-}" | sed -E $'s/\033\\[[0-9;]*[a-zA-Z]//g'
+}
+
+# Centralized Runtime Logger (user-isolated, rolling buffer max 1000 lines)
+get_runtime_log_file() {
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     echo "$run_dir/gamectl.log"
 }
 
@@ -711,7 +724,7 @@ unpack_steamstub_pe() {
 
 # Setup sovereign Steam interceptor scripts in target directory
 setup_steam_interceptor() {
-    local target_dir="${1:-${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/interceptor}"
+    local target_dir="${1:-$(get_runtime_dir)/interceptor}"
     mkdir -p -m 700 "$target_dir" 2>/dev/null || mkdir -p "$target_dir"
     cat << 'EOF_INTERCEPTOR' > "$target_dir/steam"
 # Sovereign Steam Interceptor: traps and silences unshielded Steam Client calls
@@ -960,9 +973,8 @@ scan_installed_games() {
         esac
     done
 
-    local run_uid="${UID:-$(id -u)}"
-    local cache_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
-    mkdir -p -m 700 "$cache_dir" 2>/dev/null || true
+    local cache_dir
+    cache_dir="$(get_runtime_dir)"
     local cache_file="$cache_dir/scancache.tab"
 
     # Fast-path: Check cache validity (TTL: 60s, invalidated if candidate library directories are newer)
@@ -2130,6 +2142,21 @@ EOF
 
 
 # --- [MODULE] src/steam/30_downloader.sh ---
+if ! declare -F strip_ansi >/dev/null 2>&1; then
+    strip_ansi() {
+        printf "%s" "${1:-}" | sed -E $'s/\033\\[[0-9;]*[a-zA-Z]//g'
+    }
+fi
+
+if ! declare -F get_runtime_dir >/dev/null 2>&1; then
+    get_runtime_dir() {
+        local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
+        local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+        mkdir -p -m 700 "$run_dir" 2>/dev/null || true
+        echo "$run_dir"
+    }
+fi
+
 # Fetch and generate steam_settings/DLC.txt for GBE Fork
 fetch_dlc() {
     local target_dir="$1"
@@ -2185,7 +2212,8 @@ fetch_dlc() {
         stplug_dir="$(get_steam_stplug_in_dir 2>/dev/null || echo "$HOME/.local/share/Steam/config/stplug-in")"
         [ -f "$stplug_dir/${appid}.lua" ] && lua_candidates+=("$stplug_dir/${appid}.lua")
         [ -f "$HOME/.config/SLSsteam/manifests/${appid}.lua" ] && lua_candidates+=("$HOME/.config/SLSsteam/manifests/${appid}.lua")
-        local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+        local run_dir
+        run_dir="$(get_runtime_dir)"
         [ -f "$run_dir/${appid}.lua" ] && lua_candidates+=("$run_dir/${appid}.lua")
 
         declare -A seen_dlc=()
@@ -2250,7 +2278,8 @@ validate_manifest_zip() {
     fi
 
     # Payload magic audit on contained manifests
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     local audit_tmp="$run_dir/manifest_audit_$$"
     mkdir -p -m 700 "$audit_tmp"
     local has_valid_manifest=0
@@ -2512,7 +2541,7 @@ fetch_manifest() {
     local pref_source="${3:-auto}"
 
     # Strip any ANSI escape sequences
-    appid=$(printf "%s" "$appid" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
+    appid=$(strip_ansi "$appid" | tr -dc "0-9")
     if [ -z "$appid" ]; then
         echo "[ERROR] fetch_manifest: Invalid numeric AppID." >&2
         return 1
@@ -2550,9 +2579,8 @@ fetch_manifest() {
 
     echo "[INFO] Harvesting manifest archive for AppID $appid across multi-provider network..." >&2
 
-    local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
-    mkdir -p -m 700 "$run_dir"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     local dl_tmp="$run_dir/fetch_manifest_${appid}_$$.zip"
     rm -f "$dl_tmp"
 
@@ -2719,8 +2747,8 @@ deploy_sls_manifest() {
     local source="${4:-auto}"
 
     # Strip ANSI escape sequences
-    appid=$(printf "%s" "$appid" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
-    title=$(printf "%s" "$title" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
+    appid=$(strip_ansi "$appid" | tr -dc "0-9")
+    title=$(strip_ansi "$title")
 
     if [ -z "$appid" ]; then
         echo "[ERROR] deploy_sls_manifest: Invalid numeric AppID." >&2
@@ -2742,7 +2770,8 @@ deploy_sls_manifest() {
         return 1
     fi
 
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     local stage_dir="$run_dir/sls_deploy_${appid}_$$"
     mkdir -p -m 700 "$stage_dir"
     trap 'rm -rf "$stage_dir" 2>/dev/null || true' RETURN
@@ -3001,7 +3030,7 @@ trigger_steam_install() {
 download_game() {
     local appid="${1:-}"
     # Strip ANSI escape sequences & non-digits
-    appid=$(printf "%s" "$appid" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
+    appid=$(strip_ansi "$appid" | tr -dc "0-9")
     if [ -z "$appid" ]; then
         echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|manifesthub|ryuu|sushi|luatools>] [--raw|--inject-only|--all|--standalone|--sls]" >&2
         return 1
@@ -3132,7 +3161,8 @@ download_game() {
             return 1
         fi
 
-        local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+        local run_dir
+        run_dir="$(get_runtime_dir)"
         local stage_dir="$run_dir/depot_dl_${appid}_$$"
         mkdir -p -m 700 "$stage_dir"
         trap 'rm -rf "$stage_dir" 2>/dev/null || true' RETURN
@@ -3311,7 +3341,7 @@ parse_acf_download_state() {
     if [ -f "$target" ]; then
         acf_file="$target"
     else
-        appid=$(printf "%s" "$target" | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g" | tr -dc "0-9")
+        appid=$(strip_ansi "$target" | tr -dc "0-9")
         [ -z "$appid" ] && return 1
         acf_file=$(find_app_acf "$appid" 2>/dev/null || true)
     fi
@@ -3410,9 +3440,8 @@ list_downloads() {
 
 # Interactive Download Monitor TUI
 list_downloads_interactive() {
-    local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
-    mkdir -p -m 700 "$run_dir"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     while true; do
         local entries=""
         local total_items=0
@@ -3572,8 +3601,8 @@ sync_steam() {
     local game_dir="${3:-}"
 
     # Strip ANSI escape sequences
-    appid=$(printf "%s" "$appid" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g' | tr -dc '0-9')
-    title=$(printf "%s" "$title" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g')
+    appid=$(strip_ansi "$appid" | tr -dc '0-9')
+    title=$(strip_ansi "$title")
 
     if [ -z "$appid" ] || [ "$appid" = "STANDALONE" ]; then
         echo "[WARN] Invalid numeric AppID. Skipping Steam synchronization." >&2
@@ -4740,7 +4769,7 @@ find_runner() {
     for cdir in "${compat_dirs[@]}"; do
         [ -d "$cdir" ] || continue
         local w
-        w=$(find "$cdir" -type f -name "wine64" -o -name "wine" 2>/dev/null | head -n 1)
+        w=$(find "$cdir" -type f \( -name "wine64" -o -name "wine" \) 2>/dev/null | head -n 1)
         if [ -n "$w" ] && [ -x "$w" ]; then
             echo "$w"
             return 0
@@ -6302,7 +6331,7 @@ launch_game() {
 
     # Sovereign Steam Interceptor: traps and silences unshielded Steam Client calls
     local prev_path="$PATH"
-    local interceptor_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/interceptor"
+    local interceptor_dir="$(get_runtime_dir)/interceptor"
     setup_steam_interceptor "$interceptor_dir"
     export PATH="$interceptor_dir:$PATH"
 
@@ -6468,7 +6497,8 @@ launch_game() {
     fi
 
     # Prepare runtime directory and log stream
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     mkdir -p -m 700 "$run_dir/active_games"
     local safe_gbin
     safe_gbin=$(basename "$gbin" | tr -cd '[:alnum:]_-')
@@ -6661,8 +6691,8 @@ sync_save_remote() {
     fi
     rel_path="${rel_path#/}"
 
-    ssh "$rhost" "mkdir -p ~/$rel_path"
-    rsync -avzP --exclude="*.tmp" "$sdir/" "$rhost:~/$rel_path/saves/"
+    ssh "$rhost" "mkdir -p \"~/$rel_path\""
+    rsync -avzP --exclude="*.tmp" "$sdir/" "$rhost:\"~/$rel_path/saves/\""
     echo "[VERIFIED] Savegame synchronization to $rhost completed."
 }
 
@@ -6683,8 +6713,8 @@ inject_game() {
     local sync_mode="${3:-all}"
 
     # Strip ANSI escape sequences
-    target_dir=$(printf "%s" "$target_dir" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g')
-    [ -n "$appid" ] && appid=$(printf "%s" "$appid" | sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g' | tr -dc '0-9')
+    target_dir=$(strip_ansi "$target_dir")
+    [ -n "$appid" ] && appid=$(strip_ansi "$appid" | tr -dc '0-9')
 
     if [ ! -d "$target_dir" ]; then
         echo "[ERROR] Target directory not found: $target_dir" >&2
@@ -7339,9 +7369,9 @@ query_protondb() {
 # Preview pane generator for installed games
 preview_game() {
     local appid title status gdir gbin
-    appid=$(echo "$1" | sed -r 's/\x1b\[[0-9;]*m//g' | tr -d '[:space:]')
-    title=$(echo "$2" | sed -r 's/\x1b\[[0-9;]*m//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    status=$(echo "$3" | sed -r 's/\x1b\[[0-9;]*m//g' | tr -d '][[:space:]]')
+    appid=$(strip_ansi "$1" | tr -d '[:space:]')
+    title=$(strip_ansi "$2" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    status=$(strip_ansi "$3" | tr -d '][[:space:]]')
     gdir="$4"
     gbin="$5"
 
@@ -7397,7 +7427,8 @@ preview_game() {
             ;;
     esac
 
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     local is_running=false
     local run_pid=""
     if [ -d "$run_dir/active_games" ]; then
@@ -7609,7 +7640,8 @@ preview_dashboard() {
         steam_status="${UI_GREEN}[RUNNING]${UI_RST}"
     fi
 
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     local active_count=0
     local active_titles=()
     if [ -d "$run_dir/active_games" ]; then
@@ -8272,7 +8304,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive
+export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

@@ -1,9 +1,9 @@
 # Preview pane generator for installed games
 preview_game() {
     local appid title status gdir gbin
-    appid=$(echo "$1" | sed -r 's/\x1b\[[0-9;]*m//g' | tr -d '[:space:]')
-    title=$(echo "$2" | sed -r 's/\x1b\[[0-9;]*m//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    status=$(echo "$3" | sed -r 's/\x1b\[[0-9;]*m//g' | tr -d '][[:space:]]')
+    appid=$(strip_ansi "$1" | tr -d '[:space:]')
+    title=$(strip_ansi "$2" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    status=$(strip_ansi "$3" | tr -d '][[:space:]]')
     gdir="$4"
     gbin="$5"
 
@@ -59,7 +59,8 @@ preview_game() {
             ;;
     esac
 
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     local is_running=false
     local run_pid=""
     if [ -d "$run_dir/active_games" ]; then
@@ -271,7 +272,8 @@ preview_dashboard() {
         steam_status="${UI_GREEN}[RUNNING]${UI_RST}"
     fi
 
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     local active_count=0
     local active_titles=()
     if [ -d "$run_dir/active_games" ]; then

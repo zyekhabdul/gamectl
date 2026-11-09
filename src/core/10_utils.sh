@@ -227,16 +227,17 @@ get_remote_host() {
 
 # Pre-flight cleanup of orphaned sockets and locks
 clean_stale_locks() {
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
-    rm -f /tmp/SteaMidra-* /tmp/steam_chrome_shmem_* /tmp/steam_chrome_overlay_* 2>/dev/null || true
-    rm -f "$run_dir"/SteaMidra-* "$run_dir"/steam_chrome_* 2>/dev/null || true
+    local run_dir
+    run_dir="$(get_runtime_dir)"
+    rm -f /tmp/steam_chrome_shmem_* /tmp/steam_chrome_overlay_* 2>/dev/null || true
+    rm -f "$run_dir"/steam_chrome_* 2>/dev/null || true
     rm -f "$HOME/.config/SLSsteam/cache/.picsbuffer.lock" 2>/dev/null || true
 }
 
 # Invalidate ephemeral library scanner cache
 invalidate_scan_cache() {
-    local run_uid="${UID:-$(id -u)}"
-    local cache_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
+    local cache_dir
+    cache_dir="$(get_runtime_dir)"
     rm -f "$cache_dir/scancache.tab" "$cache_dir/scancache.tab.tmp" 2>/dev/null || true
 }
 
@@ -291,11 +292,23 @@ tui_modal_notice() {
     return 0
 }
 
-# Centralized Runtime Logger (user-isolated, rolling buffer max 1000 lines)
-get_runtime_log_file() {
+# Canonical user-isolated runtime directory (0700 permissions)
+get_runtime_dir() {
     local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
     local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
     mkdir -p -m 700 "$run_dir" 2>/dev/null || true
+    echo "$run_dir"
+}
+
+# Canonical POSIX-compliant ANSI escape sequence stripper
+strip_ansi() {
+    printf "%s" "${1:-}" | sed -E $'s/\033\\[[0-9;]*[a-zA-Z]//g'
+}
+
+# Centralized Runtime Logger (user-isolated, rolling buffer max 1000 lines)
+get_runtime_log_file() {
+    local run_dir
+    run_dir="$(get_runtime_dir)"
     echo "$run_dir/gamectl.log"
 }
 
@@ -654,7 +667,7 @@ unpack_steamstub_pe() {
 
 # Setup sovereign Steam interceptor scripts in target directory
 setup_steam_interceptor() {
-    local target_dir="${1:-${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/interceptor}"
+    local target_dir="${1:-$(get_runtime_dir)/interceptor}"
     mkdir -p -m 700 "$target_dir" 2>/dev/null || mkdir -p "$target_dir"
     cat << 'EOF_INTERCEPTOR' > "$target_dir/steam"
 #!/usr/bin/env bash
