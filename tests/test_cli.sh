@@ -1716,9 +1716,12 @@ test_centralized_logger_contract() {
     source "$REPO_ROOT/src/core/10_utils.sh"
     type log_msg >/dev/null 2>&1 || return 1
     type log_info >/dev/null 2>&1 || return 1
+    type get_runtime_log_file >/dev/null 2>&1 || return 1
 
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
-    local log_file="$run_dir/gamectl.log"
+    local log_file
+    log_file="$(get_runtime_log_file)"
+    [ -n "$log_file" ] || return 1
+    [[ "$log_file" =~ gamectl\.log$ ]] || return 1
 
     log_msg "INFO" "TESTCOMP" "Automated regression logger assertion $$"
     [ -f "$log_file" ] || return 1

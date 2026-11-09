@@ -306,11 +306,12 @@ preview_dashboard() {
     echo "  ${UI_CYAN}Integration ${UI_RST}: SLSsteam $sls_status • Steam Client $steam_status"
     echo
 
-    local log_file="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}/gamectl.log"
+    local log_file
+    log_file="$(get_runtime_log_file)"
     echo "${UI_BOX}╭─ RECENT ACTIVITY LOGS ────────────────────────────────╮${UI_RST}"
     if [ -s "$log_file" ]; then
         tail -n 5 "$log_file" 2>/dev/null | while IFS= read -r line; do
-            echo "  ${UI_DIM}${line:0:68}${UI_RST}"
+            echo "  ${UI_DIM}${line:0:84}${UI_RST}"
         done
     else
         echo "  ${UI_DIM}(No recent activity logged yet)${UI_RST}"
@@ -389,8 +390,8 @@ preview_dashboard() {
 # Interactive Centralized Activity & Runtime Log Viewer
 view_logs_interactive() {
     flush_tty_input
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
-    local log_file="$run_dir/gamectl.log"
+    local log_file
+    log_file="$(get_runtime_log_file)"
 
     if [ ! -s "$log_file" ]; then
         log_msg "INFO" "SYSTEM" "Log file initialized"
@@ -420,6 +421,10 @@ view_logs_interactive() {
 dashboard_menu() {
     enter_tui_screen
     clean_stale_locks
+
+    local initial_count
+    initial_count=$(scan_installed_games 2>/dev/null | wc -l || echo "0")
+    log_msg "INFO" "DASHBOARD" "Cockpit active ($initial_count titles indexed)"
 
     while true; do
         flush_tty_input

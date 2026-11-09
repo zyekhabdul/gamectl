@@ -292,16 +292,21 @@ tui_modal_notice() {
 }
 
 # Centralized Runtime Logger (user-isolated, rolling buffer max 1000 lines)
+get_runtime_log_file() {
+    local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
+    mkdir -p -m 700 "$run_dir" 2>/dev/null || true
+    echo "$run_dir/gamectl.log"
+}
+
 log_msg() {
     local level="${1:-INFO}"
     local comp="${2:-CORE}"
     shift 2 || true
     local msg="$*"
 
-    local run_uid="${UID:-$(id -u)}"
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
-    mkdir -p -m 700 "$run_dir" 2>/dev/null || true
-    local log_file="$run_dir/gamectl.log"
+    local log_file
+    log_file="$(get_runtime_log_file)"
 
     local ts
     ts=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date)
