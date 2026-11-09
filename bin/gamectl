@@ -3549,7 +3549,16 @@ list_downloads_interactive() {
         [ "$sel_appid" = "0" ] && break
 
         if [ "$trigger_key" = "ctrl-k" ]; then
-            if command -v steam >/dev/null 2>&1; then
+            if [ "$sel_engine" = "Standalone" ]; then
+                local t_pid="${sel_ref##*_}"
+                if [[ "$t_pid" =~ ^[0-9]+$ ]] && kill -0 "$t_pid" 2>/dev/null; then
+                    kill -STOP "$t_pid" 2>/dev/null || true
+                    log_msg "INFO" "DOWNLOAD" "Paused standalone download PID $t_pid (AppID: $sel_appid) via SIGSTOP"
+                    tui_modal_notice "Standalone Download Paused" "Dispatched SIGSTOP to process PID: $t_pid (AppID: $sel_appid).\nUse Action Menu to resume or terminate."
+                else
+                    tui_modal_notice "Pause Standalone" "Downloader process (PID: $t_pid) is no longer active."
+                fi
+            elif command -v steam >/dev/null 2>&1; then
                 steam "steam://pause/$sel_appid" >/dev/null 2>&1 &
                 log_msg "INFO" "DOWNLOAD" "Paused download for AppID $sel_appid"
                 tui_modal_notice "Download Paused" "Dispatched pause signal to Steam Client for AppID: $sel_appid"
@@ -3559,46 +3568,81 @@ list_downloads_interactive() {
             continue
         fi
 
-            local action_entries
+        local action_entries
+        if [ "$sel_engine" = "Standalone" ]; then
+            local t_pid="${sel_ref##*_}"
             action_entries=$(cat <<EOF
-1	Pause Download	steam://pause/$sel_appid
-2	Resume Download	steam://resume/$sel_appid
+1	Pause Standalone Download (SIGSTOP)	Suspend process PID $t_pid
+2	Resume Standalone Download (SIGCONT)	Continue process PID $t_pid
+3	Terminate Standalone Download (SIGTERM)	Kill process PID $t_pid
+4	Inject Standalone GBE Fork LAN Runtime	Deploy Goldberg emulator
+5	Return to Download List	Back
+EOF
+)
+        else
+            action_entries=$(cat <<EOF
+1	Pause Steam Client Download	steam://pause/$sel_appid
+2	Resume Steam Client Download	steam://resume/$sel_appid
 3	Inject Standalone GBE Fork LAN Runtime	Deploy Goldberg emulator
 4	Return to Download List	Back
 EOF
 )
-            flush_tty_input
-            local act_sel act_rc=0
-            act_sel=$(echo "$action_entries" | fzf \
-                --delimiter=$'\t' \
-                --with-nth=2,3 \
-                --border-label="  ╢ Actions: AppID $sel_appid ╟  " \
-                --border-label-pos=2 \
-                --header="DOWNLOAD ACTIONS (Enter: Execute │ Esc: Return)" \
-                --prompt="Action > " \
-                --height=35% \
-                --reverse 2>/dev/null) || act_rc=$?
+        fi
+        flush_tty_input
+        local act_sel act_rc=0
+        act_sel=$(echo "$action_entries" | fzf \
+            --delimiter=$'\t' \
+            --with-nth=2,3 \
+            --border-label="  ╢ Actions: AppID $sel_appid ($sel_engine) ╟  " \
+            --border-label-pos=2 \
+            --header="DOWNLOAD ACTIONS (Enter: Execute │ Esc: Return)" \
+            --prompt="Action > " \
+            --height=35% \
+            --reverse 2>/dev/null) || act_rc=$?
 
-            [ "$act_rc" -eq 130 ] && continue
-            [ -z "$act_sel" ] && continue
+        [ "$act_rc" -eq 130 ] && continue
+        [ -z "$act_sel" ] && continue
 
-            local dl_opt
-            dl_opt=$(echo "$act_sel" | cut -f1 | tr -d '[:space:]')
+        local dl_opt
+        dl_opt=$(echo "$act_sel" | cut -f1 | tr -d '[:space:]')
 
-            case "$dl_opt" in
-                1)
-                    if command -v steam >/dev/null 2>&1; then
-                        steam "steam://pause/$sel_appid" >/dev/null 2>&1 &
-                        log_msg "INFO" "DOWNLOAD" "Paused download for AppID $sel_appid"
+        case "$dl_opt" in
+            1)
+                if [ "$sel_engine" = "Standalone" ]; then
+                    local t_pid="${sel_ref##*_}"
+                    if [[ "$t_pid" =~ ^[0-9]+$ ]] && kill -0 "$t_pid" 2>/dev/null; then
+                        kill -STOP "$t_pid" 2>/dev/null || true
+                        log_msg "INFO" "DOWNLOAD" "Paused standalone download PID $t_pid (AppID: $sel_appid) via SIGSTOP"
+                        tui_modal_notice "Download Paused" "Sent SIGSTOP to standalone downloader PID $t_pid."
                     fi
-                    ;;
-                2)
-                    if command -v steam >/dev/null 2>&1; then
-                        steam "steam://resume/$sel_appid" >/dev/null 2>&1 &
-                        log_msg "INFO" "DOWNLOAD" "Resumed download for AppID $sel_appid"
+                elif command -v steam >/dev/null 2>&1; then
+                    steam "steam://pause/$sel_appid" >/dev/null 2>&1 &
+                    log_msg "INFO" "DOWNLOAD" "Paused download for AppID $sel_appid"
+                fi
+                ;;
+            2)
+                if [ "$sel_engine" = "Standalone" ]; then
+                    local t_pid="${sel_ref##*_}"
+                    if [[ "$t_pid" =~ ^[0-9]+$ ]] && kill -0 "$t_pid" 2>/dev/null; then
+                        kill -CONT "$t_pid" 2>/dev/null || true
+                        log_msg "INFO" "DOWNLOAD" "Resumed standalone download PID $t_pid (AppID: $sel_appid) via SIGCONT"
+                        tui_modal_notice "Download Resumed" "Sent SIGCONT to standalone downloader PID $t_pid."
                     fi
-                    ;;
-                3)
+                elif command -v steam >/dev/null 2>&1; then
+                    steam "steam://resume/$sel_appid" >/dev/null 2>&1 &
+                    log_msg "INFO" "DOWNLOAD" "Resumed download for AppID $sel_appid"
+                fi
+                ;;
+            3)
+                if [ "$sel_engine" = "Standalone" ]; then
+                    local t_pid="${sel_ref##*_}"
+                    if [[ "$t_pid" =~ ^[0-9]+$ ]] && kill -0 "$t_pid" 2>/dev/null; then
+                        kill -TERM "$t_pid" 2>/dev/null || true
+                        rm -rf "$sel_ref" 2>/dev/null || true
+                        log_msg "WARN" "DOWNLOAD" "Terminated standalone download PID $t_pid (AppID: $sel_appid) via SIGTERM"
+                        tui_modal_notice "Download Terminated" "Sent SIGTERM to standalone downloader PID $t_pid and purged staging."
+                    fi
+                else
                     local g_dir
                     if [ -f "$sel_ref" ]; then
                         g_dir="$(dirname "$sel_ref")/common/$(grep -m1 '"installdir"' "$sel_ref" 2>/dev/null | awk -F'"' '{print $4}')"
@@ -3609,11 +3653,28 @@ EOF
                         log_msg "INFO" "DOWNLOAD" "Injecting GBE Fork LAN runtime into: $g_dir"
                         "$SELF_BIN" inject "$g_dir" "$sel_appid"
                     fi
-                    ;;
-                *)
+                fi
+                ;;
+            4)
+                if [ "$sel_engine" = "Standalone" ]; then
+                    local g_dir
+                    if [ -f "$sel_ref" ]; then
+                        g_dir="$(dirname "$sel_ref")/common/$(grep -m1 '"installdir"' "$sel_ref" 2>/dev/null | awk -F'"' '{print $4}')"
+                    else
+                        g_dir="$sel_ref"
+                    fi
+                    if [ -d "$g_dir" ]; then
+                        log_msg "INFO" "DOWNLOAD" "Injecting GBE Fork LAN runtime into: $g_dir"
+                        "$SELF_BIN" inject "$g_dir" "$sel_appid"
+                    fi
+                else
                     continue
-                    ;;
-            esac
+                fi
+                ;;
+            *)
+                continue
+                ;;
+        esac
     done
 }
 # Dual-Mode Steam Client & SLSsteam Full DLC Sync

@@ -1962,6 +1962,23 @@ test_ghost_download_self_healing_contract() {
 }
 run_test "Ghost Download Healing (Chunk 1): Self-healing purge of dead PID staging directories" test_ghost_download_self_healing_contract
 
+test_standalone_download_posix_signals_contract() {
+    # 1. Verify list_downloads_interactive branches on Standalone engine
+    grep -q '\[ "\$sel_engine" = "Standalone" \]' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+
+    # 2. Verify native POSIX signals (SIGSTOP, SIGCONT, SIGTERM)
+    grep -q 'kill -STOP "\$t_pid"' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    grep -q 'kill -CONT "\$t_pid"' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    grep -q 'kill -TERM "\$t_pid"' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+
+    # 3. Verify Steam client fallback branch is preserved
+    grep -q 'steam "steam://pause/\$sel_appid"' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    grep -q 'steam "steam://resume/\$sel_appid"' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+
+    return 0
+}
+run_test "Standalone Signals (Chunk 2): Native POSIX signal dispatch for standalone downloader" test_standalone_download_posix_signals_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

@@ -35,7 +35,7 @@ Memperkuat ketahanan runtime proses, mengeliminasi query rate-limit jaringan ke 
   - Direktori staging dari proses download yang mati dibersihkan secara otomatis.
   - TUI Download Manager tidak pernah menampilkan unduhan hantu (*ghost active downloads*).
 
-### [ ] Chunk 2: Native POSIX Signals for Standalone Download Management (Pause/Resume/Kill)
+### [x] Chunk 2: Native POSIX Signals for Standalone Download Management (Pause/Resume/Kill) [VERIFIED]
 - **Target Files**: `src/steam/30_downloader.sh` (`list_downloads_interactive()`)
 - **Runtutan Eksekusi Teknis**:
   1. Pada penanganan hotkey `ctrl-k` (Pause):
