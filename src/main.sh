@@ -49,7 +49,7 @@ case "${1:-}" in
         if [ -n "${2:-}" ]; then
             revert_game_fix "$2" "${@:3}"
         else
-            echo "Usage: gamectl fix-revert <game_dir|appid>"
+            echo "Usage: gamectl fix-revert <game_dir|appid> [--dry-run]"
             exit 1
         fi
         ;;
@@ -416,14 +416,14 @@ Usage:
                       Query available community, Denuvo, & Online-Fix bypasses (Public)
   gamectl fix-install <appid> [dir] [--type online|generic] [--yes] [--restart]
                       Download, verify, backup, & deploy Online-Fix/bypass directly to game
-  gamectl fix-revert <dir|appid>
+  gamectl fix-revert <dir|appid> [--dry-run]
                       Safely revert game fix and restore pristine vanilla files from snapshot
   gamectl restart-steam
                       Graceful Steam client hot-reload (SLSsteam & Game Mode supervisor)
   gamectl proton-list List local & latest upstream GE-Proton releases
   gamectl proton-install [tag|latest] Headless GE-Proton installer
   gamectl proton-remove <tag> Safely remove an installed GE-Proton version
-  gamectl pfx <dir> [action] [args...]
+  gamectl pfx <dir> [action] [args...] [--dry-run]
                       Wine prefix Swiss Army knife (winecfg/regedit/cmd/shell/kill/clean/winetricks)
   gamectl protondb <appid|dir>
                       Query ProtonDB community rating & launch recommendations

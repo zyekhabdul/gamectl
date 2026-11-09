@@ -2157,6 +2157,45 @@ test_pull_save_remote_contract() {
 }
 run_test "Bidirectional Sync (Chunk 2): Pull savegame from remote companion host contract" test_pull_save_remote_contract
 
+test_dry_run_safety_contract() {
+    # 1. Test manage_prefix clean --dry-run
+    local t_game
+    t_game=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_pfx_dry_XXXXXX")
+    mkdir -p "$t_game/pfx/drive_c"
+    echo "test_reg" > "$t_game/pfx/system.reg"
+
+    local pfx_dry_out
+    pfx_dry_out=$("$GAMECTL" pfx "$t_game" clean --dry-run 2>&1 || true)
+    
+    # Must retain directory, must not wipe
+    [ -d "$t_game/pfx/drive_c" ] || { rm -rf "$t_game"; return 1; }
+    [ -f "$t_game/pfx/system.reg" ] || { rm -rf "$t_game"; return 1; }
+    echo "$pfx_dry_out" | grep -q "\[DRY-RUN\] Wine prefix cleanup simulated successfully" || { rm -rf "$t_game"; return 1; }
+    rm -rf "$t_game"
+
+    # 2. Test revert_game_fix --dry-run
+    local t_fix_game
+    t_fix_game=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_revert_dry_XXXXXX")
+    local snap_dir="$t_fix_game/.gamectl_fix_backup/20261109_120000"
+    mkdir -p "$snap_dir/backup_files"
+    echo "vanilla_code" > "$snap_dir/backup_files/game.dll"
+    echo "game.dll" > "$snap_dir/installed_files.txt"
+    echo "modded_fix_code" > "$t_fix_game/game.dll"
+
+    local revert_dry_out
+    revert_dry_out=$("$GAMECTL" fix-revert "$t_fix_game" --dry-run 2>&1 || true)
+
+    # Must retain modified code, must not overwrite
+    [ "$(cat "$t_fix_game/game.dll")" = "modded_fix_code" ] || { rm -rf "$t_fix_game"; return 1; }
+    echo "$revert_dry_out" | grep -q "\[DRY-RUN\] Simulating game fix revert" || { rm -rf "$t_fix_game"; return 1; }
+    echo "$revert_dry_out" | grep -q "\[RESTORE\] game.dll" || { rm -rf "$t_fix_game"; return 1; }
+    echo "$revert_dry_out" | grep -q "Game fix revert simulated successfully (no files modified)" || { rm -rf "$t_fix_game"; return 1; }
+    rm -rf "$t_fix_game"
+
+    return 0
+}
+run_test "Dry-Run Safety (Chunk 3): Non-destructive simulations on pfx clean and fix-revert" test_dry_run_safety_contract
+
 test_github_workflows_schema_contract() {
     # 1. Existence check
     [ -f "$REPO_ROOT/.github/workflows/ci.yml" ] || return 1

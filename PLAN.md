@@ -52,7 +52,7 @@ Menuntaskan seluruh fitur setengah jalan (half-done / incomplete) yang teridenti
 - **Definition of Done (DoD)**:
   - Pengguna dapat menarik data savegame dari perangkat pendamping (companion host) dengan aman tanpa risiko kehilangan data lokal.
 
-### [ ] Chunk 3: Safety `--dry-run` Previews on Destructive Operations
+### [x] Chunk 3: Safety `--dry-run` Previews on Destructive Operations [VERIFIED]
 - **Target Files**: `src/runners/40_wrappers.sh`, `src/steam/35_fixes.sh`, `src/runners/50_launcher.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Di `manage_prefix()` (`clean` action):

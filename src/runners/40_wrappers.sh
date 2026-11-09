@@ -679,6 +679,26 @@ EOF
                 return 0
             fi
 
+            local is_dry_run=false auto_yes=false
+            for arg in "$@"; do
+                if [ "$arg" = "--dry-run" ] || [ "$arg" = "-n" ]; then
+                    is_dry_run=true
+                elif [ "$arg" = "-y" ] || [ "$arg" = "--yes" ]; then
+                    auto_yes=true
+                fi
+            done
+
+            if [ "$is_dry_run" = true ]; then
+                local pfx_sz="0"
+                pfx_sz=$(du -sh "$pfx_dir" 2>/dev/null | cut -f1 || echo "unknown")
+                echo "[INFO] [DRY-RUN] Target Wine prefix directory: $pfx_dir (Size: $pfx_sz)"
+                echo "[INFO] [DRY-RUN] Would create pre-wipe savegame backup snapshot via backup_save."
+                echo "[INFO] [DRY-RUN] Would terminate wineserver process."
+                echo "[INFO] [DRY-RUN] Would remove prefix directory: $pfx_dir"
+                echo "[INFO] [DRY-RUN] Wine prefix cleanup simulated successfully (no files deleted)."
+                return 0
+            fi
+
             # 1. Create save snapshot backup
             backup_save "$game_dir" true || true
 
@@ -691,13 +711,6 @@ EOF
             sleep 0.2
 
             # 3. Confirmation check
-            local auto_yes=false
-            for arg in "$@"; do
-                if [ "$arg" = "-y" ] || [ "$arg" = "--yes" ]; then
-                    auto_yes=true
-                fi
-            done
-
             if [ "$auto_yes" = false ] && [ -t 0 ]; then
                 echo -n "[WARN] Wipe entire Wine prefix ($pfx_dir)? Registry and Wine configuration will be reset. [y/N]: "
                 local confirm=""

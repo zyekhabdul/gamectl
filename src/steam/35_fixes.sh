@@ -434,9 +434,16 @@ META
 revert_game_fix() {
     local target="${1:-}"
     if [ -z "$target" ]; then
-        echo "Usage: gamectl fix-revert <game_dir|appid>" >&2
+        echo "Usage: gamectl fix-revert <game_dir|appid> [--dry-run]" >&2
         return 1
     fi
+
+    local is_dry_run=false
+    for arg in "$@"; do
+        if [ "$arg" = "--dry-run" ] || [ "$arg" = "-n" ]; then
+            is_dry_run=true
+        fi
+    done
 
     local resolved_dir
     resolved_dir=$(resolve_game_install_dir "$target" 2>/dev/null || true)
@@ -462,6 +469,30 @@ revert_game_fix() {
 
     local backup_files_dir="$latest_snap/backup_files"
     local installed_list="$latest_snap/installed_files.txt"
+
+    if [ "$is_dry_run" = true ]; then
+        echo "[INFO] [DRY-RUN] Simulating game fix revert using snapshot: $(basename "$latest_snap")"
+        if [ -f "$installed_list" ]; then
+            while IFS= read -r f; do
+                [ -z "$f" ] && continue
+                [ "${f: -1}" = "/" ] && continue
+                if [ -f "$backup_files_dir/$f" ]; then
+                    echo "  • [RESTORE] $f (original file from backup)"
+                elif [ -f "$resolved_dir/$f" ]; then
+                    echo "  • [PURGE] $f (fix-introduced artifact)"
+                fi
+            done < "$installed_list"
+        elif [ -d "$backup_files_dir" ]; then
+            (
+                cd "$backup_files_dir"
+                find . -type f | while read -r f; do
+                    echo "  • [RESTORE] ${f#./} (original file from backup)"
+                done
+            )
+        fi
+        echo "[INFO] [DRY-RUN] Game fix revert simulated successfully (no files modified)."
+        return 0
+    fi
 
     echo "[INFO] Reverting game fix using snapshot: $(basename "$latest_snap")..."
 
