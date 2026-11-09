@@ -76,7 +76,7 @@ Menuntaskan seluruh fitur setengah jalan (half-done / incomplete) yang teridenti
 - **Definition of Done (DoD)**:
   - `gamectl doctor` secara akurat mencerminkan kesiapan engine pengunduh mandiri.
 
-### [ ] Chunk 5: Full Shell Autocompletion Synchronization (`completions/gamectl.bash`)
+### [x] Chunk 5: Full Shell Autocompletion Synchronization (`completions/gamectl.bash`) [VERIFIED]
 - **Target Files**: `completions/gamectl.bash`
 - **Runtutan Eksekusi Teknis**:
   1. Tambahkan 13 subcommand baru ke variabel `commands` di `completions/gamectl.bash`:
