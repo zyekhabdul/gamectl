@@ -1,7 +1,7 @@
 # REMEDIATION REPORT: ARCHITECTURAL HARDENING & SYSTEMS DEFECTS
 
 - **Target System**: `gamectl` (Sovereign Linux TUI Game Manager & Launcher)
-- **Document Version**: 1.1.0
+- **Document Version**: 1.2.0
 - **Auditor**: Senior Linux Systems Engineer & OS Runtime Architect
 - **Classification**: Industrial Linux Systems Engineering Remediation Plan
 
@@ -23,7 +23,10 @@ A forensic systems audit of the `gamectl` codebase demonstrates fundamental supe
 | **Security & Sandboxing** | 9.5 / 10 | `[ RESOLVED ]` | Rootless Bubblewrap (bwrap) sandbox hiding ~/.ssh, ~/.gnupg, and credentials. |
 | **Library I/O Scalability** | 9.5 / 10 | `[ RESOLVED ]` | Single-pass regex parser and XDG runtime disk cache (<1ms response). |
 | **TUI Input Resilience** | 9.8 / 10 | `[ RESOLVED ]` | Clean stdin (: | fzf) and discrete signal handling (130 vs 0/1) for free-text inputs. |
-| **TUI Menu State Guards** | 8.8 / 10 | `[ AUDITED ]` | 4 fzf menu loops and 1 wrapper config loop audited for zero-match Enter ejection. |
+| **TUI Menu State Guards** | 9.8 / 10 | `[ RESOLVED ]` | 4 fzf menu loops and 1 wrapper config loop guarded against zero-match Enter ejection. |
+| **Ghost ACF Defense & Feedback** | 8.8 / 10 | `[ IN REMEDIATION ]` | Prevent dummy 1GB ACF manifest and align feedback truthfulness. |
+| **In-Dashboard TUI Ergonomics** | 9.0 / 10 | `[ IN REMEDIATION ]` | Eliminate raw stdout echo & sleep pauses in favor of clean modal dialogs. |
+| **Remote Repository Sync** | 8.5 / 10 | `[ PENDING PUSH ]` | 9 local commits ahead of origin/main awaiting explicit push. |
 
 ---
 
@@ -176,6 +179,34 @@ A forensic systems audit of the `gamectl` codebase demonstrates fundamental supe
 
 ---
 
+### DEFECT-09: False-Positive Feedback on Deferred Ghost ACF & Dashboard Menu [04] Misalignment
+- **Status**: `[ IN REMEDIATION ]`
+- **Severity**: `HIGH`
+- **Source Location**: `src/steam/30_downloader.sh` (`unlock_game`, `sync_steam`), `src/tui/70_dashboard.sh` (`dashboard_menu` Menu [04])
+- **Failure Mechanism**:
+  1. In `sync_steam()`, if a game directory does not physically exist, writing `appmanifest_<appid>.acf` is properly skipped to prevent phantom 1GB ghost games in Steam and library scanner. However, the calling wrapper `unlock_game` unconditionally prints `[SUCCESS] Game '$title' ($appid) entitled in Steam Client with Full DLC & ACF manifest.` even when ACF creation was deferred.
+  2. Menu `[04]` in `dashboard_menu()` is labeled `STEAM ENTITLEMENT & ACF` with documentation stating `Generate appmanifest_<appid>.acf automatically without downloading`, which directly contradicts ADR-022 (Sovereign Standalone Architecture) and induces user confusion.
+- **Impact**:
+  Users receive false-positive confirmation that a game is registered in Steam with an ACF manifest when no physical game exists on disk.
+- **Remediation Plan**:
+  1. Refactor `unlock_game` feedback logic to truthfully report whether the ACF manifest was registered or deferred.
+  2. Realign Menu `[04]` title and description in `src/tui/70_dashboard.sh` to focus strictly on Local Asset & Shader Adoption without false download-free ACF promises.
+
+---
+
+### DEFECT-10: In-TUI Screen Flickering via Raw Stdout `echo` and `sleep` Pauses
+- **Status**: `[ IN REMEDIATION ]`
+- **Severity**: `MEDIUM`
+- **Source Location**: `src/tui/70_dashboard.sh` (`search_steam`), `src/steam/30_downloader.sh` (`unlock_interactive`)
+- **Failure Mechanism**:
+  During interactive TUI navigation, action confirmations and status messages use raw shell `echo` and `sleep 1.2` directly inside the alternate buffer between FZF modal dialogs.
+- **Impact**:
+  Causes noticeable terminal screen flashing, visual stutter, and rigid 1-2 second blocking pauses instead of clean, reactive in-dashboard modal feedback.
+- **Remediation Plan**:
+  Replace raw `echo` and `sleep` blocks in `search_steam` and `unlock_interactive` with non-flickering, clean FZF notification/modal prompts.
+
+---
+
 ## 3. Phased Systems Remediation Action Plan
 
 ```text
@@ -205,6 +236,11 @@ A forensic systems audit of the `gamectl` codebase demonstrates fundamental supe
 [ Phase 5: TUI Interaction & UX Input Hardening ] - [ COMPLETED ]
   ├─ Action 5.1: Resilient fzf exit-code handling & stdin sanitization for text inputs [RESOLVED]
   └─ Action 5.2: Universal zero-match Enter decoupling across all fzf menu loops [RESOLVED]
+
+[ Phase 6: Post-WP18 TUI Ergonomics, Ghost ACF Remediation & Remote Synchronization ] - [ ACTIVE ]
+  ├─ Action 6.1: Remediasi Teks & Ghost ACF Logic [PENDING]
+  ├─ Action 6.2: Eliminasi Screen Flickering (echo + sleep) [PENDING]
+  └─ Action 6.3: Eksekusi Git Push (9 Local Commits Synchronized) [PENDING]
 ```
 
 ### 3.1 Granular Technical Execution Breakdown (Action 5.2 / DEFECT-08)
@@ -358,6 +394,35 @@ Daftar spesifikasi eksekusi teknis untuk menuntaskan DEFECT-08 tanpa regresi:
 
 ---
 
+### 3.2 Granular Technical Execution Breakdown (Phase 6 Remediation)
+
+Spesifikasi teknis penyelesaian 3 butir remediasi utama:
+
+#### Action 6.1: Remediasi Teks & Ghost ACF Logic
+- **Target Files**: `src/steam/30_downloader.sh`, `src/tui/70_dashboard.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Pada `unlock_game()`, perbaiki feedback teks agar jujur menyatakan apakah ACF dibuat atau ditangguhkan. Jika file game fisik belum terpasang di disk, tampilkan status bahwa entitlement SLSsteam didaftarkan sementara pembuatan ACF ditangguhkan demi mencegah Ghost Game.
+  2. Pada `dashboard_menu()` dan `preview_dashboard()` di `src/tui/70_dashboard.sh`, sesuaikan label Menu `[04]` dari `STEAM ENTITLEMENT & ACF` menjadi berfokus pada `LOCAL ASSET & SHADER ADOPTION` tanpa klaim palsu download-free ACF generation.
+- **DoD**: Tidak ada lagi pesan sukses palsu mengenai pendaftaran ACF manifest saat file fisik tidak ada; teks menu selaras dengan arsitektur berdaulat (ADR-022).
+
+#### Action 6.2: Eliminasi Screen Flickering (echo + sleep)
+- **Target Files**: `src/tui/70_dashboard.sh`, `src/steam/30_downloader.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Identifikasi dan eliminasi seluruh pemanggilan `echo "[INFO] Shortcut ..."` dan `sleep 1.2` pada event hotkey (`ctrl-a`, `ctrl-u`, `ctrl-s`, `ctrl-d`) serta action palette di `search_steam()`.
+  2. Ganti pesan terminal mentah di `unlock_interactive()` dengan dialog modal konfirmasi / notifikasi berbasis FZF murni yang konsisten dengan estetika Tokyo Night.
+  3. Pastikan transisi antar dialog FZF terjadi seketika tanpa jeda kaku (`sleep`) atau teks terminal yang berkedip di latar belakang.
+- **DoD**: Seluruh interaksi di dalam pencarian dan unlock wizard berjalan 100% mulus di dalam FZF tanpa ada *flickering* atau teks mentah yang bocor.
+
+#### Action 6.3: Eksekusi Git Push (9 Local Commits Synchronized)
+- **Target**: Git Remote `origin/main` (`git@github.com:zyekhabdul/gamectl.git`)
+- **Runtutan Eksekusi Teknis**:
+  1. Menjalankan verifikasi pra-dorong: `./tests/test_cli.sh` (104/104 PASS) dan `./scripts/build.sh --check` (exit code 0).
+  2. Sesuai aturan `git-push-restriction.md`, dorong 9 commit lokal yang tertahan (`0f06e19` s/d `6c7e538`) ke remote repository setelah menerima konfirmasi/instruksi eksplisit dari user (`git push origin main`).
+  3. Pastikan branch lokal `main` dan remote `origin/main` berada pada commit hash yang identik.
+- **DoD**: `git status` menunjukkan `Your branch is up to date with 'origin/main'`, dan seluruh kode perbaikan WP-18 tersinkronisasi penuh ke remote GitHub.
+
+---
+
 ## 4. Verification Matrix & Definition of Done (DoD)
 
 | Remediation Item | Verification Command | Pass Criteria (DoD) |
@@ -371,7 +436,10 @@ Daftar spesifikasi eksekusi teknis untuk menuntaskan DEFECT-08 tanpa regresi:
 | **Scanner Optimization**| `gamectl --list` | Single-pass scan executed, runtime cache populated in `< 1ms`. |
 | **TUI Text Input** | `./tests/test_cli.sh` | Clean stdin, non-abortive Enter on free-text entry (`search_steam`, `unlock_interactive`). |
 | **TUI Menu Loops** | `./tests/test_cli.sh` | Non-abortive Enter on 0-match across all loops (`dashboard_menu`, `library_menu`, catalog, downloads, wrappers). |
-| **Regression Suite** | `./tests/test_cli.sh` | All 61 automated tests pass with `Exit code 0`. |
+| **Regression Suite** | `./tests/test_cli.sh` | All 104 automated tests pass with `Exit code 0`. |
+| **Ghost ACF Feedback** | `gamectl unlock <appid>` | Teks output jujur membedakan pembuatan ACF vs penangguhan manifest fisik. |
+| **In-Dashboard Flickering** | `search_steam` & `unlock_interactive` | Bebas dari `echo` mentah dan `sleep 1.2`; transisi modal FZF instan. |
+| **Remote Git Push** | `git status` / `git log origin/main..HEAD` | 0 unpushed commits, remote `origin/main` sinkron dengan commit lokal terbaru. |
 
 ---
 **Document Status**: `[ RATIFIED & MAINTAINED ]`  
