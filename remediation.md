@@ -24,9 +24,9 @@ A forensic systems audit of the `gamectl` codebase demonstrates fundamental supe
 | **Library I/O Scalability** | 9.5 / 10 | `[ RESOLVED ]` | Single-pass regex parser and XDG runtime disk cache (<1ms response). |
 | **TUI Input Resilience** | 9.8 / 10 | `[ RESOLVED ]` | Clean stdin (: | fzf) and discrete signal handling (130 vs 0/1) for free-text inputs. |
 | **TUI Menu State Guards** | 9.8 / 10 | `[ RESOLVED ]` | 4 fzf menu loops and 1 wrapper config loop guarded against zero-match Enter ejection. |
-| **Ghost ACF Defense & Feedback** | 8.8 / 10 | `[ IN REMEDIATION ]` | Prevent dummy 1GB ACF manifest and align feedback truthfulness. |
+| **Full ACF Realization & Adoption** | 9.0 / 10 | `[ IN REMEDIATION ]` | Realize functional ACF via multi-library physical file adoption or interactive auto-download bridge. |
 | **In-Dashboard TUI Ergonomics** | 9.0 / 10 | `[ IN REMEDIATION ]` | Eliminate raw stdout echo & sleep pauses in favor of clean modal dialogs. |
-| **Remote Repository Sync** | 8.5 / 10 | `[ PENDING PUSH ]` | 9 local commits ahead of origin/main awaiting explicit push. |
+| **Remote Repository Sync** | 8.5 / 10 | `[ PENDING PUSH ]` | 10 local commits ahead of origin/main awaiting explicit push. |
 
 ---
 
@@ -179,18 +179,25 @@ A forensic systems audit of the `gamectl` codebase demonstrates fundamental supe
 
 ---
 
-### DEFECT-09: False-Positive Feedback on Deferred Ghost ACF & Dashboard Menu [04] Misalignment
+### DEFECT-09: Ghost ACF Defense Passivity & Missed Cross-Library Physical Adoption
 - **Status**: `[ IN REMEDIATION ]`
 - **Severity**: `HIGH`
-- **Source Location**: `src/steam/30_downloader.sh` (`unlock_game`, `sync_steam`), `src/tui/70_dashboard.sh` (`dashboard_menu` Menu [04])
+- **Source Location**: `src/steam/30_downloader.sh` (`unlock_game`, `unlock_interactive`, `sync_steam`), `src/tui/70_dashboard.sh` (`dashboard_menu` Menu [04])
 - **Failure Mechanism**:
-  1. In `sync_steam()`, if a game directory does not physically exist, writing `appmanifest_<appid>.acf` is properly skipped to prevent phantom 1GB ghost games in Steam and library scanner. However, the calling wrapper `unlock_game` unconditionally prints `[SUCCESS] Game '$title' ($appid) entitled in Steam Client with Full DLC & ACF manifest.` even when ACF creation was deferred.
-  2. Menu `[04]` in `dashboard_menu()` is labeled `STEAM ENTITLEMENT & ACF` with documentation stating `Generate appmanifest_<appid>.acf automatically without downloading`, which directly contradicts ADR-022 (Sovereign Standalone Architecture) and induces user confusion.
+  1. In `sync_steam()`, directory resolution only checked `$steam_apps/common/`, failing to resolve game directories located in alternative libraries (`~/Games`, Lutris, secondary mount points). As a result, physical games already present in non-Steam folders were falsely flagged as missing.
+  2. When game files were not installed locally on disk, the system passively deferred ACF without offering an active bridge to realize the download via standalone CDN (`gamectl-depot-dl`) or Steam install intent (`steam://install/<appid>`).
+  3. The calling wrapper `unlock_game` unconditionally printed `[SUCCESS] Game '$title' ($appid) entitled in Steam Client with Full DLC & ACF manifest.` even when ACF creation was deferred.
+  4. Menu `[04]` in `dashboard_menu()` remained labeled `STEAM ENTITLEMENT & ACF` with legacy SLSsteam claims (`Generate appmanifest_<appid>.acf automatically without downloading`), contradicting ADR-022 (Sovereign Standalone Architecture) and confusing user intent.
 - **Impact**:
-  Users receive false-positive confirmation that a game is registered in Steam with an ACF manifest when no physical game exists on disk.
+  Users received false-positive confirmation of ACF creation on absent files, while games in existing local libraries failed to be adopted into Steam.
 - **Remediation Plan**:
-  1. Refactor `unlock_game` feedback logic to truthfully report whether the ACF manifest was registered or deferred.
-  2. Realign Menu `[04]` title and description in `src/tui/70_dashboard.sh` to focus strictly on Local Asset & Shader Adoption without false download-free ACF promises.
+  1. **Multi-Library Physical Resolution**: Query `scan_installed_games` to find physical installs across all libraries (`~/Games`, Lutris, mount points), automatically create symlinks into `steamapps/common/`, and write real ACF manifests with accurate `SizeOnDisk`.
+  2. **Interactive Auto-Download Realization Bridge**: If files are absent across all libraries, present an interactive modal:
+     - `[1]` Unduh via Standalone CDN (`gamectl-depot-dl`) -> Auto-provision ACF & GBE injection.
+     - `[2]` Daftarkan SLSsteam entitlement & picu Steam native install intent (`steam://install/<appid>`).
+     - `[3]` Batalkan.
+  3. **Truthful Feedback**: Refactor feedback to accurately reflect physical ACF generation vs download bridging.
+  4. **Dashboard Menu [04] Alignment**: Align Menu `[04]` to `STEAM ACF ADOPTION & ASSET MANAGER`.
 
 ---
 
@@ -398,12 +405,17 @@ Daftar spesifikasi eksekusi teknis untuk menuntaskan DEFECT-08 tanpa regresi:
 
 Spesifikasi teknis penyelesaian 3 butir remediasi utama:
 
-#### Action 6.1: Remediasi Teks & Ghost ACF Logic
+#### Action 6.1: Realisasi Penuh ACF & Cross-Library Physical Adoption
 - **Target Files**: `src/steam/30_downloader.sh`, `src/tui/70_dashboard.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Pada `unlock_game()`, perbaiki feedback teks agar jujur menyatakan apakah ACF dibuat atau ditangguhkan. Jika file game fisik belum terpasang di disk, tampilkan status bahwa entitlement SLSsteam didaftarkan sementara pembuatan ACF ditangguhkan demi mencegah Ghost Game.
-  2. Pada `dashboard_menu()` dan `preview_dashboard()` di `src/tui/70_dashboard.sh`, sesuaikan label Menu `[04]` dari `STEAM ENTITLEMENT & ACF` menjadi berfokus pada `LOCAL ASSET & SHADER ADOPTION` tanpa klaim palsu download-free ACF generation.
-- **DoD**: Tidak ada lagi pesan sukses palsu mengenai pendaftaran ACF manifest saat file fisik tidak ada; teks menu selaras dengan arsitektur berdaulat (ADR-022).
+  1. **Resolusi Multi-Library File Fisik**: Perluas `sync_steam()` dan `unlock_game()` agar memeriksa `scan_installed_games` untuk menemukan path instalasi game yang sudah ada di library mana pun (`~/Games`, Lutris, mount disk sekunder). Jika ditemukan direktori fisik yang valid, buat symlink `steamapps/common/<Title> -> $gdir` dan tulis `appmanifest_<appid>.acf` riil (`StateFlags: 4`) dengan `SizeOnDisk` akurat (`du -sb`).
+  2. **Jembatan Unduhan Otomatis (Auto-Download Bridge)**: Jika file game fisik belum terpasang di storage mana pun, sajikan modal dialog FZF:
+     - `[1] Unduh sekarang via Standalone CDN (gamectl-depot-dl) -> Auto-provision ACF & GBE injection`
+     - `[2] Daftarkan SLSsteam entitlement & picu Steam native install intent (steam://install/<appid>)`
+     - `[3] Batalkan / Kembali`
+  3. **Kejujuran Feedback & Telemetri**: Hilangkan pesan sukses palsu. Laporkan status secara transparan apakah ACF manifest berhasil direalisasikan ke storage fisik, dialihkan ke antrean unduhan standalone, atau dipicu via Steam client intent.
+  4. **Penyelarasan Menu [04]**: Ubah label dan preview Menu `[04]` di `dashboard_menu()` menjadi `STEAM ACF ADOPTION & ASSET MANAGER` yang mencerminkan fungsi adopsi file riil dan jembatan unduhan terpadu.
+- **DoD**: Tidak ada dummy ACF kosong (`StateFlags: 4`) tanpa file; game yang sudah ada di `~/Games` otomatis teradopsi ke Steam; game yang belum ada di-bridge langsung ke downloader; verifikasi `./tests/test_cli.sh` lulus Exit 0.
 
 #### Action 6.2: Eliminasi Screen Flickering (echo + sleep)
 - **Target Files**: `src/tui/70_dashboard.sh`, `src/steam/30_downloader.sh`
@@ -413,11 +425,11 @@ Spesifikasi teknis penyelesaian 3 butir remediasi utama:
   3. Pastikan transisi antar dialog FZF terjadi seketika tanpa jeda kaku (`sleep`) atau teks terminal yang berkedip di latar belakang.
 - **DoD**: Seluruh interaksi di dalam pencarian dan unlock wizard berjalan 100% mulus di dalam FZF tanpa ada *flickering* atau teks mentah yang bocor.
 
-#### Action 6.3: Eksekusi Git Push (9 Local Commits Synchronized)
+#### Action 6.3: Eksekusi Git Push (10 Local Commits Synchronized)
 - **Target**: Git Remote `origin/main` (`git@github.com:zyekhabdul/gamectl.git`)
 - **Runtutan Eksekusi Teknis**:
   1. Menjalankan verifikasi pra-dorong: `./tests/test_cli.sh` (104/104 PASS) dan `./scripts/build.sh --check` (exit code 0).
-  2. Sesuai aturan `git-push-restriction.md`, dorong 9 commit lokal yang tertahan (`0f06e19` s/d `6c7e538`) ke remote repository setelah menerima konfirmasi/instruksi eksplisit dari user (`git push origin main`).
+  2. Sesuai aturan `git-push-restriction.md`, dorong 10 commit lokal yang tertahan (`0f06e19` s/d `966128e`) ke remote repository setelah menerima konfirmasi/instruksi eksplisit dari user (`git push origin main`).
   3. Pastikan branch lokal `main` dan remote `origin/main` berada pada commit hash yang identik.
 - **DoD**: `git status` menunjukkan `Your branch is up to date with 'origin/main'`, dan seluruh kode perbaikan WP-18 tersinkronisasi penuh ke remote GitHub.
 
@@ -437,7 +449,7 @@ Spesifikasi teknis penyelesaian 3 butir remediasi utama:
 | **TUI Text Input** | `./tests/test_cli.sh` | Clean stdin, non-abortive Enter on free-text entry (`search_steam`, `unlock_interactive`). |
 | **TUI Menu Loops** | `./tests/test_cli.sh` | Non-abortive Enter on 0-match across all loops (`dashboard_menu`, `library_menu`, catalog, downloads, wrappers). |
 | **Regression Suite** | `./tests/test_cli.sh` | All 104 automated tests pass with `Exit code 0`. |
-| **Ghost ACF Feedback** | `gamectl unlock <appid>` | Teks output jujur membedakan pembuatan ACF vs penangguhan manifest fisik. |
+| **Full ACF Realization** | `gamectl unlock <appid>` | Mengadopsi file dari `~/Games` atau memicu modal download; tidak menulis ACF dummy 1GB kosong. |
 | **In-Dashboard Flickering** | `search_steam` & `unlock_interactive` | Bebas dari `echo` mentah dan `sleep 1.2`; transisi modal FZF instan. |
 | **Remote Git Push** | `git status` / `git log origin/main..HEAD` | 0 unpushed commits, remote `origin/main` sinkron dengan commit lokal terbaru. |
 
