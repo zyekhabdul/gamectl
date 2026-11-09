@@ -1,7 +1,7 @@
 # WORK PACKET 22: COMPLETION OF HALF-DONE ARCHITECTURE & SOVEREIGN CAPABILITIES
 
 **Track**: Feature Completion & Runtime Hardening  
-**Status**: IN PROGRESS  
+**Status**: COMPLETED [VERIFIED]  
 **Branch**: `main`  
 **Max Chunks**: 6 Chunks (Active Packet <= 10)  
 **Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`, `src/runners/40_wrappers.sh`, `src/steam/35_fixes.sh`, `src/diagnostics/60_doctor.sh`, `completions/gamectl.bash`, `src/main.sh`, `src/tui/70_dashboard.sh`, `tests/test_cli.sh`, `bin/gamectl`
@@ -85,7 +85,7 @@ Menuntaskan seluruh fitur setengah jalan (half-done / incomplete) yang teridenti
 - **Definition of Done (DoD)**:
   - Shell autocomplete bekerja 100% untuk seluruh perintah yang didukung CLI.
 
-### [ ] Chunk 6: Regression Test Suite Expansion, Rebuild & Machine Gate
+### [x] Chunk 6: Regression Test Suite Expansion, Rebuild & Machine Gate [VERIFIED]
 - **Target Files**: `tests/test_cli.sh`, `bin/gamectl`, `PLAN.md`
 - **Runtutan Eksekusi Teknis**:
   1. Tambahkan test assertions untuk `restore_save`, `--dry-run`, dan completion integrity.

@@ -2225,6 +2225,87 @@ assert 'build-release' in rel['jobs'], 'Missing build-release job in release.yml
 }
 run_test "CI/CD Workflows (Chunk 2 & 3): GitHub Actions CI and release automation schema contract" test_github_workflows_schema_contract
 
+test_doctor_depot_dl_readiness_contract() {
+    local t_mock_bin
+    t_mock_bin=$(mktemp "${TMPDIR:-/tmp}/gamectl_mock_dl_XXXXXX")
+    chmod +x "$t_mock_bin"
+
+    local doc_out
+    doc_out=$(GAMECTL_DEPOT_DL_BIN="$t_mock_bin" "$GAMECTL" doctor 2>&1 || true)
+    rm -f "$t_mock_bin"
+
+    echo "$doc_out" | grep -q "\[LAYER 6\] Manifest Harvester & CDN Providers" || return 1
+    echo "$doc_out" | grep -q "Depot Downloader" || return 1
+    echo "$doc_out" | grep -q "\[READY\]" || return 1
+
+    return 0
+}
+run_test "Doctor Downloader Audit (Chunk 4): Layer 6 standalone depot downloader detection" test_doctor_depot_dl_readiness_contract
+
+test_shell_completion_contract() {
+    local comp_file="$REPO_ROOT/completions/gamectl.bash"
+    [ -f "$comp_file" ] || return 1
+    bash -n "$comp_file" || return 1
+
+    # Test top-level commands generation in subshell
+    local missing_subcmds
+    missing_subcmds=$(bash -c "
+        source '$comp_file'
+        COMP_WORDS=(gamectl '')
+        COMP_CWORD=1
+        _gamectl_completions
+        
+        required_cmds=(
+            'fix-check' 'fix-install' 'fix-revert' 'restart-steam'
+            'fetch-manifest' 'deploy-manifest' 'harvest-dlc'
+            'login-luatools' 'auth-status' 'detect-steamstub' 'unpack-stub'
+            'setup-gbe' 'logs' 'restore' 'sync-pull'
+        )
+        
+        missing=''
+        for cmd in \"\${required_cmds[@]}\"; do
+            found=0
+            for gen in \"\${COMPREPLY[@]}\"; do
+                if [ \"\$gen\" = \"\$cmd\" ]; then
+                    found=1
+                    break
+                fi
+            done
+            if [ \"\$found\" -eq 0 ]; then
+                missing=\"\$missing \$cmd\"
+            fi
+        done
+        echo \"\$missing\"
+    ")
+
+    [ -z "$missing_subcmds" ] || { echo "Missing completion subcommands: $missing_subcmds" >&2; return 1; }
+
+    # Test argument completion for restore slots
+    local restore_slots
+    restore_slots=$(bash -c "
+        source '$comp_file'
+        COMP_WORDS=(gamectl restore /fake/path '')
+        COMP_CWORD=3
+        _gamectl_completions
+        echo \"\${COMPREPLY[*]}\"
+    ")
+    echo "$restore_slots" | grep -q "1 2 3" || return 1
+
+    # Test flag completion for sync-pull
+    local pull_flags
+    pull_flags=$(bash -c "
+        source '$comp_file'
+        COMP_WORDS=(gamectl sync-pull -)
+        COMP_CWORD=2
+        _gamectl_completions
+        echo \"\${COMPREPLY[*]}\"
+    ")
+    echo "$pull_flags" | grep -q -- "--dry-run" || return 1
+
+    return 0
+}
+run_test "Shell Completion Synchronization (Chunk 5): Full subcommand & option completion contract" test_shell_completion_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
