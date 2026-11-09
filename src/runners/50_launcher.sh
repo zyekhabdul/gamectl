@@ -1,4 +1,4 @@
-# Interactive Live HUD for running game process
+# Interactive Live HUD for running game process (Zero-Flicker FZF Modal)
 game_controller_hud() {
     local game_pid="$1"
     local title="$2"
@@ -8,122 +8,132 @@ game_controller_hud() {
     local info_file="$6"
     local run_type="$7"
 
+    flush_tty_input
+
     while true; do
         local is_alive=0
         if kill -0 "$game_pid" 2>/dev/null; then
             is_alive=1
         fi
 
-        clear
-        echo "${UI_BOX}╭─ GAME CONTROLLER HUD ───────────────────────────────────────╮${UI_RST}"
-        echo "│ ${UI_CYAN}Target Game ${UI_RST}: ${UI_BOLD}$title${UI_RST}"
-        echo "│ ${UI_CYAN}Process PID ${UI_RST}: ${UI_BOLD}$game_pid${UI_RST} ${UI_DIM}($run_type)${UI_RST}"
+        local status_badge="[TERMINATED / EXITED]"
+        local status_color="\033[38;5;111m"
         if [ "$is_alive" -eq 1 ]; then
-            echo "│ ${UI_CYAN}Status      ${UI_RST}: ${UI_GREEN}[RUNNING]${UI_RST} ${UI_DIM}(Active window on desktop display)${UI_RST}"
-        else
-            echo "│ ${UI_CYAN}Status      ${UI_RST}: ${UI_ICE}[TERMINATED / EXITED]${UI_RST}"
+            status_badge="[RUNNING]"
+            status_color="\033[38;5;120m"
         fi
-        echo "│ ${UI_CYAN}Log Stream  ${UI_RST}: ${UI_DIM}$log_file${UI_RST}"
-        echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
 
+        local hud_palette
         if [ "$is_alive" -eq 1 ]; then
-            echo "  ${UI_PURPLE}1)${UI_RST} Return to Game Library ${UI_DIM}(Game continues running in background)${UI_RST}"
-            echo "  ${UI_PURPLE}2)${UI_RST} Return to Master Dashboard ${UI_DIM}(Game continues running in background)${UI_RST}"
-            echo "  ${UI_PURPLE}3)${UI_RST} Live Game Log Stream ${UI_DIM}(tail -f)${UI_RST}"
-            echo "  ${UI_AMBER}4)${UI_RST} Stop Game ${UI_DIM}(Graceful Shutdown / SIGTERM)${UI_RST}"
-            echo "  ${UI_RED}5)${UI_RST} Force Kill Game ${UI_DIM}(Emergency Teardown / SIGKILL)${UI_RST}"
-            echo
-            read -t 30 -r -p "Select action [1-5]: " hud_opt || hud_opt="1"
+            hud_palette=$(cat <<EOF
+1	Return to Game Library	Keep process $game_pid active in background
+2	Return to Master Dashboard	Keep process $game_pid active in background
+3	Live Game Log Stream	View recent process output & runtime traces
+4	Stop Game (SIGTERM)	Send graceful shutdown signal to process
+5	Force Kill Game (SIGKILL)	Emergency teardown & terminate wineserver
+EOF
+)
+        else
+            hud_palette=$(cat <<EOF
+1	Return to Game Library	Game process has exited
+2	Return to Master Dashboard	Game process has exited
+3	View Recent Logs	Inspect final process stdout & error logs
+EOF
+)
+        fi
 
-            case "$hud_opt" in
-                1)
-                    return 0
-                    ;;
-                2)
-                    return 10
-                    ;;
-                3)
-                    clear
-                    echo "${UI_BOX}╭─ LIVE LOG STREAM: $title (PID: $game_pid) ─────────────╮${UI_RST}"
-                    echo "│ ${UI_CYAN}Press any key to return to Game Controller Menu               ${UI_RST}"
-                    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-                    tail -n 25 "$log_file" 2>/dev/null || true
-                    echo "${UI_DIM}─── Live Output (press any key to stop) ───────────────────────${UI_RST}"
-                    local t_pid=""
-                    tail -f "$log_file" 2>/dev/null &
-                    t_pid=$!
-                    ( read -r -s -n 1 </dev/tty || true ) 2>/dev/null
-                    kill "$t_pid" 2>/dev/null || true
-                    wait "$t_pid" 2>/dev/null || true
-                    ;;
-                4)
-                    local s_unit=""
-                    [ -f "$info_file" ] && s_unit=$(grep -E '^SCOPE_UNIT=' "$info_file" 2>/dev/null | cut -d'=' -f2- || true)
-                    echo "  [INFO] Sending SIGTERM signal to process PID $game_pid..."
-                    if [ -n "$s_unit" ]; then
-                        systemctl --user stop "$s_unit.scope" 2>/dev/null || true
-                    fi
-                    kill "$game_pid" 2>/dev/null || true
-                    local wait_cnt=0
-                    while kill -0 "$game_pid" 2>/dev/null && [ "$wait_cnt" -lt 6 ]; do
-                        sleep 0.3
-                        wait_cnt=$((wait_cnt + 1))
-                    done
-                    if [ -d "$gdir/pfx" ]; then
-                        local ws_bin
-                        ws_bin="$(get_wineserver_bin "$(find_runner "$gdir" 2>/dev/null || true)" 2>/dev/null || true)"
-                        [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -w 2>/dev/null || true # wineserver -w
-                    fi
-                    if ! kill -0 "$game_pid" 2>/dev/null; then
-                        echo "  ${UI_GREEN}[SUCCESS] Game '$title' (PID $game_pid) terminated gracefully.${UI_RST}"
-                        rm -f "$info_file" 2>/dev/null || true
-                    else
-                        echo "  ${UI_AMBER}[WARN] Process still running. You can select option 5 (Force Kill).${UI_RST}"
-                    fi
-                    sleep 0.8
-                    ;;
-                5)
-                    local s_unit=""
-                    [ -f "$info_file" ] && s_unit=$(grep -E '^SCOPE_UNIT=' "$info_file" 2>/dev/null | cut -d'=' -f2- || true)
-                    echo "  [INFO] Sending SIGKILL signal to process PID $game_pid..."
-                    if [ -n "$s_unit" ]; then
-                        systemctl --user kill -s SIGKILL "$s_unit.scope" 2>/dev/null || true
-                        systemctl --user stop "$s_unit.scope" 2>/dev/null || true
-                    fi
-                    kill -9 "$game_pid" 2>/dev/null || true
-                    if [ -d "$gdir/pfx" ]; then
-                        # Remediation DEFECT-02: Force terminate stuck wineserver daemon and release lockfiles
-                        local ws_bin
-                        ws_bin="$(get_wineserver_bin "$(find_runner "$gdir" 2>/dev/null || true)" 2>/dev/null || true)"
-                        [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -k 2>/dev/null || true # wineserver -k
-                    fi
-                    sleep 0.3
-                    echo "  ${UI_GREEN}[SUCCESS] Game '$title' (PID $game_pid) force-killed.${UI_RST}"
+        local preview_cmd
+        preview_cmd="echo -e '\033[38;5;60m╭─ PROCESS STATUS ────────────────────────────────────╮\033[0m\n  Target Game : \033[1m$title\033[0m\n  Process PID : \033[1m$game_pid\033[0m ($run_type)\n  Status      : ${status_color}${status_badge}\033[0m\n  Log File    : $log_file\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n\033[38;5;60m╭─ RECENT LOG TAIL (Last 15 lines) ──────────────────╮\033[0m'; tail -n 15 '$log_file' 2>/dev/null || echo '  (No logs recorded)'"
+
+        local hud_sel fzf_rc=0
+        hud_sel=$(echo "$hud_palette" | fzf \
+            --delimiter=$'\t' \
+            --with-nth=1,2 \
+            --border-label="  ╢ gamectl :: Process Controller :: $title ╟  " \
+            --border-label-pos=2 \
+            --header="PROCESS HUD (Enter: Execute │ Esc: Return to Library)" \
+            --prompt="HUD > " \
+            --preview="$preview_cmd" \
+            --preview-window=down:55%:border-rounded:wrap \
+            --height=70% \
+            --reverse 2>/dev/null) || fzf_rc=$?
+
+        [ "$fzf_rc" -eq 130 ] && return 0
+        [ -z "$hud_sel" ] && return 0
+
+        local opt
+        opt=$(echo "$hud_sel" | awk -F'\t' '{print $1}')
+
+        case "$opt" in
+            1)
+                return 0
+                ;;
+            2)
+                return 10
+                ;;
+            3)
+                if [ -s "$log_file" ]; then
+                    tac "$log_file" 2>/dev/null | fzf \
+                        --border-label="  ╢ Logs :: $title (PID: $game_pid) ╟  " \
+                        --border-label-pos=2 \
+                        --header="PROCESS LOGS (Esc / Enter: Return)" \
+                        --prompt="Log > " \
+                        --preview="echo -e '\033[38;5;60m╭─ LINE DETAIL ───────────────────────────────────────╮\033[0m\n{}\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m'" \
+                        --preview-window=down:30%:border-rounded:wrap \
+                        --height=80% \
+                        --reverse 2>/dev/null || true
+                else
+                    tui_modal_notice "Log Stream" "Log file is currently empty or does not exist:\n$log_file"
+                fi
+                ;;
+            4)
+                local s_unit=""
+                [ -f "$info_file" ] && s_unit=$(grep -E '^SCOPE_UNIT=' "$info_file" 2>/dev/null | cut -d'=' -f2- || true)
+                log_msg "INFO" "LAUNCH" "Sending SIGTERM to process PID $game_pid ($title)..."
+                if [ -n "$s_unit" ]; then
+                    systemctl --user stop "$s_unit.scope" 2>/dev/null || true
+                fi
+                kill "$game_pid" 2>/dev/null || true
+                local wait_cnt=0
+                while kill -0 "$game_pid" 2>/dev/null && [ "$wait_cnt" -lt 6 ]; do
+                    sleep 0.2
+                    wait_cnt=$((wait_cnt + 1))
+                done
+                if [ -d "$gdir/pfx" ]; then
+                    local ws_bin
+                    ws_bin="$(get_wineserver_bin "$(find_runner "$gdir" 2>/dev/null || true)" 2>/dev/null || true)"
+                    [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -w 2>/dev/null || true # wineserver -w
+                fi
+                if ! kill -0 "$game_pid" 2>/dev/null; then
                     rm -f "$info_file" 2>/dev/null || true
-                    sleep 0.8
-                    ;;
-                *)
-                    ;;
-            esac
-        else
-            echo "  ${UI_PURPLE}1)${UI_RST} Return to Game Library"
-            echo "  ${UI_PURPLE}2)${UI_RST} Return to Master Dashboard"
-            echo "  ${UI_PURPLE}3)${UI_RST} View Recent Logs (tail -n 25)"
-            echo
-            read -t 30 -r -p "Select action [1-3]: " hud_opt || hud_opt="1"
-            case "$hud_opt" in
-                1) return 0 ;;
-                2) return 10 ;;
-                3)
-                    echo
-                    echo "${UI_DIM}──────────────────────────────────────────${UI_RST}"
-                    tail -n 25 "$log_file" 2>/dev/null || echo "[No logs available]"
-                    echo "${UI_DIM}──────────────────────────────────────────${UI_RST}"
-                    read -t 15 -r -p "Press [ENTER] to return..." || true
-                    ;;
-                *) return 0 ;;
-            esac
-        fi
+                    log_msg "INFO" "LAUNCH" "Game '$title' (PID $game_pid) terminated gracefully"
+                    tui_modal_notice "Game Stopped" "Game '$title' (PID $game_pid) terminated gracefully."
+                else
+                    tui_modal_notice "Process Still Alive" "Process did not respond to SIGTERM. Select 'Force Kill' (Option 5) for immediate teardown."
+                fi
+                ;;
+            5)
+                local s_unit=""
+                [ -f "$info_file" ] && s_unit=$(grep -E '^SCOPE_UNIT=' "$info_file" 2>/dev/null | cut -d'=' -f2- || true)
+                log_msg "WARN" "LAUNCH" "Sending SIGKILL to process PID $game_pid ($title)..."
+                if [ -n "$s_unit" ]; then
+                    systemctl --user kill -s SIGKILL "$s_unit.scope" 2>/dev/null || true
+                    systemctl --user stop "$s_unit.scope" 2>/dev/null || true
+                fi
+                kill -9 "$game_pid" 2>/dev/null || true
+                if [ -d "$gdir/pfx" ]; then
+                    local ws_bin
+                    ws_bin="$(get_wineserver_bin "$(find_runner "$gdir" 2>/dev/null || true)" 2>/dev/null || true)"
+                    [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -k 2>/dev/null || true # wineserver -k
+                fi
+                rm -f "$info_file" 2>/dev/null || true
+                log_msg "WARN" "LAUNCH" "Game '$title' (PID $game_pid) force-killed"
+                tui_modal_notice "Force Terminated" "Game '$title' (PID $game_pid) force-killed via SIGKILL."
+                ;;
+            *)
+                return 0
+                ;;
+        esac
     done
 }
 

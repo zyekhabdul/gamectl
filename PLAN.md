@@ -93,7 +93,7 @@ Menuntaskan technical debt pada subsistem logging dan ergonomi visual TUI gamect
   - `gamectl search` keluar langsung ke terminal shell saat ditekan `Esc`.
   - Zero pengalihan paksa ke dashboard jika user memulai dari shell spesifik.
 
-### Chunk 6: Modernisasi `game_controller_hud` Menjadi In-Dashboard FZF Modal
+### Chunk 6: Modernisasi `game_controller_hud` Menjadi In-Dashboard FZF Modal [VERIFIED]
 - **Target Files**: `src/runners/50_launcher.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Hapus pemanggilan `clear` di baris 17 & 46 serta loop `read -t 30 -r -p` di `game_controller_hud()`.
