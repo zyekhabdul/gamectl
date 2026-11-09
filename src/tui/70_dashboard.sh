@@ -603,9 +603,8 @@ library_menu() {
         esac
     done
 
-    if [ "$standalone" = "true" ]; then
-        dashboard_menu
-    fi
+    [ "$standalone" = "true" ] && exit_tui_screen
+    return 0
 }
 
 # Live Steam Search View (Actionable TUI Search)
@@ -628,14 +627,14 @@ search_steam() {
         # Only abort if user cancelled via ESC or Ctrl-C (exit status 130)
         if [ "$fzf_rc" -eq 130 ]; then
             flush_tty_input
-            [ "$standalone" = "true" ] && dashboard_menu
+            [ "$standalone" = "true" ] && exit_tui_screen
             [ "$fzf_rc" -eq 130 ] && return 0
         fi
 
         query=$(echo "$query_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         if [ -z "$query" ]; then
             flush_tty_input
-            [ "$standalone" = "true" ] && dashboard_menu
+            [ "$standalone" = "true" ] && exit_tui_screen
             return 0
         fi
     fi
@@ -652,7 +651,8 @@ search_steam() {
     if [ -z "$items" ]; then
         log_msg "WARN" "STORE" "Game '$query' not found on Steam Store API."
         tui_modal_notice "Steam Store Search" "Game '$query' was not found on Steam Store."
-        return
+        [ "$standalone" = "true" ] && exit_tui_screen
+        return 0
     fi
 
     # Build list with local installed status across all libraries via scan_installed_games
@@ -927,8 +927,7 @@ EOF
     done
 
     flush_tty_input
-    if [ "$standalone" = "true" ]; then
-        dashboard_menu
-    fi
+    [ "$standalone" = "true" ] && exit_tui_screen
+    return 0
 }
 

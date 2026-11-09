@@ -76,7 +76,7 @@ Menuntaskan technical debt pada subsistem logging dan ergonomi visual TUI gamect
 - **DoD**:
   - Menekan `<Ctrl-K>` pada monitor unduhan tidak memuntahkan teks bash mentah ke layar.
 
-### Chunk 5: Pemisahan Navigasi Mandiri Shell (Eliminasi Perangkap `standalone=true`)
+### Chunk 5: Pemisahan Navigasi Mandiri Shell (Eliminasi Perangkap `standalone=true`) [VERIFIED]
 - **Target Files**: `src/tui/70_dashboard.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Pada `library_menu()`, hapus blok:
