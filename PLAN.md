@@ -79,7 +79,7 @@ Memperkuat ketahanan runtime proses, mengeliminasi query rate-limit jaringan ke 
 - **Definition of Done (DoD)**:
   - Operasi download berstatus standalone mematuhi invariant ADR-022 dan tidak pernah mencoba meluncurkan Steam Client secara diam-diam.
 
-### [ ] Chunk 5: Rust Compilation Cache Cleanup Target in `Makefile`
+### [x] Chunk 5: Rust Compilation Cache Cleanup Target in `Makefile` [VERIFIED]
 - **Target Files**: `Makefile`
 - **Runtutan Eksekusi Teknis**:
   1. Perbarui target `clean` di `Makefile` agar menyertakan pemeriksaan direktori crate Rust:

@@ -2031,6 +2031,19 @@ test_strict_sovereign_standalone_failure_protocol_contract() {
 }
 run_test "Sovereign Invariant (Chunk 4): Strict standalone failure protocol rejects SLSsteam fallback" test_strict_sovereign_standalone_failure_protocol_contract
 
+test_makefile_clean_rust_contract() {
+    # 1. Static check: Makefile contains cargo clean and distclean
+    grep -q 'cargo clean --manifest-path crates/depot-dl/Cargo.toml' "$REPO_ROOT/Makefile" || return 1
+    grep -q '^distclean:' "$REPO_ROOT/Makefile" || return 1
+
+    # 2. Dry-run execution check: make -n clean and make -n distclean succeed
+    make -C "$REPO_ROOT" -n clean >/dev/null 2>&1 || return 1
+    make -C "$REPO_ROOT" -n distclean >/dev/null 2>&1 || return 1
+
+    return 0
+}
+run_test "Clean Target (Chunk 5): Makefile clean and distclean rust & cache targets contract" test_makefile_clean_rust_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

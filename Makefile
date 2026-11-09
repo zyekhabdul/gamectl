@@ -1,4 +1,4 @@
-.PHONY: help build build-depot-dl test lint clean pkg-deb pkg-aur pkg-all install uninstall
+.PHONY: help build build-depot-dl test lint clean distclean pkg-deb pkg-aur pkg-all install uninstall
 
 help:
 	@echo "gamectl - Sovereign TUI Game Manager & Launcher for Linux"
@@ -13,7 +13,8 @@ help:
 	@echo "  make pkg-all        - Build all platform distribution packages"
 	@echo "  make install        - Run turnkey installer (install.sh)"
 	@echo "  make uninstall      - Remove installed binaries, completions, and desktop entry"
-	@echo "  make clean          - Clean build and packaging artifacts"
+	@echo "  make clean          - Clean build, packaging, and rust artifacts"
+	@echo "  make distclean      - Deep clean including runtime caches and temporary logs"
 
 build:
 	./scripts/build.sh
@@ -48,3 +49,12 @@ uninstall:
 
 clean:
 	rm -rf packaging/debian/build_deb packaging/debian/*.deb packaging/arch/*.pkg.tar* packaging/aur-git/*.pkg.tar* packaging/aur-git/src packaging/aur-git/pkg
+	@if [ -f crates/depot-dl/Cargo.toml ] && command -v cargo >/dev/null 2>&1; then \
+		cargo clean --manifest-path crates/depot-dl/Cargo.toml; \
+	fi
+
+distclean: clean
+	rm -f $${XDG_RUNTIME_DIR:-/tmp}/gamectl_*.log
+	rm -f $${XDG_CACHE_HOME:-$$HOME/.cache}/gamectl/scancache_*.vdf
+	rm -f $${XDG_CACHE_HOME:-$$HOME/.cache}/gamectl/steam_basic_*.json
+	rm -f $${XDG_CACHE_HOME:-$$HOME/.cache}/gamectl/steam_dlc_*.json
