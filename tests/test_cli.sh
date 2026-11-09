@@ -2090,6 +2090,35 @@ test_savegame_snapshot_rotation_contract() {
 }
 run_test "Savegame Protection (Chunk 1): Rolling 3-slot savegame snapshot rotation contract" test_savegame_snapshot_rotation_contract
 
+test_github_workflows_schema_contract() {
+    # 1. Existence check
+    [ -f "$REPO_ROOT/.github/workflows/ci.yml" ] || return 1
+    [ -f "$REPO_ROOT/.github/workflows/release.yml" ] || return 1
+
+    # 2. Structural & schema validation via Python
+    python3 -c "
+import yaml, sys
+
+with open('$REPO_ROOT/.github/workflows/ci.yml') as f:
+    ci = yaml.safe_load(f)
+assert 'test-and-lint' in ci['jobs'], 'Missing test-and-lint job in ci.yml'
+
+with open('$REPO_ROOT/.github/workflows/release.yml') as f:
+    rel = yaml.safe_load(f)
+assert 'build-release' in rel['jobs'], 'Missing build-release job in release.yml'
+" >/dev/null 2>&1 || return 1
+
+    # 3. Step checks
+    grep -q 'make lint' "$REPO_ROOT/.github/workflows/ci.yml" || return 1
+    grep -q './scripts/build.sh --check' "$REPO_ROOT/.github/workflows/ci.yml" || return 1
+    grep -q 'cargo test' "$REPO_ROOT/.github/workflows/ci.yml" || return 1
+    grep -q 'sha256sum' "$REPO_ROOT/.github/workflows/release.yml" || return 1
+    grep -q 'action-gh-release' "$REPO_ROOT/.github/workflows/release.yml" || return 1
+
+    return 0
+}
+run_test "CI/CD Workflows (Chunk 2 & 3): GitHub Actions CI and release automation schema contract" test_github_workflows_schema_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
