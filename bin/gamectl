@@ -7751,42 +7751,86 @@ library_menu() {
 
     while true; do
         flush_tty_input
-        local selection fzf_rc=0
-        selection=$(scan_installed_games --formatted | fzf \
+        local fzf_out fzf_rc=0
+        fzf_out=$(scan_installed_games --formatted | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
+            --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b \
             --border-label="  ╢ gamectl :: Game Library ╟  " \
             --border-label-pos=2 \
             --header=$'GAME LIBRARY (Enter: Launch │ Esc: Dashboard Hub)\nShortcuts: Ctrl-F (Search Store) │ Ctrl-D (Downloads) │ Ctrl-L (Logs) │ Ctrl-I (Inject GBE) │ Ctrl-O (Wrappers) │ Ctrl-P (LAN ID) │ Ctrl-S (Sync) │ Ctrl-B (Backup)' \
             --prompt="Library > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:border-rounded:wrap \
-            --bind="ctrl-f:execute($SELF_BIN --search --no-dashboard)+reload($SELF_BIN list-formatted --refresh)" \
-            --bind="ctrl-d:execute($SELF_BIN downloads)+reload($SELF_BIN list-formatted --refresh)" \
-            --bind="ctrl-l:execute($SELF_BIN logs)" \
-            --bind="ctrl-o:execute($SELF_BIN configure-wrappers {4} {2})+reload($SELF_BIN list-formatted --refresh)" \
-            --bind="ctrl-p:execute($SELF_BIN set-id-interactive {4} {2})+reload($SELF_BIN list-formatted --refresh)" \
-            --bind="ctrl-i:execute($SELF_BIN inject {4} {1}; $SELF_BIN sync-steam {1} {2} {4}; bash -c 'read -n 1 -s -r -p \"Press any key to return to library...\"')+reload($SELF_BIN list-formatted --refresh)" \
-            --bind="ctrl-s:execute($SELF_BIN --sync {4} {2}; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
-            --bind="ctrl-b:execute($SELF_BIN --backup {4}; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
         ) || fzf_rc=$?
 
         [ "$fzf_rc" -eq 130 ] && break
+        [ -z "$fzf_out" ] && continue
+
+        local trigger_key selection
+        trigger_key=$(echo "$fzf_out" | head -n 1)
+        selection=$(echo "$fzf_out" | sed -n '2p')
+
+        # Global in-process hotkeys that do not require item selection
+        if [ "$trigger_key" = "ctrl-l" ]; then
+            view_logs_interactive
+            continue
+        elif [ "$trigger_key" = "ctrl-f" ]; then
+            search_steam "" false
+            invalidate_scan_cache
+            continue
+        elif [ "$trigger_key" = "ctrl-d" ]; then
+            list_downloads_interactive
+            continue
+        fi
+
         [ -z "$selection" ] && continue
 
-        if [ -n "$selection" ]; then
-            local sel_dir sel_bin sel_title
-            sel_dir=$(echo "$selection" | awk -F'\t' '{print $4}')
-            sel_bin=$(echo "$selection" | awk -F'\t' '{print $5}')
-            sel_title=$(echo "$selection" | awk -F'\t' '{print $2}')
-            local launch_rc=0
-            launch_game "$sel_dir" "$sel_bin" "$sel_title" || launch_rc=$?
-            invalidate_scan_cache
-            if [ "$launch_rc" -eq 10 ]; then
-                # User selected return directly to Master Dashboard
-                break
-            fi
-        fi
+        local sel_appid sel_title sel_status sel_dir sel_bin
+        sel_appid=$(echo "$selection" | awk -F'\t' '{print $1}')
+        sel_title=$(echo "$selection" | awk -F'\t' '{print $2}')
+        sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
+        sel_dir=$(echo "$selection" | awk -F'\t' '{print $4}')
+        sel_bin=$(echo "$selection" | awk -F'\t' '{print $5}')
+
+        case "$trigger_key" in
+            ctrl-o)
+                configure_wrappers "$sel_dir" "$sel_title"
+                invalidate_scan_cache
+                continue
+                ;;
+            ctrl-p)
+                set_id_interactive "$sel_dir" "$sel_title"
+                invalidate_scan_cache
+                continue
+                ;;
+            ctrl-i)
+                inject_game "$sel_dir" "$sel_appid"
+                sync_steam "$sel_appid" "$sel_title" "$sel_dir"
+                invalidate_scan_cache
+                tui_modal_notice "GBE Injection & Steam Sync" "Successfully injected GBE Fork & synchronized Steam entitlement for:\n${sel_title:-$sel_dir}"
+                continue
+                ;;
+            ctrl-s)
+                sync_save_remote "$sel_dir" "$sel_title"
+                tui_modal_notice "Remote Sync" "Savegames synchronized with remote companion host for:\n${sel_title:-$sel_dir}"
+                continue
+                ;;
+            ctrl-b)
+                backup_save "$sel_dir"
+                tui_modal_notice "Save Backup" "Savegame snapshot created in slot for:\n${sel_title:-$sel_dir}"
+                continue
+                ;;
+            *)
+                local launch_rc=0
+                launch_game "$sel_dir" "$sel_bin" "$sel_title" || launch_rc=$?
+                invalidate_scan_cache
+                if [ "$launch_rc" -eq 10 ]; then
+                    # User selected return directly to Master Dashboard
+                    break
+                fi
+                ;;
+        esac
     done
 
     if [ "$standalone" = "true" ]; then

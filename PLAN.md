@@ -45,7 +45,7 @@ Menuntaskan technical debt pada subsistem logging dan ergonomi visual TUI gamect
   - Menekan `<Ctrl-L>` di dashboard membuka log viewer seketika tanpa jeda subshell dan tanpa merusak alternate screen buffer.
   - Menekan `Esc` di log viewer kembali ke dashboard dengan tampilan 100% utuh tanpa glitch.
 
-### Chunk 3: Zero-Flicker Native Hotkey Dispatch di `library_menu`
+### Chunk 3: Zero-Flicker Native Hotkey Dispatch di `library_menu` [VERIFIED]
 - **Target Files**: `src/tui/70_dashboard.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Di `library_menu()`, hapus seluruh binding `execute(...)` yang mengandung `bash -c 'read -n 1 ...'`:
