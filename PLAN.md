@@ -1,7 +1,7 @@
 # WORK PACKET 20: RUNTIME RESILIENCE, CACHE EXPANSION & SOVEREIGN DECOUPLING HARDENING
 
 **Track**: Maintenance / Resilience & Zero-Bloat  
-**Status**: PENDING IMPLEMENTATION  
+**Status**: COMPLETED [VERIFIED]  
 **Branch**: `main`  
 **Max Chunks**: 6 Chunks (Active Packet <= 10)  
 **Target Files**: `src/steam/30_downloader.sh`, `src/core/10_utils.sh`, `Makefile`, `tests/test_cli.sh`, `bin/gamectl`
@@ -94,7 +94,7 @@ Memperkuat ketahanan runtime proses, mengeliminasi query rate-limit jaringan ke 
 - **Definition of Done (DoD)**:
   - `make clean` membersihkan sisa build Rust di `crates/depot-dl/target`, menghemat ratusan megabyte ruang disk.
 
-### [ ] Chunk 6: Regression Test Suite Expansion, Rebuild & Machine Gate
+### [x] Chunk 6: Regression Test Suite Expansion, Rebuild & Machine Gate [VERIFIED]
 - **Target Files**: `tests/test_cli.sh`, `bin/gamectl`
 - **Runtutan Eksekusi Teknis**:
   1. Tambahkan skenario pengujian regresi di `tests/test_cli.sh`:
