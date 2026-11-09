@@ -66,7 +66,7 @@ Menuntaskan seluruh fitur setengah jalan (half-done / incomplete) yang teridenti
 - **Definition of Done (DoD)**:
   - Seluruh operasi pembersihan dan sinkronisasi mendukung preview non-destruktif.
 
-### [ ] Chunk 4: Downloader Engine Status Audit in `gamectl doctor`
+### [x] Chunk 4: Downloader Engine Status Audit in `gamectl doctor` [VERIFIED]
 - **Target Files**: `src/diagnostics/60_doctor.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Di `doctor_audit()` Layer 6 ("Manifest Harvester & CDN Providers"):

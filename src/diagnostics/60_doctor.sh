@@ -149,11 +149,21 @@ doctor_audit() {
     command -v zip >/dev/null 2>&1 || harvest_ok=0
     command -v unzip >/dev/null 2>&1 || harvest_ok=0
     if [ "$harvest_ok" -eq 1 ]; then
-        echo "    • $(printf '%-15s' "Harvester") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}(curl, jq, zip, unzip)${UI_RST}"
+        echo "    • $(printf '%-18s' "Harvester") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}(curl, jq, zip, unzip)${UI_RST}"
         pass_cnt=$((pass_cnt + 1))
     else
-        echo "    • $(printf '%-15s' "Harvester") : ${UI_RED}[MISSING]${UI_RST} curl, jq, zip, or unzip not found"
+        echo "    • $(printf '%-18s' "Harvester") : ${UI_RED}[MISSING]${UI_RST} curl, jq, zip, or unzip not found"
         miss_cnt=$((miss_cnt + 1))
+    fi
+
+    local dl_bin
+    dl_bin="$(resolve_depot_dl_bin 2>/dev/null || true)"
+    if [ -n "$dl_bin" ] && [ -x "$dl_bin" ]; then
+        echo "    • $(printf '%-18s' "Depot Downloader") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($dl_bin)${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "    • $(printf '%-18s' "Depot Downloader") : ${UI_AMBER}[WARN]${UI_RST} Standalone Rust downloader not compiled (Run 'make build-depot-dl')"
+        warn_cnt=$((warn_cnt + 1))
     fi
 
     # Layer 7: Steam Client & SLSsteam Integration
