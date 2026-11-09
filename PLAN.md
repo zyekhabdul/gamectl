@@ -50,7 +50,7 @@ Mengatasi temuan audit eksternal yang valid untuk memperkuat continuous integrat
 - **Definition of Done (DoD)**:
   - File `.github/workflows/ci.yml` valid secara sintaks YAML dan mencakup seluruh layer uji otomatis.
 
-### [ ] Chunk 3: GitHub Actions Release & Checksum Generation Pipeline (`.github/workflows/release.yml`)
+### [x] Chunk 3: GitHub Actions Release & Checksum Generation Pipeline (`.github/workflows/release.yml`) [VERIFIED]
 - **Target Files**: `.github/workflows/release.yml`
 - **Runtutan Eksekusi Teknis**:
   1. Buat `.github/workflows/release.yml`:

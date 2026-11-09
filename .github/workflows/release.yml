@@ -1,0 +1,70 @@
+name: Release Automation
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build & Publish Release Assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            fzf \
+            jq \
+            file \
+            rsync \
+            zip \
+            unzip \
+            p7zip-full \
+            dpkg-dev
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Compile standalone gamectl bundle
+        run: |
+          chmod +x ./scripts/build.sh
+          ./scripts/build.sh
+
+      - name: Compile native Rust depot downloader
+        run: |
+          cargo build --release --manifest-path crates/depot-dl/Cargo.toml
+          mkdir -p bin
+          cp -f crates/depot-dl/target/release/gamectl-depot-dl bin/gamectl-depot-dl
+          chmod +x bin/gamectl-depot-dl
+
+      - name: Build Debian (.deb) package
+        run: bash packaging/debian/build-deb.sh
+
+      - name: Stage release artifacts & generate SHA256 checksums
+        run: |
+          mkdir -p dist
+          cp -f bin/gamectl dist/gamectl
+          cp -f bin/gamectl-depot-dl dist/gamectl-depot-dl
+          cp -f packaging/debian/*.deb dist/
+          cd dist
+          sha256sum * > SHA256SUMS
+          echo "Generated SHA256SUMS:"
+          cat SHA256SUMS
+
+      - name: Publish GitHub Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/gamectl
+            dist/gamectl-depot-dl
+            dist/*.deb
+            dist/SHA256SUMS
+          generate_release_notes: true
