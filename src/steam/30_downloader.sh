@@ -1531,30 +1531,58 @@ except Exception as e:
 
     local steam_apps
     steam_apps="$(get_steam_primary_apps 2>/dev/null || echo "$HOME/.local/share/Steam/steamapps")"
-    if [ -d "$steam_apps" ]; then
-        # Guard against concurrent Steam client memory lock on manifests
-        check_steam_active "Writing appmanifest_${appid}.acf" || true
+    if [ ! -d "$steam_apps" ]; then
+        echo "  ${UI_AMBER}[NOTE] Steam steamapps directory not found at $steam_apps.${UI_RST}"
+        echo "  ${UI_DIM}Physical ACF manifest deferred.${UI_RST}"
+        log_msg "INFO" "STEAM" "Steam steamapps directory not found at $steam_apps; ACF creation deferred"
+        invalidate_scan_cache
+        return 2
+    fi
 
-        local resolved_dir="$game_dir"
-        if [ -z "$resolved_dir" ]; then
-            if [ -d "$steam_apps/common/$safe_title" ] && [ -n "$(ls -A "$steam_apps/common/$safe_title" 2>/dev/null)" ]; then
-                resolved_dir="$steam_apps/common/$safe_title"
-            elif [ -d "$steam_apps/common/$title" ] && [ -n "$(ls -A "$steam_apps/common/$title" 2>/dev/null)" ]; then
-                resolved_dir="$steam_apps/common/$title"
-            fi
+    # Guard against concurrent Steam client memory lock on manifests
+    check_steam_active "Writing appmanifest_${appid}.acf" || true
+
+    local resolved_dir="$game_dir"
+    if [ -z "$resolved_dir" ]; then
+        if [ -d "$steam_apps/common/$safe_title" ] && [ -n "$(ls -A "$steam_apps/common/$safe_title" 2>/dev/null)" ]; then
+            resolved_dir="$steam_apps/common/$safe_title"
+        elif [ -d "$steam_apps/common/$title" ] && [ -n "$(ls -A "$steam_apps/common/$title" 2>/dev/null)" ]; then
+            resolved_dir="$steam_apps/common/$title"
         fi
+    fi
 
-        # Ghost ACF Defense: do not generate empty 1GB dummy ACF if files do not exist physically
-        if [ -n "$resolved_dir" ] && [ -d "$resolved_dir" ]; then
-            local acf_file="$steam_apps/appmanifest_${appid}.acf"
-            local install_name="$(basename "$resolved_dir")"
-            local size_bytes
-            size_bytes=$(du -sb "$resolved_dir" 2>/dev/null | awk '{print $1}')
-            [ -z "$size_bytes" ] || [ "$size_bytes" -le 0 ] && size_bytes=1000000000
-            local steamid
-            steamid=$(resolve_active_steamid)
+    # Cross-Library physical file discovery across all active game libraries
+    if [ -z "$resolved_dir" ]; then
+        local sc_id sc_name sc_st sc_dir sc_bin
+        local clean_target="${title,,}"
+        while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
+            sc_id="${sc_id//[[:space:]]/}"
+            sc_dir="${sc_dir//$'\r'/}"
+            if [ -n "$sc_id" ] && [ "$sc_id" = "$appid" ] && [ -d "$sc_dir" ] && [ -n "$(ls -A "$sc_dir" 2>/dev/null)" ]; then
+                resolved_dir="$sc_dir"
+                break
+            fi
+            local cur_clean="${sc_name,,}"
+            cur_clean="${cur_clean#"${cur_clean%%[![:space:]]*}"}"
+            cur_clean="${cur_clean%"${cur_clean##*[![:space:]]}"}"
+            if [ -n "$cur_clean" ] && [ "$cur_clean" = "$clean_target" ] && [ -d "$sc_dir" ] && [ -n "$(ls -A "$sc_dir" 2>/dev/null)" ]; then
+                resolved_dir="$sc_dir"
+                break
+            fi
+        done < <(scan_installed_games 2>/dev/null || true)
+    fi
 
-            cat <<ACF > "$acf_file"
+    # Ghost ACF Defense: do not generate empty 1GB dummy ACF if files do not exist physically
+    if [ -n "$resolved_dir" ] && [ -d "$resolved_dir" ]; then
+        local acf_file="$steam_apps/appmanifest_${appid}.acf"
+        local install_name="$(basename "$resolved_dir")"
+        local size_bytes
+        size_bytes=$(du -sb "$resolved_dir" 2>/dev/null | awk '{print $1}')
+        [ -z "$size_bytes" ] || [ "$size_bytes" -le 0 ] && size_bytes=1000000000
+        local steamid
+        steamid=$(resolve_active_steamid)
+
+        cat <<ACF > "$acf_file"
 "AppState"
 {
 	"appid"		"$appid"
@@ -1576,19 +1604,22 @@ except Exception as e:
 	}
 }
 ACF
-            mkdir -p "$steam_apps/common"
-            local common_target="$steam_apps/common/$install_name"
-            if [ "$resolved_dir" != "$common_target" ] && [ ! -e "$common_target" ]; then
-                ln -sf "$resolved_dir" "$common_target"
-                echo "[INFO] Created common symlink: $common_target -> $resolved_dir"
-            fi
-            echo "[VERIFIED] appmanifest_${appid}.acf registered (Status: Installed in Steam, Size: $size_bytes bytes)."
-            log_msg "INFO" "STEAM" "Registered physical ACF manifest for $title ($appid) in $common_target"
-        else
-            echo "  ${UI_AMBER}[NOTE] No physical game files detected on disk for AppID $appid.${UI_RST}"
-            echo "  ${UI_DIM}Entitlement registered in SLSsteam. ACF manifest creation skipped to prevent Ghost Game.${UI_RST}"
-            log_msg "INFO" "STEAM" "SLSsteam entitlement registered for $title ($appid); ACF creation deferred"
+        mkdir -p "$steam_apps/common"
+        local common_target="$steam_apps/common/$install_name"
+        if [ "$resolved_dir" != "$common_target" ] && [ ! -e "$common_target" ]; then
+            ln -sf "$resolved_dir" "$common_target"
+            echo "[INFO] Created common symlink: $common_target -> $resolved_dir"
         fi
+        echo "[VERIFIED] appmanifest_${appid}.acf registered (Status: Installed in Steam, Size: $size_bytes bytes)."
+        log_msg "INFO" "STEAM" "Registered physical ACF manifest for $title ($appid) in $common_target"
+        invalidate_scan_cache
+        return 0
+    else
+        echo "  ${UI_AMBER}[NOTE] No physical game files detected across libraries for AppID $appid.${UI_RST}"
+        echo "  ${UI_DIM}Entitlement registered in SLSsteam. Physical ACF manifest deferred (game files not installed).${UI_RST}"
+        log_msg "INFO" "STEAM" "SLSsteam entitlement registered for $title ($appid); ACF creation deferred"
+        invalidate_scan_cache
+        return 2
     fi
     invalidate_scan_cache
 }
@@ -1597,9 +1628,10 @@ ACF
 unlock_game() {
     local appid="${1:-}"
     local title="${2:-}"
+    local game_dir="${3:-}"
 
     if [ -z "$appid" ]; then
-        echo "Usage: gamectl entitle <appid> [title] (aliases: unlock, adopt-steam)" >&2
+        echo "Usage: gamectl entitle <appid> [title] [game_dir] (aliases: unlock, adopt-steam)" >&2
         return 1
     fi
 
@@ -1611,24 +1643,35 @@ unlock_game() {
 
     echo "${UI_BOX}╭─ STEAM ENTITLEMENT & ACF ADOPTION ENGINE ───────────────────╮${UI_RST}"
     echo "│ ${UI_CYAN}Target Game${UI_RST}: ${UI_BOLD}$title${UI_RST} ${UI_DIM}(AppID: $appid)${UI_RST}"
-    echo "│ ${UI_DIM}Adopts local files, community Steam Input & Vulkan shader caching${UI_RST}"
+    echo "│ ${UI_DIM}Adopts local files across libraries, Steam Input & Vulkan shaders${UI_RST}"
     echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
 
-    sync_steam "$appid" "$title" ""
+    local sync_rc=0
+    sync_steam "$appid" "$title" "$game_dir" || sync_rc=$?
     invalidate_scan_cache
-    echo "  ${UI_GREEN}[SUCCESS] Game '$title' ($appid) entitled in Steam Client with Full DLC & ACF manifest.${UI_RST}"
+
+    if [ "$sync_rc" -eq 0 ]; then
+        echo "  ${UI_GREEN}[SUCCESS] Game '$title' ($appid) entitled in Steam Client with Full DLC & ACF manifest.${UI_RST}"
+        return 0
+    elif [ "$sync_rc" -eq 2 ]; then
+        echo "  ${UI_AMBER}[DEFERRED] Entitlement registered in SLSsteam. Physical ACF manifest deferred (game files not installed).${UI_RST}"
+        return 0
+    else
+        echo "  ${UI_RED}[WARN] Steam synchronization encountered a notice (Exit: $sync_rc).${UI_RST}"
+        return "$sync_rc"
+    fi
 }
 
 # Aliases for entitlement engine
 entitle_game() { unlock_game "$@"; }
 adopt_steam() { unlock_game "$@"; }
 
-# Interactive Steam Entitlement & ACF Adoption Wizard
+# Interactive Steam ACF Adoption & Asset Manager Wizard
 unlock_interactive() {
     local u_appid_raw="" fzf_rc=0
     u_appid_raw=$(: | fzf \
         --print-query \
-        --border-label="  ╢ Steam Entitlement & ACF Adoption Wizard ╟  " \
+        --border-label="  ╢ Steam ACF Adoption & Asset Manager ╟  " \
         --border-label-pos=2 \
         --header="Enter numeric AppID (Enter: Adopt │ Esc: Cancel)" \
         --prompt="Steam AppID > " \
@@ -1653,9 +1696,75 @@ unlock_interactive() {
     u_title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${u_appid}&filters=basic" | jq -r ".\"${u_appid}\".data.name // empty" 2>/dev/null || true)
     [ -z "$u_title" ] && u_title="AppID_${u_appid}"
 
-    echo "  Registering: $u_title ($u_appid)..."
-    unlock_game "$u_appid" "$u_title"
-    sleep 1.2
+    # Check for physical game files across all active libraries
+    local existing_dir=""
+    local sc_id sc_name sc_st sc_dir sc_bin
+    local clean_target="${u_title,,}"
+    while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
+        sc_id="${sc_id//[[:space:]]/}"
+        sc_dir="${sc_dir//$'\r'/}"
+        if [ -n "$sc_id" ] && [ "$sc_id" = "$u_appid" ] && [ -d "$sc_dir" ] && [ -n "$(ls -A "$sc_dir" 2>/dev/null)" ]; then
+            existing_dir="$sc_dir"
+            break
+        fi
+        local cur_clean="${sc_name,,}"
+        cur_clean="${cur_clean#"${cur_clean%%[![:space:]]*}"}"
+        cur_clean="${cur_clean%"${cur_clean##*[![:space:]]}"}"
+        if [ -n "$cur_clean" ] && [ "$cur_clean" = "$clean_target" ] && [ -d "$sc_dir" ] && [ -n "$(ls -A "$sc_dir" 2>/dev/null)" ]; then
+            existing_dir="$sc_dir"
+            break
+        fi
+    done < <(scan_installed_games 2>/dev/null || true)
+
+    if [ -n "$existing_dir" ]; then
+        echo "  [INFO] Discovered physical install across libraries: $existing_dir"
+        unlock_game "$u_appid" "$u_title" "$existing_dir"
+        sleep 1.2
+        return 0
+    fi
+
+    # Auto-Download Bridge: files are not installed in any active library
+    local bridge_options
+    bridge_options=$(cat <<EOF
+1	[Download Standalone] Unduh via Standalone CDN (gamectl-depot-dl) & Auto-provision ACF + GBE
+2	[Steam Native Install] Daftarkan SLSsteam entitlement & picu Steam Client (steam://install/$u_appid)
+3	[Cancel] Batalkan dan kembali ke Dashboard
+EOF
+)
+    local bridge_sel="" b_rc=0
+    bridge_sel=$(echo "$bridge_options" | fzf \
+        --delimiter=$'\t' \
+        --with-nth=2 \
+        --border-label="  ╢ Physical Game Files Absent: $u_title ($u_appid) ╟  " \
+        --border-label-pos=2 \
+        --header="PHYSICAL FILES NOT FOUND (Enter: Select │ Esc: Return)" \
+        --prompt="Action > " \
+        --height=35% \
+        --reverse 2>/dev/null) || b_rc=$?
+
+    [ "$b_rc" -eq 130 ] && return 0
+    local b_opt
+    b_opt=$(echo "$bridge_sel" | awk -F'\t' '{print $1}')
+
+    case "$b_opt" in
+        1)
+            local dest_dir target_os
+            dest_dir="$(resolve_target_library_dir "$u_title")"
+            target_os="$(detect_app_platform_os "$u_appid")"
+            log_msg "INFO" "ADOPT" "Bridging uninstalled AppID $u_appid to standalone depot download"
+            download_game "$u_appid" "$dest_dir" "$u_title" --all --os "$target_os"
+            ;;
+        2)
+            sync_steam "$u_appid" "$u_title" "--no-acf"
+            if command -v steam >/dev/null 2>&1; then
+                steam "steam://install/$u_appid" >/dev/null 2>&1 &
+                log_msg "INFO" "ADOPT" "Triggered steam://install/$u_appid native install intent"
+            fi
+            ;;
+        *)
+            return 0
+            ;;
+    esac
 }
 
 entitle_interactive() { unlock_interactive "$@"; }

@@ -343,13 +343,13 @@ preview_dashboard() {
             echo "  • Monitor real-time Steam native downloads & ACF telemetry."
             echo "  • Pause and resume downloads via Valve client protocol."
             ;;
-        *4*|*UNLOCK*|*ENTITLE*|*ENTITLEMENT*|*ACF*)
+        *4*|*UNLOCK*|*ENTITLE*|*ENTITLEMENT*|*ACF*|*ADOPT*)
             echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
-            echo "│ ${UI_BOLD}[04] STEAM ENTITLEMENT & ACF ADOPTION ENGINE${UI_RST}"
+            echo "│ ${UI_BOLD}[04] STEAM ACF ADOPTION & ASSET MANAGER${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
-            echo "  • Adopt local files, community Steam Input gyro/touchpad & Vulkan shaders."
-            echo "  • Register AppID & full DLC entitlements directly to SLSsteam."
-            echo "  • Generate appmanifest_<appid>.acf automatically without downloading."
+            echo "  • Adopt local files across libraries, community Steam Input & shaders."
+            echo "  • Automatically resolve physical game directories & generate real ACF."
+            echo "  • Integrated bridge to Standalone CDN or Steam native install."
             ;;
         *5*|*CONFIG*|*SETTINGS*|*KONFIGURASI*)
             echo "${UI_BOX}╭─ SELECTED MODULE ─────────────────────────────────────╮${UI_RST}"
@@ -431,7 +431,7 @@ dashboard_menu() {
 1	${UI_PURPLE}[01]${UI_RST} ${UI_BOLD}GAME LIBRARY${UI_RST}	${UI_DIM}Browse, inject and launch installed games${UI_RST}
 2	${UI_PURPLE}[02]${UI_RST} ${UI_BOLD}STEAM STORE SEARCH${UI_RST}	${UI_DIM}Search games & check ProtonDB compatibility${UI_RST}
 3	${UI_PURPLE}[03]${UI_RST} ${UI_BOLD}DOWNLOAD MONITOR${UI_RST}	${UI_DIM}Track Steam native downloads & ACF telemetry${UI_RST}
-4	${UI_PURPLE}[04]${UI_RST} ${UI_BOLD}STEAM ENTITLEMENT & ACF${UI_RST}	${UI_DIM}Adopt files, Steam Input & shaders (Full DLC)${UI_RST}
+4	${UI_PURPLE}[04]${UI_RST} ${UI_BOLD}STEAM ACF ADOPTION & ASSET MANAGER${UI_RST}	${UI_DIM}Adopt physical files, shaders & bridge downloads${UI_RST}
 5	${UI_PURPLE}[05]${UI_RST} ${UI_BOLD}GLOBAL SETTINGS${UI_RST}	${UI_DIM}Configure LAN persona, default wrappers & remote host${UI_RST}
 6	${UI_PURPLE}[06]${UI_RST} ${UI_BOLD}SYSTEM DIAGNOSTICS${UI_RST}	${UI_DIM}Audit 7-layer dependencies, runners & GPU health${UI_RST}
 7	${UI_PURPLE}[07]${UI_RST} ${UI_BOLD}ACTIVITY LOGS${UI_RST}	${UI_DIM}Inspect operational events, runner traces & error history${UI_RST}

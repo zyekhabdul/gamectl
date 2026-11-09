@@ -539,13 +539,21 @@ run_test "Entitlement Aliases: Reject execution without AppID (entitle/adopt-ste
 test_entitle_aliases_execution() {
     local t_home
     t_home=$(mktemp -d)
-    local out1 out2
+
+    # 1. When physical files are absent: Truthful deferred ACF banner
+    local out1
     out1=$(HOME="$t_home" "$GAMECTL" entitle 48000 "LIMBO" 2>&1)
+
+    # 2. When physical files are present: Full physical adoption & ACF registration
+    mkdir -p "$t_home/.local/share/Steam/steamapps" "$t_home/Games/LIMBO"
+    touch "$t_home/Games/LIMBO/limbo.exe"
+    local out2
     out2=$(HOME="$t_home" "$GAMECTL" adopt-steam 48000 "LIMBO" 2>&1)
     rm -rf "$t_home"
 
     echo "$out1" | grep -q "STEAM ENTITLEMENT & ACF ADOPTION ENGINE" && \
-    echo "$out1" | grep -q "Adopts local files, community Steam Input" && \
+    echo "$out1" | grep -q "Adopts local files" && \
+    echo "$out1" | grep -q "Physical ACF manifest deferred" && \
     echo "$out2" | grep -q "STEAM ENTITLEMENT & ACF ADOPTION ENGINE" && \
     echo "$out2" | grep -q "entitled in Steam Client with Full DLC & ACF manifest"
 }
@@ -1782,6 +1790,35 @@ test_set_id_interactive_cli_contract() {
     return 0
 }
 run_test "LAN Persona: Reject set-id-interactive on invalid directory" test_set_id_interactive_cli_contract
+
+test_cross_library_acf_realization_contract() {
+    source "$REPO_ROOT/src/core/00_header.sh"
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+
+    local t_home
+    t_home=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_cross_acf_XXXXXX")
+    local steam_apps="$t_home/.local/share/Steam/steamapps"
+    mkdir -p "$steam_apps" "$t_home/Games/Terraria"
+    touch "$t_home/Games/Terraria/Terraria.exe"
+
+    # Call sync_steam with empty game_dir -> must discover ~/Games/Terraria via scan_installed_games
+    HOME="$t_home" sync_steam 105600 "Terraria" "" >/dev/null 2>&1 || true
+
+    # Assert appmanifest_105600.acf created
+    [ -f "$steam_apps/appmanifest_105600.acf" ] || { rm -rf "$t_home"; return 1; }
+
+    # Assert symlink created
+    [ -L "$steam_apps/common/Terraria" ] || { rm -rf "$t_home"; return 1; }
+
+    # Assert StateFlags: 4
+    grep -q '"StateFlags"[[:space:]]*"4"' "$steam_apps/appmanifest_105600.acf" || { rm -rf "$t_home"; return 1; }
+
+    rm -rf "$t_home"
+    return 0
+}
+run_test "Cross-Library ACF Realization: Auto-discover ~/Games and provision physical manifest" test_cross_library_acf_realization_contract
 
 # ------------------------------------------------------------------------------
 # Final Execution Summary
