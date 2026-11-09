@@ -39,7 +39,7 @@ Menuntaskan seluruh fitur setengah jalan (half-done / incomplete) yang teridenti
 - **Definition of Done (DoD)**:
   - Pemulihan savegame dari slot1/slot2/slot3 terbukti memulihkan data persis seperti saat snapshot dibuat.
 
-### [ ] Chunk 2: Bidirectional Remote Save Sync (`pull_save_remote` / `sync-pull`)
+### [x] Chunk 2: Bidirectional Remote Save Sync (`pull_save_remote` / `sync-pull`) [VERIFIED]
 - **Target Files**: `src/runners/50_launcher.sh`, `src/main.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Implementasi `pull_save_remote()` di `src/runners/50_launcher.sh`:

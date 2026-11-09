@@ -2129,6 +2129,34 @@ test_savegame_restore_contract() {
 }
 run_test "Savegame Recovery (Chunk 1): Restore savegame snapshot from recovery slot contract" test_savegame_restore_contract
 
+test_pull_save_remote_contract() {
+    # 1. Static check: pull_save_remote function is exported and defined
+    grep -q 'pull_save_remote()' "$REPO_ROOT/src/runners/50_launcher.sh" || return 1
+    grep -q 'export -f .*pull_save_remote' "$REPO_ROOT/src/main.sh" || return 1
+    grep -q 'sync-pull' "$REPO_ROOT/src/main.sh" || return 1
+
+    # 2. CLI validation: running without args prints usage
+    local no_arg_out
+    no_arg_out=$("$GAMECTL" sync-pull 2>&1 || true)
+    echo "$no_arg_out" | grep -q "Usage: gamectl sync-pull" || return 1
+
+    # 3. Dynamic test: running with nonexistent directory fails cleanly
+    local bad_dir_out
+    bad_dir_out=$("$GAMECTL" sync-pull "/path/to/nonexistent/game_dir_$$" 2>&1 || true)
+    echo "$bad_dir_out" | grep -q "Target game directory not found" || return 1
+
+    # 4. Dynamic test: running with valid dir but unconfigured host warns cleanly
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_pull_XXXXXX")
+    local unconf_out
+    unconf_out=$(HOME="/tmp" GAMECTL_REMOTE_HOST="" GAMECTL_COMPANION_HOST="" GAMECTL_SYNC_HOST="" GAMECTL_TUF_HOST="" "$GAMECTL" sync-pull "$t_dir" 2>&1 || true)
+    rm -rf "$t_dir"
+    echo "$unconf_out" | grep -q "Target remote host not configured" || return 1
+
+    return 0
+}
+run_test "Bidirectional Sync (Chunk 2): Pull savegame from remote companion host contract" test_pull_save_remote_contract
+
 test_github_workflows_schema_contract() {
     # 1. Existence check
     [ -f "$REPO_ROOT/.github/workflows/ci.yml" ] || return 1

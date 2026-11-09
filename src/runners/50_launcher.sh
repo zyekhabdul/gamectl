@@ -607,11 +607,19 @@ EOF
     return "$hud_exit"
 }
 
-# Sync savegame to remote companion host
+# Sync savegame to remote companion host (Push)
 sync_save_remote() {
     local gdir="$1"
-    local title="$2"
+    local title="${2:-Game}"
     local override_host="${3:-}"
+    local is_dry_run=false
+
+    for arg in "$@"; do
+        if [ "$arg" = "--dry-run" ] || [ "$arg" = "-n" ]; then
+            is_dry_run=true
+        fi
+    done
+
     local sdir="$gdir/saves"
     local rhost="$override_host"
     [ -z "$rhost" ] && rhost=$(get_remote_host)
@@ -646,9 +654,92 @@ sync_save_remote() {
     fi
     rel_path="${rel_path#/}"
 
-    ssh "$rhost" "mkdir -p \"~/$rel_path\""
-    rsync -avzP --exclude="*.tmp" "$sdir/" "$rhost:\"~/$rel_path/saves/\""
-    echo "[VERIFIED] Savegame synchronization to $rhost completed."
+    local rsync_opts=("-avzP" "--exclude=*.tmp")
+    [ "$is_dry_run" = true ] && rsync_opts+=("-n")
+
+    if [ "$is_dry_run" = false ]; then
+        ssh "$rhost" "mkdir -p \"~/$rel_path\""
+    fi
+
+    rsync "${rsync_opts[@]}" "$sdir/" "$rhost:\"~/$rel_path/saves/\""
+    if [ "$is_dry_run" = true ]; then
+        echo "[INFO] [DRY-RUN] Savegame synchronization simulated successfully."
+    else
+        echo "[VERIFIED] Savegame synchronization to $rhost completed."
+    fi
+    return 0
+}
+
+# Pull savegame from remote companion host to local workstation (Pull)
+pull_save_remote() {
+    local gdir="$1"
+    local title="${2:-Game}"
+    local override_host="${3:-}"
+    local is_dry_run=false
+
+    for arg in "$@"; do
+        if [ "$arg" = "--dry-run" ] || [ "$arg" = "-n" ]; then
+            is_dry_run=true
+        fi
+    done
+
+    local sdir="$gdir/saves"
+    local rhost="$override_host"
+    [ -z "$rhost" ] && rhost=$(get_remote_host)
+
+    if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
+        echo "[ERROR] Target game directory not found: ${gdir:-<empty>}" >&2
+        return 1
+    fi
+
+    if [ -z "$rhost" ]; then
+        echo "[WARN] Target remote host not configured." >&2
+        echo "       Define host in ~/.config/gamectl/remote_host or GAMECTL_REMOTE_HOST variable." >&2
+        return 1
+    fi
+
+    echo "[INFO] Checking connectivity to $rhost..."
+    if ! ssh -q -o ConnectTimeout=1 -o BatchMode=yes "$rhost" exit 2>/dev/null; then
+        echo "[WARN] Remote host '$rhost' offline or unreachable on local network." >&2
+        return 1
+    fi
+
+    local canon_gdir
+    canon_gdir="$(cd "$gdir" 2>/dev/null && pwd || echo "$gdir")"
+
+    local rel_path
+    if [[ "$canon_gdir" == "$HOME/"* ]]; then
+        rel_path="${canon_gdir#$HOME/}"
+    else
+        rel_path="Games/$(basename "$canon_gdir")"
+    fi
+    rel_path="${rel_path#/}"
+
+    # Verify remote saves directory exists
+    if ! ssh -q -o BatchMode=yes "$rhost" "[ -d \"~/$rel_path/saves\" ]" 2>/dev/null; then
+        echo "[ERROR] Remote saves directory not found on $rhost: ~/$rel_path/saves" >&2
+        return 1
+    fi
+
+    # Protect local savegame before pulling remote overwrites
+    if [ "$is_dry_run" = false ] && [ -d "$sdir" ]; then
+        backup_save "$gdir" true || true
+    fi
+
+    mkdir -p "$sdir"
+    local rsync_opts=("-avzP" "--exclude=*.tmp")
+    [ "$is_dry_run" = true ] && rsync_opts+=("-n")
+
+    echo "[INFO] Pulling savegame for '$title' from $rhost:~/$rel_path/saves/ -> $sdir/..."
+    rsync "${rsync_opts[@]}" "$rhost:\"~/$rel_path/saves/\"" "$sdir/"
+
+    if [ "$is_dry_run" = true ]; then
+        echo "[INFO] [DRY-RUN] Remote savegame pull simulated successfully (no local files modified)."
+    else
+        echo "[VERIFIED] Savegame pull from $rhost completed."
+        log_msg "INFO" "SAVE" "Pulled savegame for '$title' from $rhost"
+    fi
+    return 0
 }
 
 # Aliases for remote savegame synchronization
@@ -658,6 +749,14 @@ sync_to_companion() {
 
 sync_to_tuf() {
     sync_save_remote "$@"
+}
+
+pull_from_companion() {
+    pull_save_remote "$@"
+}
+
+pull_from_tuf() {
+    pull_save_remote "$@"
 }
 
 

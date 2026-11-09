@@ -1,5 +1,5 @@
 # Export functions for subshells in fzf
-export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive
+export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -356,9 +356,18 @@ case "${1:-}" in
         ;;
     --sync|sync|sync-remote|sync-companion|sync-tuf)
         if [ -n "${2:-}" ]; then
-            sync_save_remote "$2" "${3:-Game}" "${4:-}"
+            sync_save_remote "$2" "${3:-Game}" "${4:-}" "${@:5}"
         else
-            echo "Usage: gamectl --sync <game_dir> [title] [remote_host]"
+            echo "Usage: gamectl --sync <game_dir> [title] [remote_host] [--dry-run]"
+            exit 1
+        fi
+        ;;
+    --sync-pull|sync-pull|pull-remote|pull-companion|pull-tuf)
+        if [ -n "${2:-}" ]; then
+            pull_save_remote "$2" "${3:-Game}" "${4:-}" "${@:5}"
+        else
+            echo "Usage: gamectl sync-pull <game_dir> [title] [remote_host] [--dry-run]"
+            exit 1
         fi
         ;;
     --list|list)
@@ -445,7 +454,8 @@ Usage:
                       Audit SteamStub (.bind ELF & PE markers) and print forensic diagnostics
   gamectl unpack-stub <bin.exe>
                       Unpack Windows PE SteamStub DRM binary via Steamless CLI
-  gamectl --sync <dir> [title] [host]  Sync saves to remote companion host
+  gamectl --sync <dir> [title] [host]   Push saves to remote companion host (alias: sync)
+  gamectl sync-pull <dir> [title] [host] Pull saves from remote companion host (alias: --sync-pull)
   gamectl backup <dir>        Create manual savegame backup snapshot (alias: --backup)
   gamectl restore <dir> [slot]  Restore savegame snapshot from recovery slot (1-3)
   gamectl logs        View centralized runtime activity logs
