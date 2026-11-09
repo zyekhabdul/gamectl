@@ -24,7 +24,7 @@ Pastikan paket berikut telah terpasang pada distribusi Linux:
 - `curl` (HTTP client untuk discovery metadata)
 - `rsync` & `openssh` (protokol transfer savegame multi-node)
 - `file` (inspeksi header binary ELF 32-bit / 64-bit)
-- `unzip` (ekstraksi archive binary DepotDownloader)
+- `unzip` (ekstraksi archive manifest ZIP, template GBE, dan bypass fix)
 - `python3` & `python-ruamel-yaml` / `python-yaml` (sinkronisasi konfigurasi SLSsteam)
 
 Pada Arch Linux:
@@ -98,14 +98,7 @@ Daftarkan alias host tersebut di `~/.config/gamectl/remote_host` atau via enviro
 echo "companion-pc" > ~/.config/gamectl/remote_host
 ```
 
-### 3.4 Kredensial Steam untuk Downloader (`~/.config/gamectl/steam_user`)
-Jika Anda mengunduh game yang memerlukan lisensi akun Steam Anda:
-```bash
-echo "nama_akun_steam_anda" > ~/.config/gamectl/steam_user
-```
-DepotDownloader otomatis membaca username ini dan menyertakan flag `-remember-password`.
-
-### 3.5 Konfigurasi Default Wrapper Performa (`~/.config/gamectl/wrappers`)
+### 3.4 Konfigurasi Default Wrapper Performa (`~/.config/gamectl/wrappers`)
 Untuk mengaktifkan wrapper secara default pada setiap game yang diluncurkan:
 ```bash
 cp ~/.config/gamectl/wrappers.example ~/.config/gamectl/wrappers
@@ -120,7 +113,7 @@ gamescope_args=-W 1280 -H 720 -w 1920 -h 1080 -F fsr -f
 ```
 Konfigurasi per-game dapat ditimpa dengan membuat file `$GAME_DIR/.wrappers` atau melalui menu TUI interaktif (`<Ctrl-O>`).
 
-### 3.6 Identitas Default LAN & SteamID (`~/.config/gamectl/persona`)
+### 3.5 Identitas Default LAN & SteamID (`~/.config/gamectl/persona`)
 Untuk menetapkan nama pemain default dan SteamID saat injeksi GBE Fork:
 ```bash
 cp ~/.config/gamectl/persona.example ~/.config/gamectl/persona
@@ -130,7 +123,7 @@ Atau cukup jalankan:
 gamectl set-id "MyGamerTag" auto --global
 ```
 
-### 3.7 Shell Completion & Desktop Launcher
+### 3.6 Shell Completion & Desktop Launcher
 Installer otomatis memasang integrasi sistem:
 
 #### A. Shell Autocompletion (Bash & Zsh)
@@ -352,14 +345,14 @@ gamectl set-id <player> [steamid] [dir] [--broadcast <ip>] [--global]
 # 5. Generate SteamID64 valid 17-digit acak
 gamectl generate-steamid
 
-# 6. Unduh game secara headless via DepotDownloader (pilihan paket fleksibel)
-gamectl download <appid> [target_dir] [title] [--raw|--inject-only|--all] [-f]
+# 6. Unduh game secara headless via native standalone Steam CDN engine (gamectl-depot-dl)
+gamectl download <appid> [dir] [title] [--source <auto|...>] [--raw|--inject-only|--all|--standalone|--sls]
 
 # 7. Pantau status & antrean download yang aktif
 gamectl downloads
 
-# 8. Buka game di Steam resmi tanpa unduh aset (Zero-Download Full DLC)
-gamectl unlock <appid> [title]
+# 8. Adopsi aset fisik lokal, Steam Input & shaders via Steam entitlement & ACF
+gamectl entitle <appid> [title]  # (alias: unlock, adopt-steam)
 
 # 9. Injeksi GBE Fork, konfigurasi save ./saves, dan auto-DLC
 gamectl inject /path/to/game [appid] [--no-sync|--all]
