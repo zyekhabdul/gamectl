@@ -934,6 +934,8 @@ download_game() {
     local action="all"          # "all", "inject", "raw"
     local source="auto"         # "auto", "ryuu", "sushi", "luatools"
     local engine="standalone"   # Default to Pure Standalone CDN engine (Zero Steam Client)
+    local is_strict_standalone=false
+    [ "${GAMECTL_HEADLESS:-0}" = "1" ] && is_strict_standalone=true
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -945,9 +947,11 @@ download_game() {
                         ;;
                     steam|sls)
                         engine="sls"
+                        is_strict_standalone=false
                         ;;
                     standalone|direct)
                         engine="standalone"
+                        is_strict_standalone=true
                         ;;
                 esac
                 ;;
@@ -959,23 +963,21 @@ download_game() {
                         ;;
                     steam|sls)
                         engine="sls"
+                        is_strict_standalone=false
                         ;;
                     standalone|direct)
                         engine="standalone"
+                        is_strict_standalone=true
                         ;;
                 esac
                 ;;
             --sls|--steam)
                 engine="sls"
+                is_strict_standalone=false
                 ;;
-            --direct|--no-steam)
+            --direct|--no-steam|--standalone|--headless)
                 engine="standalone"
-                ;;
-            --standalone)
-                engine="standalone"
-                ;;
-            --headless)
-                engine="standalone"
+                is_strict_standalone=true
                 ;;
             --source)
                 shift
@@ -1033,6 +1035,12 @@ download_game() {
         local dl_bin
         dl_bin="$(resolve_depot_dl_bin 2>/dev/null || true)"
         if [ -z "$dl_bin" ] || [ ! -x "$dl_bin" ]; then
+            if [ "$is_strict_standalone" = true ]; then
+                echo "[ERROR] Standalone downloader binary (gamectl-depot-dl) not found." >&2
+                echo "[ERROR] Compile it via 'make build-depot-dl' or run 'gamectl setup-gbe'." >&2
+                log_msg "ERROR" "DOWNLOAD" "Standalone downloader binary not found in strict standalone mode"
+                return 1
+            fi
             echo "[WARN] Standalone downloader binary (gamectl-depot-dl) not found. Falling back to SLSsteam engine." >&2
             engine="sls"
         fi
@@ -1109,6 +1117,12 @@ download_game() {
         shopt -u nullglob globstar
 
         if [ "${#depot_args[@]}" -eq 0 ]; then
+            if [ "$is_strict_standalone" = true ]; then
+                echo "[ERROR] Strict standalone mode: No encrypted manifests with valid AES keys found for AppID $appid." >&2
+                echo "[ERROR] Cannot fallback to Steam Client/SLSsteam in standalone mode (ADR-022)." >&2
+                log_msg "ERROR" "DOWNLOAD" "No valid AES depot keys found for AppID $appid in strict standalone mode"
+                return 1
+            fi
             echo "[WARN] No encrypted manifests with valid AES keys found. Falling back to SLSsteam engine." >&2
             engine="sls"
         else

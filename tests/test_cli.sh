@@ -2004,6 +2004,33 @@ test_steam_store_api_caching_contract() {
 }
 run_test "Disk Cache API (Chunk 3): Steam Store metadata disk caching contract" test_steam_store_api_caching_contract
 
+test_strict_sovereign_standalone_failure_protocol_contract() {
+    # 1. Verify strict standalone flag parsing
+    grep -q 'is_strict_standalone=true' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+
+    # 2. Verify strict standalone error checks prevent SLSsteam fallback
+    grep -q 'Cannot fallback to Steam Client/SLSsteam in standalone mode' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    grep -q 'Standalone downloader binary (gamectl-depot-dl) not found' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+
+    # 3. Dynamic test: Invoke download_game with --standalone when binary is missing
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+
+    local test_out
+    test_out=$(
+        resolve_depot_dl_bin() { return 1; }
+        export -f resolve_depot_dl_bin
+        download_game "99990" --standalone "StrictFailTitle" 2>&1 || true
+    )
+
+    # Must contain error, must NOT contain SLSsteam routing
+    echo "$test_out" | grep -q 'Standalone downloader binary (gamectl-depot-dl) not found' || return 1
+    ! echo "$test_out" | grep -q 'STEAM NATIVE CONTENT ENGINE' || return 1
+
+    return 0
+}
+run_test "Sovereign Invariant (Chunk 4): Strict standalone failure protocol rejects SLSsteam fallback" test_strict_sovereign_standalone_failure_protocol_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

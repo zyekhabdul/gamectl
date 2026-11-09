@@ -67,7 +67,7 @@ Memperkuat ketahanan runtime proses, mengeliminasi query rate-limit jaringan ke 
   - Metadata tersimpan rapi di `${XDG_CACHE_HOME:-~/.cache}/gamectl/` selama 3600 detik.
   - Zero pemanggilan jaringan redundan pada operasi download, entitle, dan dlc beruntun.
 
-### [ ] Chunk 4: Strict Sovereign Decoupling & Explicit Headless Failure Protocol
+### [x] Chunk 4: Strict Sovereign Decoupling & Explicit Headless Failure Protocol [VERIFIED]
 - **Target Files**: `src/steam/30_downloader.sh` (`download_game()`)
 - **Runtutan Eksekusi Teknis**:
   1. Tambahkan pengecekan flag kedaulatan: `local is_strict_standalone=false`.
