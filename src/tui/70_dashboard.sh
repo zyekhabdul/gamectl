@@ -580,7 +580,7 @@ search_steam() {
         fi
     fi
 
-    echo "[INFO] Searching '$query' on Steam Store API..."
+    log_msg "INFO" "STORE" "Searching '$query' on Steam Store API..."
     local encoded_query
     encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$query")
     local raw_results
@@ -590,8 +590,8 @@ search_steam() {
     items=$(echo "$raw_results" | jq -r '.items[]? | "\(.id)\t\(.name)"' 2>/dev/null || true)
 
     if [ -z "$items" ]; then
-        echo "[INFO] Game not found."
-        sleep 1
+        log_msg "WARN" "STORE" "Game '$query' not found on Steam Store API."
+        tui_modal_notice "Steam Store Search" "Game '$query' was not found on Steam Store."
         return
     fi
 
@@ -733,31 +733,28 @@ search_steam() {
         # Direct hotkey triggers
         if [ "$trigger_key" = "ctrl-a" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-                echo "[INFO] Shortcut <Ctrl-A>: Injecting GBE + Syncing Steam for $sel_name..."
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Injecting GBE + Syncing Steam for $sel_name ($sel_id)"
                 inject_game "$gdir" "$sel_id"
             else
-                echo "[INFO] Shortcut <Ctrl-A>: Starting All-in-One Background Download for $sel_name ($target_os)..."
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Starting All-in-One Background Download for $sel_name ($target_os)"
                 download_game "$sel_id" "$dest_dir" "$sel_name" --all --background --os "$target_os"
             fi
-            sleep 1.2
         elif [ "$trigger_key" = "ctrl-u" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-                echo "[INFO] Shortcut <Ctrl-U>: Synchronizing Steam Entitlement & ACF for $sel_name..."
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-U>: Synchronizing Steam Entitlement & ACF for $sel_name ($sel_id)"
                 sync_steam "$sel_id" "$sel_name" "$gdir"
             else
-                echo "[INFO] Shortcut <Ctrl-U>: Adopting Steam Entitlement & ACF for $sel_name..."
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-U>: Adopting Steam Entitlement & ACF for $sel_name ($sel_id)"
                 unlock_game "$sel_id" "$sel_name"
             fi
-            sleep 1.2
         elif [ "$trigger_key" = "ctrl-s" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-                echo "[INFO] Shortcut <Ctrl-S>: Injecting Standalone GBE Fork for $sel_name..."
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Injecting Standalone GBE Fork for $sel_name ($sel_id)"
                 inject_game "$gdir" "$sel_id" --no-sync
             else
-                echo "[INFO] Shortcut <Ctrl-S>: Starting Standalone Background Download for $sel_name ($target_os)..."
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Starting Standalone Background Download for $sel_name ($target_os)"
                 download_game "$sel_id" "$dest_dir" "$sel_name" --inject-only --background --os "$target_os"
             fi
-            sleep 1.2
         elif [ "$trigger_key" = "ctrl-d" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
                 local gbin
@@ -769,11 +766,11 @@ search_steam() {
                         break
                     fi
                 else
-                    echo "[ERROR] Binary executable not found in $gdir."
-                    sleep 1.2
+                    log_msg "ERROR" "LAUNCH" "Binary executable not found in $gdir for $sel_name"
+                    tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir"
                 fi
             else
-                echo "[INFO] Shortcut <Ctrl-D>: Starting All-in-One Live Stream Download for $sel_name ($target_os)..."
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-D>: Starting All-in-One Live Stream Download for $sel_name ($target_os)"
                 download_game "$sel_id" "$dest_dir" "$sel_name" --all --foreground --os "$target_os"
             fi
         else
@@ -813,8 +810,8 @@ EOF
                                 break
                             fi
                         else
-                            echo "[ERROR] Binary executable not found in $gdir."
-                            sleep 1.2
+                            log_msg "ERROR" "LAUNCH" "Binary executable not found in $gdir for $sel_name"
+                            tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir"
                         fi
                         ;;
                     2)
@@ -854,15 +851,12 @@ EOF
                 case "$opt" in
                     1)
                         download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
-                        sleep 1.2
                         ;;
                     2)
                         unlock_game "$sel_id" "$sel_name"
-                        sleep 1.2
                         ;;
                     3)
                         inject_game "$dest_dir" "$sel_id" --no-sync
-                        sleep 1.2
                         ;;
                     *)
                         ;;

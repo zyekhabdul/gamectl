@@ -1820,6 +1820,36 @@ test_cross_library_acf_realization_contract() {
 }
 run_test "Cross-Library ACF Realization: Auto-discover ~/Games and provision physical manifest" test_cross_library_acf_realization_contract
 
+test_screen_flickering_elimination_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+
+    # Invariant 1: Zero sleep calls in 70_dashboard.sh (no screen freezing in TUI)
+    if grep -q 'sleep' "$REPO_ROOT/src/tui/70_dashboard.sh"; then
+        return 1
+    fi
+
+    # Invariant 2: Zero sleep calls in 30_downloader.sh (no screen freezing in TUI)
+    if grep -q 'sleep' "$REPO_ROOT/src/steam/30_downloader.sh"; then
+        return 1
+    fi
+
+    # Invariant 3: Zero raw stdout shortcut notifications in 70_dashboard.sh
+    if grep -q 'echo "\[INFO\] Shortcut' "$REPO_ROOT/src/tui/70_dashboard.sh"; then
+        return 1
+    fi
+
+    # Invariant 4: Modal helper tui_modal_notice is defined and non-interactive safe
+    if ! type tui_modal_notice >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # Execute in non-interactive environment (must return 0 without hanging)
+    tui_modal_notice "Test" "Message" || return 1
+
+    return 0
+}
+run_test "Screen Flickering Invariant (Action 6.2): Zero sleep and raw stdout leaks in TUI" test_screen_flickering_elimination_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

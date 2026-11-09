@@ -270,6 +270,27 @@ exit_tui_screen() {
     return 0
 }
 
+# Clean FZF Modal Notification Dialog (Zero-Flicker)
+tui_modal_notice() {
+    local title="${1:-Notice}"
+    local msg="${2:-}"
+    local height="${3:-25%}"
+
+    if [ ! -t 1 ] || ! command -v fzf >/dev/null 2>&1; then
+        log_msg "INFO" "UI" "[$title] $msg"
+        return 0
+    fi
+
+    printf "%b\n" "$msg" | fzf \
+        --border-label="  ╢ $title ╟  " \
+        --border-label-pos=2 \
+        --header="NOTICE (Enter or Esc: Dismiss)" \
+        --prompt="> " \
+        --height="$height" \
+        --reverse 2>/dev/null || true
+    return 0
+}
+
 # Centralized Runtime Logger (user-isolated, rolling buffer max 1000 lines)
 log_msg() {
     local level="${1:-INFO}"

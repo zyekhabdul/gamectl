@@ -1686,12 +1686,12 @@ unlock_interactive() {
     [ -z "$u_appid" ] && return 0
 
     if [[ ! "$u_appid" =~ ^[0-9]+$ ]]; then
-        echo "  ${UI_RED}[ERROR] AppID must be numeric characters (e.g. 105600).${UI_RST}"
-        sleep 1.5
+        log_msg "WARN" "ADOPT" "Invalid non-numeric AppID input: '$u_appid'"
+        tui_modal_notice "Invalid AppID" "AppID must contain only numeric characters (e.g. 105600).\nProvided value: '$u_appid'"
         return 1
     fi
 
-    echo "  [INFO] Fetching title from Steam Store API for AppID $u_appid..."
+    log_msg "INFO" "ADOPT" "Fetching title from Steam Store API for AppID $u_appid..."
     local u_title
     u_title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${u_appid}&filters=basic" | jq -r ".\"${u_appid}\".data.name // empty" 2>/dev/null || true)
     [ -z "$u_title" ] && u_title="AppID_${u_appid}"
@@ -1717,9 +1717,13 @@ unlock_interactive() {
     done < <(scan_installed_games 2>/dev/null || true)
 
     if [ -n "$existing_dir" ]; then
-        echo "  [INFO] Discovered physical install across libraries: $existing_dir"
-        unlock_game "$u_appid" "$u_title" "$existing_dir"
-        sleep 1.2
+        log_msg "INFO" "ADOPT" "Discovered physical install across libraries: $existing_dir"
+        local adopt_out
+        adopt_out=$(unlock_game "$u_appid" "$u_title" "$existing_dir")
+        local clean_notice
+        clean_notice=$(echo "$adopt_out" | grep -E '\[SUCCESS\]|\[DEFERRED\]|\[WARN\]' | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^[[:space:]]*//')
+        [ -z "$clean_notice" ] && clean_notice="Physical ACF adoption complete for $u_title ($u_appid)."
+        tui_modal_notice "Steam ACF Adoption" "$clean_notice\n\nGame Location: $existing_dir" "30%"
         return 0
     fi
 
@@ -1759,6 +1763,9 @@ EOF
             if command -v steam >/dev/null 2>&1; then
                 steam "steam://install/$u_appid" >/dev/null 2>&1 &
                 log_msg "INFO" "ADOPT" "Triggered steam://install/$u_appid native install intent"
+                tui_modal_notice "Steam Client Intent" "Entitlement registered in SLSsteam.\nPushed steam://install/$u_appid to Steam Client." "25%"
+            else
+                tui_modal_notice "Steam Entitlement Registered" "Entitlement registered in SLSsteam.\nSteam Client executable not found in PATH." "25%"
             fi
             ;;
         *)

@@ -327,6 +327,27 @@ exit_tui_screen() {
     return 0
 }
 
+# Clean FZF Modal Notification Dialog (Zero-Flicker)
+tui_modal_notice() {
+    local title="${1:-Notice}"
+    local msg="${2:-}"
+    local height="${3:-25%}"
+
+    if [ ! -t 1 ] || ! command -v fzf >/dev/null 2>&1; then
+        log_msg "INFO" "UI" "[$title] $msg"
+        return 0
+    fi
+
+    printf "%b\n" "$msg" | fzf \
+        --border-label="  ╢ $title ╟  " \
+        --border-label-pos=2 \
+        --header="NOTICE (Enter or Esc: Dismiss)" \
+        --prompt="> " \
+        --height="$height" \
+        --reverse 2>/dev/null || true
+    return 0
+}
+
 # Centralized Runtime Logger (user-isolated, rolling buffer max 1000 lines)
 log_msg() {
     local level="${1:-INFO}"
@@ -3792,12 +3813,12 @@ unlock_interactive() {
     [ -z "$u_appid" ] && return 0
 
     if [[ ! "$u_appid" =~ ^[0-9]+$ ]]; then
-        echo "  ${UI_RED}[ERROR] AppID must be numeric characters (e.g. 105600).${UI_RST}"
-        sleep 1.5
+        log_msg "WARN" "ADOPT" "Invalid non-numeric AppID input: '$u_appid'"
+        tui_modal_notice "Invalid AppID" "AppID must contain only numeric characters (e.g. 105600).\nProvided value: '$u_appid'"
         return 1
     fi
 
-    echo "  [INFO] Fetching title from Steam Store API for AppID $u_appid..."
+    log_msg "INFO" "ADOPT" "Fetching title from Steam Store API for AppID $u_appid..."
     local u_title
     u_title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${u_appid}&filters=basic" | jq -r ".\"${u_appid}\".data.name // empty" 2>/dev/null || true)
     [ -z "$u_title" ] && u_title="AppID_${u_appid}"
@@ -3823,9 +3844,13 @@ unlock_interactive() {
     done < <(scan_installed_games 2>/dev/null || true)
 
     if [ -n "$existing_dir" ]; then
-        echo "  [INFO] Discovered physical install across libraries: $existing_dir"
-        unlock_game "$u_appid" "$u_title" "$existing_dir"
-        sleep 1.2
+        log_msg "INFO" "ADOPT" "Discovered physical install across libraries: $existing_dir"
+        local adopt_out
+        adopt_out=$(unlock_game "$u_appid" "$u_title" "$existing_dir")
+        local clean_notice
+        clean_notice=$(echo "$adopt_out" | grep -E '\[SUCCESS\]|\[DEFERRED\]|\[WARN\]' | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^[[:space:]]*//')
+        [ -z "$clean_notice" ] && clean_notice="Physical ACF adoption complete for $u_title ($u_appid)."
+        tui_modal_notice "Steam ACF Adoption" "$clean_notice\n\nGame Location: $existing_dir" "30%"
         return 0
     fi
 
@@ -3865,6 +3890,9 @@ EOF
             if command -v steam >/dev/null 2>&1; then
                 steam "steam://install/$u_appid" >/dev/null 2>&1 &
                 log_msg "INFO" "ADOPT" "Triggered steam://install/$u_appid native install intent"
+                tui_modal_notice "Steam Client Intent" "Entitlement registered in SLSsteam.\nPushed steam://install/$u_appid to Steam Client." "25%"
+            else
+                tui_modal_notice "Steam Entitlement Registered" "Entitlement registered in SLSsteam.\nSteam Client executable not found in PATH." "25%"
             fi
             ;;
         *)
@@ -7777,7 +7805,7 @@ search_steam() {
         fi
     fi
 
-    echo "[INFO] Searching '$query' on Steam Store API..."
+    log_msg "INFO" "STORE" "Searching '$query' on Steam Store API..."
     local encoded_query
     encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$query")
     local raw_results
@@ -7787,8 +7815,8 @@ search_steam() {
     items=$(echo "$raw_results" | jq -r '.items[]? | "\(.id)\t\(.name)"' 2>/dev/null || true)
 
     if [ -z "$items" ]; then
-        echo "[INFO] Game not found."
-        sleep 1
+        log_msg "WARN" "STORE" "Game '$query' not found on Steam Store API."
+        tui_modal_notice "Steam Store Search" "Game '$query' was not found on Steam Store."
         return
     fi
 
@@ -7930,31 +7958,28 @@ search_steam() {
         # Direct hotkey triggers
         if [ "$trigger_key" = "ctrl-a" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-                echo "[INFO] Shortcut <Ctrl-A>: Injecting GBE + Syncing Steam for $sel_name..."
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Injecting GBE + Syncing Steam for $sel_name ($sel_id)"
                 inject_game "$gdir" "$sel_id"
             else
-                echo "[INFO] Shortcut <Ctrl-A>: Starting All-in-One Background Download for $sel_name ($target_os)..."
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Starting All-in-One Background Download for $sel_name ($target_os)"
                 download_game "$sel_id" "$dest_dir" "$sel_name" --all --background --os "$target_os"
             fi
-            sleep 1.2
         elif [ "$trigger_key" = "ctrl-u" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-                echo "[INFO] Shortcut <Ctrl-U>: Synchronizing Steam Entitlement & ACF for $sel_name..."
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-U>: Synchronizing Steam Entitlement & ACF for $sel_name ($sel_id)"
                 sync_steam "$sel_id" "$sel_name" "$gdir"
             else
-                echo "[INFO] Shortcut <Ctrl-U>: Adopting Steam Entitlement & ACF for $sel_name..."
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-U>: Adopting Steam Entitlement & ACF for $sel_name ($sel_id)"
                 unlock_game "$sel_id" "$sel_name"
             fi
-            sleep 1.2
         elif [ "$trigger_key" = "ctrl-s" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-                echo "[INFO] Shortcut <Ctrl-S>: Injecting Standalone GBE Fork for $sel_name..."
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Injecting Standalone GBE Fork for $sel_name ($sel_id)"
                 inject_game "$gdir" "$sel_id" --no-sync
             else
-                echo "[INFO] Shortcut <Ctrl-S>: Starting Standalone Background Download for $sel_name ($target_os)..."
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Starting Standalone Background Download for $sel_name ($target_os)"
                 download_game "$sel_id" "$dest_dir" "$sel_name" --inject-only --background --os "$target_os"
             fi
-            sleep 1.2
         elif [ "$trigger_key" = "ctrl-d" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
                 local gbin
@@ -7966,11 +7991,11 @@ search_steam() {
                         break
                     fi
                 else
-                    echo "[ERROR] Binary executable not found in $gdir."
-                    sleep 1.2
+                    log_msg "ERROR" "LAUNCH" "Binary executable not found in $gdir for $sel_name"
+                    tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir"
                 fi
             else
-                echo "[INFO] Shortcut <Ctrl-D>: Starting All-in-One Live Stream Download for $sel_name ($target_os)..."
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-D>: Starting All-in-One Live Stream Download for $sel_name ($target_os)"
                 download_game "$sel_id" "$dest_dir" "$sel_name" --all --foreground --os "$target_os"
             fi
         else
@@ -8010,8 +8035,8 @@ EOF
                                 break
                             fi
                         else
-                            echo "[ERROR] Binary executable not found in $gdir."
-                            sleep 1.2
+                            log_msg "ERROR" "LAUNCH" "Binary executable not found in $gdir for $sel_name"
+                            tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir"
                         fi
                         ;;
                     2)
@@ -8051,15 +8076,12 @@ EOF
                 case "$opt" in
                     1)
                         download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
-                        sleep 1.2
                         ;;
                     2)
                         unlock_game "$sel_id" "$sel_name"
-                        sleep 1.2
                         ;;
                     3)
                         inject_game "$dest_dir" "$sel_id" --no-sync
-                        sleep 1.2
                         ;;
                     *)
                         ;;
@@ -8078,7 +8100,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen log_msg log_info log_warn log_error view_logs_interactive
+export -f preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice log_msg log_info log_warn log_error view_logs_interactive
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

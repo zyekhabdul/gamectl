@@ -24,9 +24,9 @@ A forensic systems audit of the `gamectl` codebase demonstrates fundamental supe
 | **Library I/O Scalability** | 9.5 / 10 | `[ RESOLVED ]` | Single-pass regex parser and XDG runtime disk cache (<1ms response). |
 | **TUI Input Resilience** | 9.8 / 10 | `[ RESOLVED ]` | Clean stdin (: | fzf) and discrete signal handling (130 vs 0/1) for free-text inputs. |
 | **TUI Menu State Guards** | 9.8 / 10 | `[ RESOLVED ]` | 4 fzf menu loops and 1 wrapper config loop guarded against zero-match Enter ejection. |
-| **Full ACF Realization & Adoption** | 9.0 / 10 | `[ IN REMEDIATION ]` | Realize functional ACF via multi-library physical file adoption or interactive auto-download bridge. |
-| **In-Dashboard TUI Ergonomics** | 9.0 / 10 | `[ IN REMEDIATION ]` | Eliminate raw stdout echo & sleep pauses in favor of clean modal dialogs. |
-| **Remote Repository Sync** | 8.5 / 10 | `[ PENDING PUSH ]` | 10 local commits ahead of origin/main awaiting explicit push. |
+| **Full ACF Realization & Adoption** | 9.8 / 10 | `[ RESOLVED ]` | Realize functional ACF via multi-library physical file adoption or interactive auto-download bridge. |
+| **In-Dashboard TUI Ergonomics** | 9.8 / 10 | `[ RESOLVED ]` | Eliminate raw stdout echo & sleep pauses in favor of clean modal dialogs. |
+| **Remote Repository Sync** | 8.5 / 10 | `[ PENDING PUSH ]` | 13 local commits ahead of origin/main awaiting explicit push. |
 
 ---
 
@@ -180,7 +180,7 @@ A forensic systems audit of the `gamectl` codebase demonstrates fundamental supe
 ---
 
 ### DEFECT-09: Ghost ACF Defense Passivity & Missed Cross-Library Physical Adoption
-- **Status**: `[ IN REMEDIATION ]`
+- **Status**: `[ RESOLVED in Action 6.1 ]`
 - **Severity**: `HIGH`
 - **Source Location**: `src/steam/30_downloader.sh` (`unlock_game`, `unlock_interactive`, `sync_steam`), `src/tui/70_dashboard.sh` (`dashboard_menu` Menu [04])
 - **Failure Mechanism**:
@@ -202,7 +202,7 @@ A forensic systems audit of the `gamectl` codebase demonstrates fundamental supe
 ---
 
 ### DEFECT-10: In-TUI Screen Flickering via Raw Stdout `echo` and `sleep` Pauses
-- **Status**: `[ IN REMEDIATION ]`
+- **Status**: `[ RESOLVED in Action 6.2 ]`
 - **Severity**: `MEDIUM`
 - **Source Location**: `src/tui/70_dashboard.sh` (`search_steam`), `src/steam/30_downloader.sh` (`unlock_interactive`)
 - **Failure Mechanism**:
@@ -245,9 +245,9 @@ A forensic systems audit of the `gamectl` codebase demonstrates fundamental supe
   └─ Action 5.2: Universal zero-match Enter decoupling across all fzf menu loops [RESOLVED]
 
 [ Phase 6: Post-WP18 TUI Ergonomics, Ghost ACF Remediation & Remote Synchronization ] - [ ACTIVE ]
-  ├─ Action 6.1: Remediasi Teks & Ghost ACF Logic [PENDING]
-  ├─ Action 6.2: Eliminasi Screen Flickering (echo + sleep) [PENDING]
-  └─ Action 6.3: Eksekusi Git Push (9 Local Commits Synchronized) [PENDING]
+  ├─ Action 6.1: Remediasi Teks & Ghost ACF Logic [RESOLVED]
+  ├─ Action 6.2: Eliminasi Screen Flickering (echo + sleep) [RESOLVED]
+  └─ Action 6.3: Eksekusi Git Push (13 Local Commits Synchronized) [PENDING CONFIRMATION]
 ```
 
 ### 3.1 Granular Technical Execution Breakdown (Action 5.2 / DEFECT-08)
@@ -417,19 +417,19 @@ Spesifikasi teknis penyelesaian 3 butir remediasi utama:
   4. **Penyelarasan Menu [04]**: Ubah label dan preview Menu `[04]` di `dashboard_menu()` menjadi `STEAM ACF ADOPTION & ASSET MANAGER` yang mencerminkan fungsi adopsi file riil dan jembatan unduhan terpadu.
 - **DoD**: Tidak ada dummy ACF kosong (`StateFlags: 4`) tanpa file; game yang sudah ada di `~/Games` otomatis teradopsi ke Steam; game yang belum ada di-bridge langsung ke downloader; verifikasi `./tests/test_cli.sh` lulus Exit 0.
 
-#### Action 6.2: Eliminasi Screen Flickering (echo + sleep)
-- **Target Files**: `src/tui/70_dashboard.sh`, `src/steam/30_downloader.sh`
+#### Action 6.2: Eliminasi Screen Flickering (echo + sleep) [RESOLVED & VERIFIED]
+- **Target Files**: `src/tui/70_dashboard.sh`, `src/steam/30_downloader.sh`, `src/core/10_utils.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Identifikasi dan eliminasi seluruh pemanggilan `echo "[INFO] Shortcut ..."` dan `sleep 1.2` pada event hotkey (`ctrl-a`, `ctrl-u`, `ctrl-s`, `ctrl-d`) serta action palette di `search_steam()`.
-  2. Ganti pesan terminal mentah di `unlock_interactive()` dengan dialog modal konfirmasi / notifikasi berbasis FZF murni yang konsisten dengan estetika Tokyo Night.
+  2. Implementasi modal helper `tui_modal_notice()` berbasis FZF di `src/core/10_utils.sh` dan dialihkan konfirmasi/notifikasi di `unlock_interactive()` ke dialog modal FZF murni tanpa memuntahkan teks mentah ke stdout.
   3. Pastikan transisi antar dialog FZF terjadi seketika tanpa jeda kaku (`sleep`) atau teks terminal yang berkedip di latar belakang.
-- **DoD**: Seluruh interaksi di dalam pencarian dan unlock wizard berjalan 100% mulus di dalam FZF tanpa ada *flickering* atau teks mentah yang bocor.
+- **DoD**: Seluruh interaksi di dalam pencarian dan unlock wizard berjalan 100% mulus di dalam FZF tanpa ada *flickering* atau teks mentah yang bocor; automated test `test_screen_flickering_elimination_contract` lulus Exit 0.
 
-#### Action 6.3: Eksekusi Git Push (10 Local Commits Synchronized)
+#### Action 6.3: Eksekusi Git Push (13 Local Commits Synchronized)
 - **Target**: Git Remote `origin/main` (`git@github.com:zyekhabdul/gamectl.git`)
 - **Runtutan Eksekusi Teknis**:
-  1. Menjalankan verifikasi pra-dorong: `./tests/test_cli.sh` (104/104 PASS) dan `./scripts/build.sh --check` (exit code 0).
-  2. Sesuai aturan `git-push-restriction.md`, dorong 10 commit lokal yang tertahan (`0f06e19` s/d `966128e`) ke remote repository setelah menerima konfirmasi/instruksi eksplisit dari user (`git push origin main`).
+  1. Menjalankan verifikasi pra-dorong: `./tests/test_cli.sh` (106/106 PASS) dan `./scripts/build.sh --check` (exit code 0).
+  2. Sesuai aturan `git-push-restriction.md`, dorong 13 commit lokal yang tertahan (`0f06e19` s/d commit terbaru) ke remote repository setelah menerima konfirmasi/instruksi eksplisit dari user (`git push origin main`).
   3. Pastikan branch lokal `main` dan remote `origin/main` berada pada commit hash yang identik.
 - **DoD**: `git status` menunjukkan `Your branch is up to date with 'origin/main'`, dan seluruh kode perbaikan WP-18 tersinkronisasi penuh ke remote GitHub.
 
