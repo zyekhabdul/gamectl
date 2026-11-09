@@ -1341,6 +1341,7 @@ EOF_LUA
     (
         curl() { return 7; }
         export -f curl
+        export XDG_CACHE_HOME="$t_dir/cache"
         fetch_dlc "$t_dir" "$test_appid" >/dev/null 2>&1
     )
 
@@ -1978,6 +1979,30 @@ test_standalone_download_posix_signals_contract() {
     return 0
 }
 run_test "Standalone Signals (Chunk 2): Native POSIX signal dispatch for standalone downloader" test_standalone_download_posix_signals_contract
+
+test_steam_store_api_caching_contract() {
+    # 1. Verify appdetails and dlcforapp calls in 30_downloader.sh use fetch_cached_json
+    grep -q 'fetch_cached_json .* "steam_basic_\${appid}" 3600' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    grep -q 'fetch_cached_json .* "steam_dlc_\${appid}" 3600' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+
+    # 2. Dynamic cache hit verification
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    local t_cache
+    t_cache=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_cache_test_XXXXXX")
+    local t_file="$t_cache/gamectl/steam_basic_99999.json"
+    mkdir -p "$t_cache/gamectl"
+    echo '{"99999":{"data":{"name":"Cached Test Title"}}}' > "$t_file"
+
+    local hit_out
+    hit_out=$(
+        XDG_CACHE_HOME="$t_cache" fetch_cached_json "https://invalid-url-should-not-be-reached" "steam_basic_99999" 3600 2>/dev/null
+    )
+
+    [ "$hit_out" = '{"99999":{"data":{"name":"Cached Test Title"}}}' ] || { rm -rf "$t_cache"; return 1; }
+    rm -rf "$t_cache"
+    return 0
+}
+run_test "Disk Cache API (Chunk 3): Steam Store metadata disk caching contract" test_steam_store_api_caching_contract
 
 # ------------------------------------------------------------------------------
 # Final Execution Summary

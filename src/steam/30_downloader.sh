@@ -13,6 +13,42 @@ if ! declare -F get_runtime_dir >/dev/null 2>&1; then
     }
 fi
 
+if ! declare -F fetch_cached_json >/dev/null 2>&1; then
+    fetch_cached_json() {
+        local url="${1:-}" cache_key="${2:-}" ttl="${3:-3600}"
+        [ -z "$url" ] || [ -z "$cache_key" ] && return 1
+        local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl"
+        mkdir -p "$cache_dir" 2>/dev/null || true
+        local safe_key
+        safe_key=$(echo "$cache_key" | tr -cd '[:alnum:]_-')
+        local cache_file="$cache_dir/${safe_key}.json"
+        local now
+        now=$(date +%s)
+        if [ -f "$cache_file" ]; then
+            local mtime
+            mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null || echo 0)
+            local age=$(( now - mtime ))
+            if [ "$age" -ge 0 ] && [ "$age" -lt "$ttl" ] && [ -s "$cache_file" ]; then
+                cat "$cache_file"
+                return 0
+            fi
+        fi
+        local tmp_file="${cache_file}.tmp.$$"
+        local fetched
+        fetched=$(curl -s --connect-timeout 2 --max-time 4 "$url" 2>/dev/null || true)
+        if [ -n "$fetched" ] && [ "$fetched" != "null" ]; then
+            if echo "$fetched" | jq . >/dev/null 2>&1; then
+                echo "$fetched" > "$tmp_file" 2>/dev/null && mv -f "$tmp_file" "$cache_file" 2>/dev/null || rm -f "$tmp_file" 2>/dev/null
+                echo "$fetched"
+                return 0
+            fi
+        fi
+        rm -f "$tmp_file" 2>/dev/null || true
+        [ -s "$cache_file" ] && { cat "$cache_file"; return 0; }
+        return 1
+    }
+fi
+
 # Fetch and generate steam_settings/DLC.txt for GBE Fork
 fetch_dlc() {
     local target_dir="$1"
@@ -41,14 +77,14 @@ fetch_dlc() {
     local dlc_file="$target_dir/steam_settings/DLC.txt"
     mkdir -p "$target_dir/steam_settings"
 
-    # Primary: dlcforapp endpoint (names & IDs in single call)
+    # Primary: dlcforapp endpoint (names & IDs in single call, disk-cached 3600s)
     local dlc_data=""
-    dlc_data=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/dlcforapp/?appid=${appid}" | jq -r '.dlc[]? | "\(.id)=\(.name)"' 2>/dev/null || true)
+    dlc_data=$(fetch_cached_json "https://store.steampowered.com/api/dlcforapp/?appid=${appid}" "steam_dlc_${appid}" 3600 2>/dev/null | jq -r '.dlc[]? | "\(.id)=\(.name)"' 2>/dev/null || true)
 
-    # Fallback: appdetails basic,dlc
+    # Fallback: appdetails basic,dlc (disk-cached 3600s)
     if [ -z "$dlc_data" ]; then
         local dlc_ids
-        dlc_ids=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic,dlc" | jq -r ".\"${appid}\".data.dlc[]?" 2>/dev/null || true)
+        dlc_ids=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic,dlc" "steam_basic_dlc_${appid}" 3600 2>/dev/null | jq -r ".\"${appid}\".data.dlc[]?" 2>/dev/null || true)
         if [ -n "$dlc_ids" ]; then
             dlc_data=""
             while read -r did; do
@@ -975,7 +1011,7 @@ download_game() {
     done
 
     if [ -z "$title" ]; then
-        title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" | jq -r "."${appid}".data.name // empty" 2>/dev/null || true)
+        title=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" "steam_basic_${appid}" 3600 2>/dev/null | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
         [ -z "$title" ] && title="AppID_${appid}"
     fi
 
@@ -1545,9 +1581,10 @@ sync_steam() {
 
     echo "[INFO] Synchronizing Steam Client & SLSsteam for: $title ($appid)..."
 
-    # 1. Fetch DLC mapping via Steam API
+    # 1. Fetch DLC mapping via Steam API (disk-cached 3600s)
     local dlc_json
-    dlc_json=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/dlcforapp/?appid=${appid}" 2>/dev/null || echo "{}")
+    dlc_json=$(fetch_cached_json "https://store.steampowered.com/api/dlcforapp/?appid=${appid}" "steam_dlc_${appid}" 3600 2>/dev/null || echo "{}")
+    [ -z "$dlc_json" ] && dlc_json="{}"
 
     # 2. Update ~/.config/SLSsteam/config.yaml using ruamel.yaml
     local sls_cfg="$(get_sls_root 2>/dev/null || echo "$HOME/.config/SLSsteam")/config.yaml"
@@ -1741,7 +1778,7 @@ unlock_game() {
 
     if [ -z "$title" ]; then
         echo "[INFO] Fetching game title for AppID $appid from Steam Store API..."
-        title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
+        title=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" "steam_basic_${appid}" 3600 2>/dev/null | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
         [ -z "$title" ] && title="AppID_${appid}"
     fi
 
@@ -1796,7 +1833,7 @@ unlock_interactive() {
     if [[ "$u_input" =~ ^[0-9]+$ ]]; then
         u_appid="$u_input"
         log_msg "INFO" "ADOPT" "Fetching title from Steam Store API for AppID $u_appid..."
-        u_title=$(curl -s --connect-timeout 4 "https://store.steampowered.com/api/appdetails?appids=${u_appid}&filters=basic" | jq -r ".\"${u_appid}\".data.name // empty" 2>/dev/null || true)
+        u_title=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${u_appid}&filters=basic" "steam_basic_${u_appid}" 3600 2>/dev/null | jq -r ".\"${u_appid}\".data.name // empty" 2>/dev/null || true)
         [ -z "$u_title" ] && u_title="AppID_${u_appid}"
     else
         log_msg "INFO" "ADOPT" "Searching Steam Store API for title: '$u_input'..."

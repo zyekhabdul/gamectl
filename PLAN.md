@@ -51,7 +51,7 @@ Memperkuat ketahanan runtime proses, mengeliminasi query rate-limit jaringan ke 
 - **Definition of Done (DoD)**:
   - Unduhan standalone merespons jeda dan lanjut secara instan via sinyal sistem operasi tanpa bergantung pada Steam Client IPC.
 
-### [ ] Chunk 3: Zero-Latency & Anti-Rate-Limit: Steam Store API Disk Caching (`fetch_cached_json`)
+### [x] Chunk 3: Zero-Latency & Anti-Rate-Limit: Steam Store API Disk Caching (`fetch_cached_json`) [VERIFIED]
 - **Target Files**: `src/steam/30_downloader.sh` (`download_game()`, `sync_steam()`, `unlock_interactive()`, `fetch_dlc()`)
 - **Runtutan Eksekusi Teknis**:
   1. Di `download_game()` (L978):
