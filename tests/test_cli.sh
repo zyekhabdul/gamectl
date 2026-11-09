@@ -1932,6 +1932,36 @@ test_dual_input_acf_adoption_contract() {
 }
 run_test "ACF Adoption Dual-Input: Resolve by Game Title or numeric AppID" test_dual_input_acf_adoption_contract
 
+test_ghost_download_self_healing_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+
+    # 1. Verify clean_stale_locks inspects and purges dead PID depot_dl_* staging directories
+    grep -q 'for st_dir in "$run_dir"/depot_dl_\*;' "$REPO_ROOT/src/core/10_utils.sh" || return 1
+    grep -q 'kill -0 "\$st_pid"' "$REPO_ROOT/src/core/10_utils.sh" || return 1
+
+    # 2. Verify list_downloads_interactive checks process liveness before displaying
+    grep -q 'kill -0 "\$st_pid"' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    grep -q 'rm -rf "\$st_dir"' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+
+    # 3. Dynamic test: create a dummy staging directory with a dead PID (99999999)
+    local test_run_dir
+    test_run_dir="$(get_runtime_dir)"
+    local dead_dir="$test_run_dir/depot_dl_999999_99999999"
+    mkdir -p "$dead_dir"
+    [ -d "$dead_dir" ] || return 1
+
+    # Execute clean_stale_locks and verify dead_dir is purged
+    clean_stale_locks
+    if [ -d "$dead_dir" ]; then
+        rm -rf "$dead_dir" 2>/dev/null || true
+        return 1
+    fi
+
+    return 0
+}
+run_test "Ghost Download Healing (Chunk 1): Self-healing purge of dead PID staging directories" test_ghost_download_self_healing_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

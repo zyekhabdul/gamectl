@@ -282,13 +282,26 @@ get_remote_host() {
     echo "$host"
 }
 
-# Pre-flight cleanup of orphaned sockets and locks
+# Pre-flight cleanup of orphaned sockets, locks, and stale download staging directories
 clean_stale_locks() {
     local run_dir
     run_dir="$(get_runtime_dir)"
     rm -f /tmp/steam_chrome_shmem_* /tmp/steam_chrome_overlay_* 2>/dev/null || true
     rm -f "$run_dir"/steam_chrome_* 2>/dev/null || true
     rm -f "$HOME/.config/SLSsteam/cache/.picsbuffer.lock" 2>/dev/null || true
+
+    # Self-healing cleanup of orphaned standalone download staging directories
+    local st_dir
+    shopt -s nullglob
+    for st_dir in "$run_dir"/depot_dl_*; do
+        if [ -d "$st_dir" ]; then
+            local st_pid="${st_dir##*_}"
+            if ! [[ "$st_pid" =~ ^[0-9]+$ ]] || ! kill -0 "$st_pid" 2>/dev/null; then
+                rm -rf "$st_dir" 2>/dev/null || true
+            fi
+        fi
+    done
+    shopt -u nullglob
 }
 
 # Invalidate ephemeral library scanner cache
@@ -3479,11 +3492,20 @@ list_downloads_interactive() {
         shopt -s nullglob
         for st_dir in "$run_dir"/depot_dl_*; do
             [ -d "$st_dir" ] || continue
-            local st_appid
-            st_appid=$(basename "$st_dir" | sed -E 's/depot_dl_([0-9]+)_.*/\1/')
-            [ -z "$st_appid" ] && continue
+            local base_st="${st_dir##*/}"
+            local st_pid="${base_st##*_}"
+            local rest_st="${base_st#depot_dl_}"
+            local st_appid="${rest_st%_*}"
+            [ -z "$st_appid" ] || [ -z "$st_pid" ] && continue
+
+            # Self-healing: purge orphaned staging dir if downloader process is dead
+            if ! [[ "$st_pid" =~ ^[0-9]+$ ]] || ! kill -0 "$st_pid" 2>/dev/null; then
+                rm -rf "$st_dir" 2>/dev/null || true
+                continue
+            fi
+
             local st_ui="${UI_GREEN}[STANDALONE ACTIVE]${UI_RST}"
-            local st_detail="Native CDN Download in progress"
+            local st_detail="Native CDN Download in progress (PID: $st_pid)"
             entries+="${st_appid}\tStandalone\t${st_ui}\t100%\t${st_detail}\t${st_dir}\n"
             total_items=$((total_items + 1))
         done
