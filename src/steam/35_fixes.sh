@@ -362,7 +362,7 @@ except Exception:
     fi
 
     # 7. Zip-Slip Security Audit
-    if unzip -l "$tmp_zip" | awk '{print $4}' | grep -E '(^/|^\.\./|/\.\./|^\.\.\\|\\\.\.\\)' >/dev/null 2>&1; then
+    if unzip -Z1 "$tmp_zip" 2>/dev/null | grep -E '(^/|^\.\./|/\.\./|^\.\.\\|\\\.\.\\)' >/dev/null 2>&1; then
         rm -f "$tmp_zip"
         echo "[ERROR] Security violation: Zip slip path traversal detected in archive payload!" >&2
         return 1
@@ -534,7 +534,7 @@ restart_steam_client() {
 
     # Wait up to 10 seconds for clean exit
     local terminated=false
-    for _ in $(seq 1 50); do
+    for _ in {1..50}; do
         if ! pgrep -x steam >/dev/null 2>&1; then
             terminated=true
             break

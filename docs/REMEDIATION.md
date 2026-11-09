@@ -1,124 +1,76 @@
-# SYSTEM REMEDIATION REPORT: STANDARDIZATION & MONKEY-PATCH ELIMINATION
+# REMEDIATION WORK PACKET: STANDARDIZATION & MONKEY-PATCH ELIMINATION
 
-- **Target Workspace**: `/home/aomiqaza/Projects/gamectl`
-- **Module Boundary**: `src/core/`, `src/runners/`, `src/steam/`, `src/tui/`, `src/main.sh`
-- **Verification Status**: `[ VERIFIED ]` (110/110 test assertions pass with Exit Code 0)
-- **Standard**: Linux System Integrity, Web/POSIX Standards, Pragmatic DRY, Ponytail / YAGNI Minimalism
-
----
-
-## 1. EXECUTIVE SUMMARY
-
-Audit forensik mendalam mendeteksi 5 area kode rentan (*monkey-patch*, evaluasi operator cacat, duplikasi regex, dan pembersihan artefak usang) pada basis kode shell `gamectl`. Seluruh temuan telah direfaktor secara bedah (*surgical refactoring*) menjadi helper kanonikal terstandarisasi yang mematuhi standar POSIX/GNU, menjaga keamanan subshell, serta mempertahankan isolasi direktori pengguna.
+**Track**: Maintenance / Refactoring & Zero-Bloat  
+**Status**: COMPLETED [VERIFIED]  
+**Max Chunks**: 5 Chunks (Active Packet <= 10)  
+**Target Files**: `src/steam/35_fixes.sh`, `src/runners/40_wrappers.sh`, `src/steam/30_downloader.sh`, `bin/gamectl`
 
 ---
 
-## 2. DETAIL TEMUAN & REMEDIASI
-
-### DEFECT 01: Evaluasi Operator Precedence `find` pada Runner Resolution
-- **Lokasi**: [`src/runners/40_wrappers.sh`](file:///home/aomiqaza/Projects/gamectl/src/runners/40_wrappers.sh#L212)
-- **Root Cause**:
-  Ekspresi `find "$cdir" -type f -name "wine64" -o -name "wine"` dievaluasi oleh mesin `find` sesuai hirarki operator POSIX:
-  `(-type f AND -name "wine64") OR (-name "wine")`
-  Jika di dalam direktori `compatibilitytools.d` terdapat subdirektori bernama `wine` (seperti struktur Wine `files/lib/wine/` atau `include/wine/`), folder tersebut lolos evaluasi. Karena direktori berizin `0755` (`+x`), tes lanjutan `[ -x "$w" ]` mengembalikan `true`. Fungsi `find_runner` berpotensi mengembalikan direktori, bukan binary executable.
-- **Remediasi**:
-  Menyematkan pengelompokan kurung (*parentheses grouping*):
-  ```bash
-  # Sebelum
-  w=$(find "$cdir" -type f -name "wine64" -o -name "wine" 2>/dev/null | head -n 1)
-
-  # Sesudah
-  w=$(find "$cdir" -type f \( -name "wine64" -o -name "wine" \) 2>/dev/null | head -n 1)
-  ```
+## 1. Objective & Technical Scope
+Mengeliminasi seluruh sisa kode *monkey-patch*, proses fork non-standar, duplikasi konfigurasi, dan pemotongan nama file berspasi:
+1. **Zip-Slip Hardening**: Mengganti pemotongan parsing tabel `unzip -l | awk '{print $4}'` dengan kanonikal `unzip -Z1` untuk mencegah kegagalan audit pada arsip dengan nama file berspasi.
+2. **Config Parsing Consolidation**: Menyatukan loop parsing `wrappers` yang terduplikasi di `build_wrapper_command()`, mengeliminasi subshell `echo | tr` dan `echo | sed` menjadi native Bash parameter expansion (zero-fork).
+3. **Directory Non-Empty Probing**: Mengganti `ls -A` yang mem-buffer seluruh nama file ke memori Bash dengan short-circuit probing (`find ... | head -n 1`) pada validasi folder game fisik.
+4. **Subshell Fork Elimination**: Mengganti eksekusi binary eksternal `$(seq 1 50)` dengan native Bash brace expansion `{1..50}` pada loop polling shutdown Steam Client.
+5. **Deterministic Verification**: Memastikan bundle `bin/gamectl` terkompilasi ulang dan 110/110 pengujian regresi lulus dengan Exit Code 0.
 
 ---
 
-### DEFECT 02: Duplikasi Ad-Hoc ANSI Escape Stripping (Anti-DRY & GNU Extension Fragility)
-- **Lokasi**:
-  - `src/steam/30_downloader.sh` (baris 383, 590, 872, 1182, 1443)
-  - `src/runners/50_launcher.sh` (baris 670, 671)
-  - `src/tui/70_dashboard.sh` (baris 4, 5, 6)
-- **Root Cause**:
-  Pembersihan format ANSI escape sequence di-copy-paste 10+ kali dengan regex yang bervariasi (`\x1B` hex escape GNU extension, flag `-r` non-POSIX, atau hanya menangkap format warna `m`).
-- **Remediasi**:
-  Mengabstraksi ke fungsi kanonikal `strip_ansi()` di [`src/core/10_utils.sh`](file:///home/aomiqaza/Projects/gamectl/src/core/10_utils.sh) menggunakan POSIX-compliant ANSI escape matcher `\033\[[0-9;]*[a-zA-Z]`, diekspor ke subshell, dan dilengkapi fallback guard pada modul-modul independen:
-  ```bash
-  strip_ansi() {
-      printf "%s" "${1:-}" | sed -E $'s/\033\\[[0-9;]*[a-zA-Z]//g'
-  }
-  ```
+## 2. Granular Technical Execution Plan (Todolist)
 
----
+### [x] Chunk 1: Standardize Zip-Slip Security Inspection via Canonical `unzip -Z1`
+- **Target File**: `src/steam/35_fixes.sh` (L365)
+- **Runtutan Eksekusi Teknis**:
+  1. Buka `src/steam/35_fixes.sh` pada fungsi `install_game_fix()`.
+  2. Ganti `unzip -l "$tmp_zip" | awk '{print $4}' | grep -E ...` dengan `unzip -Z1 "$tmp_zip" 2>/dev/null | grep -E ...`.
+  3. Verifikasi regex path traversal tetap menangkap sequence traversal (`^/`, `^\.\./`, `/\.\./`, `^\.\.\\`, `\\\.\.\\`).
+- **Definition of Done (DoD)**:
+  - File arsip ZIP dengan nama berspasi (`mods/custom fix.dll`) diaudit utuh tanpa pemotongan kata.
+  - Path traversal berbahaya tetap tertolak deterministik dengan exit code 1.
 
-### DEFECT 03: Fragmentasi Resolusi Direktori Runtime (`XDG_RUNTIME_DIR`)
-- **Lokasi**:
-  - `src/core/10_utils.sh`
-  - `src/steam/20_discovery.sh`
-  - `src/steam/30_downloader.sh`
-  - `src/runners/50_launcher.sh`
-  - `src/tui/70_dashboard.sh`
-- **Root Cause**:
-  Penetapan path runtime menggunakan variasi ad-hoc:
-  `local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"` beresiko menghasilkan `/tmp/gamectl-` tanpa UID jika `$UID` tidak terekspor dalam subshell non-interactive atau `/bin/sh`.
-- **Remediasi**:
-  Standardisasi melalui fungsi kanonikal SSoT `get_runtime_dir()` di [`src/core/10_utils.sh`](file:///home/aomiqaza/Projects/gamectl/src/core/10_utils.sh) dengan penguncian permission `0700` dan fallback `id -u 2>/dev/null || echo 1000`:
-  ```bash
-  get_runtime_dir() {
-      local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
-      local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
-      mkdir -p -m 700 "$run_dir" 2>/dev/null || true
-      echo "$run_dir"
-  }
-  ```
-  Seluruh modul diarahkan memanggil `$(get_runtime_dir)`.
+### [x] Chunk 2: Eliminate Duplicate Config Parsing in `build_wrapper_command` via Array Loop & Native Expansion
+- **Target File**: `src/runners/40_wrappers.sh` (L1015-L1053)
+- **Runtutan Eksekusi Teknis**:
+  1. Di `build_wrapper_command()`, gabungkan blok parsing `$HOME/.config/gamectl/wrappers` dan `$gdir/.wrappers` ke dalam satu perulangan: `for w_cfg in "$HOME/.config/gamectl/wrappers" "$gdir/.wrappers"; do`.
+  2. Hapus proses fork `echo "$k" | tr -d '[:space:]'` dan `echo "$v" | sed ...`.
+  3. Terapkan pembersihan native parameter expansion:
+     - `k="${k//[[:space:]]/}"`
+     - `v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"`
+     - `v="${v#\"}"; v="${v%\"}"`
+  4. Pertahankan precedence: nilai di `$gdir/.wrappers` menimpa konfigurasi global.
+- **Definition of Done (DoD)**:
+  - Duplikasi 16 baris kode terhapus (-20 baris).
+  - 0 subshell fork pada setiap baris konfigurasi yang dibaca.
+  - Konfigurasi wrapper per-game tetap berfungsi 100%.
 
----
+### [x] Chunk 3: Short-Circuit Directory Non-Empty Check (Eliminate `ls -A` Memory Buffer)
+- **Target File**: `src/steam/30_downloader.sh` (L1581, L1583, L1595, L1602, L1775, L1782)
+- **Runtutan Eksekusi Teknis**:
+  1. Di `sync_steam()` dan `unlock_interactive()`, temukan seluruh pemanggilan `[ -n "$(ls -A "$dir" 2>/dev/null)" ]`.
+  2. Ubah menjadi pemeriksaan short-circuit yang berhenti pada file pertama:
+     `[ -n "$(find "$dir" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]`.
+  3. Pastikan penanganan path berspasi tetap aman.
+- **Definition of Done (DoD)**:
+  - Tidak ada alokasi buffer memori untuk ribuan nama file di memori shell.
+  - Logika Ghost ACF Defense tetap aktif: folder kosong tidak akan dianggap sebagai instalasi valid.
 
-### DEFECT 04: Space-Splitting Kerentanan Remote Shell pada `sync_save_remote`
-- **Lokasi**: [`src/runners/50_launcher.sh`](file:///home/aomiqaza/Projects/gamectl/src/runners/50_launcher.sh#L649-L650)
-- **Root Cause**:
-  Perintah `ssh "$rhost" "mkdir -p ~/$rel_path"` dan `rsync ... "$rhost:~/$rel_path/saves/"` mengekspansi `$rel_path` tanpa tanda kutip ganda internal. Untuk judul game yang memuat spasi (contoh: `Monster Hunter World` atau `Cyberpunk 2077`), subshell SSH remote memecahnya menjadi argumen terpisah dan membuat beberapa folder acak.
-- **Remediasi**:
-  Menyematkan escaped quotes `\"~/$rel_path\"` pada SSH dan Rsync target:
-  ```bash
-  # Sebelum
-  ssh "$rhost" "mkdir -p ~/$rel_path"
-  rsync -avzP --exclude="*.tmp" "$sdir/" "$rhost:~/$rel_path/saves/"
+### [x] Chunk 4: Native Bash Brace Expansion for Steam Shutdown Polling Loop (`{1..50}`)
+- **Target File**: `src/steam/35_fixes.sh` (L537)
+- **Runtutan Eksekusi Teknis**:
+  1. Di `restart_steam_client()`, ganti `for _ in $(seq 1 50); do` menjadi `for _ in {1..50}; do`.
+  2. Verifikasi waktu tunggu polling tetap 50 iterasi x 0.2s = 10 detik.
+- **Definition of Done (DoD)**:
+  - 0 eksekusi process fork `/usr/bin/seq`.
+  - Polling graceful shutdown Steam Client tetap berjalan normal.
 
-  # Sesudah
-  ssh "$rhost" "mkdir -p \"~/$rel_path\""
-  rsync -avzP --exclude="*.tmp" "$sdir/" "$rhost:\"~/$rel_path/saves/\""
-  ```
-
----
-
-### DEFECT 05: Sisa Pembersihan Artefak Usang `SteaMidra-*`
-- **Lokasi**: [`src/core/10_utils.sh`](file:///home/aomiqaza/Projects/gamectl/src/core/10_utils.sh#L231-L232)
-- **Root Cause**:
-  `SteaMidra` adalah aplikasi Electron eksternal lama yang sudah tidak lagi digunakan. Pola `rm -f /tmp/SteaMidra-*` dan `"$run_dir"/SteaMidra-*` pada `clean_stale_locks()` merupakan sisa prototipe awal yang tidak relevan.
-- **Remediasi**:
-  Menghapus pembersihan artefak `SteaMidra`, menyisakan hanya pembersihan socket shmem dan lockfile resmi Steam/SLSsteam/gamectl:
-  ```bash
-  clean_stale_locks() {
-      local run_dir
-      run_dir="$(get_runtime_dir)"
-      rm -f /tmp/steam_chrome_shmem_* /tmp/steam_chrome_overlay_* 2>/dev/null || true
-      rm -f "$run_dir"/steam_chrome_* 2>/dev/null || true
-      rm -f "$HOME/.config/SLSsteam/cache/.picsbuffer.lock" 2>/dev/null || true
-  }
-  ```
-
----
-
-## 3. MATRIKS VERIFIKASI EMPIRIS
-
-| Layer Pengujian | Perintah Eksekusi | Hasil | Status |
-| :--- | :--- | :--- | :--- |
-| **Static Lint** | `make lint` (`bash -n`) | 0 syntax errors across all modules & bundle | `[ PASS ]` (Exit Code 0) |
-| **Bundle Compiler** | `make build` (`./scripts/build.sh`) | Standalone bundle `bin/gamectl` tersinkronisasi (8,754 baris) | `[ PASS ]` (Exit Code 0) |
-| **Suite 1: Build & Sync** | `./tests/test_cli.sh` | 2/2 tests pass | `[ PASS ]` (Exit Code 0) |
-| **Suite 2: CLI Core Contracts** | `./tests/test_cli.sh` | 7/7 tests pass | `[ PASS ]` (Exit Code 0) |
-| **Suite 3: Library & Diagnostics**| `./tests/test_cli.sh` | 3/3 tests pass | `[ PASS ]` (Exit Code 0) |
-| **Suite 4: Security & Invariants** | `./tests/test_cli.sh` | 5/5 tests pass | `[ PASS ]` (Exit Code 0) |
-| **Suite 5: Global Features** | `./tests/test_cli.sh` | 93/93 tests pass | `[ PASS ]` (Exit Code 0) |
-| **Total Test Execution** | `make test` | **110 / 110 passed**, 0 failed | `[ VERIFIED ]` (Exit Code 0) |
+### [x] Chunk 5: Rebuild Standalone Bundle & Regression Verification Harness
+- **Target Files**: `bin/gamectl`, `tests/test_cli.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Jalankan `make lint` untuk memvalidasi kepatuhan sintaks seluruh modul bash.
+  2. Jalankan `make build` untuk mengompilasi bundler modular ke `bin/gamectl`.
+  3. Jalankan `make test` untuk mengeksekusi seluruh 110 skenario pengujian regresi.
+- **Definition of Done (DoD)**:
+  - `make lint` mengembalikan Exit Code 0.
+  - `make build` mensinkronkan `bin/gamectl` dengan modular sources.
+  - `make test` mencatat 110/110 test assertions lulus dengan Exit Code 0.

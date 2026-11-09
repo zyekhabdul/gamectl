@@ -1578,9 +1578,9 @@ except Exception as e:
 
     local resolved_dir="$game_dir"
     if [ -z "$resolved_dir" ]; then
-        if [ -d "$steam_apps/common/$safe_title" ] && [ -n "$(ls -A "$steam_apps/common/$safe_title" 2>/dev/null)" ]; then
+        if [ -d "$steam_apps/common/$safe_title" ] && [ -n "$(find "$steam_apps/common/$safe_title" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
             resolved_dir="$steam_apps/common/$safe_title"
-        elif [ -d "$steam_apps/common/$title" ] && [ -n "$(ls -A "$steam_apps/common/$title" 2>/dev/null)" ]; then
+        elif [ -d "$steam_apps/common/$title" ] && [ -n "$(find "$steam_apps/common/$title" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
             resolved_dir="$steam_apps/common/$title"
         fi
     fi
@@ -1592,14 +1592,14 @@ except Exception as e:
         while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
             sc_id="${sc_id//[[:space:]]/}"
             sc_dir="${sc_dir//$'\r'/}"
-            if [ -n "$sc_id" ] && [ "$sc_id" = "$appid" ] && [ -d "$sc_dir" ] && [ -n "$(ls -A "$sc_dir" 2>/dev/null)" ]; then
+            if [ -n "$sc_id" ] && [ "$sc_id" = "$appid" ] && [ -d "$sc_dir" ] && [ -n "$(find "$sc_dir" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
                 resolved_dir="$sc_dir"
                 break
             fi
             local cur_clean="${sc_name,,}"
             cur_clean="${cur_clean#"${cur_clean%%[![:space:]]*}"}"
             cur_clean="${cur_clean%"${cur_clean##*[![:space:]]}"}"
-            if [ -n "$cur_clean" ] && [ "$cur_clean" = "$clean_target" ] && [ -d "$sc_dir" ] && [ -n "$(ls -A "$sc_dir" 2>/dev/null)" ]; then
+            if [ -n "$cur_clean" ] && [ "$cur_clean" = "$clean_target" ] && [ -d "$sc_dir" ] && [ -n "$(find "$sc_dir" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
                 resolved_dir="$sc_dir"
                 break
             fi
@@ -1772,14 +1772,14 @@ unlock_interactive() {
     while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
         sc_id="${sc_id//[[:space:]]/}"
         sc_dir="${sc_dir//$'\r'/}"
-        if [ -n "$sc_id" ] && [ "$sc_id" = "$u_appid" ] && [ -d "$sc_dir" ] && [ -n "$(ls -A "$sc_dir" 2>/dev/null)" ]; then
+        if [ -n "$sc_id" ] && [ "$sc_id" = "$u_appid" ] && [ -d "$sc_dir" ] && [ -n "$(find "$sc_dir" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
             existing_dir="$sc_dir"
             break
         fi
         local cur_clean="${sc_name,,}"
         cur_clean="${cur_clean#"${cur_clean%%[![:space:]]*}"}"
         cur_clean="${cur_clean%"${cur_clean##*[![:space:]]}"}"
-        if [ -n "$cur_clean" ] && [ "$cur_clean" = "$clean_target" ] && [ -d "$sc_dir" ] && [ -n "$(ls -A "$sc_dir" 2>/dev/null)" ]; then
+        if [ -n "$cur_clean" ] && [ "$cur_clean" = "$clean_target" ] && [ -d "$sc_dir" ] && [ -n "$(find "$sc_dir" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
             existing_dir="$sc_dir"
             break
         fi

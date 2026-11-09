@@ -1011,45 +1011,33 @@ build_wrapper_command() {
     local gscope_args
     gscope_args=$(get_default_gamescope_args)
 
-    # 2. Global configuration (~/.config/gamectl/wrappers)
-    if [ -f "$HOME/.config/gamectl/wrappers" ]; then
-        while IFS='=' read -r k v || [ -n "$k" ]; do
-            k=$(echo "$k" | tr -d '[:space:]')
-            v=$(echo "$v" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
-            [[ "$k" =~ ^# ]] && continue
-            case "$k" in
-                gamemode) use_gm="$v" ;;
-                hud|mangohud) use_hud="$v" ;;
-                gamescope) use_scope="$v" ;;
-                fsr) use_fsr="$v" ;;
-                glthread|mesa_glthread) use_glthread="$v" ;;
-                scope|systemd_scope) use_systemd_scope="$v" ;;
-                prime|dgpu) use_prime="$v" ;;
-                sandbox) use_sandbox="$v" ;;
-                gamescope_args) gscope_args="$v" ;;
-            esac
-        done < "$HOME/.config/gamectl/wrappers"
-    fi
-
-    # 3. Per-game override ($gdir/.wrappers)
-    if [ -n "$gdir" ] && [ -f "$gdir/.wrappers" ]; then
-        while IFS='=' read -r k v || [ -n "$k" ]; do
-            k=$(echo "$k" | tr -d '[:space:]')
-            v=$(echo "$v" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
-            [[ "$k" =~ ^# ]] && continue
-            case "$k" in
-                gamemode) use_gm="$v" ;;
-                hud|mangohud) use_hud="$v" ;;
-                gamescope) use_scope="$v" ;;
-                fsr) use_fsr="$v" ;;
-                glthread|mesa_glthread) use_glthread="$v" ;;
-                scope|systemd_scope) use_systemd_scope="$v" ;;
-                prime|dgpu) use_prime="$v" ;;
-                sandbox) use_sandbox="$v" ;;
-                gamescope_args) gscope_args="$v" ;;
-            esac
-        done < "$gdir/.wrappers"
-    fi
+    # 2. Config file hierarchy: Global (~/.config/gamectl/wrappers) -> Per-game override ($gdir/.wrappers)
+    local w_cfgs=("$HOME/.config/gamectl/wrappers")
+    [ -n "$gdir" ] && w_cfgs+=("$gdir/.wrappers")
+    local w_cfg
+    for w_cfg in "${w_cfgs[@]}"; do
+        if [ -f "$w_cfg" ]; then
+            while IFS='=' read -r k v || [ -n "$k" ]; do
+                k="${k//[[:space:]]/}"
+                v="${v#"${v%%[![:space:]]*}"}"
+                v="${v%"${v##*[![:space:]]}"}"
+                v="${v#\"}"
+                v="${v%\"}"
+                [[ "$k" =~ ^# ]] && continue
+                case "$k" in
+                    gamemode) use_gm="$v" ;;
+                    hud|mangohud) use_hud="$v" ;;
+                    gamescope) use_scope="$v" ;;
+                    fsr) use_fsr="$v" ;;
+                    glthread|mesa_glthread) use_glthread="$v" ;;
+                    scope|systemd_scope) use_systemd_scope="$v" ;;
+                    prime|dgpu) use_prime="$v" ;;
+                    sandbox) use_sandbox="$v" ;;
+                    gamescope_args) gscope_args="$v" ;;
+                esac
+            done < "$w_cfg"
+        fi
+    done
 
     # 4. Environment variable overrides
     [ -n "${GAMECTL_GAMEMODE:-}" ] && use_gm="$GAMECTL_GAMEMODE"

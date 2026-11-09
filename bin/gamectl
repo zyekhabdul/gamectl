@@ -3722,9 +3722,9 @@ except Exception as e:
 
     local resolved_dir="$game_dir"
     if [ -z "$resolved_dir" ]; then
-        if [ -d "$steam_apps/common/$safe_title" ] && [ -n "$(ls -A "$steam_apps/common/$safe_title" 2>/dev/null)" ]; then
+        if [ -d "$steam_apps/common/$safe_title" ] && [ -n "$(find "$steam_apps/common/$safe_title" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
             resolved_dir="$steam_apps/common/$safe_title"
-        elif [ -d "$steam_apps/common/$title" ] && [ -n "$(ls -A "$steam_apps/common/$title" 2>/dev/null)" ]; then
+        elif [ -d "$steam_apps/common/$title" ] && [ -n "$(find "$steam_apps/common/$title" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
             resolved_dir="$steam_apps/common/$title"
         fi
     fi
@@ -3736,14 +3736,14 @@ except Exception as e:
         while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
             sc_id="${sc_id//[[:space:]]/}"
             sc_dir="${sc_dir//$'\r'/}"
-            if [ -n "$sc_id" ] && [ "$sc_id" = "$appid" ] && [ -d "$sc_dir" ] && [ -n "$(ls -A "$sc_dir" 2>/dev/null)" ]; then
+            if [ -n "$sc_id" ] && [ "$sc_id" = "$appid" ] && [ -d "$sc_dir" ] && [ -n "$(find "$sc_dir" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
                 resolved_dir="$sc_dir"
                 break
             fi
             local cur_clean="${sc_name,,}"
             cur_clean="${cur_clean#"${cur_clean%%[![:space:]]*}"}"
             cur_clean="${cur_clean%"${cur_clean##*[![:space:]]}"}"
-            if [ -n "$cur_clean" ] && [ "$cur_clean" = "$clean_target" ] && [ -d "$sc_dir" ] && [ -n "$(ls -A "$sc_dir" 2>/dev/null)" ]; then
+            if [ -n "$cur_clean" ] && [ "$cur_clean" = "$clean_target" ] && [ -d "$sc_dir" ] && [ -n "$(find "$sc_dir" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
                 resolved_dir="$sc_dir"
                 break
             fi
@@ -3916,14 +3916,14 @@ unlock_interactive() {
     while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
         sc_id="${sc_id//[[:space:]]/}"
         sc_dir="${sc_dir//$'\r'/}"
-        if [ -n "$sc_id" ] && [ "$sc_id" = "$u_appid" ] && [ -d "$sc_dir" ] && [ -n "$(ls -A "$sc_dir" 2>/dev/null)" ]; then
+        if [ -n "$sc_id" ] && [ "$sc_id" = "$u_appid" ] && [ -d "$sc_dir" ] && [ -n "$(find "$sc_dir" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
             existing_dir="$sc_dir"
             break
         fi
         local cur_clean="${sc_name,,}"
         cur_clean="${cur_clean#"${cur_clean%%[![:space:]]*}"}"
         cur_clean="${cur_clean%"${cur_clean##*[![:space:]]}"}"
-        if [ -n "$cur_clean" ] && [ "$cur_clean" = "$clean_target" ] && [ -d "$sc_dir" ] && [ -n "$(ls -A "$sc_dir" 2>/dev/null)" ]; then
+        if [ -n "$cur_clean" ] && [ "$cur_clean" = "$clean_target" ] && [ -d "$sc_dir" ] && [ -n "$(find "$sc_dir" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
             existing_dir="$sc_dir"
             break
         fi
@@ -4355,7 +4355,7 @@ except Exception:
     fi
 
     # 7. Zip-Slip Security Audit
-    if unzip -l "$tmp_zip" | awk '{print $4}' | grep -E '(^/|^\.\./|/\.\./|^\.\.\\|\\\.\.\\)' >/dev/null 2>&1; then
+    if unzip -Z1 "$tmp_zip" 2>/dev/null | grep -E '(^/|^\.\./|/\.\./|^\.\.\\|\\\.\.\\)' >/dev/null 2>&1; then
         rm -f "$tmp_zip"
         echo "[ERROR] Security violation: Zip slip path traversal detected in archive payload!" >&2
         return 1
@@ -4527,7 +4527,7 @@ restart_steam_client() {
 
     # Wait up to 10 seconds for clean exit
     local terminated=false
-    for _ in $(seq 1 50); do
+    for _ in {1..50}; do
         if ! pgrep -x steam >/dev/null 2>&1; then
             terminated=true
             break
@@ -5571,45 +5571,33 @@ build_wrapper_command() {
     local gscope_args
     gscope_args=$(get_default_gamescope_args)
 
-    # 2. Global configuration (~/.config/gamectl/wrappers)
-    if [ -f "$HOME/.config/gamectl/wrappers" ]; then
-        while IFS='=' read -r k v || [ -n "$k" ]; do
-            k=$(echo "$k" | tr -d '[:space:]')
-            v=$(echo "$v" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
-            [[ "$k" =~ ^# ]] && continue
-            case "$k" in
-                gamemode) use_gm="$v" ;;
-                hud|mangohud) use_hud="$v" ;;
-                gamescope) use_scope="$v" ;;
-                fsr) use_fsr="$v" ;;
-                glthread|mesa_glthread) use_glthread="$v" ;;
-                scope|systemd_scope) use_systemd_scope="$v" ;;
-                prime|dgpu) use_prime="$v" ;;
-                sandbox) use_sandbox="$v" ;;
-                gamescope_args) gscope_args="$v" ;;
-            esac
-        done < "$HOME/.config/gamectl/wrappers"
-    fi
-
-    # 3. Per-game override ($gdir/.wrappers)
-    if [ -n "$gdir" ] && [ -f "$gdir/.wrappers" ]; then
-        while IFS='=' read -r k v || [ -n "$k" ]; do
-            k=$(echo "$k" | tr -d '[:space:]')
-            v=$(echo "$v" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
-            [[ "$k" =~ ^# ]] && continue
-            case "$k" in
-                gamemode) use_gm="$v" ;;
-                hud|mangohud) use_hud="$v" ;;
-                gamescope) use_scope="$v" ;;
-                fsr) use_fsr="$v" ;;
-                glthread|mesa_glthread) use_glthread="$v" ;;
-                scope|systemd_scope) use_systemd_scope="$v" ;;
-                prime|dgpu) use_prime="$v" ;;
-                sandbox) use_sandbox="$v" ;;
-                gamescope_args) gscope_args="$v" ;;
-            esac
-        done < "$gdir/.wrappers"
-    fi
+    # 2. Config file hierarchy: Global (~/.config/gamectl/wrappers) -> Per-game override ($gdir/.wrappers)
+    local w_cfgs=("$HOME/.config/gamectl/wrappers")
+    [ -n "$gdir" ] && w_cfgs+=("$gdir/.wrappers")
+    local w_cfg
+    for w_cfg in "${w_cfgs[@]}"; do
+        if [ -f "$w_cfg" ]; then
+            while IFS='=' read -r k v || [ -n "$k" ]; do
+                k="${k//[[:space:]]/}"
+                v="${v#"${v%%[![:space:]]*}"}"
+                v="${v%"${v##*[![:space:]]}"}"
+                v="${v#\"}"
+                v="${v%\"}"
+                [[ "$k" =~ ^# ]] && continue
+                case "$k" in
+                    gamemode) use_gm="$v" ;;
+                    hud|mangohud) use_hud="$v" ;;
+                    gamescope) use_scope="$v" ;;
+                    fsr) use_fsr="$v" ;;
+                    glthread|mesa_glthread) use_glthread="$v" ;;
+                    scope|systemd_scope) use_systemd_scope="$v" ;;
+                    prime|dgpu) use_prime="$v" ;;
+                    sandbox) use_sandbox="$v" ;;
+                    gamescope_args) gscope_args="$v" ;;
+                esac
+            done < "$w_cfg"
+        fi
+    done
 
     # 4. Environment variable overrides
     [ -n "${GAMECTL_GAMEMODE:-}" ] && use_gm="$GAMECTL_GAMEMODE"
