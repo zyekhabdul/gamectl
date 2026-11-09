@@ -527,10 +527,10 @@ library_menu() {
         fzf_out=$(scan_installed_games --formatted | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
-            --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b \
+            --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r \
             --border-label="  ╢ gamectl :: Game Library ╟  " \
             --border-label-pos=2 \
-            --header=$'GAME LIBRARY (Enter: Launch │ Esc: Dashboard Hub)\nShortcuts: Ctrl-F (Search Store) │ Ctrl-D (Downloads) │ Ctrl-L (Logs) │ Ctrl-I (Inject GBE) │ Ctrl-O (Wrappers) │ Ctrl-P (LAN ID) │ Ctrl-S (Sync) │ Ctrl-B (Backup)' \
+            --header=$'GAME LIBRARY (Enter: Launch │ Esc: Dashboard Hub)\nShortcuts: Ctrl-F (Search) │ Ctrl-D (Downloads) │ Ctrl-L (Logs) │ Ctrl-I (Inject) │ Ctrl-O (Wrappers) │ Ctrl-P (LAN ID) │ Ctrl-S (Sync) │ Ctrl-B (Backup) │ Ctrl-R (Restore)' \
             --prompt="Library > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:border-rounded:wrap \
@@ -591,6 +591,48 @@ library_menu() {
             ctrl-b)
                 backup_save "$sel_dir"
                 tui_modal_notice "Save Backup" "Savegame snapshot created in slot for:\n${sel_title:-$sel_dir}"
+                continue
+                ;;
+            ctrl-r)
+                if [ -d "$sel_dir/.save_snapshots" ]; then
+                    local snaps
+                    snaps=$(ls -d "$sel_dir/.save_snapshots"/slot* 2>/dev/null | wc -l)
+                    if [ "$snaps" -gt 0 ]; then
+                        local chosen_slot="1"
+                        if [ "$snaps" -gt 1 ]; then
+                            local slot_list=""
+                            for s in "$sel_dir/.save_snapshots"/slot*; do
+                                [ -d "$s" ] || continue
+                                local s_name s_time
+                                s_name=$(basename "$s")
+                                s_time=$(date -r "$s" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "Snapshot")
+                                slot_list+="${s_name}\t${s_time}\n"
+                            done
+                            flush_tty_input
+                            local pick="" p_rc=0
+                            pick=$(printf '%b' "$slot_list" | fzf \
+                                --delimiter=$'\t' \
+                                --border-label="  ╢ Restore Save Snapshot :: ${sel_title:-$sel_dir} ╟  " \
+                                --border-label-pos=2 \
+                                --header="Select Recovery Slot to Restore (Enter: Restore │ Esc: Cancel)" \
+                                --prompt="Restore Slot > " \
+                                --height=30% \
+                                --reverse 2>/dev/null) || p_rc=$?
+                            [ "$p_rc" -eq 130 ] || [ -z "$pick" ] && continue
+                            chosen_slot=$(echo "$pick" | cut -f1)
+                            chosen_slot="${chosen_slot#slot}"
+                        fi
+                        if restore_save "$sel_dir" "$chosen_slot"; then
+                            tui_modal_notice "Save Restore" "Savegame restored successfully from slot${chosen_slot} for:\n${sel_title:-$sel_dir}"
+                        else
+                            tui_modal_notice "Save Restore Error" "Failed to restore savegame from slot${chosen_slot} for:\n${sel_title:-$sel_dir}"
+                        fi
+                    else
+                        tui_modal_notice "Save Restore" "No snapshot recovery slots found for:\n${sel_title:-$sel_dir}"
+                    fi
+                else
+                    tui_modal_notice "Save Restore" "No snapshot recovery directory (.save_snapshots) found for:\n${sel_title:-$sel_dir}"
+                fi
                 continue
                 ;;
             *)

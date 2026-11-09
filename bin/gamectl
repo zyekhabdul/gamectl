@@ -47,6 +47,7 @@ UI_PILL_CTRLF=$'\033[1;38;5;232;48;5;153m CTRL-F \033[0m'
 UI_PILL_CTRLD=$'\033[1;38;5;232;48;5;141m CTRL-D \033[0m'
 UI_PILL_CTRLS=$'\033[1;38;5;232;48;5;117m CTRL-S \033[0m'
 UI_PILL_CTRLB=$'\033[1;38;5;232;48;5;221m CTRL-B \033[0m'
+UI_PILL_CTRLR=$'\033[1;38;5;232;48;5;174m CTRL-R \033[0m'
 UI_PILL_CTRLK=$'\033[1;38;5;232;48;5;203m CTRL-K \033[0m'
 UI_PILL_ESC=$'\033[1;38;5;232;48;5;248m ESC \033[0m'
 
@@ -487,6 +488,56 @@ backup_save() {
         echo "       Press <CTRL-I> first to enable portable saves." >&2
         return 1
     fi
+}
+
+# Restore savegame snapshot from recovery slot (slot1, slot2, or slot3)
+restore_save() {
+    local game_dir="$1"
+    local slot="${2:-1}"
+    local is_quiet="${3:-false}"
+
+    if [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
+        [ "$is_quiet" = true ] || echo "[ERROR] Target game directory not found: ${game_dir:-<empty>}" >&2
+        return 1
+    fi
+
+    local snap_dir="$game_dir/.save_snapshots"
+    if [ ! -d "$snap_dir" ]; then
+        [ "$is_quiet" = true ] || echo "[ERROR] No savegame snapshots directory found in: $game_dir" >&2
+        return 1
+    fi
+
+    # Normalize slot notation: "1", "slot1", "2", "slot2", etc.
+    slot="${slot#slot}"
+    local target_slot="$snap_dir/slot${slot}"
+
+    if [ ! -d "$target_slot" ]; then
+        if [ "$is_quiet" != true ]; then
+            echo "[ERROR] Recovery snapshot slot $slot not found in: $snap_dir" >&2
+            echo "        Available slots:" >&2
+            for s in "$snap_dir"/slot*; do
+                [ -d "$s" ] && echo "        - $(basename "$s")" >&2
+            done
+        fi
+        return 1
+    fi
+
+    local save_dir="$game_dir/saves"
+    # Safety stash: backup current saves if directory exists and is not empty
+    if [ -d "$save_dir" ] && [ -n "$(find "$save_dir" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
+        local stash_dir="$snap_dir/.pre_restore_stash"
+        rm -rf "$stash_dir" 2>/dev/null || true
+        mkdir -p "$stash_dir"
+        cp -a "$save_dir/." "$stash_dir/" 2>/dev/null || true
+    fi
+
+    mkdir -p "$save_dir"
+    rm -rf "${save_dir:?}"/* "${save_dir:?}"/.[!.]* 2>/dev/null || true
+    cp -a "$target_slot/." "$save_dir/" 2>/dev/null || true
+
+    [ "$is_quiet" = true ] || echo "[VERIFIED] Savegame restored successfully from slot${slot} ($target_slot -> $save_dir)"
+    log_msg "INFO" "SAVE" "Savegame restored from slot${slot} for $(basename "$game_dir")"
+    return 0
 }
 
 # Dynamic executable finder for game directory
@@ -8017,10 +8068,10 @@ library_menu() {
         fzf_out=$(scan_installed_games --formatted | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
-            --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b \
+            --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r \
             --border-label="  ╢ gamectl :: Game Library ╟  " \
             --border-label-pos=2 \
-            --header=$'GAME LIBRARY (Enter: Launch │ Esc: Dashboard Hub)\nShortcuts: Ctrl-F (Search Store) │ Ctrl-D (Downloads) │ Ctrl-L (Logs) │ Ctrl-I (Inject GBE) │ Ctrl-O (Wrappers) │ Ctrl-P (LAN ID) │ Ctrl-S (Sync) │ Ctrl-B (Backup)' \
+            --header=$'GAME LIBRARY (Enter: Launch │ Esc: Dashboard Hub)\nShortcuts: Ctrl-F (Search) │ Ctrl-D (Downloads) │ Ctrl-L (Logs) │ Ctrl-I (Inject) │ Ctrl-O (Wrappers) │ Ctrl-P (LAN ID) │ Ctrl-S (Sync) │ Ctrl-B (Backup) │ Ctrl-R (Restore)' \
             --prompt="Library > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:border-rounded:wrap \
@@ -8081,6 +8132,48 @@ library_menu() {
             ctrl-b)
                 backup_save "$sel_dir"
                 tui_modal_notice "Save Backup" "Savegame snapshot created in slot for:\n${sel_title:-$sel_dir}"
+                continue
+                ;;
+            ctrl-r)
+                if [ -d "$sel_dir/.save_snapshots" ]; then
+                    local snaps
+                    snaps=$(ls -d "$sel_dir/.save_snapshots"/slot* 2>/dev/null | wc -l)
+                    if [ "$snaps" -gt 0 ]; then
+                        local chosen_slot="1"
+                        if [ "$snaps" -gt 1 ]; then
+                            local slot_list=""
+                            for s in "$sel_dir/.save_snapshots"/slot*; do
+                                [ -d "$s" ] || continue
+                                local s_name s_time
+                                s_name=$(basename "$s")
+                                s_time=$(date -r "$s" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "Snapshot")
+                                slot_list+="${s_name}\t${s_time}\n"
+                            done
+                            flush_tty_input
+                            local pick="" p_rc=0
+                            pick=$(printf '%b' "$slot_list" | fzf \
+                                --delimiter=$'\t' \
+                                --border-label="  ╢ Restore Save Snapshot :: ${sel_title:-$sel_dir} ╟  " \
+                                --border-label-pos=2 \
+                                --header="Select Recovery Slot to Restore (Enter: Restore │ Esc: Cancel)" \
+                                --prompt="Restore Slot > " \
+                                --height=30% \
+                                --reverse 2>/dev/null) || p_rc=$?
+                            [ "$p_rc" -eq 130 ] || [ -z "$pick" ] && continue
+                            chosen_slot=$(echo "$pick" | cut -f1)
+                            chosen_slot="${chosen_slot#slot}"
+                        fi
+                        if restore_save "$sel_dir" "$chosen_slot"; then
+                            tui_modal_notice "Save Restore" "Savegame restored successfully from slot${chosen_slot} for:\n${sel_title:-$sel_dir}"
+                        else
+                            tui_modal_notice "Save Restore Error" "Failed to restore savegame from slot${chosen_slot} for:\n${sel_title:-$sel_dir}"
+                        fi
+                    else
+                        tui_modal_notice "Save Restore" "No snapshot recovery slots found for:\n${sel_title:-$sel_dir}"
+                    fi
+                else
+                    tui_modal_notice "Save Restore" "No snapshot recovery directory (.save_snapshots) found for:\n${sel_title:-$sel_dir}"
+                fi
                 continue
                 ;;
             *)
@@ -8426,7 +8519,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive
+export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -8749,9 +8842,20 @@ case "${1:-}" in
     --preview)
         preview_game "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}"
         ;;
-    --backup)
+    --backup|backup|backup-save)
         if [ -n "${2:-}" ]; then
             backup_save "$2"
+        else
+            echo "Usage: gamectl backup <game_dir>"
+            exit 1
+        fi
+        ;;
+    --restore|restore|restore-save)
+        if [ -n "${2:-}" ]; then
+            restore_save "$2" "${3:-1}"
+        else
+            echo "Usage: gamectl restore <game_dir> [slot_num]"
+            exit 1
         fi
         ;;
     search|--search)
@@ -8862,7 +8966,8 @@ Usage:
   gamectl unpack-stub <bin.exe>
                       Unpack Windows PE SteamStub DRM binary via Steamless CLI
   gamectl --sync <dir> [title] [host]  Sync saves to remote companion host
-  gamectl --backup <dir>        Create manual savegame backup snapshot
+  gamectl backup <dir>        Create manual savegame backup snapshot (alias: --backup)
+  gamectl restore <dir> [slot]  Restore savegame snapshot from recovery slot (1-3)
   gamectl logs        View centralized runtime activity logs
   gamectl --help      Show this help documentation
   gamectl --version   Print active version

@@ -432,6 +432,56 @@ backup_save() {
     fi
 }
 
+# Restore savegame snapshot from recovery slot (slot1, slot2, or slot3)
+restore_save() {
+    local game_dir="$1"
+    local slot="${2:-1}"
+    local is_quiet="${3:-false}"
+
+    if [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
+        [ "$is_quiet" = true ] || echo "[ERROR] Target game directory not found: ${game_dir:-<empty>}" >&2
+        return 1
+    fi
+
+    local snap_dir="$game_dir/.save_snapshots"
+    if [ ! -d "$snap_dir" ]; then
+        [ "$is_quiet" = true ] || echo "[ERROR] No savegame snapshots directory found in: $game_dir" >&2
+        return 1
+    fi
+
+    # Normalize slot notation: "1", "slot1", "2", "slot2", etc.
+    slot="${slot#slot}"
+    local target_slot="$snap_dir/slot${slot}"
+
+    if [ ! -d "$target_slot" ]; then
+        if [ "$is_quiet" != true ]; then
+            echo "[ERROR] Recovery snapshot slot $slot not found in: $snap_dir" >&2
+            echo "        Available slots:" >&2
+            for s in "$snap_dir"/slot*; do
+                [ -d "$s" ] && echo "        - $(basename "$s")" >&2
+            done
+        fi
+        return 1
+    fi
+
+    local save_dir="$game_dir/saves"
+    # Safety stash: backup current saves if directory exists and is not empty
+    if [ -d "$save_dir" ] && [ -n "$(find "$save_dir" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
+        local stash_dir="$snap_dir/.pre_restore_stash"
+        rm -rf "$stash_dir" 2>/dev/null || true
+        mkdir -p "$stash_dir"
+        cp -a "$save_dir/." "$stash_dir/" 2>/dev/null || true
+    fi
+
+    mkdir -p "$save_dir"
+    rm -rf "${save_dir:?}"/* "${save_dir:?}"/.[!.]* 2>/dev/null || true
+    cp -a "$target_slot/." "$save_dir/" 2>/dev/null || true
+
+    [ "$is_quiet" = true ] || echo "[VERIFIED] Savegame restored successfully from slot${slot} ($target_slot -> $save_dir)"
+    log_msg "INFO" "SAVE" "Savegame restored from slot${slot} for $(basename "$game_dir")"
+    return 0
+}
+
 # Dynamic executable finder for game directory
 find_game_binary() {
     local dir="$1"

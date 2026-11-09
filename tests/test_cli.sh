@@ -2090,6 +2090,45 @@ test_savegame_snapshot_rotation_contract() {
 }
 run_test "Savegame Protection (Chunk 1): Rolling 3-slot savegame snapshot rotation contract" test_savegame_snapshot_rotation_contract
 
+test_savegame_restore_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    local t_game
+    t_game=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_restore_XXXXXX")
+    local s_dir="$t_game/saves"
+    mkdir -p "$s_dir"
+
+    # Step 1: Create initial save v1 and snapshot
+    echo "save_v1" > "$s_dir/save.dat"
+    backup_save "$t_game" true >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
+
+    # Step 2: Create second save v2 and snapshot (slot1=v2, slot2=v1)
+    echo "save_v2" > "$s_dir/save.dat"
+    backup_save "$t_game" true >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
+
+    # Step 3: Simulate corrupted save data
+    echo "corrupted_save_data" > "$s_dir/save.dat"
+
+    # Step 4: Restore slot 2 (which holds save_v1)
+    restore_save "$t_game" "2" true >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
+    [ -f "$s_dir/save.dat" ] || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$s_dir/save.dat")" = "save_v1" ] || { rm -rf "$t_game"; return 1; }
+
+    # Step 5: Verify pre_restore_stash contains the corrupted data
+    [ -f "$t_game/.save_snapshots/.pre_restore_stash/save.dat" ] || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$t_game/.save_snapshots/.pre_restore_stash/save.dat")" = "corrupted_save_data" ] || { rm -rf "$t_game"; return 1; }
+
+    # Step 6: Test CLI subcommand invocation for restore
+    "$GAMECTL" restore "$t_game" 1 >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$s_dir/save.dat")" = "save_v2" ] || { rm -rf "$t_game"; return 1; }
+
+    # Step 7: Test error handling on nonexistent slot
+    ! restore_save "$t_game" "99" true >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
+
+    rm -rf "$t_game"
+    return 0
+}
+run_test "Savegame Recovery (Chunk 1): Restore savegame snapshot from recovery slot contract" test_savegame_restore_contract
+
 test_github_workflows_schema_contract() {
     # 1. Existence check
     [ -f "$REPO_ROOT/.github/workflows/ci.yml" ] || return 1
