@@ -409,7 +409,7 @@ view_logs_interactive() {
         --prompt="Logs > " \
         --preview="echo -e '\033[38;5;60m╭─ LOG ENTRY DETAILS ─────────────────────────────────╮\033[0m\n{}\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m'" \
         --preview-window=down:30%:border-rounded:wrap \
-        --bind="ctrl-x:execute(: > '$log_file'; echo '[INFO] Logs cleared.')+reload(command -v tac >/dev/null 2>&1 && tac '$log_file' 2>/dev/null || sed -e '1!G;h;\$!d' '$log_file' 2>/dev/null)" \
+        --bind="ctrl-x:execute(: > '$log_file')+reload(command -v tac >/dev/null 2>&1 && tac '$log_file' 2>/dev/null || sed -e '1!G;h;\$!d' '$log_file' 2>/dev/null)" \
         --height=85% \
         --reverse 2>/dev/null || fzf_rc=$?
 
@@ -443,20 +443,31 @@ dashboard_menu() {
 EOF
 )
 
-        local selection fzf_rc=0
-        selection=$(echo "$menu_entries" | fzf \
+        local fzf_out fzf_rc=0
+        fzf_out=$(echo "$menu_entries" | fzf \
             --delimiter=$'\t' \
             --with-nth=2,3 \
+            --expect=ctrl-l \
             --border-label="  ╢ gamectl :: Master Dashboard Hub ╟  " \
             --border-label-pos=2 \
             --header="MASTER DASHBOARD (Arrows/Numbers: Select │ Enter: Open │ Ctrl-L: Logs │ Esc: Exit)" \
             --prompt="Dashboard > " \
             --preview="$SELF_BIN --preview-dashboard {1} $game_count" \
             --preview-window=right:55%:border-rounded:wrap \
-            --bind="ctrl-l:execute($SELF_BIN logs)" \
         ) || fzf_rc=$?
 
         [ "$fzf_rc" -eq 130 ] && break
+        [ -z "$fzf_out" ] && continue
+
+        local trigger_key selection
+        trigger_key=$(echo "$fzf_out" | head -n 1)
+        selection=$(echo "$fzf_out" | sed -n '2p')
+
+        if [ "$trigger_key" = "ctrl-l" ]; then
+            view_logs_interactive
+            continue
+        fi
+
         [ -z "$selection" ] && continue
 
         local sel_key

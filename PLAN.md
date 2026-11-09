@@ -29,7 +29,7 @@ Menuntaskan technical debt pada subsistem logging dan ergonomi visual TUI gamect
   - `get_runtime_log_file` menghasilkan path valid di bash maupun `/bin/sh`.
   - Membuka dashboard langsung mencatat log event yang terlihat di kartu preview kanan.
 
-### Chunk 2: Native In-Process Log Viewer (`--expect=ctrl-l`) & Buffer Preservation
+### Chunk 2: Native In-Process Log Viewer (`--expect=ctrl-l`) & Buffer Preservation [VERIFIED]
 - **Target Files**: `src/tui/70_dashboard.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Di `dashboard_menu()`, ubah `--bind="ctrl-l:execute($SELF_BIN logs)"` menjadi `--expect=ctrl-l`.
