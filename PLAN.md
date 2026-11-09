@@ -102,7 +102,7 @@ Menuntaskan technical debt pada subsistem logging dan ergonomi visual TUI gamect
 - **DoD**:
   - Peluncuran game tidak pernah memanggil `clear` dan bebas dari prompt bash kuno.
 
-### Chunk 7: Modernisasi `manage_prefix` Menjadi In-Dashboard FZF Modal
+### Chunk 7: Modernisasi `manage_prefix` Menjadi In-Dashboard FZF Modal [VERIFIED]
 - **Target Files**: `src/runners/40_wrappers.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Hapus pemanggilan `clear` di baris 583 dan `read -t 15 -r -p` di baris 599 pada `manage_prefix()`.
@@ -110,7 +110,7 @@ Menuntaskan technical debt pada subsistem logging dan ergonomi visual TUI gamect
 - **DoD**:
   - `gamectl pfx <dir>` interaktif berjalan 100% di dalam FZF tanpa mengosongkan layar terminal.
 
-### Chunk 8: Suite Pengujian Regresi & Validasi Bundle
+### Chunk 8: Suite Pengujian Regresi & Validasi Bundle [VERIFIED]
 - **Target Files**: `tests/test_cli.sh`, `scripts/build.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Tambahkan test assertions pada `tests/test_cli.sh`:

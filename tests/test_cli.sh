@@ -1853,6 +1853,67 @@ test_screen_flickering_elimination_contract() {
 }
 run_test "Screen Flickering Invariant (Action 6.2): Zero sleep and raw stdout leaks in TUI" test_screen_flickering_elimination_contract
 
+test_ssot_runtime_log_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    # 1. get_runtime_log_file returns valid user-isolated log path
+    local log_path
+    log_path="$(get_runtime_log_file 2>/dev/null)" || return 1
+    [[ "$log_path" == */gamectl.log ]] || return 1
+
+    # 2. preview_dashboard and view_logs_interactive use get_runtime_log_file
+    grep -q 'get_runtime_log_file' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
+    grep -q 'log_file="$(get_runtime_log_file)"' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
+
+    # 3. dashboard_menu logs cockpit session active event
+    grep -q 'log_msg "INFO" "DASHBOARD" "Cockpit active' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
+
+    return 0
+}
+run_test "SSoT Log File (Chunk 1): Centralized runtime log path and cockpit event contract" test_ssot_runtime_log_contract
+
+test_zero_flicker_tui_actions_contract() {
+    # 1. Zero raw execute read pauses in library_menu
+    if grep -E 'ctrl-[a-z]:execute\(.*read' "$REPO_ROOT/src/tui/70_dashboard.sh"; then
+        return 1
+    fi
+
+    # 2. library_menu uses --expect for in-process action dispatch
+    grep -q -- '--expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
+
+    # 3. list_downloads_interactive uses --expect=ctrl-k and zero execute read pauses
+    if grep -E 'ctrl-k:execute\(.*read' "$REPO_ROOT/src/steam/30_downloader.sh"; then
+        return 1
+    fi
+    grep -q -- '--expect=ctrl-k' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+
+    # 4. Zero clear calls in game_controller_hud and manage_prefix
+    if grep -n 'clear' "$REPO_ROOT/src/runners/50_launcher.sh" | grep -v 'clean'; then
+        return 1
+    fi
+    if sed -n '/manage_prefix()/,/^}/p' "$REPO_ROOT/src/runners/40_wrappers.sh" | grep -E '^[[:space:]]+clear$'; then
+        return 1
+    fi
+
+    return 0
+}
+run_test "Zero-Flicker Action Palette (Chunk 2, 3, 4, 6, 7): In-process dispatch & zero raw clear" test_zero_flicker_tui_actions_contract
+
+test_standalone_tui_exit_contract() {
+    # 1. library_menu standalone mode exits to shell, zero forced dashboard redirection
+    if grep -q 'dashboard_menu' <(sed -n '/library_menu()/,/^}/p' "$REPO_ROOT/src/tui/70_dashboard.sh" | grep -A 5 '\[ "\$standalone" = "true" \]'); then
+        return 1
+    fi
+    grep -q '\[ "\$standalone" = "true" \] && exit_tui_screen' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
+
+    # 2. search_steam standalone mode exits to shell, zero forced dashboard redirection
+    if grep -q 'dashboard_menu' <(sed -n '/search_steam()/,/^}/p' "$REPO_ROOT/src/tui/70_dashboard.sh" | grep -A 5 '\[ "\$standalone" = "true" \]'); then
+        return 1
+    fi
+
+    return 0
+}
+run_test "Standalone Navigation Invariant (Chunk 5): Direct shell exit on Esc without dashboard trap" test_standalone_tui_exit_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
