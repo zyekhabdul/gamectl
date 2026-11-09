@@ -271,7 +271,9 @@ case "${1:-}" in
         ;;
     downloads|--downloads)
         if [ -t 0 ]; then
+            enter_tui_screen
             list_downloads_interactive
+            exit_tui_screen
         else
             list_downloads
         fi

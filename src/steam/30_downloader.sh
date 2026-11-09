@@ -418,7 +418,8 @@ fetch_manifest() {
 
     echo "[INFO] Harvesting manifest archive for AppID $appid across multi-provider network..." >&2
 
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
     mkdir -p -m 700 "$run_dir"
     local dl_tmp="$run_dir/fetch_manifest_${appid}_$$.zip"
     rm -f "$dl_tmp"
@@ -1277,7 +1278,8 @@ list_downloads() {
 
 # Interactive Download Monitor TUI
 list_downloads_interactive() {
-    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+    local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
+    local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
     mkdir -p -m 700 "$run_dir"
     while true; do
         local entries=""
@@ -1331,32 +1333,48 @@ list_downloads_interactive() {
         fi
 
         flush_tty_input
-        local selection fzf_rc=0
-        selection=$(printf "%b" "$entries" | fzf \
+        local fzf_out fzf_rc=0
+        fzf_out=$(printf "%b" "$entries" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3,5 \
+            --expect=ctrl-k \
             --border-label="  ╢ gamectl :: Download Manager ╟  " \
             --border-label-pos=2 \
             --header="DOWNLOADS (Enter: Actions │ Ctrl-K: Pause │ Esc: Back)" \
             --prompt="Downloads > " \
             --preview="echo -e '\033[38;5;60mDownload Reference: {6}\033[0m\n──────────────────────────────────────────'; [ -f {6} ] && grep -E '\"(appid|name|StateFlags|BytesDownloaded|BytesToDownload|installdir)\"' {6} 2>/dev/null || echo 'Standalone download reference or empty state.'" \
             --preview-window=right:60%:border-rounded:wrap \
-            --bind="ctrl-k:execute(appid={1}; steam \"steam://pause/\$appid\" 2>/dev/null; echo \"[INFO] Dispatched pause to Steam client for AppID \$appid.\"; bash -c 'read -n 1 -s -r -p \"Press any key to continue...\"')" \
         ) || fzf_rc=$?
 
         [ "$fzf_rc" -eq 130 ] && break
+        [ -z "$fzf_out" ] && continue
+
+        local trigger_key selection
+        trigger_key=$(echo "$fzf_out" | head -n 1)
+        selection=$(echo "$fzf_out" | sed -n '2p')
+
         [ -z "$selection" ] && continue
 
-        if [ -n "$selection" ]; then
-            local sel_appid sel_engine sel_status sel_pct sel_title sel_ref
-            sel_appid=$(echo "$selection" | awk -F'\t' '{print $1}')
-            sel_engine=$(echo "$selection" | awk -F'\t' '{print $2}')
-            sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
-            sel_pct=$(echo "$selection" | awk -F'\t' '{print $4}')
-            sel_title=$(echo "$selection" | awk -F'\t' '{print $5}')
-            sel_ref=$(echo "$selection" | awk -F'\t' '{print $6}')
+        local sel_appid sel_engine sel_status sel_pct sel_title sel_ref
+        sel_appid=$(echo "$selection" | awk -F'\t' '{print $1}')
+        sel_engine=$(echo "$selection" | awk -F'\t' '{print $2}')
+        sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
+        sel_pct=$(echo "$selection" | awk -F'\t' '{print $4}')
+        sel_title=$(echo "$selection" | awk -F'\t' '{print $5}')
+        sel_ref=$(echo "$selection" | awk -F'\t' '{print $6}')
 
-            [ "$sel_appid" = "0" ] && break
+        [ "$sel_appid" = "0" ] && break
+
+        if [ "$trigger_key" = "ctrl-k" ]; then
+            if command -v steam >/dev/null 2>&1; then
+                steam "steam://pause/$sel_appid" >/dev/null 2>&1 &
+                log_msg "INFO" "DOWNLOAD" "Paused download for AppID $sel_appid"
+                tui_modal_notice "Download Paused" "Dispatched pause signal to Steam Client for AppID: $sel_appid"
+            else
+                tui_modal_notice "Pause Unsupported" "Steam client CLI is not available in PATH."
+            fi
+            continue
+        fi
 
             local action_entries
             action_entries=$(cat <<EOF
@@ -1413,7 +1431,6 @@ EOF
                     continue
                     ;;
             esac
-        fi
     done
 }
 # Dual-Mode Steam Client & SLSsteam Full DLC Sync

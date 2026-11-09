@@ -67,7 +67,7 @@ Menuntaskan technical debt pada subsistem logging dan ergonomi visual TUI gamect
   - Zero pemanggilan `read -p` atau pesan mentah ke stdout di dalam library menu.
   - Transisi aksi berlangsung mulus di dalam FZF tanpa layar berkedip hitam.
 
-### Chunk 4: Eliminasi Raw Terminal Output di `list_downloads_interactive`
+### Chunk 4: Eliminasi Raw Terminal Output di `list_downloads_interactive` [VERIFIED]
 - **Target Files**: `src/steam/30_downloader.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Ganti `--bind="ctrl-k:execute(... read ...)"` dengan `--expect=ctrl-k`.
