@@ -389,6 +389,70 @@ preview_dashboard() {
     echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
 }
 
+# Preview pane generator for Steam Store Search & ProtonDB compatibility
+preview_search_game() {
+    local appid="${1:-}"
+    local title="${2:-}"
+    local app_status="${3:-[NOT INSTALLED]}"
+
+    appid=$(strip_ansi "$appid" | tr -d '[:space:]')
+    title=$(strip_ansi "$title" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    app_status=$(strip_ansi "$app_status" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    printf "%s╭─ STEAM METADATA & PROTONDB AUDIT ───────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
+    printf "│ %s%s%s %s(AppID: %s)%s\n" "${UI_BOLD}" "$title" "${UI_RST}" "${UI_DIM}" "$appid" "${UI_RST}"
+    printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
+    printf "  %sLocal State%s : %s\n" "${UI_CYAN}" "${UI_RST}" "$app_status"
+
+    if [ -n "$appid" ] && [[ "$appid" =~ ^[0-9]+$ ]]; then
+        local details
+        details=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=platforms,genres" "steam_details_${appid}" 3600 2>/dev/null | jq -r ".\"${appid}\".data // empty" 2>/dev/null || true)
+        if [ -n "$details" ] && [ "$details" != "null" ]; then
+            local is_linux is_win genres
+            is_linux=$(echo "$details" | jq -r ".platforms.linux // false" 2>/dev/null || echo "false")
+            is_win=$(echo "$details" | jq -r ".platforms.windows // false" 2>/dev/null || echo "false")
+            genres=$(echo "$details" | jq -r "[.genres[]?.description] | join(\", \")" 2>/dev/null || true)
+            [ -n "$genres" ] && printf "  %sGenres     %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$genres" "${UI_RST}"
+            if [ "$is_linux" = "true" ]; then
+                printf "  %sPlatform   %s : %sNative Linux ELF available%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_GREEN}" "${UI_RST}"
+            elif [ "$is_win" = "true" ]; then
+                printf "  %sPlatform   %s : %sWindows PE (Requires Proton/Wine)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_PURPLE}" "${UI_RST}"
+            fi
+        fi
+
+        printf "\n%s╭─ COMMUNITY COMPATIBILITY ───────────────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
+        local pdb
+        pdb=$(fetch_cached_json "https://www.protondb.com/api/v1/reports/summaries/${appid}.json" "protondb_${appid}" 3600 2>/dev/null || true)
+        if [ -n "$pdb" ] && [ "$pdb" != "null" ]; then
+            local tier score conf total tier_upper c_tier
+            tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null || echo "Unknown")
+            score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null || echo "-")
+            conf=$(echo "$pdb" | jq -r ".confidence // \"-\"" 2>/dev/null || echo "-")
+            total=$(echo "$pdb" | jq -r ".total // \"-\"" 2>/dev/null || echo "-")
+            tier_upper="${tier^^}"
+            c_tier="${UI_GREEN}[$tier_upper]${UI_RST}"
+            case "$tier_upper" in
+                *PLATINUM*) c_tier="${UI_ICE}[PLATINUM]${UI_RST}" ;;
+                *GOLD*)     c_tier="${UI_AMBER}[GOLD]${UI_RST}" ;;
+                *SILVER*)   c_tier="${UI_DIM}[SILVER]${UI_RST}" ;;
+                *BRONZE*)   c_tier="${UI_RED}[BRONZE]${UI_RST}" ;;
+                *BORKED*)   c_tier="${UI_RED}[BORKED]${UI_RST}" ;;
+            esac
+            printf "  %sProtonDB Tier %s: %s\n" "${UI_CYAN}" "${UI_RST}" "$c_tier"
+            local rep_str=""
+            [ "$total" != "-" ] && rep_str=" • Reports: $total"
+            printf "  %sRating Score  %s: %s%s%s %s(Confidence: %s%s)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_BOLD}" "$score" "${UI_RST}" "${UI_DIM}" "$conf" "$rep_str" "${UI_RST}"
+        else
+            printf "  %sProtonDB Tier %s: %s[NO REPORTS YET]%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "${UI_RST}"
+        fi
+        printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
+    else
+        printf "\n%s╭─ COMMUNITY COMPATIBILITY ───────────────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
+        printf "  %sProtonDB Tier %s: %s[INVALID APPID]%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "${UI_RST}"
+        printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
+    fi
+}
+
 # Interactive Centralized Activity & Runtime Log Viewer
 view_logs_interactive() {
     flush_tty_input
@@ -755,49 +819,7 @@ search_steam() {
             --border-label-pos=2 \
             --header="STEAM CATALOG (Enter: Actions │ Ctrl-A: All-in-One │ Ctrl-U: Entitle │ Ctrl-S: Standalone │ Esc: Back)" \
             --prompt="Steam Store > " \
-            --preview='
-                appid={1}
-                title={2}
-                app_status={3}
-                echo -e "\033[38;5;60m╭─ STEAM METADATA & PROTONDB AUDIT ───────────────────╮\033[0m"
-                echo -e "│ \033[1m$title\033[0m \033[38;5;244m(AppID: $appid)\033[0m"
-                echo -e "\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m"
-                echo -e "  \033[1;38;5;117mLocal State\033[0m : $app_status"
-                details=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=$appid&filters=platforms,genres" "steam_details_$appid" 3600 2>/dev/null | jq -r ".\"$appid\".data // empty" 2>/dev/null)
-                if [ -n "$details" ]; then
-                    is_linux=$(echo "$details" | jq -r ".platforms.linux // false" 2>/dev/null)
-                    is_win=$(echo "$details" | jq -r ".platforms.windows // false" 2>/dev/null)
-                    genres=$(echo "$details" | jq -r "[.genres[]?.description] | join(\", \")" 2>/dev/null)
-                    [ -n "$genres" ] && echo -e "  \033[1;38;5;117mGenres     \033[0m : \033[38;5;244m$genres\033[0m"
-                    if [ "$is_linux" = "true" ]; then
-                        echo -e "  \033[1;38;5;117mPlatform   \033[0m : \033[1;38;5;120mNative Linux ELF available\033[0m"
-                    elif [ "$is_win" = "true" ]; then
-                        echo -e "  \033[1;38;5;117mPlatform   \033[0m : \033[1;38;5;141mWindows PE (Requires Proton/Wine)\033[0m"
-                    fi
-                fi
-                echo
-                echo -e "\033[38;5;60m╭─ COMMUNITY COMPATIBILITY ───────────────────────────╮\033[0m"
-                pdb=$(fetch_cached_json "https://www.protondb.com/api/v1/reports/summaries/$appid.json" "protondb_$appid" 3600 2>/dev/null)
-                if [ -n "$pdb" ] && [ "$pdb" != "null" ]; then
-                    tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null)
-                    score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null)
-                    conf=$(echo "$pdb" | jq -r ".confidence // \"-\"" 2>/dev/null)
-                    tier_upper="${tier^^}"
-                    c_tier="\033[1;38;5;120m[$tier_upper]\033[0m"
-                    case "$tier_upper" in
-                        *PLATINUM*) c_tier="\033[1;38;5;153m[PLATINUM]\033[0m" ;;
-                        *GOLD*)     c_tier="\033[1;38;5;221m[GOLD]\033[0m" ;;
-                        *SILVER*)   c_tier="\033[1;38;5;248m[SILVER]\033[0m" ;;
-                        *BRONZE*)   c_tier="\033[1;38;5;173m[BRONZE]\033[0m" ;;
-                        *BORKED*)   c_tier="\033[1;38;5;203m[BORKED]\033[0m" ;;
-                    esac
-                    echo -e "  \033[1;38;5;117mProtonDB Tier \033[0m: $c_tier"
-                    echo -e "  \033[1;38;5;117mRating Score  \033[0m: \033[1m$score\033[0m \033[38;5;244m(Confidence: $conf)\033[0m"
-                else
-                    echo -e "  \033[1;38;5;117mProtonDB Tier \033[0m: \033[38;5;244m[NO REPORTS YET]\033[0m"
-                fi
-                echo -e "\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m"
-            ' \
+            --preview="$SELF_BIN --preview-search {1} {2} {3}" \
             --preview-window=right:52%:border-rounded:wrap \
         ) || fzf_rc=$?
 

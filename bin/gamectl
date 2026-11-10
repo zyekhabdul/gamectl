@@ -8090,6 +8090,70 @@ preview_dashboard() {
     echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
 }
 
+# Preview pane generator for Steam Store Search & ProtonDB compatibility
+preview_search_game() {
+    local appid="${1:-}"
+    local title="${2:-}"
+    local app_status="${3:-[NOT INSTALLED]}"
+
+    appid=$(strip_ansi "$appid" | tr -d '[:space:]')
+    title=$(strip_ansi "$title" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    app_status=$(strip_ansi "$app_status" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    printf "%s╭─ STEAM METADATA & PROTONDB AUDIT ───────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
+    printf "│ %s%s%s %s(AppID: %s)%s\n" "${UI_BOLD}" "$title" "${UI_RST}" "${UI_DIM}" "$appid" "${UI_RST}"
+    printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
+    printf "  %sLocal State%s : %s\n" "${UI_CYAN}" "${UI_RST}" "$app_status"
+
+    if [ -n "$appid" ] && [[ "$appid" =~ ^[0-9]+$ ]]; then
+        local details
+        details=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=platforms,genres" "steam_details_${appid}" 3600 2>/dev/null | jq -r ".\"${appid}\".data // empty" 2>/dev/null || true)
+        if [ -n "$details" ] && [ "$details" != "null" ]; then
+            local is_linux is_win genres
+            is_linux=$(echo "$details" | jq -r ".platforms.linux // false" 2>/dev/null || echo "false")
+            is_win=$(echo "$details" | jq -r ".platforms.windows // false" 2>/dev/null || echo "false")
+            genres=$(echo "$details" | jq -r "[.genres[]?.description] | join(\", \")" 2>/dev/null || true)
+            [ -n "$genres" ] && printf "  %sGenres     %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$genres" "${UI_RST}"
+            if [ "$is_linux" = "true" ]; then
+                printf "  %sPlatform   %s : %sNative Linux ELF available%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_GREEN}" "${UI_RST}"
+            elif [ "$is_win" = "true" ]; then
+                printf "  %sPlatform   %s : %sWindows PE (Requires Proton/Wine)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_PURPLE}" "${UI_RST}"
+            fi
+        fi
+
+        printf "\n%s╭─ COMMUNITY COMPATIBILITY ───────────────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
+        local pdb
+        pdb=$(fetch_cached_json "https://www.protondb.com/api/v1/reports/summaries/${appid}.json" "protondb_${appid}" 3600 2>/dev/null || true)
+        if [ -n "$pdb" ] && [ "$pdb" != "null" ]; then
+            local tier score conf total tier_upper c_tier
+            tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null || echo "Unknown")
+            score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null || echo "-")
+            conf=$(echo "$pdb" | jq -r ".confidence // \"-\"" 2>/dev/null || echo "-")
+            total=$(echo "$pdb" | jq -r ".total // \"-\"" 2>/dev/null || echo "-")
+            tier_upper="${tier^^}"
+            c_tier="${UI_GREEN}[$tier_upper]${UI_RST}"
+            case "$tier_upper" in
+                *PLATINUM*) c_tier="${UI_ICE}[PLATINUM]${UI_RST}" ;;
+                *GOLD*)     c_tier="${UI_AMBER}[GOLD]${UI_RST}" ;;
+                *SILVER*)   c_tier="${UI_DIM}[SILVER]${UI_RST}" ;;
+                *BRONZE*)   c_tier="${UI_RED}[BRONZE]${UI_RST}" ;;
+                *BORKED*)   c_tier="${UI_RED}[BORKED]${UI_RST}" ;;
+            esac
+            printf "  %sProtonDB Tier %s: %s\n" "${UI_CYAN}" "${UI_RST}" "$c_tier"
+            local rep_str=""
+            [ "$total" != "-" ] && rep_str=" • Reports: $total"
+            printf "  %sRating Score  %s: %s%s%s %s(Confidence: %s%s)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_BOLD}" "$score" "${UI_RST}" "${UI_DIM}" "$conf" "$rep_str" "${UI_RST}"
+        else
+            printf "  %sProtonDB Tier %s: %s[NO REPORTS YET]%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "${UI_RST}"
+        fi
+        printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
+    else
+        printf "\n%s╭─ COMMUNITY COMPATIBILITY ───────────────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
+        printf "  %sProtonDB Tier %s: %s[INVALID APPID]%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "${UI_RST}"
+        printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
+    fi
+}
+
 # Interactive Centralized Activity & Runtime Log Viewer
 view_logs_interactive() {
     flush_tty_input
@@ -8456,49 +8520,7 @@ search_steam() {
             --border-label-pos=2 \
             --header="STEAM CATALOG (Enter: Actions │ Ctrl-A: All-in-One │ Ctrl-U: Entitle │ Ctrl-S: Standalone │ Esc: Back)" \
             --prompt="Steam Store > " \
-            --preview='
-                appid={1}
-                title={2}
-                app_status={3}
-                echo -e "\033[38;5;60m╭─ STEAM METADATA & PROTONDB AUDIT ───────────────────╮\033[0m"
-                echo -e "│ \033[1m$title\033[0m \033[38;5;244m(AppID: $appid)\033[0m"
-                echo -e "\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m"
-                echo -e "  \033[1;38;5;117mLocal State\033[0m : $app_status"
-                details=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=$appid&filters=platforms,genres" "steam_details_$appid" 3600 2>/dev/null | jq -r ".\"$appid\".data // empty" 2>/dev/null)
-                if [ -n "$details" ]; then
-                    is_linux=$(echo "$details" | jq -r ".platforms.linux // false" 2>/dev/null)
-                    is_win=$(echo "$details" | jq -r ".platforms.windows // false" 2>/dev/null)
-                    genres=$(echo "$details" | jq -r "[.genres[]?.description] | join(\", \")" 2>/dev/null)
-                    [ -n "$genres" ] && echo -e "  \033[1;38;5;117mGenres     \033[0m : \033[38;5;244m$genres\033[0m"
-                    if [ "$is_linux" = "true" ]; then
-                        echo -e "  \033[1;38;5;117mPlatform   \033[0m : \033[1;38;5;120mNative Linux ELF available\033[0m"
-                    elif [ "$is_win" = "true" ]; then
-                        echo -e "  \033[1;38;5;117mPlatform   \033[0m : \033[1;38;5;141mWindows PE (Requires Proton/Wine)\033[0m"
-                    fi
-                fi
-                echo
-                echo -e "\033[38;5;60m╭─ COMMUNITY COMPATIBILITY ───────────────────────────╮\033[0m"
-                pdb=$(fetch_cached_json "https://www.protondb.com/api/v1/reports/summaries/$appid.json" "protondb_$appid" 3600 2>/dev/null)
-                if [ -n "$pdb" ] && [ "$pdb" != "null" ]; then
-                    tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null)
-                    score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null)
-                    conf=$(echo "$pdb" | jq -r ".confidence // \"-\"" 2>/dev/null)
-                    tier_upper="${tier^^}"
-                    c_tier="\033[1;38;5;120m[$tier_upper]\033[0m"
-                    case "$tier_upper" in
-                        *PLATINUM*) c_tier="\033[1;38;5;153m[PLATINUM]\033[0m" ;;
-                        *GOLD*)     c_tier="\033[1;38;5;221m[GOLD]\033[0m" ;;
-                        *SILVER*)   c_tier="\033[1;38;5;248m[SILVER]\033[0m" ;;
-                        *BRONZE*)   c_tier="\033[1;38;5;173m[BRONZE]\033[0m" ;;
-                        *BORKED*)   c_tier="\033[1;38;5;203m[BORKED]\033[0m" ;;
-                    esac
-                    echo -e "  \033[1;38;5;117mProtonDB Tier \033[0m: $c_tier"
-                    echo -e "  \033[1;38;5;117mRating Score  \033[0m: \033[1m$score\033[0m \033[38;5;244m(Confidence: $conf)\033[0m"
-                else
-                    echo -e "  \033[1;38;5;117mProtonDB Tier \033[0m: \033[38;5;244m[NO REPORTS YET]\033[0m"
-                fi
-                echo -e "\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m"
-            ' \
+            --preview="$SELF_BIN --preview-search {1} {2} {3}" \
             --preview-window=right:52%:border-rounded:wrap \
         ) || fzf_rc=$?
 
@@ -8679,7 +8701,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive
+export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive preview_search_game
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -8831,6 +8853,9 @@ case "${1:-}" in
         ;;
     --preview-dashboard)
         preview_dashboard "${2:-1}" "${3:-}"
+        ;;
+    --preview-search)
+        preview_search_game "${2:-}" "${3:-}" "${4:-}"
         ;;
     set-id)
         if [ -n "${2:-}" ]; then

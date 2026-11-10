@@ -124,6 +124,42 @@ test_steam_libraries() {
 }
 run_test "Steam Libraries Discovery (get-steam-libraries)" test_steam_libraries
 
+test_preview_search_contract() {
+    # 1. Invalid AppID format test
+    local out_invalid
+    out_invalid=$("$GAMECTL" --preview-search "" "Test Game" "[NOT INSTALLED]" 2>/dev/null)
+    echo "$out_invalid" | grep -q "INVALID APPID" || return 1
+    echo "$out_invalid" | grep -q -- "-e " && return 1
+
+    # 2. Mock / Cached Steam & ProtonDB query test
+    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl"
+    mkdir -p "$cache_dir"
+    cat <<'EOF' > "$cache_dir/steam_details_999999.json"
+{"999999":{"success":true,"data":{"platforms":{"windows":true,"linux":true},"genres":[{"description":"Action"},{"description":"Rogue-like"}]}}}
+EOF
+    cat <<'EOF' > "$cache_dir/protondb_999999.json"
+{"tier":"platinum","score":0.95,"confidence":"strong","total":120}
+EOF
+
+    local out_valid clean_out
+    out_valid=$("$GAMECTL" --preview-search 999999 "Mock Roguelike" "[INSTALLED]" 2>/dev/null)
+    clean_out=$(echo "$out_valid" | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+
+    # Clean up mock cache files
+    rm -f "$cache_dir/steam_details_999999.json" "$cache_dir/protondb_999999.json"
+
+    echo "$clean_out" | grep -F -q "Mock Roguelike (AppID: 999999)" || return 1
+    echo "$clean_out" | grep -F -q "Local State : [INSTALLED]" || return 1
+    echo "$clean_out" | grep -F -q "Genres      : Action, Rogue-like" || return 1
+    echo "$clean_out" | grep -F -q "Platform    : Native Linux ELF available" || return 1
+    echo "$clean_out" | grep -F -q "ProtonDB Tier : [PLATINUM]" || return 1
+    echo "$clean_out" | grep -F -q "Rating Score  : 0.95 (Confidence: strong • Reports: 120)" || return 1
+    echo "$out_valid" | grep -q -- "-e " && return 1
+
+    return 0
+}
+run_test "Steam Store Search Preview Contract (--preview-search)" test_preview_search_contract
+
 # ------------------------------------------------------------------------------
 # Test Suite 3: Library & Diagnostics Engine
 # ------------------------------------------------------------------------------
