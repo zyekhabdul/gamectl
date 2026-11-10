@@ -2357,6 +2357,77 @@ test_shell_completion_contract() {
 }
 run_test "Shell Completion Synchronization (Chunk 5): Full subcommand & option completion contract" test_shell_completion_contract
 
+test_download_telemetry_preview_contract() {
+    local tmp_dir
+    tmp_dir=$(mktemp -d "/tmp/gamectl_dl_test_XXXXXX")
+    trap 'rm -rf "$tmp_dir" 2>/dev/null || true' RETURN
+
+    # 1. Test Standalone Staging Directory Telemetry
+    local stage_dir="$tmp_dir/depot_dl_105600_99999"
+    mkdir -p "$stage_dir"
+    cat <<EOF > "$stage_dir/status.info"
+APPID=105600
+TITLE=Terraria
+TARGET_DIR=/tmp/test_games/Terraria
+PID=$$
+START_TIME=$(date +%s)
+LOG_FILE=$stage_dir/download.log
+ENGINE=standalone
+STATUS=DOWNLOADING
+EOF
+
+    cat <<EOF > "$stage_dir/download.log"
+[DEPOT_START] Depot 105601: 25 files (100.00 MB)
+[PROGRESS] Transferred: 45.00 MB | Uncompressed: 60.00 MB
+EOF
+
+    local out_standalone clean_out
+    out_standalone=$("$GAMECTL" --preview-download 105600 Standalone "$stage_dir" 2>&1 || true)
+    clean_out=$(echo "$out_standalone" | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+
+    echo "$clean_out" | grep -F -q "STANDALONE CDN DOWNLOAD TELEMETRY" || return 1
+    echo "$clean_out" | grep -F -q "Terraria (AppID: 105600)" || return 1
+    echo "$clean_out" | grep -F -q "45% (45.00 MB / 100.00 MB)" || return 1
+    echo "$clean_out" | grep -F -q "Target Dir    : /tmp/test_games/Terraria" || return 1
+    echo "$clean_out" | grep -F -q "Transferred: 45.00 MB" || return 1
+    echo "$clean_out" | grep -F -q -- "-e " && return 1
+
+    # 2. Test Steam ACF Manifest Telemetry
+    local acf_file="$tmp_dir/appmanifest_480.acf"
+    cat <<EOF > "$acf_file"
+"AppState"
+{
+	"appid"		"480"
+	"name"		"Spacewar"
+	"StateFlags"		"1026"
+	"installdir"		"Spacewar"
+	"BytesDownloaded"		"52428800"
+	"BytesToDownload"		"104857600"
+}
+EOF
+
+    local out_steam clean_steam
+    out_steam=$("$GAMECTL" --preview-download 480 Steam "$acf_file" 2>&1 || true)
+    clean_steam=$(echo "$out_steam" | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+
+    echo "$clean_steam" | grep -F -q "STEAM CLIENT DOWNLOAD TELEMETRY" || return 1
+    echo "$clean_steam" | grep -F -q "Spacewar (AppID: 480)" || return 1
+    echo "$clean_steam" | grep -F -q "50%" || return 1
+    echo "$clean_steam" | grep -F -q "50 MB / 100 MB" || return 1
+    echo "$clean_steam" | grep -F -q -- "-e " && return 1
+
+    # 3. Test Empty State / No active download
+    local out_empty clean_empty
+    out_empty=$("$GAMECTL" --preview-download 0 Info "" 2>&1 || true)
+    clean_empty=$(echo "$out_empty" | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+
+    echo "$clean_empty" | grep -F -q "No Active Download Selected" || return 1
+    echo "$clean_empty" | grep -F -q -- "-e " && return 1
+
+    return 0
+}
+run_test "Download Telemetry Preview Contract (--preview-download)" test_download_telemetry_preview_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

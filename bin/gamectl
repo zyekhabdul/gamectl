@@ -3278,7 +3278,7 @@ download_game() {
 
         local run_dir
         run_dir="$(get_runtime_dir)"
-        local stage_dir="$run_dir/depot_dl_${appid}_$$"
+        local stage_dir="$run_dir/depot_dl_${appid}_${BASHPID:-$$}"
         mkdir -p -m 700 "$stage_dir"
         trap 'rm -rf "$stage_dir" 2>/dev/null || true' RETURN
 
@@ -3356,12 +3356,27 @@ download_game() {
             echo " Engine     : Native Rust Standalone (Zero Steam Client)"
             echo "=========================================="
 
-            local dl_bin
+            local cur_pid="${BASHPID:-$$}"
+            cat <<EOF > "$stage_dir/status.info"
+APPID=$appid
+TITLE=$title
+TARGET_DIR=$target_dir
+PID=$cur_pid
+START_TIME=$(date +%s)
+LOG_FILE=$stage_dir/download.log
+ENGINE=standalone
+STATUS=DOWNLOADING
+EOF
+
+            local dl_bin dl_log="$stage_dir/download.log" dl_rc=0
             dl_bin="$(resolve_depot_dl_bin)"
-            if ! "$dl_bin" --app "$appid" --dir "$target_dir" "${depot_args[@]}"; then
-                echo "[ERROR] Standalone CDN download failed." >&2
+            "$dl_bin" --app "$appid" --dir "$target_dir" "${depot_args[@]}" 2>&1 | tee "$dl_log" || dl_rc=${PIPESTATUS[0]}
+            if [ "$dl_rc" -ne 0 ]; then
+                echo "STATUS=FAILED" >> "$stage_dir/status.info"
+                echo "[ERROR] Standalone CDN download failed (exit code $dl_rc)." >&2
                 return 1
             fi
+            echo "STATUS=COMPLETED" >> "$stage_dir/status.info"
 
             # Preserve staged lua manifests in target_dir for offline DLC discovery
             shopt -s nullglob globstar
@@ -3559,6 +3574,182 @@ list_downloads() {
     fi
 }
 
+# Helper: Parse structured download telemetry from depot-dl logs
+get_depot_dl_progress() {
+    local log_file="$1"
+    local pid="${2:-}"
+
+    if [ ! -f "$log_file" ]; then
+        printf "0%%\t0 MB / 0 MB\t[STARTING]\n"
+        return 0
+    fi
+
+    local parsed
+    parsed=$(awk '
+    /^\[DEPOT_START\]/ {
+        for (i=1; i<=NF; i++) {
+            if ($i ~ /^\([0-9.]+$/) {
+                tot += substr($i, 2);
+            }
+        }
+    }
+    /^\[PROGRESS\] Transferred:/ {
+        dl = $3;
+    }
+    /^\[SUCCESS\]/ {
+        done = 1;
+    }
+    /^\[ERROR\]/ {
+        err = 1;
+    }
+    END {
+        if (done) {
+            printf "100%%\t%.2f MB / %.2f MB\t[COMPLETED]\n", dl ? dl : tot, tot ? tot : dl;
+        } else if (err && !dl) {
+            printf "0%%\t0 MB / 0 MB\t[FAILED]\n";
+        } else if (tot > 0 && dl > 0) {
+            pct = int((dl / tot) * 100);
+            if (pct > 100) pct = 100;
+            printf "%d%%\t%.2f MB / %.2f MB\t[DOWNLOADING]\n", pct, dl, tot;
+        } else if (tot > 0) {
+            printf "0%%\t0 MB / %.2f MB\t[STARTING]\n", tot;
+        } else if (dl > 0) {
+            printf "0%%\t%.2f MB transferred\t[DOWNLOADING]\n", dl;
+        } else {
+            printf "0%%\t0 MB / 0 MB\t[STARTING]\n";
+        }
+    }' "$log_file")
+
+    local pct bytes_info state_label
+    IFS=$'\t' read -r pct bytes_info state_label <<< "$parsed"
+
+    # Check process state for SIGSTOP pause
+    if [ -n "$pid" ] && [ -d "/proc/$pid" ]; then
+        local proc_state
+        proc_state=$(awk '/^State:/ {print $2}' "/proc/$pid/status" 2>/dev/null || true)
+        if [[ "$proc_state" =~ ^[Tt] ]]; then
+            state_label="[PAUSED]"
+        fi
+    fi
+
+    printf "%s\t%s\t%s\n" "$pct" "$bytes_info" "$state_label"
+}
+
+# Dedicated Download Telemetry & ACF Preview Handler
+preview_download() {
+    local appid="${1:-}"
+    local engine="${2:-}"
+    local ref_path="${3:-}"
+
+    appid=$(strip_ansi "$appid" | tr -d '[:space:]')
+    engine=$(strip_ansi "$engine" | tr -d '[:space:]')
+    ref_path=$(strip_ansi "$ref_path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    if [ -z "$appid" ] || [ "$appid" = "0" ] || [ -z "$ref_path" ]; then
+        printf "%s╭─ DOWNLOAD TELEMETRY MONITOR ────────────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
+        printf "│ %sNo Active Download Selected%s\n" "${UI_DIM}" "${UI_RST}"
+        printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
+        printf "  %sNo active download telemetry or reference available in queue.%s\n" "${UI_DIM}" "${UI_RST}"
+        return 0
+    fi
+
+    if [ -d "$ref_path" ]; then
+        # Standalone Staging Directory
+        local title="Unknown Title" target_dir="Not configured" pid="Unknown" start_time="" log_file="$ref_path/download.log" status="DOWNLOADING"
+        if [ -f "$ref_path/status.info" ]; then
+            local k v
+            while IFS='=' read -r k v || [ -n "$k" ]; do
+                case "$k" in
+                    TITLE) title="$v" ;;
+                    TARGET_DIR) target_dir="$v" ;;
+                    PID) pid="$v" ;;
+                    START_TIME) start_time="$v" ;;
+                    LOG_FILE) [ -n "$v" ] && log_file="$v" ;;
+                    STATUS) status="$v" ;;
+                esac
+            done < "$ref_path/status.info"
+        fi
+
+        local pid_status="${UI_RED}[TERMINATED]${UI_RST}"
+        if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+            local p_stat
+            p_stat=$(awk '/^State:/ {print $2}' "/proc/$pid/status" 2>/dev/null || true)
+            if [[ "$p_stat" =~ ^[Tt] ]]; then
+                pid_status="${UI_PURPLE}[PAUSED (SIGSTOP)]${UI_RST}"
+            else
+                pid_status="${UI_GREEN}[RUNNING (PID $pid)]${UI_RST}"
+            fi
+        fi
+
+        local elapsed_str="N/A"
+        if [ -n "$start_time" ] && [[ "$start_time" =~ ^[0-9]+$ ]]; then
+            local now_ts elapsed
+            now_ts=$(date +%s)
+            elapsed=$(( now_ts - start_time ))
+            if [ "$elapsed" -ge 0 ]; then
+                local mins=$(( elapsed / 60 ))
+                local secs=$(( elapsed % 60 ))
+                elapsed_str="${mins}m ${secs}s"
+            fi
+        fi
+
+        local prog_data st_pct st_bytes st_state
+        prog_data=$(get_depot_dl_progress "$log_file" "$pid")
+        IFS=$'\t' read -r st_pct st_bytes st_state <<< "$prog_data"
+
+        printf "%s╭─ STANDALONE CDN DOWNLOAD TELEMETRY ────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
+        printf "│ %s%s%s %s(AppID: %s)%s\n" "${UI_BOLD}" "$title" "${UI_RST}" "${UI_DIM}" "$appid" "${UI_RST}"
+        printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
+        printf "  %sEngine%s        : %s\n" "${UI_CYAN}" "${UI_RST}" "Native Rust gamectl-depot-dl (Valve CDN)"
+        printf "  %sProcess State%s : %s\n" "${UI_CYAN}" "${UI_RST}" "$pid_status"
+        printf "  %sProgress%s      : %s%s%s (%s)\n" "${UI_CYAN}" "${UI_RST}" "${UI_BOLD}" "$st_pct" "${UI_RST}" "$st_bytes"
+        printf "  %sElapsed Time%s  : %s\n" "${UI_CYAN}" "${UI_RST}" "$elapsed_str"
+        printf "  %sTarget Dir%s    : %s\n" "${UI_CYAN}" "${UI_RST}" "$target_dir"
+        printf "  %sStaging Dir%s   : %s\n" "${UI_CYAN}" "${UI_RST}" "$ref_path"
+        printf "\n"
+        printf "%s╭─ RECENT DOWNLOAD LOG (tail -n 12) ──────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
+        if [ -f "$log_file" ]; then
+            tail -n 12 "$log_file"
+        else
+            printf "%s(No log file generated yet)%s\n" "${UI_DIM}" "${UI_RST}"
+        fi
+        return 0
+    fi
+
+    if [ -f "$ref_path" ]; then
+        # Steam ACF Manifest
+        local state_data
+        state_data=$(parse_acf_download_state "$ref_path" 2>/dev/null || true)
+        if [ -n "$state_data" ]; then
+            local a_id a_name a_status a_pct a_dl a_tot a_flags a_dir a_path
+            IFS=$'\t' read -r a_id a_name a_status a_pct a_dl a_tot a_flags a_dir a_path <<< "$state_data"
+            local dl_fmt tot_fmt
+            dl_fmt=$(format_bytes "$a_dl")
+            tot_fmt=$(format_bytes "$a_tot")
+            local install_path="$(dirname "$ref_path")/common/$a_dir"
+
+            printf "%s╭─ STEAM CLIENT DOWNLOAD TELEMETRY ───────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
+            printf "│ %s%s%s %s(AppID: %s)%s\n" "${UI_BOLD}" "$a_name" "${UI_RST}" "${UI_DIM}" "$a_id" "${UI_RST}"
+            printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
+            printf "  %sEngine%s        : %s\n" "${UI_CYAN}" "${UI_RST}" "Steam Client (ACF Manifest Engine)"
+            printf "  %sStatus%s        : %s\n" "${UI_CYAN}" "${UI_RST}" "$a_status"
+            printf "  %sProgress%s      : %s%s%s (%s / %s)\n" "${UI_CYAN}" "${UI_RST}" "${UI_BOLD}" "$a_pct" "${UI_RST}" "$dl_fmt" "$tot_fmt"
+            printf "  %sStateFlags%s    : %s\n" "${UI_CYAN}" "${UI_RST}" "$a_flags"
+            printf "  %sInstall Dir%s   : %s\n" "${UI_CYAN}" "${UI_RST}" "$install_path"
+            printf "  %sManifest File%s : %s\n" "${UI_CYAN}" "${UI_RST}" "$ref_path"
+            printf "\n"
+            printf "%s╭─ MANIFEST CONFIGURATION (VDF) ──────────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
+            grep -E '"(appid|name|StateFlags|BytesDownloaded|BytesToDownload|installdir|buildid|LastOwner)"' "$ref_path" 2>/dev/null || true
+            return 0
+        fi
+    fi
+
+    printf "%s╭─ DOWNLOAD TELEMETRY MONITOR ────────────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
+    printf "│ %sReference: %s%s\n" "${UI_DIM}" "$ref_path" "${UI_RST}"
+    printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
+    printf "  No active download telemetry or reference available for this target.\n"
+}
+
 # Interactive Download Monitor TUI
 list_downloads_interactive() {
     local run_dir
@@ -3612,9 +3803,34 @@ list_downloads_interactive() {
                 continue
             fi
 
-            local st_ui="${UI_GREEN}[STANDALONE ACTIVE]${UI_RST}"
-            local st_detail="Native CDN Download in progress (PID: $st_pid)"
-            entries+="${st_appid}\tStandalone\t${st_ui}\t100%\t${st_detail}\t${st_dir}\n"
+            local st_info="$st_dir/status.info"
+            local st_title="Native CDN Download"
+            local st_log="$st_dir/download.log"
+            if [ -f "$st_info" ]; then
+                local info_title info_log
+                info_title=$(grep -E '^TITLE=' "$st_info" | cut -d= -f2- || true)
+                info_log=$(grep -E '^LOG_FILE=' "$st_info" | cut -d= -f2- || true)
+                [ -n "$info_title" ] && st_title="$info_title"
+                [ -n "$info_log" ] && [ -f "$info_log" ] && st_log="$info_log"
+            fi
+
+            local prog_data st_pct st_bytes st_state
+            prog_data=$(get_depot_dl_progress "$st_log" "$st_pid")
+            IFS=$'\t' read -r st_pct st_bytes st_state <<< "$prog_data"
+
+            local st_ui="${UI_GREEN}[DOWNLOADING ${st_pct}]${UI_RST}"
+            if [ "$st_state" = "[PAUSED]" ]; then
+                st_ui="${UI_PURPLE}[PAUSED ${st_pct}]${UI_RST}"
+            elif [ "$st_state" = "[COMPLETED]" ]; then
+                st_ui="${UI_CYAN}[COMPLETED]${UI_RST}"
+            elif [ "$st_state" = "[FAILED]" ]; then
+                st_ui="${UI_RED}[FAILED]${UI_RST}"
+            elif [ "$st_state" = "[STARTING]" ]; then
+                st_ui="${UI_ICE}[STARTING]${UI_RST}"
+            fi
+
+            local st_detail="${st_title} (${st_bytes}, PID: ${st_pid})"
+            entries+="${st_appid}\tStandalone\t${st_ui}\t${st_pct}\t${st_detail}\t${st_dir}\n"
             total_items=$((total_items + 1))
         done
         shopt -u nullglob
@@ -3633,7 +3849,7 @@ list_downloads_interactive() {
             --border-label-pos=2 \
             --header="DOWNLOADS (Enter: Actions │ Ctrl-K: Pause │ Esc: Back)" \
             --prompt="Downloads > " \
-            --preview="echo -e '\033[38;5;60mDownload Reference: {6}\033[0m\n──────────────────────────────────────────'; [ -f {6} ] && grep -E '\"(appid|name|StateFlags|BytesDownloaded|BytesToDownload|installdir)\"' {6} 2>/dev/null || echo 'Standalone download reference or empty state.'" \
+            --preview="$SELF_BIN --preview-download {1} {2} {6}" \
             --preview-window=right:60%:border-rounded:wrap \
         ) || fzf_rc=$?
 
@@ -3751,29 +3967,42 @@ EOF
                         tui_modal_notice "Download Terminated" "Sent SIGTERM to standalone downloader PID $t_pid and purged staging."
                     fi
                 else
-                    local g_dir
+                    local g_dir=""
                     if [ -f "$sel_ref" ]; then
-                        g_dir="$(dirname "$sel_ref")/common/$(grep -m1 '"installdir"' "$sel_ref" 2>/dev/null | awk -F'"' '{print $4}')"
-                    else
-                        g_dir="$sel_ref"
+                        local i_dir
+                        i_dir=$(grep -m1 '"installdir"' "$sel_ref" 2>/dev/null | awk -F'"' '{print $4}')
+                        if [ -n "$i_dir" ]; then
+                            g_dir="$(dirname "$sel_ref")/common/$i_dir"
+                        fi
                     fi
-                    if [ -d "$g_dir" ]; then
+                    if [ -n "$g_dir" ] && [ -d "$g_dir" ]; then
                         log_msg "INFO" "DOWNLOAD" "Injecting GBE Fork LAN runtime into: $g_dir"
                         "$SELF_BIN" inject "$g_dir" "$sel_appid"
+                        tui_modal_notice "GBE Runtime Injected" "Goldberg emulator LAN runtime successfully injected into:\n$g_dir"
+                    else
+                        tui_modal_notice "Target Not Found" "Steam common game directory not found:\n$g_dir"
                     fi
                 fi
                 ;;
             4)
                 if [ "$sel_engine" = "Standalone" ]; then
-                    local g_dir
-                    if [ -f "$sel_ref" ]; then
-                        g_dir="$(dirname "$sel_ref")/common/$(grep -m1 '"installdir"' "$sel_ref" 2>/dev/null | awk -F'"' '{print $4}')"
-                    else
-                        g_dir="$sel_ref"
+                    local g_dir=""
+                    if [ -f "$sel_ref/status.info" ]; then
+                        g_dir=$(grep -E '^TARGET_DIR=' "$sel_ref/status.info" | cut -d= -f2-)
                     fi
-                    if [ -d "$g_dir" ]; then
-                        log_msg "INFO" "DOWNLOAD" "Injecting GBE Fork LAN runtime into: $g_dir"
+                    if [ -z "$g_dir" ] || [ ! -d "$g_dir" ]; then
+                        local st_title=""
+                        [ -f "$sel_ref/status.info" ] && st_title=$(grep -E '^TITLE=' "$sel_ref/status.info" | cut -d= -f2-)
+                        if [ -n "$st_title" ]; then
+                            g_dir="$(resolve_standalone_library_dir "$st_title")"
+                        fi
+                    fi
+                    if [ -n "$g_dir" ] && [ -d "$g_dir" ]; then
+                        log_msg "INFO" "DOWNLOAD" "Injecting GBE Fork LAN runtime into target dir: $g_dir"
                         "$SELF_BIN" inject "$g_dir" "$sel_appid"
+                        tui_modal_notice "GBE Runtime Injected" "Goldberg emulator LAN runtime successfully injected into:\n$g_dir"
+                    else
+                        tui_modal_notice "Target Not Found" "Target installation directory not found or not yet created:\n$g_dir"
                     fi
                 else
                     continue
@@ -8701,7 +8930,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive preview_search_game
+export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive preview_search_game preview_download get_depot_dl_progress
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -8856,6 +9085,9 @@ case "${1:-}" in
         ;;
     --preview-search)
         preview_search_game "${2:-}" "${3:-}" "${4:-}"
+        ;;
+    --preview-download)
+        preview_download "${2:-}" "${3:-}" "${4:-}"
         ;;
     set-id)
         if [ -n "${2:-}" ]; then
