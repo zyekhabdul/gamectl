@@ -869,6 +869,7 @@ test_trigger_steam_install_contract() {
 run_test "Download Orchestrator: trigger_steam_install URI contract" test_trigger_steam_install_contract
 
 test_download_game_dual_mode_orchestration() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
     source "$REPO_ROOT/src/steam/20_discovery.sh"
     source "$REPO_ROOT/src/steam/30_downloader.sh"
     local test_root="${TEST_TMP_DIR:-/tmp}/dl_orch_test_$$"
@@ -989,6 +990,7 @@ EOF
 run_test "Manifest Harvester: Lua AES key single and double quotes regex contract" test_lua_manifest_quotes_regex_contract
 
 test_download_game_standalone_mode_orchestration() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
     source "$REPO_ROOT/src/steam/20_discovery.sh"
     source "$REPO_ROOT/src/steam/30_downloader.sh"
     local test_root="${TEST_TMP_DIR:-/tmp}/dl_orch_standalone_test_$$"
@@ -1356,6 +1358,7 @@ EOF_LUA
 run_test "Offline DLC Harvester: Air-gapped fallback to local Lua manifest" test_fetch_dlc_offline_fallback_contract
 
 test_download_game_default_standalone_engine_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
     source "$REPO_ROOT/src/steam/20_discovery.sh"
     source "$REPO_ROOT/src/steam/30_downloader.sh"
     local test_root="${TEST_TMP_DIR:-/tmp}/dl_orch_default_engine_test_$$"
@@ -2121,8 +2124,20 @@ test_savegame_restore_contract() {
     "$GAMECTL" restore "$t_game" 1 >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
     [ "$(cat "$s_dir/save.dat")" = "save_v2" ] || { rm -rf "$t_game"; return 1; }
 
-    # Step 7: Test error handling on nonexistent slot
-    ! restore_save "$t_game" "99" true >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
+    # Unsupported slots must be rejected even if their target directory exists.
+    mkdir -p "$t_game/.save_snapshots/slot99"
+    echo "invalid_snapshot" > "$t_game/.save_snapshots/slot99/save.dat"
+    local invalid_slot
+    for invalid_slot in 99 slot99 '1/../slot99'; do
+        if "$GAMECTL" restore "$t_game" "$invalid_slot" >/dev/null 2>&1; then
+            rm -rf "$t_game"
+            return 1
+        fi
+        [ "$(cat "$s_dir/save.dat")" = "save_v2" ] || { rm -rf "$t_game"; return 1; }
+    done
+
+    "$GAMECTL" restore "$t_game" slot2 >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$s_dir/save.dat")" = "save_v1" ] || { rm -rf "$t_game"; return 1; }
 
     rm -rf "$t_game"
     return 0

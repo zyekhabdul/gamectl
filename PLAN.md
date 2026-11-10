@@ -108,3 +108,121 @@ Menuntaskan seluruh fitur setengah jalan (half-done / incomplete) yang teridenti
 | **Doctor Downloader** | `bin/gamectl doctor` | Layer 6 mendeteksi dan menampilkan status `gamectl-depot-dl`. |
 | **Completions** | `./tests/test_cli.sh` | File completion memuat seluruh 13+ subcommand baru. |
 | **Machine Gate** | `make lint && make test` | 0 syntax errors, 118+ test assertions lulus dengan Exit Code 0. |
+
+---
+
+# WORK PACKET 23: RUNTIME HARDENING, PROCESS SUPERVISION & RESILIENCE
+
+**Track**: Stability / Zero Risk / High Reliability  
+**Status**: PLANNED [READY FOR RESUME]  
+**Branch**: `main`  
+**Max Chunks**: 6 Chunks  
+**Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`, `src/tui/70_dashboard.sh`, `crates/depot-dl/src/bin/gamectl-depot-dl.rs`, `crates/depot-dl/src/util.rs`, `crates/depot-dl/src/manifest/mod.rs`, `packaging/debian/build-deb.sh`, `pyproject.toml`, `tests/test_cli.sh`, `bin/gamectl`
+
+---
+
+## 1. Objective & Technical Scope
+Menyelesaikan sisa temuan audit mendalam (Maintenance Audit & Verification 2026-11-10) untuk mencapai standar Zero Error, Zero Risk, dan Zero Trouble:
+1. **Transactional Savegame Restore (`restore_save`)**: Mengganti penghapusan prematur live saves (`rm -rf`) dengan atomic staging, backup verifikasi sebelum penghapusan, dan rollback terjamin saat error copy/disk full.
+2. **Supervisor Process Ownership (`launch_game`)**: Mengganti sibling process wait (`wait "$game_pid"` di subshell background terpisah yang return 127) dengan arsitektur supervisor yang memegang child process secara langsung dan mencegah cleanup prematur saat game masih aktif.
+3. **Remote Sync Robustness (`sync_save_remote`, `pull_save_remote`)**:
+   - Memvalidasi exit status `rsync` dan `ssh` secara ketat (tidak mencetak `[VERIFIED]` saat transfer gagal).
+   - Memperbaiki ekspansi tilde remote (`~`) dengan menghapus quoting yang mencegah resolusi home directory remote.
+   - Menghilangkan side-effect `mkdir -p "$sdir"` pada flag `--dry-run`.
+4. **TUI Action Observability (`70_dashboard.sh`)**:
+   - Menghubungkan notifikasi visual TUI ke exit code backend yang sebenarnya (mencegah modal sukses palsu).
+   - Membungkus eksekusi perintah di dashboard agar tidak membocorkan raw stdout/stderr ke layar fzf.
+5. **Rust Quality & Mutation Hardening (`crates/depot-dl`)**:
+   - Memperbaiki 3 Clippy strict warnings (`single_match_else`, `manual_checked_ops`).
+   - Merapikan formatting dengan `cargo fmt`.
+   - Mengatasi test fixture `all-features` yang hilang di `src/manifest/mod.rs` (isolasi/synthetic fixtures).
+   - Menambahkan unit test edge-case pada `safe_relative_path` (`.`, `..`, `/`) untuk menangkap 1 mutan yang lolos (target: 100% mutation score).
+6. **Multi-Arch Packaging & Dependency Advisory Review**:
+   - Memperbaiki deklarasi architecture pada paket Debian (`Architecture: any/amd64` bukan `all`) dan wheel Python agar tidak mengemas binary ELF x86-64 dengan tag `py3-none-any`.
+   - Melakukan evaluasi reachability pada 8 dependensi Rust dengan advisory OSV.
+
+---
+
+## 2. Granular Technical Execution Plan (Todolist)
+
+### [ ] Chunk 1: Transactional Savegame Restore Engine (`restore_save`)
+- **Target Files**: `src/core/10_utils.sh`, `tests/test_cli.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Di `restore_save()`:
+     - Tahap A (Staging): Salin snapshot terpilih ke staging temporary directory di `.save_snapshots/.staging_restore_$$`.
+     - Tahap B (Verifikasi Staging): Pastikan proses copy berhasil 100% dan direktori staging tidak kosong. Jika gagal, batalkan tanpa menyentuh live save.
+     - Tahap C (Safety Backup): Pindahkan atau buat backup utuh live save ke `.save_snapshots/.pre_restore_stash` dengan verifikasi return code.
+     - Tahap D (Commit): Pindahkan hasil staging ke direktori `saves/` aktif secara atomik.
+     - Tahap E (Rollback): Jika tahap commit gagal, pulihkan kembali live save dari stash.
+  2. Tambahkan test di `tests/test_cli.sh` dengan simulasi `cp` gagal (fault injection) untuk membuktikan data save asli tetap utuh.
+- **DoD**:
+  - Live save tidak pernah hilang atau rusak ketika terjadi kegagalan penyalinan snapshot.
+
+### [ ] Chunk 2: Supervisor Process Ownership in Background Watchdog
+- **Target Files**: `src/runners/50_launcher.sh`, `tests/test_cli.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Restrukturisasi pemanggilan game background di `launch_game()`:
+     - Gunakan dedicated supervisor wrapper shell yang meluncurkan game sebagai child langsungnya, sehingga `wait "$child_pid"` valid dan menangkap exit code asli.
+     - Hanya picu pembersihan `$info_file`, penghentian systemd scope, dan restorasi CPU governor SETELAH child benar-benar exit.
+  2. Tambahkan regression test di `tests/test_cli.sh` memverifikasi `$info_file` tetap ada selama proses game mock berjalan di background.
+- **DoD**:
+  - Watchdog tidak lagi mengembalikan exit code 127, dan status proses game terpantau akurat dari peluncuran hingga selesai.
+
+### [ ] Chunk 3: Remote Sync Robustness & Zero-Side-Effect Dry-Run
+- **Target Files**: `src/runners/50_launcher.sh`, `tests/test_cli.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Tangkap exit code `rsync`:
+     - Jika rsync mengembalikan kode != 0, tampilkan pesan error dan hentikan dengan return code 1.
+  2. Perbaiki remote tilde quoting:
+     - Gunakan `$HOME` remote atau unquoted tilde saat membuat direktori via SSH.
+  3. Di `pull_save_remote()`:
+     - Pastikan `mkdir -p "$sdir"` hanya berjalan jika `[ "$is_dry_run" = false ]`.
+     - Validasi keberhasilan `backup_save` sebelum memulai rsync penimpaan.
+  4. Tambahkan test case di `tests/test_cli.sh` untuk rsync failure mock dan dry-run directory creation avoidance.
+- **DoD**:
+  - Gagal rsync melaporkan error, remote tilde berekspansi ke remote user home, dan dry-run tidak mengubah filesystem lokal.
+
+### [ ] Chunk 4: TUI Action Wrapper & Observability
+- **Target Files**: `src/tui/70_dashboard.sh`, `tests/test_cli.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Implementasikan helper `tui_exec_action()` untuk menjalankan operasi backend (inject, sync, backup, fix).
+  2. Tangkap output stdout/stderr ke buffer sementara dan periksa exit code status backend.
+  3. Tampilkan modal notice hasil: `[SUCCESS]` jika rc=0, `[ERROR]` dengan ringkasan error jika rc!=0.
+- **DoD**:
+  - Pengguna mendapatkan umpan balik akurat di TUI saat aksi berhasil maupun gagal.
+
+### [ ] Chunk 5: Rust Quality Gate & Mutation Hardening
+- **Target Files**: `crates/depot-dl/src/bin/gamectl-depot-dl.rs`, `crates/depot-dl/src/util.rs`, `crates/depot-dl/src/manifest/mod.rs`
+- **Runtutan Eksekusi Teknis**:
+  1. Selesaikan 3 Clippy warnings di `gamectl-depot-dl.rs` (ganti `match ... None => exit(1)` dengan idiomatic `unwrap_or_else`, rapikan formula pembagian).
+  2. Jalankan `cargo fmt` untuk standardisasi format file Rust.
+  3. Tambahkan unit test di `crates/depot-dl/src/util.rs` yang menguji input normalization kosong (`.`, `..`, `/`) pada `safe_relative_path`.
+  4. Isolasi fixture test `all-features` di `src/manifest/mod.rs` dengan synthetic fixtures atau conditional skip jika file eksternal tidak ada.
+- **DoD**:
+  - `cargo clippy --all-targets -- -D warnings` lulus tanpa warning.
+  - `cargo fmt --check` lulus tanpa diff.
+  - Mutation score `src/util.rs` mencapai 100% (43/43 caught).
+
+### [ ] Chunk 6: Multi-Arch Packaging & Deterministic Verification Gate
+- **Target Files**: `packaging/debian/build-deb.sh`, `pyproject.toml`, `Makefile`, `bin/gamectl`
+- **Runtutan Eksekusi Teknis**:
+  1. Sinkronisasi arsitektur paket:
+     - Sesuaikan `Architecture` pada Debian deb dan platform tag pada Python wheel sesuai keberadaan binary native.
+  2. Re-bundle `bin/gamectl` via `make build`.
+  3. Jalankan `make lint`, `./scripts/build.sh --check`, dan `./tests/test_cli.sh` (122+ assertions PASS).
+- **DoD**:
+  - Semua artifact distribusi memiliki metadata arsitektur valid dan seluruh test suite lulus 100%.
+
+---
+
+## 3. Verification Matrix (Work Packet 23)
+
+| Komponen | Perintah Uji | Kriteria Sukses (DoD) |
+| :--- | :--- | :--- |
+| **Transactional Restore** | `./tests/test_cli.sh` | Live save utuh saat proses restore diinterupsi/gagal. |
+| **Process Supervision** | `./tests/test_cli.sh` | Metadata `$info_file` bertahan selama game hidup di background. |
+| **Remote Sync Guard** | `./tests/test_cli.sh` | Gagal transfer rsync menghasilkan exit code 1; `--dry-run` zero write. |
+| **TUI Action Handling** | Smoke PTY test | Modal error muncul saat aksi gagal; terminal buffer bersih. |
+| **Rust Clippy & Format** | `cargo clippy && cargo fmt` | Zero warning pada strict clippy, zero formatting issues. |
+| **Mutation Testing** | `cargo mutants` | 100% mutan tertangkap pada `safe_relative_path`. |
+| **Full Machine Gate** | `make lint && make test` | 122/122 assertions lulus dengan Exit Code 0. |

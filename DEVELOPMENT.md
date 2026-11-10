@@ -49,8 +49,11 @@ src/
 
 ### Syntax Verification Across All Modules
 ```bash
-for f in src/*/*.sh src/main.sh bin/gamectl scripts/build.sh; do bash -n "$f" || exit 1; done
+make lint
 ```
+
+This checks each source module, bundled executable, installer, build and packaging
+script, regression test, and Bash completion separately, stopping on syntax errors.
 
 ### Run Comprehensive Regression & Integrity Test Suite
 ```bash

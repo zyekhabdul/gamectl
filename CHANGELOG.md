@@ -4,6 +4,13 @@ All notable changes to `gamectl` are documented in this file according to [Keep 
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- Reject unsupported save recovery slots and path-like slot arguments before modifying current saves.
+- Load the core logging utilities in downloader regression fixtures, matching the bundled application's module dependencies.
+- Make `make lint` validate every shell file individually, including tests and shell completions. Previously, Bash parsed only the first file and treated the remaining paths as script arguments.
+
 ## [1.4.0] - 2026-11-07
 
 ### Added

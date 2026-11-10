@@ -27,7 +27,9 @@ test:
 	./tests/test_cli.sh
 
 lint:
-	bash -n src/*.sh src/*/*.sh bin/gamectl install.sh scripts/build.sh scripts/build-depot-dl.sh packaging/debian/build-deb.sh packaging/scripts/build-all.sh
+	@set -e; for file in src/*.sh src/*/*.sh bin/gamectl install.sh scripts/*.sh packaging/debian/*.sh packaging/scripts/*.sh tests/*.sh completions/*.bash; do \
+		bash -n "$$file"; \
+	done
 
 pkg-deb:
 	bash packaging/debian/build-deb.sh

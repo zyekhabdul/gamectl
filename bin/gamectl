@@ -509,6 +509,13 @@ restore_save() {
 
     # Normalize slot notation: "1", "slot1", "2", "slot2", etc.
     slot="${slot#slot}"
+    case "$slot" in
+        1|2|3) ;;
+        *)
+            [ "$is_quiet" = true ] || echo "[ERROR] Invalid recovery slot: use 1, 2, or 3." >&2
+            return 1
+            ;;
+    esac
     local target_slot="$snap_dir/slot${slot}"
 
     if [ ! -d "$target_slot" ]; then
