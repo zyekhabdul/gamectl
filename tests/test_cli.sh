@@ -2472,6 +2472,79 @@ EOF
 }
 run_test "Unified CLI Download Status (Chunk 3): Standalone CDN detection in download-status" test_cli_download_status_standalone_contract
 
+test_preview_dashboard_dynamic_metrics_contract() {
+    # 1. Module 1: Game Library
+    local p1
+    p1=$("$GAMECTL" --preview-dashboard 1 4 2>&1 || true)
+    grep -F -q "GAME LIBRARY" <<< "$p1" || return 1
+    grep -F -q "Installed Titles" <<< "$p1" || return 1
+    grep -F -q "Storage Footprint" <<< "$p1" || return 1
+    grep -F -q "Platform Ratio" <<< "$p1" || return 1
+    grep -F -q "GBE Fork Injected" <<< "$p1" || return 1
+
+    # 2. Module 2: Steam Store & ProtonDB
+    local p2
+    p2=$("$GAMECTL" --preview-dashboard 2 4 2>&1 || true)
+    grep -F -q "STEAM STORE & PROTONDB" <<< "$p2" || return 1
+    grep -F -q "Steam Store API" <<< "$p2" || return 1
+    grep -F -q "ProtonDB API" <<< "$p2" || return 1
+    grep -F -q "Local Cache Dir" <<< "$p2" || return 1
+    grep -F -q "Cached Store Items" <<< "$p2" || return 1
+
+    # 3. Module 3: Download Monitor
+    local p3
+    p3=$("$GAMECTL" --preview-dashboard 3 4 2>&1 || true)
+    grep -F -q "DOWNLOAD MONITOR" <<< "$p3" || return 1
+    grep -F -q "Active Downloads" <<< "$p3" || return 1
+    grep -F -q "Standalone Engine" <<< "$p3" || return 1
+    grep -F -q "Steam Client Engine" <<< "$p3" || return 1
+
+    # 4. Module 4: Steam ACF Adoption
+    local p4
+    p4=$("$GAMECTL" --preview-dashboard 4 4 2>&1 || true)
+    grep -F -q "STEAM ACF ADOPTION" <<< "$p4" || return 1
+    grep -F -q "Physical Games Dir" <<< "$p4" || return 1
+    grep -F -q "Pending Adoption" <<< "$p4" || return 1
+    grep -F -q "Steam Apps Target" <<< "$p4" || return 1
+
+    # 5. Module 5: Global Settings
+    local p5
+    p5=$("$GAMECTL" --preview-dashboard 5 4 2>&1 || true)
+    grep -F -q "GLOBAL CONFIGURATION" <<< "$p5" || return 1
+    grep -F -q "Player Name (LAN)" <<< "$p5" || return 1
+    grep -F -q "Default SteamID64" <<< "$p5" || return 1
+    grep -F -q "Default Wrappers" <<< "$p5" || return 1
+
+    # 6. Module 6: System Diagnostics
+    local p6
+    p6=$("$GAMECTL" --preview-dashboard 6 4 2>&1 || true)
+    grep -F -q "SYSTEM DIAGNOSTICS" <<< "$p6" || return 1
+    grep -F -q "Overall Health" <<< "$p6" || return 1
+    grep -F -q "Audit Summary" <<< "$p6" || return 1
+    grep -F -q "7-Layer Architecture Status" <<< "$p6" || return 1
+
+    # 7. Module 7: Activity Logs
+    local p7
+    p7=$("$GAMECTL" --preview-dashboard 7 4 2>&1 || true)
+    grep -F -q "ACTIVITY & RUNTIME LOGS" <<< "$p7" || return 1
+    grep -F -q "Log File Path" <<< "$p7" || return 1
+    grep -F -q "Total Records" <<< "$p7" || return 1
+    grep -F -q "Severity Breakdown" <<< "$p7" || return 1
+    grep -F -q "RECENT ACTIVITY LOGS" <<< "$p7" || return 1
+
+    # 8. Invariant: Zero -e literal leaks across all modules
+    local i p_out
+    for i in {1..7}; do
+        p_out=$("$GAMECTL" --preview-dashboard "$i" 4 2>&1 || true)
+        if [[ "$p_out" == *"-e "* ]]; then
+            return 1
+        fi
+    done
+
+    return 0
+}
+run_test "Dashboard Preview Metrics (Chunk 4): Dynamic context-rich indicators across modules 1-7" test_preview_dashboard_dynamic_metrics_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
