@@ -275,13 +275,13 @@ case "${1:-}" in
             fi
         fi
         ;;
-    downloads|--downloads)
-        if [ -t 0 ]; then
+    downloads|--downloads|download-status|--download-status)
+        if [ "${1:-}" = "download-status" ] || [ "${1:-}" = "--download-status" ] || [ ! -t 0 ] || [ ! -t 1 ]; then
+            list_downloads
+        else
             enter_tui_screen
             list_downloads_interactive
             exit_tui_screen
-        else
-            list_downloads
         fi
         ;;
     sync-steam|--sync-steam)
@@ -400,7 +400,9 @@ Usage:
                       Configure per-game wrappers (GameMode/MangoHud/Gamescope FSR/MesaGL)
   gamectl download <appid> [dir] [title] [--source <auto|...>] [--standalone|--sls] [--raw|--inject-only]
                       Download game via native Valve CDN (default: Pure Standalone zero-client)
-  gamectl downloads   Monitor active & recent downloads (Steam ACF telemetry)
+  gamectl downloads   Monitor active & recent downloads (Interactive TUI)
+  gamectl download-status
+                      Display active download tasks across Steam & Standalone engines
   gamectl fetch-manifest <appid> [dest] [source]
                       Harvest manifest archive across Ryuu/Sushi/LuaTools providers
   gamectl auth-status Display current LuaTools authentication session & auto-refresh status

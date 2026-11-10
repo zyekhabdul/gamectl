@@ -1707,19 +1707,19 @@ test_preview_game_live_inspection_contract() {
     head -c 8000000 /dev/zero > "$t_game/steam_api64.dll"
     local out1
     out1=$("$GAMECTL" --preview "12345" "MyGame" "STANDALONE" "$t_game" "game.exe")
-    echo "$out1" | grep -q "\[GBE_FORK\]" || { rm -rf "$t_dir"; return 1; }
+    grep -q "\[GBE_FORK\]" <<< "$out1" || { rm -rf "$t_dir"; return 1; }
 
     # Case 2: Valve DLL (<=7MB)
     head -c 1000000 /dev/zero > "$t_game/steam_api64.dll"
     local out2
     out2=$("$GAMECTL" --preview "12345" "MyGame" "STANDALONE" "$t_game" "game.exe")
-    echo "$out2" | grep -q "\[VALVE_DLL\]" || { rm -rf "$t_dir"; return 1; }
+    grep -q "\[VALVE_DLL\]" <<< "$out2" || { rm -rf "$t_dir"; return 1; }
 
     # Case 3: Standalone (no steam_api file)
     rm -f "$t_game/steam_api64.dll"
     local out3
     out3=$("$GAMECTL" --preview "12345" "MyGame" "GBE_FORK" "$t_game" "game.exe")
-    echo "$out3" | grep -q "\[STANDALONE\]" || { rm -rf "$t_dir"; return 1; }
+    grep -q "\[STANDALONE\]" <<< "$out3" || { rm -rf "$t_dir"; return 1; }
 
     rm -rf "$t_dir"
     return 0
@@ -2427,6 +2427,50 @@ EOF
     return 0
 }
 run_test "Download Telemetry Preview Contract (--preview-download)" test_download_telemetry_preview_contract
+
+test_cli_download_status_standalone_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    local test_run_dir
+    test_run_dir="$(get_runtime_dir)"
+    local stage_dir="$test_run_dir/depot_dl_553850_$$"
+    mkdir -p "$stage_dir"
+    trap 'rm -rf "$stage_dir" 2>/dev/null || true' RETURN
+
+    cat <<EOF > "$stage_dir/status.info"
+APPID=553850
+TITLE=HELLDIVERS 2
+TARGET_DIR=/tmp/test_games/Helldivers2
+PID=$$
+START_TIME=$(date +%s)
+LOG_FILE=$stage_dir/download.log
+ENGINE=standalone
+STATUS=DOWNLOADING
+EOF
+
+    cat <<EOF > "$stage_dir/download.log"
+[DEPOT_START] Depot 553851: 50 files (200.00 MB)
+[PROGRESS] Transferred: 70.00 MB | Uncompressed: 90.00 MB
+EOF
+
+    # 1. Execute CLI gamectl download-status
+    local out_status
+    out_status=$("$GAMECTL" download-status < /dev/null 2>&1 || true)
+
+    grep -F -q "GAMECTL DOWNLOAD STATUS (Unified Engine)" <<< "$out_status" || return 1
+    grep -F -q "AppID: 553850" <<< "$out_status" || return 1
+    grep -F -q "HELLDIVERS 2" <<< "$out_status" || return 1
+    grep -F -q "Progress: 35%" <<< "$out_status" || return 1
+    grep -F -q "Engine: Standalone CDN" <<< "$out_status" || return 1
+
+    # 2. Execute CLI gamectl downloads non-interactively (piped / null stdin)
+    local out_downloads
+    out_downloads=$("$GAMECTL" downloads < /dev/null 2>&1 || true)
+    grep -F -q "HELLDIVERS 2" <<< "$out_downloads" || return 1
+    grep -F -q "Progress: 35%" <<< "$out_downloads" || return 1
+
+    return 0
+}
+run_test "Unified CLI Download Status (Chunk 3): Standalone CDN detection in download-status" test_cli_download_status_standalone_contract
 
 # ------------------------------------------------------------------------------
 # Final Execution Summary

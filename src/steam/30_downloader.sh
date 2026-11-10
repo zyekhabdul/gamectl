@@ -1324,7 +1324,7 @@ parse_acf_download_state() {
 # List active and recent downloads
 list_downloads() {
     echo "=========================================="
-    echo " GAMECTL DOWNLOAD STATUS (Steam Native Engine)"
+    echo " GAMECTL DOWNLOAD STATUS (Unified Engine)"
     echo "=========================================="
     local count=0
 
@@ -1354,8 +1354,52 @@ list_downloads() {
         fi
     done
 
+    # Inspect Standalone CDN downloads
+    local run_dir
+    run_dir="$(get_runtime_dir)"
+    shopt -s nullglob
+    for st_dir in "$run_dir"/depot_dl_*; do
+        [ -d "$st_dir" ] || continue
+        local base_st="${st_dir##*/}"
+        local st_pid="${base_st##*_}"
+        local rest_st="${base_st#depot_dl_}"
+        local st_appid="${rest_st%_*}"
+        [ -z "$st_appid" ] || [ -z "$st_pid" ] && continue
+
+        # Self-healing: purge orphaned staging dir if downloader process is dead
+        if ! [[ "$st_pid" =~ ^[0-9]+$ ]] || ! kill -0 "$st_pid" 2>/dev/null; then
+            rm -rf "$st_dir" 2>/dev/null || true
+            continue
+        fi
+
+        local st_info="$st_dir/status.info"
+        local st_title="Native CDN Download"
+        local st_log="$st_dir/download.log"
+        if [ -f "$st_info" ]; then
+            local info_title info_log
+            info_title=$(grep -E '^TITLE=' "$st_info" | cut -d= -f2- || true)
+            info_log=$(grep -E '^LOG_FILE=' "$st_info" | cut -d= -f2- || true)
+            [ -n "$info_title" ] && st_title="$info_title"
+            [ -n "$info_log" ] && [ -f "$info_log" ] && st_log="$info_log"
+        fi
+
+        local prog_data st_pct st_bytes st_state
+        prog_data=$(get_depot_dl_progress "$st_log" "$st_pid")
+        IFS=$'\t' read -r st_pct st_bytes st_state <<< "$prog_data"
+
+        count=$((count + 1))
+        local dl_label="Engine: Standalone CDN"
+        if [ -n "$st_bytes" ] && [ "$st_bytes" != "0 MB / 0 MB" ]; then
+            echo "$st_state AppID: $st_appid | $st_title | Progress: $st_pct ($st_bytes) | $dl_label"
+        else
+            echo "$st_state AppID: $st_appid | $st_title | Progress: $st_pct | $dl_label"
+        fi
+        echo "------------------------------------------"
+    done
+    shopt -u nullglob
+
     if [ $count -eq 0 ]; then
-        echo "[INFO] No active download tasks in Steam client."
+        echo "[INFO] No active download tasks in Steam or Standalone engine."
     fi
 }
 
