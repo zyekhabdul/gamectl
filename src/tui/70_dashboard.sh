@@ -643,6 +643,21 @@ preview_dashboard() {
                 fi
             done
 
+            # Layer 8: Security Sandboxing & Process Isolation
+            local has_bwrap=0 has_scope=0
+            if command -v bwrap >/dev/null 2>&1; then
+                pass_cnt=$((pass_cnt + 1))
+                has_bwrap=1
+            else
+                warn_cnt=$((warn_cnt + 1))
+            fi
+            if check_systemd_scope_support >/dev/null 2>&1; then
+                pass_cnt=$((pass_cnt + 1))
+                has_scope=1
+            else
+                warn_cnt=$((warn_cnt + 1))
+            fi
+
             local health_badge="${UI_GREEN}[HEALTHY] Ready for Gaming${UI_RST}"
             if [ "$miss_cnt" -gt 0 ]; then
                 health_badge="${UI_RED}[DEGRADED] Missing Core Dependencies${UI_RST}"
@@ -658,6 +673,7 @@ preview_dashboard() {
             echo "  • L3 Windows Runner: $l3_st    • L4 GBE Templates: $l4_st"
             echo "  • L5 Wrappers      : GameMode $w_gm • MangoHud $w_hud • Gamescope $w_scope"
             echo "  • L6 Integrations  : SLSsteam $sls_status • Steam Client $steam_status"
+            echo "  • L8 Security      : Sandbox $([ "$has_bwrap" -eq 1 ] && echo "${UI_GREEN}[READY]${UI_RST}" || echo "${UI_AMBER}[OFF]${UI_RST}") • Scope $([ "$has_scope" -eq 1 ] && echo "${UI_GREEN}[READY]${UI_RST}" || echo "${UI_AMBER}[OFF]${UI_RST}")"
             echo
             echo "  ${UI_DIM}Full Audit: Press Enter to launch interactive 7-layer doctor_audit${UI_RST}"
             ;;

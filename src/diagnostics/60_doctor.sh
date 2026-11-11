@@ -188,6 +188,25 @@ doctor_audit() {
         warn_cnt=$((warn_cnt + 1))
     fi
 
+    # Layer 8: Security Sandboxing & Process Isolation
+    echo
+    echo "  ${UI_PURPLE}[LAYER 8] Security Sandboxing & Process Isolation${UI_RST}"
+    if command -v bwrap >/dev/null 2>&1; then
+        echo "    • $(printf '%-18s' "Bubblewrap") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(command -v bwrap))${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "    • $(printf '%-18s' "Bubblewrap") : ${UI_AMBER}[WARN]${UI_RST} bwrap not found in PATH (Rootless sandbox disabled: --sandbox)"
+        warn_cnt=$((warn_cnt + 1))
+    fi
+
+    if check_systemd_scope_support; then
+        echo "    • $(printf '%-18s' "cgroups v2 Scope") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}(systemd-run --user scope active)${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "    • $(printf '%-18s' "cgroups v2 Scope") : ${UI_AMBER}[WARN]${UI_RST} systemd-run user scope unsupported or inactive"
+        warn_cnt=$((warn_cnt + 1))
+    fi
+
     # Hardware GPU & Mesa Driver Health
     echo
     echo "  ${UI_PURPLE}[HARDWARE] GPU Controller & Mesa Driver Health${UI_RST}"

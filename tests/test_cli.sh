@@ -2605,6 +2605,23 @@ test_enriched_redundant_preview_panes_contract() {
 }
 run_test "Enriched Preview Panes (Chunk 5): Log Viewer, Process HUD, and ACF Picker telemetry" test_enriched_redundant_preview_panes_contract
 
+test_doctor_layer8_security_contract() {
+    local doc_out
+    doc_out=$("$GAMECTL" doctor 2>&1 || true)
+
+    grep -F -q "[LAYER 8] Security Sandboxing & Process Isolation" <<< "$doc_out" || return 1
+    grep -F -q "Bubblewrap" <<< "$doc_out" || return 1
+    grep -F -q "cgroups v2 Scope" <<< "$doc_out" || return 1
+
+    # Verify preview dashboard incorporates L8
+    local p6
+    p6=$("$GAMECTL" --preview-dashboard 6 4 2>&1 || true)
+    grep -F -q "L8 Security" <<< "$p6" || return 1
+
+    return 0
+}
+run_test "System Diagnostics (Chunk 6): Layer 8 Security Sandboxing & Process Isolation contract" test_doctor_layer8_security_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
