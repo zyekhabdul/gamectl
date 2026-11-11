@@ -2622,6 +2622,69 @@ test_doctor_layer8_security_contract() {
 }
 run_test "System Diagnostics (Chunk 6): Layer 8 Security Sandboxing & Process Isolation contract" test_doctor_layer8_security_contract
 
+test_tui_game_fixes_exposure_contract() {
+    # 1. Verify library_menu hotkey and header exposure
+    grep -q -- '--expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
+    grep -F -q 'Ctrl-X (Fixes)' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
+    grep -F -q 'manage_game_fixes_interactive "$sel_appid" "$sel_title" "$sel_dir"' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
+
+    # 2. Verify search_steam action palette exposure for installed and uninstalled games
+    grep -F -q 'Check Community Fixes & Online-Fix Catalog' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
+    grep -F -q '[Fixes & OnlineFix] Check Community Fixes & Online-Fix Catalog' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
+
+    # 3. Verify main.sh CLI registration and exports
+    grep -q -- '--preview-fix' "$REPO_ROOT/src/main.sh" || return 1
+    grep -q 'manage_game_fixes_interactive' <(head -n 2 "$REPO_ROOT/src/main.sh") || return 1
+    grep -q 'preview_fix_entry' <(head -n 2 "$REPO_ROOT/src/main.sh") || return 1
+
+    # 4. Verify preview-fix rendering without literal -e leaks
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_fix_test_XXXXXX")
+    mkdir -p "$t_dir/.gamectl_fix_backup/20261111_120000/backup_files"
+    cat <<META > "$t_dir/.gamectl_fix_backup/latest.json"
+{
+  "timestamp": "20261111_120000",
+  "appid": "105600",
+  "fix_id": "online-fix:test",
+  "fix_title": "Terraria P2P Online",
+  "backed_up_count": 3
+}
+META
+
+    # Test [RESTORE] preview
+    local p_restore
+    p_restore=$("$GAMECTL" --preview-fix "[RESTORE]" "105600" "Terraria" "Terraria.zip" "Online Fix" "$t_dir" 2>&1 || true)
+    grep -F -q "COMMUNITY FIX & ONLINEFIX HARVESTER" <<< "$p_restore" || return 1
+    grep -F -q "[RESTORE ROLLBACK]" <<< "$p_restore" || return 1
+    grep -F -q "Terraria P2P Online" <<< "$p_restore" || return 1
+    grep -F -q "3 files preserved" <<< "$p_restore" || return 1
+    [[ "$p_restore" != *"-e "* ]] || return 1
+
+    # Test [SIMULATE] preview
+    local p_sim
+    p_sim=$("$GAMECTL" --preview-fix "[SIMULATE]" "105600" "Terraria" "Terraria.zip" "Online Fix" "$t_dir" 2>&1 || true)
+    grep -F -q "[DRY-RUN SIMULATION]" <<< "$p_sim" || return 1
+    [[ "$p_sim" != *"-e "* ]] || return 1
+
+    # Test fix metadata preview
+    local p_fix
+    p_fix=$("$GAMECTL" --preview-fix "online-fix:test" "105600" "Terraria P2P Online" "Terraria.zip" "Online Fix" "$t_dir" "Multiplayer co-op fix" 2>&1 || true)
+    grep -F -q "online-fix:test" <<< "$p_fix" || return 1
+    grep -F -q "Terraria.zip" <<< "$p_fix" || return 1
+    grep -F -q "AppID 480" <<< "$p_fix" || return 1
+    grep -F -q "Multiplayer co-op fix" <<< "$p_fix" || return 1
+    [[ "$p_fix" != *"-e "* ]] || return 1
+
+    # 5. Verify fix-interactive rejects missing/invalid AppID cleanly
+    local err_out
+    err_out=$("$GAMECTL" fix-interactive "notanumber" "TestGame" < /dev/null 2>&1 || true)
+    grep -F -q "Numeric Steam AppID could not be determined" <<< "$err_out" || return 1
+
+    rm -rf "$t_dir"
+    return 0
+}
+run_test "TUI Game Fixes Exposure (Chunk 7): Library & search actions with --preview-fix" test_tui_game_fixes_exposure_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------

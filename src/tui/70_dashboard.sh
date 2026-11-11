@@ -982,10 +982,10 @@ library_menu() {
         fzf_out=$(scan_installed_games --formatted | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
-            --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r \
+            --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x \
             --border-label="  ╢ gamectl :: Game Library ╟  " \
             --border-label-pos=2 \
-            --header=$'GAME LIBRARY (Enter: Launch │ Esc: Dashboard Hub)\nShortcuts: Ctrl-F (Search) │ Ctrl-D (Downloads) │ Ctrl-L (Logs) │ Ctrl-I (Inject) │ Ctrl-O (Wrappers) │ Ctrl-P (LAN ID) │ Ctrl-S (Sync) │ Ctrl-B (Backup) │ Ctrl-R (Restore)' \
+            --header=$'GAME LIBRARY (Enter: Launch │ Esc: Dashboard Hub)\nShortcuts: Ctrl-F (Search) │ Ctrl-D (Downloads) │ Ctrl-L (Logs) │ Ctrl-I (Inject) │ Ctrl-O (Wrappers) │ Ctrl-P (LAN ID) │ Ctrl-S (Sync) │ Ctrl-B (Backup) │ Ctrl-R (Restore) │ Ctrl-X (Fixes)' \
             --prompt="Library > " \
             --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
             --preview-window=right:55%:border-rounded:wrap \
@@ -1088,6 +1088,11 @@ library_menu() {
                 else
                     tui_modal_notice "Save Restore" "No snapshot recovery directory (.save_snapshots) found for:\n${sel_title:-$sel_dir}"
                 fi
+                continue
+                ;;
+            ctrl-x)
+                manage_game_fixes_interactive "$sel_appid" "$sel_title" "$sel_dir"
+                invalidate_scan_cache
                 continue
                 ;;
             *)
@@ -1299,7 +1304,8 @@ search_steam() {
 2	Inject GBE Fork Only (Standalone ./saves & DLC.txt)
 3	Inject GBE + Sync Steam Client (All-in-One Full DLC)
 4	Sync to Steam Client Entitlement Only (ACF & Steam Input)
-5	Cancel / Return
+5	Check Community Fixes & Online-Fix Catalog
+6	Cancel / Return
 EOF
 )
                 local action_sel
@@ -1311,7 +1317,7 @@ EOF
                     --header="ACTION PALETTE (Enter: Execute │ Esc: Return)" \
                     --prompt="Action > " \
                     --height=40% \
-                    --reverse 2>/dev/null) || action_sel="5"
+                    --reverse 2>/dev/null) || action_sel="6"
 
                 local act_opt
                 act_opt=$(echo "$action_sel" | awk -F'\t' '{print $1}')
@@ -1340,6 +1346,9 @@ EOF
                     4)
                         sync_steam "$sel_id" "$sel_name" "$gdir"
                         ;;
+                    5)
+                        manage_game_fixes_interactive "$sel_id" "$sel_name" "$gdir"
+                        ;;
                     *)
                         ;;
                 esac
@@ -1349,7 +1358,8 @@ EOF
 1	[All-in-One] Download & Auto-Provision via Steam Native CDN (SLSsteam)
 2	[Steam Entitlement & ACF] Adopt files, Steam Input & Shaders (Full DLC)
 3	[Standalone] Inject GBE LAN runtime (Steam-free)
-4	Cancel / Return
+4	[Fixes & OnlineFix] Check Community Fixes & Online-Fix Catalog
+5	Cancel / Return
 EOF
 )
                 local pkg_sel
@@ -1361,7 +1371,7 @@ EOF
                     --header="PACKAGE SELECTION (Enter: Execute │ Esc: Return)" \
                     --prompt="Package > " \
                     --height=40% \
-                    --reverse 2>/dev/null) || pkg_sel="4"
+                    --reverse 2>/dev/null) || pkg_sel="5"
 
                 local opt
                 opt=$(echo "$pkg_sel" | awk -F'\t' '{print $1}')
@@ -1374,6 +1384,9 @@ EOF
                         ;;
                     3)
                         inject_game "$dest_dir" "$sel_id" --no-sync
+                        ;;
+                    4)
+                        manage_game_fixes_interactive "$sel_id" "$sel_name" ""
                         ;;
                     *)
                         ;;

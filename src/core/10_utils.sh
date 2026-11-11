@@ -290,8 +290,9 @@ tui_modal_notice() {
     local msg="${2:-}"
     local height="${3:-25%}"
 
-    if [ ! -t 1 ] || ! command -v fzf >/dev/null 2>&1; then
+    if [ ! -t 0 ] || [ ! -t 1 ] || ! command -v fzf >/dev/null 2>&1; then
         log_msg "INFO" "UI" "[$title] $msg"
+        echo "[$title] $msg"
         return 0
     fi
 
