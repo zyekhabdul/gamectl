@@ -2090,6 +2090,91 @@ unlock_game() {
     fi
 }
 
+# Preview pane generator for Steam ACF Adoption candidate (physical directory auto-detection)
+preview_adopt_candidate() {
+    local appid="$1"
+    local title="$2"
+    [ -z "$appid" ] && return 0
+
+    local found_dir=""
+    local found_source=""
+    local has_acf=""
+
+    # 1. Check scancache if available
+    local cache_file
+    cache_file="$(get_runtime_dir)/scancache.tab"
+    if [ -f "$cache_file" ]; then
+        local sc_id sc_name sc_st sc_dir sc_bin
+        while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
+            sc_id="${sc_id//[[:space:]]/}"
+            if [ "$sc_id" = "$appid" ] && [ -d "$sc_dir" ]; then
+                found_dir="$sc_dir"
+                found_source="Library Cache ($sc_st)"
+                break
+            fi
+        done < "$cache_file"
+    fi
+
+    # 2. Check ~/Games directly
+    if [ -z "$found_dir" ] && [ -d "$HOME/Games" ]; then
+        for cand in "$HOME/Games"/*; do
+            [ -d "$cand" ] || continue
+            local c_aid=""
+            [ -f "$cand/steam_appid.txt" ] && c_aid=$(cat "$cand/steam_appid.txt" 2>/dev/null | tr -cd "0-9")
+            [ -z "$c_aid" ] && [ -f "$cand/.gamectl_appid" ] && c_aid=$(cat "$cand/.gamectl_appid" 2>/dev/null | tr -cd "0-9")
+            if [ -n "$c_aid" ] && [ "$c_aid" = "$appid" ]; then
+                found_dir="$cand"
+                found_source="Physical ~/Games (AppID match)"
+                break
+            fi
+            local c_base="${cand##*/}"
+            if [ "${c_base,,}" = "${title,,}" ]; then
+                found_dir="$cand"
+                found_source="Physical ~/Games (Title match)"
+                break
+            fi
+        done
+    fi
+
+    # 3. Check Steam Libraries
+    if [ -z "$found_dir" ]; then
+        while read -r steam_lib; do
+            [ -d "$steam_lib" ] || continue
+            if [ -d "$steam_lib/common/$title" ]; then
+                found_dir="$steam_lib/common/$title"
+                found_source="Steam Primary Library"
+                break
+            fi
+        done < <(get_steam_libraries 2>/dev/null || true)
+    fi
+
+    # Check ACF status
+    local acf_file
+    acf_file=$(find_app_acf "$appid" 2>/dev/null || true)
+    if [ -n "$acf_file" ] && [ -f "$acf_file" ]; then
+        has_acf="${UI_GREEN}[EXISTS] $(basename "$acf_file")${UI_RST}"
+    else
+        has_acf="${UI_AMBER}[MISSING] Not yet registered${UI_RST}"
+    fi
+
+    echo "${UI_BOX}╭─ TARGET STORE GAME & PHYSICAL DISCOVERY AUDIT ──────╮${UI_RST}"
+    echo "  ${UI_CYAN}Store AppID ${UI_RST}: ${UI_BOLD}$appid${UI_RST}"
+    echo "  ${UI_CYAN}Store Title ${UI_RST}: ${UI_BOLD}$title${UI_RST}"
+    echo "  ${UI_CYAN}ACF Manifest${UI_RST}: $has_acf"
+    echo
+    if [ -n "$found_dir" ]; then
+        local dir_size="N/A"
+        dir_size=$(du -sh "$found_dir" 2>/dev/null | awk '{print $1}' || echo "N/A")
+        echo "  ${UI_CYAN}Physical Dir${UI_RST}: ${UI_GREEN}${UI_BOLD}[FOUND]${UI_RST} $found_dir"
+        echo "  ${UI_CYAN}Detection   ${UI_RST}: ${UI_DIM}$found_source • $dir_size on disk${UI_RST}"
+        echo "  ${UI_CYAN}Adoption Act${UI_RST}: ${UI_GREEN}Instant Linking Ready (StateFlags=4)${UI_RST}"
+    else
+        echo "  ${UI_CYAN}Physical Dir${UI_RST}: ${UI_AMBER}[NOT FOUND]${UI_RST} No existing local installation"
+        echo "  ${UI_CYAN}Adoption Act${UI_RST}: ${UI_PURPLE}Triggers Auto-Download Bridge${UI_RST} ${UI_DIM}(Standalone CDN / Steam)${UI_RST}"
+    fi
+    echo "${UI_BOX}╰─────────────────────────────────────────────────────╯${UI_RST}"
+}
+
 # Aliases for entitlement engine
 entitle_game() { unlock_game "$@"; }
 adopt_steam() { unlock_game "$@"; }
@@ -2145,9 +2230,9 @@ unlock_interactive() {
             --border-label-pos=2 \
             --header="SELECT GAME FOR ACF ADOPTION (Enter: Select │ Esc: Cancel)" \
             --prompt="Adopt Game > " \
-            --preview="echo -e '\033[38;5;60m╭─ SELECTED STORE GAME ──────────────────────────────╮\033[0m\n  AppID : \033[1m{1}\033[0m\n  Title : \033[1m{2}\033[0m\n\033[38;5;60m╰────────────────────────────────────────────────────╯\033[0m'" \
-            --preview-window=down:30%:border-rounded \
-            --height=50% \
+            --preview="$SELF_BIN --preview-adopt {1} {2}" \
+            --preview-window=down:45%:border-rounded \
+            --height=55% \
             --reverse 2>/dev/null) || fzf_sel_rc=$?
 
         [ "$fzf_sel_rc" -eq 130 ] && return 0

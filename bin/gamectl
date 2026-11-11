@@ -4305,6 +4305,91 @@ unlock_game() {
     fi
 }
 
+# Preview pane generator for Steam ACF Adoption candidate (physical directory auto-detection)
+preview_adopt_candidate() {
+    local appid="$1"
+    local title="$2"
+    [ -z "$appid" ] && return 0
+
+    local found_dir=""
+    local found_source=""
+    local has_acf=""
+
+    # 1. Check scancache if available
+    local cache_file
+    cache_file="$(get_runtime_dir)/scancache.tab"
+    if [ -f "$cache_file" ]; then
+        local sc_id sc_name sc_st sc_dir sc_bin
+        while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
+            sc_id="${sc_id//[[:space:]]/}"
+            if [ "$sc_id" = "$appid" ] && [ -d "$sc_dir" ]; then
+                found_dir="$sc_dir"
+                found_source="Library Cache ($sc_st)"
+                break
+            fi
+        done < "$cache_file"
+    fi
+
+    # 2. Check ~/Games directly
+    if [ -z "$found_dir" ] && [ -d "$HOME/Games" ]; then
+        for cand in "$HOME/Games"/*; do
+            [ -d "$cand" ] || continue
+            local c_aid=""
+            [ -f "$cand/steam_appid.txt" ] && c_aid=$(cat "$cand/steam_appid.txt" 2>/dev/null | tr -cd "0-9")
+            [ -z "$c_aid" ] && [ -f "$cand/.gamectl_appid" ] && c_aid=$(cat "$cand/.gamectl_appid" 2>/dev/null | tr -cd "0-9")
+            if [ -n "$c_aid" ] && [ "$c_aid" = "$appid" ]; then
+                found_dir="$cand"
+                found_source="Physical ~/Games (AppID match)"
+                break
+            fi
+            local c_base="${cand##*/}"
+            if [ "${c_base,,}" = "${title,,}" ]; then
+                found_dir="$cand"
+                found_source="Physical ~/Games (Title match)"
+                break
+            fi
+        done
+    fi
+
+    # 3. Check Steam Libraries
+    if [ -z "$found_dir" ]; then
+        while read -r steam_lib; do
+            [ -d "$steam_lib" ] || continue
+            if [ -d "$steam_lib/common/$title" ]; then
+                found_dir="$steam_lib/common/$title"
+                found_source="Steam Primary Library"
+                break
+            fi
+        done < <(get_steam_libraries 2>/dev/null || true)
+    fi
+
+    # Check ACF status
+    local acf_file
+    acf_file=$(find_app_acf "$appid" 2>/dev/null || true)
+    if [ -n "$acf_file" ] && [ -f "$acf_file" ]; then
+        has_acf="${UI_GREEN}[EXISTS] $(basename "$acf_file")${UI_RST}"
+    else
+        has_acf="${UI_AMBER}[MISSING] Not yet registered${UI_RST}"
+    fi
+
+    echo "${UI_BOX}╭─ TARGET STORE GAME & PHYSICAL DISCOVERY AUDIT ──────╮${UI_RST}"
+    echo "  ${UI_CYAN}Store AppID ${UI_RST}: ${UI_BOLD}$appid${UI_RST}"
+    echo "  ${UI_CYAN}Store Title ${UI_RST}: ${UI_BOLD}$title${UI_RST}"
+    echo "  ${UI_CYAN}ACF Manifest${UI_RST}: $has_acf"
+    echo
+    if [ -n "$found_dir" ]; then
+        local dir_size="N/A"
+        dir_size=$(du -sh "$found_dir" 2>/dev/null | awk '{print $1}' || echo "N/A")
+        echo "  ${UI_CYAN}Physical Dir${UI_RST}: ${UI_GREEN}${UI_BOLD}[FOUND]${UI_RST} $found_dir"
+        echo "  ${UI_CYAN}Detection   ${UI_RST}: ${UI_DIM}$found_source • $dir_size on disk${UI_RST}"
+        echo "  ${UI_CYAN}Adoption Act${UI_RST}: ${UI_GREEN}Instant Linking Ready (StateFlags=4)${UI_RST}"
+    else
+        echo "  ${UI_CYAN}Physical Dir${UI_RST}: ${UI_AMBER}[NOT FOUND]${UI_RST} No existing local installation"
+        echo "  ${UI_CYAN}Adoption Act${UI_RST}: ${UI_PURPLE}Triggers Auto-Download Bridge${UI_RST} ${UI_DIM}(Standalone CDN / Steam)${UI_RST}"
+    fi
+    echo "${UI_BOX}╰─────────────────────────────────────────────────────╯${UI_RST}"
+}
+
 # Aliases for entitlement engine
 entitle_game() { unlock_game "$@"; }
 adopt_steam() { unlock_game "$@"; }
@@ -4360,9 +4445,9 @@ unlock_interactive() {
             --border-label-pos=2 \
             --header="SELECT GAME FOR ACF ADOPTION (Enter: Select │ Esc: Cancel)" \
             --prompt="Adopt Game > " \
-            --preview="echo -e '\033[38;5;60m╭─ SELECTED STORE GAME ──────────────────────────────╮\033[0m\n  AppID : \033[1m{1}\033[0m\n  Title : \033[1m{2}\033[0m\n\033[38;5;60m╰────────────────────────────────────────────────────╯\033[0m'" \
-            --preview-window=down:30%:border-rounded \
-            --height=50% \
+            --preview="$SELF_BIN --preview-adopt {1} {2}" \
+            --preview-window=down:45%:border-rounded \
+            --height=55% \
             --reverse 2>/dev/null) || fzf_sel_rc=$?
 
         [ "$fzf_sel_rc" -eq 130 ] && return 0
@@ -6540,6 +6625,34 @@ EOF
 
 
 # --- [MODULE] src/runners/50_launcher.sh ---
+# Preview pane generator for Process HUD Log context (3 lines before and 3 lines after)
+preview_process_log() {
+    local lfile="$1"
+    local lnum="${2:-1}"
+    [ -f "$lfile" ] || return 0
+    [[ "$lnum" =~ ^[0-9]+$ ]] || lnum=1
+
+    local total_lines
+    total_lines=$(wc -l < "$lfile" 2>/dev/null || echo 1)
+    local start_line=$(( lnum > 3 ? lnum - 3 : 1 ))
+    local end_line=$(( lnum + 3 < total_lines ? lnum + 3 : total_lines ))
+
+    echo "${UI_BOX}╭─ PROCESS LOG CONTEXT (Lines $start_line..$end_line of $total_lines) ────────────────╮${UI_RST}"
+    local cur=1
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [ "$cur" -ge "$start_line" ] && [ "$cur" -le "$end_line" ]; then
+            if [ "$cur" -eq "$lnum" ]; then
+                printf "  ${UI_GREEN}-> [%3d]${UI_RST} ${UI_BOLD}${UI_CYAN}%s${UI_RST}\n" "$cur" "$line"
+            else
+                printf "     ${UI_DIM}[%3d] %s${UI_RST}\n" "$cur" "$line"
+            fi
+        fi
+        cur=$((cur + 1))
+        [ "$cur" -gt "$end_line" ] && break
+    done < "$lfile"
+    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────────────╯${UI_RST}"
+}
+
 # Interactive Live HUD for running game process (Zero-Flicker FZF Modal)
 game_controller_hud() {
     local game_pid="$1"
@@ -6615,13 +6728,15 @@ EOF
                 ;;
             3)
                 if [ -s "$log_file" ]; then
-                    tac "$log_file" 2>/dev/null | fzf \
+                    awk '{printf "%d\t%s\n", NR, $0}' "$log_file" 2>/dev/null | (command -v tac >/dev/null 2>&1 && tac || sed -e '1!G;h;$!d') | fzf \
+                        --delimiter=$'\t' \
+                        --with-nth=1,2 \
                         --border-label="  ╢ Logs :: $title (PID: $game_pid) ╟  " \
                         --border-label-pos=2 \
                         --header="PROCESS LOGS (Esc / Enter: Return)" \
                         --prompt="Log > " \
-                        --preview="echo -e '\033[38;5;60m╭─ LINE DETAIL ───────────────────────────────────────╮\033[0m\n{}\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m'" \
-                        --preview-window=down:30%:border-rounded:wrap \
+                        --preview="$SELF_BIN --preview-process-log '$log_file' {1}" \
+                        --preview-window=down:35%:border-rounded:wrap \
                         --height=80% \
                         --reverse 2>/dev/null || true
                 else
@@ -8741,6 +8856,67 @@ preview_search_game() {
     fi
 }
 
+# Preview pane generator for Activity & Runtime Log entries
+preview_log_entry() {
+    local raw_entry="$1"
+    [ -z "$raw_entry" ] && return 0
+
+    local ts="N/A" lvl="UNKNOWN" mod="GENERAL" msg="$raw_entry"
+    if [[ "$raw_entry" =~ ^\[([^]]+)\][[:space:]]+\[([^]]+)\][[:space:]]+\[([^]]+)\][[:space:]]+(.*)$ ]]; then
+        ts="${BASH_REMATCH[1]}"
+        lvl="${BASH_REMATCH[2]// /}"
+        mod="${BASH_REMATCH[3]// /}"
+        msg="${BASH_REMATCH[4]}"
+    fi
+
+    local lvl_badge="${UI_BOLD}$lvl${UI_RST}"
+    case "$lvl" in
+        INFO)  lvl_badge="${UI_GREEN}${UI_BOLD}[INFO]${UI_RST}" ;;
+        WARN)  lvl_badge="${UI_AMBER}${UI_BOLD}[WARN]${UI_RST}" ;;
+        ERROR) lvl_badge="${UI_RED}${UI_BOLD}[ERROR]${UI_RST}" ;;
+        DEBUG) lvl_badge="${UI_CYAN}${UI_BOLD}[DEBUG]${UI_RST}" ;;
+    esac
+
+    echo "${UI_BOX}╭─ LOG ENTRY DETAILS ─────────────────────────────────╮${UI_RST}"
+    echo "  ${UI_CYAN}Timestamp  ${UI_RST}: ${UI_BOLD}$ts${UI_RST}"
+    echo "  ${UI_CYAN}Severity   ${UI_RST}: $lvl_badge"
+    echo "  ${UI_CYAN}Subsystem  ${UI_RST}: ${UI_PURPLE}${UI_BOLD}$mod${UI_RST}"
+    echo "  ${UI_CYAN}Message    ${UI_RST}: $msg"
+    echo "${UI_BOX}╰─────────────────────────────────────────────────────╯${UI_RST}"
+
+    if [ "$lvl" = "ERROR" ]; then
+        echo
+        echo "${UI_RED}╭─ REMEDIATION & TROUBLESHOOTING GUIDANCE ────────────╮${UI_RST}"
+        local advice="Run 'gamectl doctor' to audit system health or review recent activity logs."
+        case "$mod" in
+            *LAUNCH*|*RUNNER*)
+                advice="Windows runner missing or crashed. Run 'gamectl doctor' or install Proton-GE/Wine."
+                ;;
+            *STORE*|*DOWNLOAD*|*DEPOT*)
+                advice="Network or CDN timeout. Check connectivity to Steam Store or CDN endpoints."
+                ;;
+            *GBE*|*INJECT*)
+                advice="GBE injection failure. Check file permissions or verify 32-bit vs 64-bit architecture."
+                ;;
+            *SAVE*|*BACKUP*|*RESTORE*)
+                advice="Savegame snapshot error. Verify disk space in target directory or storage quota."
+                ;;
+            *DRM*|*STEAMSTUB*)
+                advice="SteamStub DRM detected. Run 'gamectl unpack <exe>' using Steamless CLI."
+                ;;
+            *)
+                if [[ "$msg" =~ (runner|wine|proton) ]]; then
+                    advice="Windows runner failure. Verify runner configuration in ~/.config/gamectl/."
+                elif [[ "$msg" =~ (permission|denied|write) ]]; then
+                    advice="Filesystem permission error. Verify user write permissions on target directory."
+                fi
+                ;;
+        esac
+        echo "  ${UI_AMBER}• Suggestion: ${advice}${UI_RST}"
+        echo "${UI_RED}╰─────────────────────────────────────────────────────╯${UI_RST}"
+    fi
+}
+
 # Interactive Centralized Activity & Runtime Log Viewer
 view_logs_interactive() {
     flush_tty_input
@@ -8761,8 +8937,8 @@ view_logs_interactive() {
         --border-label-pos=2 \
         --header="ACTIVITY LOGS (Arrows: Navigate │ Ctrl-X: Clear Log │ Esc: Return)" \
         --prompt="Logs > " \
-        --preview="echo -e '\033[38;5;60m╭─ LOG ENTRY DETAILS ─────────────────────────────────╮\033[0m\n{}\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m'" \
-        --preview-window=down:30%:border-rounded:wrap \
+        --preview="$SELF_BIN --preview-log {}" \
+        --preview-window=down:35%:border-rounded:wrap \
         --bind="ctrl-x:execute(: > '$log_file')+reload(command -v tac >/dev/null 2>&1 && tac '$log_file' 2>/dev/null || sed -e '1!G;h;\$!d' '$log_file' 2>/dev/null)" \
         --height=85% \
         --reverse 2>/dev/null || fzf_rc=$?
@@ -9288,7 +9464,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive preview_search_game preview_download get_depot_dl_progress
+export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive preview_search_game preview_download get_depot_dl_progress preview_log_entry preview_process_log preview_adopt_candidate
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -9446,6 +9622,15 @@ case "${1:-}" in
         ;;
     --preview-download)
         preview_download "${2:-}" "${3:-}" "${4:-}"
+        ;;
+    --preview-log)
+        preview_log_entry "${2:-}"
+        ;;
+    --preview-process-log)
+        preview_process_log "${2:-}" "${3:-}"
+        ;;
+    --preview-adopt)
+        preview_adopt_candidate "${2:-}" "${3:-}"
         ;;
     set-id)
         if [ -n "${2:-}" ]; then

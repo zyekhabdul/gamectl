@@ -767,6 +767,67 @@ preview_search_game() {
     fi
 }
 
+# Preview pane generator for Activity & Runtime Log entries
+preview_log_entry() {
+    local raw_entry="$1"
+    [ -z "$raw_entry" ] && return 0
+
+    local ts="N/A" lvl="UNKNOWN" mod="GENERAL" msg="$raw_entry"
+    if [[ "$raw_entry" =~ ^\[([^]]+)\][[:space:]]+\[([^]]+)\][[:space:]]+\[([^]]+)\][[:space:]]+(.*)$ ]]; then
+        ts="${BASH_REMATCH[1]}"
+        lvl="${BASH_REMATCH[2]// /}"
+        mod="${BASH_REMATCH[3]// /}"
+        msg="${BASH_REMATCH[4]}"
+    fi
+
+    local lvl_badge="${UI_BOLD}$lvl${UI_RST}"
+    case "$lvl" in
+        INFO)  lvl_badge="${UI_GREEN}${UI_BOLD}[INFO]${UI_RST}" ;;
+        WARN)  lvl_badge="${UI_AMBER}${UI_BOLD}[WARN]${UI_RST}" ;;
+        ERROR) lvl_badge="${UI_RED}${UI_BOLD}[ERROR]${UI_RST}" ;;
+        DEBUG) lvl_badge="${UI_CYAN}${UI_BOLD}[DEBUG]${UI_RST}" ;;
+    esac
+
+    echo "${UI_BOX}╭─ LOG ENTRY DETAILS ─────────────────────────────────╮${UI_RST}"
+    echo "  ${UI_CYAN}Timestamp  ${UI_RST}: ${UI_BOLD}$ts${UI_RST}"
+    echo "  ${UI_CYAN}Severity   ${UI_RST}: $lvl_badge"
+    echo "  ${UI_CYAN}Subsystem  ${UI_RST}: ${UI_PURPLE}${UI_BOLD}$mod${UI_RST}"
+    echo "  ${UI_CYAN}Message    ${UI_RST}: $msg"
+    echo "${UI_BOX}╰─────────────────────────────────────────────────────╯${UI_RST}"
+
+    if [ "$lvl" = "ERROR" ]; then
+        echo
+        echo "${UI_RED}╭─ REMEDIATION & TROUBLESHOOTING GUIDANCE ────────────╮${UI_RST}"
+        local advice="Run 'gamectl doctor' to audit system health or review recent activity logs."
+        case "$mod" in
+            *LAUNCH*|*RUNNER*)
+                advice="Windows runner missing or crashed. Run 'gamectl doctor' or install Proton-GE/Wine."
+                ;;
+            *STORE*|*DOWNLOAD*|*DEPOT*)
+                advice="Network or CDN timeout. Check connectivity to Steam Store or CDN endpoints."
+                ;;
+            *GBE*|*INJECT*)
+                advice="GBE injection failure. Check file permissions or verify 32-bit vs 64-bit architecture."
+                ;;
+            *SAVE*|*BACKUP*|*RESTORE*)
+                advice="Savegame snapshot error. Verify disk space in target directory or storage quota."
+                ;;
+            *DRM*|*STEAMSTUB*)
+                advice="SteamStub DRM detected. Run 'gamectl unpack <exe>' using Steamless CLI."
+                ;;
+            *)
+                if [[ "$msg" =~ (runner|wine|proton) ]]; then
+                    advice="Windows runner failure. Verify runner configuration in ~/.config/gamectl/."
+                elif [[ "$msg" =~ (permission|denied|write) ]]; then
+                    advice="Filesystem permission error. Verify user write permissions on target directory."
+                fi
+                ;;
+        esac
+        echo "  ${UI_AMBER}• Suggestion: ${advice}${UI_RST}"
+        echo "${UI_RED}╰─────────────────────────────────────────────────────╯${UI_RST}"
+    fi
+}
+
 # Interactive Centralized Activity & Runtime Log Viewer
 view_logs_interactive() {
     flush_tty_input
@@ -787,8 +848,8 @@ view_logs_interactive() {
         --border-label-pos=2 \
         --header="ACTIVITY LOGS (Arrows: Navigate │ Ctrl-X: Clear Log │ Esc: Return)" \
         --prompt="Logs > " \
-        --preview="echo -e '\033[38;5;60m╭─ LOG ENTRY DETAILS ─────────────────────────────────╮\033[0m\n{}\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m'" \
-        --preview-window=down:30%:border-rounded:wrap \
+        --preview="$SELF_BIN --preview-log {}" \
+        --preview-window=down:35%:border-rounded:wrap \
         --bind="ctrl-x:execute(: > '$log_file')+reload(command -v tac >/dev/null 2>&1 && tac '$log_file' 2>/dev/null || sed -e '1!G;h;\$!d' '$log_file' 2>/dev/null)" \
         --height=85% \
         --reverse 2>/dev/null || fzf_rc=$?

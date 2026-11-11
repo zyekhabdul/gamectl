@@ -1,3 +1,31 @@
+# Preview pane generator for Process HUD Log context (3 lines before and 3 lines after)
+preview_process_log() {
+    local lfile="$1"
+    local lnum="${2:-1}"
+    [ -f "$lfile" ] || return 0
+    [[ "$lnum" =~ ^[0-9]+$ ]] || lnum=1
+
+    local total_lines
+    total_lines=$(wc -l < "$lfile" 2>/dev/null || echo 1)
+    local start_line=$(( lnum > 3 ? lnum - 3 : 1 ))
+    local end_line=$(( lnum + 3 < total_lines ? lnum + 3 : total_lines ))
+
+    echo "${UI_BOX}╭─ PROCESS LOG CONTEXT (Lines $start_line..$end_line of $total_lines) ────────────────╮${UI_RST}"
+    local cur=1
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [ "$cur" -ge "$start_line" ] && [ "$cur" -le "$end_line" ]; then
+            if [ "$cur" -eq "$lnum" ]; then
+                printf "  ${UI_GREEN}-> [%3d]${UI_RST} ${UI_BOLD}${UI_CYAN}%s${UI_RST}\n" "$cur" "$line"
+            else
+                printf "     ${UI_DIM}[%3d] %s${UI_RST}\n" "$cur" "$line"
+            fi
+        fi
+        cur=$((cur + 1))
+        [ "$cur" -gt "$end_line" ] && break
+    done < "$lfile"
+    echo "${UI_BOX}╰─────────────────────────────────────────────────────────────────────╯${UI_RST}"
+}
+
 # Interactive Live HUD for running game process (Zero-Flicker FZF Modal)
 game_controller_hud() {
     local game_pid="$1"
@@ -73,13 +101,15 @@ EOF
                 ;;
             3)
                 if [ -s "$log_file" ]; then
-                    tac "$log_file" 2>/dev/null | fzf \
+                    awk '{printf "%d\t%s\n", NR, $0}' "$log_file" 2>/dev/null | (command -v tac >/dev/null 2>&1 && tac || sed -e '1!G;h;$!d') | fzf \
+                        --delimiter=$'\t' \
+                        --with-nth=1,2 \
                         --border-label="  ╢ Logs :: $title (PID: $game_pid) ╟  " \
                         --border-label-pos=2 \
                         --header="PROCESS LOGS (Esc / Enter: Return)" \
                         --prompt="Log > " \
-                        --preview="echo -e '\033[38;5;60m╭─ LINE DETAIL ───────────────────────────────────────╮\033[0m\n{}\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m'" \
-                        --preview-window=down:30%:border-rounded:wrap \
+                        --preview="$SELF_BIN --preview-process-log '$log_file' {1}" \
+                        --preview-window=down:35%:border-rounded:wrap \
                         --height=80% \
                         --reverse 2>/dev/null || true
                 else

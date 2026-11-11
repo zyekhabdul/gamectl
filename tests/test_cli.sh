@@ -2545,6 +2545,66 @@ test_preview_dashboard_dynamic_metrics_contract() {
 }
 run_test "Dashboard Preview Metrics (Chunk 4): Dynamic context-rich indicators across modules 1-7" test_preview_dashboard_dynamic_metrics_contract
 
+test_enriched_redundant_preview_panes_contract() {
+    # 1. Preview Log Entry (INFO)
+    local p_info
+    p_info=$("$GAMECTL" --preview-log "[2026-11-11 05:43:21] [INFO ] [DASHBOARD ] Cockpit active (4 titles indexed)" 2>&1 || true)
+    grep -F -q "LOG ENTRY DETAILS" <<< "$p_info" || return 1
+    grep -F -q "Timestamp" <<< "$p_info" || return 1
+    grep -F -q "Severity" <<< "$p_info" || return 1
+    grep -F -q "DASHBOARD" <<< "$p_info" || return 1
+    grep -F -q "Cockpit active" <<< "$p_info" || return 1
+
+    # 2. Preview Log Entry (ERROR with Remediation Guidance)
+    local p_err
+    p_err=$("$GAMECTL" --preview-log "[2026-11-11 05:45:00] [ERROR] [LAUNCH    ] Runner not found: umu-run / wine" 2>&1 || true)
+    grep -F -q "LOG ENTRY DETAILS" <<< "$p_err" || return 1
+    grep -F -q "REMEDIATION & TROUBLESHOOTING GUIDANCE" <<< "$p_err" || return 1
+    grep -F -q "Windows runner missing or crashed" <<< "$p_err" || return 1
+
+    # 3. Process HUD Log Context Preview (3 lines before and after)
+    local t_log
+    t_log=$(mktemp "${TMPDIR:-/tmp}/gamectl_test_hud_log_XXXXXX")
+    local i
+    for i in {1..12}; do
+        echo "Process log trace line $i for testing context" >> "$t_log"
+    done
+    local p_proc
+    p_proc=$("$GAMECTL" --preview-process-log "$t_log" 6 2>&1 || true)
+    rm -f "$t_log"
+
+    grep -F -q "PROCESS LOG CONTEXT" <<< "$p_proc" || return 1
+    grep -F -q "Lines 3..9 of 12" <<< "$p_proc" || return 1
+    grep -F -q -- "-> [  6]" <<< "$p_proc" || return 1
+    grep -F -q "[  3] Process log trace line 3" <<< "$p_proc" || return 1
+    grep -F -q "[  9] Process log trace line 9" <<< "$p_proc" || return 1
+
+    # 4. Steam ACF Adoption Candidate Preview (Physical detection & Bridge)
+    local p_adopt_found
+    p_adopt_found=$("$GAMECTL" --preview-adopt 813230 "ANIMAL WELL" 2>&1 || true)
+    grep -F -q "TARGET STORE GAME & PHYSICAL DISCOVERY AUDIT" <<< "$p_adopt_found" || return 1
+    grep -F -q "Store AppID" <<< "$p_adopt_found" || return 1
+    grep -F -q "813230" <<< "$p_adopt_found" || return 1
+    grep -F -q "ANIMAL WELL" <<< "$p_adopt_found" || return 1
+    grep -F -q "Physical Dir" <<< "$p_adopt_found" || return 1
+
+    local p_adopt_missing
+    p_adopt_missing=$("$GAMECTL" --preview-adopt 9999999 "FakeNonexistentGame" 2>&1 || true)
+    grep -F -q "TARGET STORE GAME & PHYSICAL DISCOVERY AUDIT" <<< "$p_adopt_missing" || return 1
+    grep -F -q "[NOT FOUND]" <<< "$p_adopt_missing" || return 1
+    grep -F -q "Triggers Auto-Download Bridge" <<< "$p_adopt_missing" || return 1
+
+    # 5. Invariant: Zero -e literal leaks across all preview panes
+    [[ "$p_info" != *"-e "* ]] || return 1
+    [[ "$p_err" != *"-e "* ]] || return 1
+    [[ "$p_proc" != *"-e "* ]] || return 1
+    [[ "$p_adopt_found" != *"-e "* ]] || return 1
+    [[ "$p_adopt_missing" != *"-e "* ]] || return 1
+
+    return 0
+}
+run_test "Enriched Preview Panes (Chunk 5): Log Viewer, Process HUD, and ACF Picker telemetry" test_enriched_redundant_preview_panes_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
