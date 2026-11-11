@@ -2685,6 +2685,51 @@ META
 }
 run_test "TUI Game Fixes Exposure (Chunk 7): Library & search actions with --preview-fix" test_tui_game_fixes_exposure_contract
 
+test_preview_search_community_protondb_parsing_contract() {
+    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl"
+    mkdir -p "$cache_dir"
+
+    # 1. Gold tier Windows PE game
+    cat <<'EOF' > "$cache_dir/steam_details_888881.json"
+{"888881":{"success":true,"data":{"platforms":{"windows":true,"linux":false},"genres":[{"description":"RPG"},{"description":"Adventure"}]}}}
+EOF
+    cat <<'EOF' > "$cache_dir/protondb_888881.json"
+{"tier":"gold","score":0.82,"confidence":"strong","total":450}
+EOF
+
+    local out_gold clean_gold
+    out_gold=$("$GAMECTL" --preview-search 888881 "Gold RPG" "[NOT INSTALLED]" 2>&1 || true)
+    clean_gold=$(echo "$out_gold" | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+    rm -f "$cache_dir/steam_details_888881.json" "$cache_dir/protondb_888881.json"
+
+    grep -F -q "Gold RPG (AppID: 888881)" <<< "$clean_gold" || return 1
+    grep -F -q "Genres      : RPG, Adventure" <<< "$clean_gold" || return 1
+    grep -F -q "Platform    : Windows PE (Requires Proton/Wine)" <<< "$clean_gold" || return 1
+    grep -F -q "ProtonDB Tier : [GOLD]" <<< "$clean_gold" || return 1
+    grep -F -q "Rating Score  : 0.82 (Confidence: strong • Reports: 450)" <<< "$clean_gold" || return 1
+    [[ "$out_gold" != *"-e "* ]] || return 1
+
+    # 2. Native Linux game with silver tier
+    cat <<'EOF' > "$cache_dir/steam_details_888882.json"
+{"888882":{"success":true,"data":{"platforms":{"windows":true,"linux":true},"genres":[{"description":"Strategy"}]}}}
+EOF
+    cat <<'EOF' > "$cache_dir/protondb_888882.json"
+{"tier":"silver","score":0.65,"confidence":"fair","total":50}
+EOF
+
+    local out_silver clean_silver
+    out_silver=$("$GAMECTL" --preview-search 888882 "Silver Strategy" "[INSTALLED]" 2>&1 || true)
+    clean_silver=$(echo "$out_silver" | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+    rm -f "$cache_dir/steam_details_888882.json" "$cache_dir/protondb_888882.json"
+
+    grep -F -q "Platform    : Native Linux ELF available" <<< "$clean_silver" || return 1
+    grep -F -q "ProtonDB Tier : [SILVER]" <<< "$clean_silver" || return 1
+    [[ "$out_silver" != *"-e "* ]] || return 1
+
+    return 0
+}
+run_test "Store Search Invariant (Chunk 1 & 8): Multi-tier ProtonDB and platform resolution" test_preview_search_community_protondb_parsing_contract
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
