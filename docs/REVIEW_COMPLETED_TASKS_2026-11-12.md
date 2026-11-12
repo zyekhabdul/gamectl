@@ -59,13 +59,13 @@ provisioning game, remote save, atau konfigurasi produksi.
 
 ## Batas verifikasi dan pekerjaan tersisa
 
-25.01 belum selesai penuh. Scanner menulis field title/path langsung ke format
+Pada audit `9d2a682`, 25.01 belum selesai penuh. Scanner menulis field title/path langsung ke format
 TAB/newline (`src/steam/20_discovery.sh`), sedangkan fzf membacanya sebagai
 pemisah. Validasi nama yang tidak dapat direpresentasikan belum tersedia.
 Submenu search action/package juga masih memetakan semua kegagalan fzf menjadi
 pilihan Cancel (`src/tui/70_dashboard.sh`); propagasi error bertingkat perlu
 ditutup dengan pengujian sendiri. Hasil delapan kombinasi entrypoint tidak
-mensertifikasi seluruh menu.
+mensertifikasi seluruh menu. Temuan 25.01 ini ditutup pada follow-up di bawah.
 
 25.02 belum selesai penuh. Rename per langkah pada filesystem lokal bukan
 transaksi tahan crash. SIGKILL/mati daya dapat meninggalkan slot yang bergeser,
@@ -88,3 +88,45 @@ resource limits, provisioning, dan source freshness build tetap mengikuti
 urutan backlog yang sudah ada. Pengujian game/GPU, Steam Deck, SSH nyata,
 Windows, dan publikasi paket tidak dilakukan. Tes lokal tidak membuktikan
 kesiapan produksi atau gameplay.
+
+## Follow-up Chunk 25.01 completed
+
+Implementasi `46301b4`, branch lokal `fix/chunk-25-01-complete`, 2026-11-12.
+Hanya Chunk 25.01 ditutup; sembilan chunk 25.02-25.10 tetap terbuka.
+
+- Scanner memvalidasi path/title/executable sebelum menyimpan baris. Judul
+  metadata multiline dan nama executable yang mengandung pemisah ditolak dengan
+  pesan error. Cache versi lama tidak dipakai ulang. Formatter memakai `%s`
+  sehingga nama seperti `Player's 測試 \\t game` tidak berubah menjadi field baru.
+- Katalog Store/adoption divalidasi sebelum konversi TSV; katalog fixes
+  divalidasi sebelum baris dikirim ke fzf. Backslash literal tidak diinterpretasi
+  sebagai escape saat menyusun menu fixes, unduhan, dan custom library.
+- Error fzf pada settings, wrappers, persona, action/package, download actions,
+  adoption bridge, restore picker, diagnostics, HUD log, dan modal diteruskan
+  hingga pemanggil. Kesalahan 2/127 tidak disamarkan sebagai Cancel. Menu yang
+  memerlukan TTY/fzf gagal segera jika syarat tersebut tidak tersedia.
+- Kontrak pembatalan yang sudah ada dipertahankan, termasuk Esc menyimpan
+  konfigurasi wrappers. Backend provisioning/save/process ownership tidak
+  diubah menjadi implementasi chunk lain.
+
+Regresi sebelum perbaikan membuktikan field scanner terpecah oleh TAB dan
+backslash escape, serta dashboard mengembalikan 0 setelah settings gagal.
+Setelah perbaikan, seluruh assertion lama tetap dipertahankan; parser ACF
+tetap dapat di-source sendiri dan validasi direktori persona tetap bekerja.
+
+Verifikasi pada source/bundle `46301b4`, seluruhnya exit 0:
+
+| Gate | Hasil |
+| --- | --- |
+| `./tests/test_cli.sh` di salinan dengan HOME/cache/runtime sementara | 134/134 kontrak; tidak ada skip |
+| Harness TUI yang dipanggil suite CLI | 12 metode; 60 kombinasi submenu 2/127, validasi data, cache lama, missing fzf/TTY, no-match/cancel |
+| Preview fzf nyata dalam PTY, `SHELL=/bin/sh` | Fixes dengan path executable khusus, prefix, HUD/log; preview benar-benar tampil, marker tidak terbentuk, Esc keluar 0 |
+| `cargo test --locked --manifest-path crates/depot-dl/Cargo.toml` | 31 unit test library + 3 doctest; source Rust tidak berubah |
+| `make lint`, `./scripts/build.sh --check`, `git diff --check` | Lulus; bundle dibangun ulang dari source modular |
+
+Fault injection submenu memakai executable fzf pengganti dengan urutan pilihan
+dan status yang dikendalikan. Setiap kasus memeriksa status akhir, jumlah
+pemanggilan, dan tidak adanya mutasi persona setelah error. API katalog memakai
+fixture lokal; preview dan terminal memakai fzf/PTY nyata. Tes ini tidak
+mensertifikasi gameplay, GPU, SSH nyata, Steam Deck, Windows, atau recovery
+SIGKILL/mati daya. Backlog dan batas 25.02 di atas tetap berlaku.

@@ -1,12 +1,12 @@
 # WORK PACKET 25: RUNTIME SAFETY REMEDIATION BEFORE WINDOWS EXPANSION
 
 - Track: Maintenance / Security / Save Integrity / Process Ownership / Failure Reporting
-- **Status**: IN PROGRESS [CHUNKS 25.01-25.02 REOPENED AFTER REVIEW]
-- **Reviewed at**: 2026-11-12, baseline commit `27f5a718e36177b37a761575d041125fa132f256`
-- **Review branch**: `fix/review-completed-25`
+- **Status**: IN PROGRESS [CHUNK 25.01 VERIFIED; 9 CHUNKS REMAINING]
+- **Reviewed at**: 2026-11-12, implementation commit `46301b4` (follow-up to `9d2a682`)
+- **Review branch**: `fix/chunk-25-01-complete`
 - **Execution branches**: branch `fix/` terpisah untuk tiap perubahan yang dapat diverifikasi
-- **Max Chunks**: 10 pekerjaan aktif; backlog Packet 26 belum diperinci menjadi chunk aktif
-- **Scope of this review**: audit task yang dicentang, perbaikan kegagalan save, dan penguatan regresi; Chunk 25.03-25.10 tetap terbuka
+- **Max Chunks**: 10 chunk dalam Packet 25; 9 belum selesai; backlog Packet 26 belum diperinci menjadi chunk aktif
+- **Scope of this follow-up**: menyelesaikan Chunk 25.01; Chunk 25.02-25.10 tetap terbuka
 
 ## 1. Baseline, evidence, and boundaries
 
@@ -35,11 +35,15 @@
 | 25.09 | P1 | Standalone/provisioning/fix mutations gagal secara jujur | 25.02, 25.04, 25.07, 25.08 |
 | 25.10 | P2 | Build verifikasi membuktikan artifact berasal dari source yang diuji | 25.01-25.09 |
 
-### [ ] Chunk 25.01: Safe preview arguments and bounded fzf failure handling [PARTIALLY VERIFIED]
+### [x] Chunk 25.01: Safe preview arguments and bounded fzf failure handling [VERIFIED]
 
-**Review 2026-11-12**: Perbaikan awal `d4623c0` terbukti melindungi preview fixes dengan path game dan executable berspasi/apostrof/Unicode/metakarakter. Tes `tests/test_tui_safety.py` mewajibkan preview nyata tampil, Esc keluar 0, dan fzf 2/127 diteruskan pada fixes/logs/library/dashboard. Tes PTY lama menelan error dan tidak menunggu preview; sekarang menggunakan harness ini. Masih terbuka: validasi TAB/newline dalam format baris scanner/catalog dan audit error pada submenu/pemanggil bertingkat; jangan menutup seluruh chunk berdasarkan empat entrypoint tersebut.
+**Review awal 2026-11-12 (historis)**: Perbaikan `d4623c0` dan audit `c029a7a` melindungi preview fixes dan empat entrypoint utama, tetapi belum menutup validasi TAB/newline dan propagasi error submenu. Karena itu chunk sempat dibuka kembali pada `9d2a682`.
 
-**Target Files**: `src/steam/35_fixes.sh`, `src/steam/30_downloader.sh`, `src/runners/50_launcher.sh`, `src/runners/40_wrappers.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `tests/test_cli.sh`. Mulai dari menu fixes; perluas hanya ke call-site yang memiliki pola interpolasi berbahaya yang sama.
+**Completion 2026-11-12 — commit `46301b4`**: Scanner, metadata judul/executable, katalog Store/fixes, serta baris unduhan menolak pemisah TAB/CR/newline sebelum dipakai sebagai field. Backslash literal, spasi, apostrof, Unicode, dan metakarakter shell tetap dipertahankan; cache scanner lama dibangun ulang. Error fzf pada submenu, modal, dan pemanggil dashboard/library/search diteruskan dengan status asli; TTY/fzf diperiksa pada entrypoint yang tersisa. Escape/no-match mempertahankan kontrak navigasi sebelumnya.
+
+**Evidence**: `tests/test_tui_safety.py` menjalankan 12 metode: 60 kombinasi error submenu 2/127, pembatalan/no-match, fzf benar-benar hilang, tanpa TTY, validasi katalog/cache/metadata, serta preview fixes/prefix/HUD melalui fzf nyata dengan `SHELL=/bin/sh`. Marker tidak terbentuk dan Esc keluar 0. Suite CLI di salinan sementara dengan HOME/cache/runtime terpisah lulus **134/134**, termasuk harness tersebut dan 10 metode save; Rust **31 unit test + 3 doctest** lulus. `make lint`, `scripts/build.sh --check`, dan `git diff --check`: exit 0. Bukti dan batas: [follow-up 25.01](docs/REVIEW_COMPLETED_TASKS_2026-11-12.md#follow-up-chunk-2501-completed). Tidak mengklaim gameplay, Windows, SSH nyata, atau recovery tahan crash.
+
+**Target Files**: `src/core/10_utils.sh`, `src/steam/20_discovery.sh`, `src/steam/25_identity.sh`, `src/steam/35_fixes.sh`, `src/steam/30_downloader.sh`, `src/runners/50_launcher.sh`, `src/runners/40_wrappers.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `tests/test_cli.sh`, `tests/test_tui_safety.py`, serta bundle hasil build. Perubahan scanner/identity menutup field dan submenu yang ditemukan dalam audit call-site.
 
 **Execution**:
 1. Audit seluruh `--preview`/`--bind` yang memasukkan path, title, atau log ke string shell. Pada `manage_game_fixes_interactive`, hentikan interpolasi langsung `'$gdir'`; teruskan data lewat placeholder fzf yang di-escape atau environment per pemanggilan dengan ekspansi terkutip pada command tetap. Lindungi path `SELF_BIN` juga.
