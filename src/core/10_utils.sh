@@ -290,20 +290,57 @@ tui_modal_notice() {
     local msg="${2:-}"
     local height="${3:-25%}"
 
-    if [ ! -t 0 ] || [ ! -t 1 ] || ! command -v fzf >/dev/null 2>&1; then
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
         log_msg "INFO" "UI" "[$title] $msg"
         echo "[$title] $msg"
         return 0
     fi
+    require_tui "$title" || return $?
 
+    local fzf_rc=0
     printf "%b\n" "$msg" | fzf \
         --border-label="  ╢ $title ╟  " \
         --border-label-pos=2 \
         --header="NOTICE (Enter or Esc: Dismiss)" \
         --prompt="> " \
         --height="$height" \
-        --reverse 2>/dev/null || true
+        --reverse 2>/dev/null || fzf_rc=$?
+    check_fzf_status "$fzf_rc" || return $?
     return 0
+}
+
+require_tui() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] ${1:-Interactive mode} requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for ${1:-interactive mode}." >&2
+        return 127
+    fi
+}
+
+check_fzf_status() {
+    case "$1" in
+        0|1|130) return 0 ;;
+        *) echo "[ERROR] Interactive selection failed (fzf exit code $1)." >&2; return "$1" ;;
+    esac
+}
+
+validate_tui_fields() {
+    local field
+    for field in "$@"; do
+        if [[ "$field" == *[$'\t\r\n']* ]]; then
+            printf '[ERROR] TUI fields cannot contain TAB, CR or newline: %q\n' "$field" >&2
+            return 1
+        fi
+    done
+}
+
+store_search_items() {
+    jq -r 'if any(.items[]?; (.id | tostring | test("[\\t\\r\\n]")) or (.name | test("[\\t\\r\\n]")))
+        then error("TUI catalog contains TAB, CR or newline")
+        else .items[]? | "\(.id)\t\(.name)" end'
 }
 
 # Canonical user-isolated runtime directory (0700 permissions)
@@ -680,6 +717,7 @@ find_game_binary() {
     )
     for c in "${candidates[@]}"; do
         if [ -x "$dir/$c" ] && [ ! -d "$dir/$c" ]; then
+            validate_tui_fields "$c" || continue
             echo "$c"
             return 0
         fi
@@ -689,7 +727,8 @@ find_game_binary() {
     local f fname
     for f in "$dir"/*; do
         if [ -x "$f" ] && [ ! -d "$f" ]; then
-            fname=$(basename "$f")
+            fname="${f##*/}"
+            validate_tui_fields "$fname" || continue
             case "$fname" in
                 *.so|*.so.*|*.dll|*.dylib|installscript.vdf|*.png|*.bmp|*.txt|*.pkg|createdump|monoconfig|monomachineconfig)
                     continue
@@ -708,6 +747,7 @@ find_game_binary() {
     )
     for c in "${win_candidates[@]}"; do
         if [ -f "$dir/$c" ] && [ ! -d "$dir/$c" ]; then
+            validate_tui_fields "$c" || continue
             chmod +x "$dir/$c" 2>/dev/null || true
             echo "$c"
             return 0
@@ -717,7 +757,8 @@ find_game_binary() {
     # Priority 4: Any root .exe excluding setup/redist/crash handlers
     for f in "$dir"/*.exe "$dir"/*.EXE; do
         [ -f "$f" ] || continue
-        fname=$(basename "$f")
+        fname="${f##*/}"
+        validate_tui_fields "$fname" || continue
         case "$fname" in
             UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|vcredist*|dotnet*|vc_redist*|*CrashReport*)
                 continue
@@ -735,7 +776,8 @@ find_game_binary() {
         if [ -d "$dir/$sub" ]; then
             for f in "$dir/$sub"/*.exe "$dir/$sub"/*.EXE; do
                 [ -f "$f" ] || continue
-                fname=$(basename "$f")
+                fname="${f##*/}"
+                validate_tui_fields "$fname" || continue
                 case "$fname" in
                     UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|vcredist*|dotnet*|vc_redist*|*CrashReport*)
                         continue

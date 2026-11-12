@@ -579,6 +579,7 @@ manage_prefix() {
 
     # Interactive menu if action is empty and stdin is terminal
     if [ -z "$action" ]; then
+        require_tui "Wine prefix manager" || return $?
         if [ -t 0 ]; then
             if command -v fzf >/dev/null 2>&1; then
                 flush_tty_input
@@ -639,32 +640,8 @@ EOF
 
                 action=$(echo "$pfx_sel" | awk -F'\t' '{print $1}')
             else
-                echo "${UI_BOX}╭─ WINE PREFIX SWISS ARMY KNIFE ──────────────────────────────╮${UI_RST}"
-                echo "│ ${UI_CYAN}Game Directory${UI_RST} : ${UI_BOLD}$game_dir${UI_RST}"
-                echo "│ ${UI_CYAN}Prefix Path   ${UI_RST} : ${UI_BOLD}$pfx_dir${UI_RST}"
-                echo "│ ${UI_CYAN}Active Runner ${UI_RST} : ${UI_GREEN}$runner_bin${UI_RST}"
-                echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-                echo "  ${UI_PURPLE}1)${UI_RST} winecfg      ${UI_DIM}(Wine Audio, Graphics & Windows Version Config)${UI_RST}"
-                echo "  ${UI_PURPLE}2)${UI_RST} regedit      ${UI_DIM}(Windows Registry Editor)${UI_RST}"
-                echo "  ${UI_PURPLE}3)${UI_RST} cmd          ${UI_DIM}(Windows Command Prompt)${UI_RST}"
-                echo "  ${UI_PURPLE}4)${UI_RST} shell        ${UI_DIM}(Host Bash Subshell with active WINEPREFIX)${UI_RST}"
-                echo "  ${UI_PURPLE}5)${UI_RST} winetricks   ${UI_DIM}(Winetricks GUI / Package Manager)${UI_RST}"
-                echo "  ${UI_AMBER}6)${UI_RST} kill         ${UI_DIM}(Terminate locked / hung Wineserver)${UI_RST}"
-                echo "  ${UI_RED}7)${UI_RST} clean        ${UI_DIM}(Backup Saves & Wipe Entire Wine Prefix)${UI_RST}"
-                echo "  ${UI_CYAN}8)${UI_RST} Exit"
-                echo
-                local choice=""
-                read -t 15 -r -p "Select action [1-8]: " choice || choice="8"
-                case "$choice" in
-                    1) action="winecfg" ;;
-                    2) action="regedit" ;;
-                    3) action="cmd" ;;
-                    4) action="shell" ;;
-                    5) action="winetricks" ;;
-                    6) action="kill" ;;
-                    7) action="clean" ;;
-                    *) echo "[INFO] Operation canceled."; return 0 ;;
-                esac
+                echo "[ERROR] fzf is required for Wine prefix manager." >&2
+                return 127
             fi
         else
             echo "Usage: gamectl pfx <game_dir> [winecfg|regedit|cmd|shell|kill|clean|winetricks] [args...]" >&2
@@ -1162,6 +1139,7 @@ build_wrapper_command() {
 
 # Interactive wrapper configuration for a game or global defaults
 configure_wrappers() {
+    require_tui "Runtime wrappers" || return $?
     local gdir="${1:-}"
     local title="${2:-}"
     local w_file
@@ -1248,6 +1226,7 @@ EOF
             --height=45% \
             --reverse 2>/dev/null) || fzf_rc=$?
 
+        check_fzf_status "$fzf_rc" || return $?
         local opt
         if [ "$fzf_rc" -eq 130 ]; then
             opt="9"
@@ -1291,6 +1270,7 @@ EOF
 
 # Global Configuration Manager TUI
 configure_global() {
+    require_tui "Global settings" || return $?
     mkdir -p "$HOME/.config/gamectl"
 
     while true; do
@@ -1321,6 +1301,7 @@ configure_global() {
             [ -z "$r_host" ] && r_host="Not Configured"
         fi
 
+        validate_tui_fields "$p_name" "$p_id" "$r_host" || return 1
         local menu_entries
         menu_entries=$(cat <<EOF
 1	Global LAN Persona	Name: $p_name | SteamID: ${p_id:-Auto}
@@ -1343,6 +1324,7 @@ EOF
             --height=40% \
             --reverse 2>/dev/null) || fzf_rc=$?
 
+        check_fzf_status "$fzf_rc" || return $?
         [ "$fzf_rc" -eq 130 ] && break
         [ -z "$selection" ] && continue
 
@@ -1361,12 +1343,15 @@ EOF
                     --prompt="Player Name > " \
                     --height=20% \
                     --reverse 2>/dev/null) || rc=$?
+                check_fzf_status "$rc" || return $?
                 [ "$rc" -eq 130 ] && continue
                 local new_name
                 new_name=$(echo "$in_name_raw" | head -n 1 | tr -d '\r\n')
+                validate_tui_fields "$new_name" || return 1
                 [ -n "$new_name" ] && p_name="$new_name"
 
                 flush_tty_input
+                rc=0
                 in_id_raw=$(: | fzf \
                     --print-query \
                     --border-label="  ╢ Configure SteamID64 ╟  " \
@@ -1375,6 +1360,7 @@ EOF
                     --prompt="SteamID64 > " \
                     --height=20% \
                     --reverse 2>/dev/null) || rc=$?
+                check_fzf_status "$rc" || return $?
                 [ "$rc" -eq 130 ] && continue
                 local new_id
                 new_id=$(echo "$in_id_raw" | head -n 1 | tr -d '[:space:]')
@@ -1393,7 +1379,7 @@ EOF
                 log_msg "INFO" "CONFIG" "Saved global LAN persona: $p_name | $p_id"
                 ;;
             2)
-                configure_wrappers ""
+                configure_wrappers "" || return $?
                 ;;
             3)
                 while true; do
@@ -1403,7 +1389,8 @@ EOF
                         while IFS= read -r l_path; do
                             [ -z "$l_path" ] && continue
                             [[ "$l_path" =~ ^[[:space:]]*# ]] && continue
-                            lib_items+="${l_idx}\t[REMOVE] $l_path\tSelect to remove this library path\n"
+                            validate_tui_fields "$l_path" || return 1
+                            lib_items+="${l_idx}"$'\t'"[REMOVE] $l_path"$'\t'"Select to remove this library path"$'\n'
                             l_idx=$((l_idx + 1))
                         done < "$HOME/.config/gamectl/libraries"
                     fi
@@ -1412,7 +1399,7 @@ EOF
 add	[+] Register New Library Path	Enter filesystem path (e.g. ~/Games)
 EOF
 )
-                    [ -n "$lib_items" ] && lib_menu="${lib_menu}"$'\n'"$(printf '%b' "$lib_items")"
+                    [ -n "$lib_items" ] && lib_menu="${lib_menu}"$'\n'"${lib_items%$'\n'}"
                     lib_menu="${lib_menu}"$'\n'"back	[<] Return to Global Settings	Back"
 
                     flush_tty_input
@@ -1427,6 +1414,7 @@ EOF
                         --height=40% \
                         --reverse 2>/dev/null) || l_rc=$?
 
+                    check_fzf_status "$l_rc" || return $?
                     [ "$l_rc" -eq 130 ] && break
                     [ -z "$lib_sel" ] && continue
 
@@ -1444,9 +1432,11 @@ EOF
                             --prompt="Path > " \
                             --height=20% \
                             --reverse 2>/dev/null) || p_rc=$?
+                        check_fzf_status "$p_rc" || return $?
                         [ "$p_rc" -eq 130 ] && continue
                         local new_path
                         new_path=$(echo "$in_p_raw" | head -n 1 | tr -d '\r\n')
+                        validate_tui_fields "$new_path" || return 1
                         if [ -n "$new_path" ]; then
                             new_path="${new_path/#\~/$HOME}"
                             echo "$new_path" >> "$HOME/.config/gamectl/libraries"
@@ -1477,6 +1467,7 @@ EOF
                     --prompt="SSH Host > " \
                     --height=20% \
                     --reverse 2>/dev/null) || rc=$?
+                check_fzf_status "$rc" || return $?
                 [ "$rc" -eq 130 ] && continue
                 local new_rhost
                 new_rhost=$(echo "$in_host_raw" | head -n 1 | tr -d '[:space:]')

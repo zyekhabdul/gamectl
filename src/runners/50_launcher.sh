@@ -143,7 +143,7 @@ EOF
                         return "$log_fzf_rc"
                     fi
                 else
-                    tui_modal_notice "Log Stream" "Log file is currently empty or does not exist:\n$log_file"
+                    tui_modal_notice "Log Stream" "Log file is currently empty or does not exist:\n$log_file" || return $?
                 fi
                 ;;
             4)
@@ -167,9 +167,9 @@ EOF
                 if ! kill -0 "$game_pid" 2>/dev/null; then
                     rm -f "$info_file" 2>/dev/null || true
                     log_msg "INFO" "LAUNCH" "Game '$title' (PID $game_pid) terminated gracefully"
-                    tui_modal_notice "Game Stopped" "Game '$title' (PID $game_pid) terminated gracefully."
+                    tui_modal_notice "Game Stopped" "Game '$title' (PID $game_pid) terminated gracefully." || return $?
                 else
-                    tui_modal_notice "Process Still Alive" "Process did not respond to SIGTERM. Select 'Force Kill' (Option 5) for immediate teardown."
+                    tui_modal_notice "Process Still Alive" "Process did not respond to SIGTERM. Select 'Force Kill' (Option 5) for immediate teardown." || return $?
                 fi
                 ;;
             5)
@@ -188,7 +188,7 @@ EOF
                 fi
                 rm -f "$info_file" 2>/dev/null || true
                 log_msg "WARN" "LAUNCH" "Game '$title' (PID $game_pid) force-killed"
-                tui_modal_notice "Force Terminated" "Game '$title' (PID $game_pid) force-killed via SIGKILL."
+                tui_modal_notice "Force Terminated" "Game '$title' (PID $game_pid) force-killed via SIGKILL." || return $?
                 ;;
             *)
                 return 0

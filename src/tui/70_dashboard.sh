@@ -955,7 +955,7 @@ EOF
         selection=$(echo "$fzf_out" | sed -n '2p')
 
         if [ "$trigger_key" = "ctrl-l" ]; then
-            view_logs_interactive
+            view_logs_interactive || return $?
             continue
         fi
 
@@ -966,22 +966,23 @@ EOF
 
         case "$sel_key" in
             1)
-                library_menu false
+                library_menu false || return $?
                 ;;
             2)
-                search_steam "" false
+                search_steam "" false || return $?
                 ;;
             3)
-                list_downloads_interactive
+                list_downloads_interactive || return $?
                 ;;
             4)
-                unlock_interactive
+                unlock_interactive || return $?
                 ;;
             5)
-                configure_global
+                configure_global || return $?
                 ;;
             6)
                 flush_tty_input
+                local audit_rc=0
                 doctor_audit 2>&1 | fzf \
                     --ansi \
                     --no-sort \
@@ -990,10 +991,11 @@ EOF
                     --header="SYSTEM DIAGNOSTICS (Arrows: Scroll │ Esc / q / Enter: Return to Dashboard)" \
                     --prompt="Audit > " \
                     --bind="q:abort" \
-                    --reverse 2>/dev/null || true
+                    --reverse 2>/dev/null || audit_rc=$?
+                check_fzf_status "$audit_rc" || return $?
                 ;;
             7)
-                view_logs_interactive
+                view_logs_interactive || return $?
                 ;;
             *)
                 break
@@ -1049,14 +1051,14 @@ library_menu() {
 
         # Global in-process hotkeys that do not require item selection
         if [ "$trigger_key" = "ctrl-l" ]; then
-            view_logs_interactive
+            view_logs_interactive || return $?
             continue
         elif [ "$trigger_key" = "ctrl-f" ]; then
-            search_steam "" false
+            search_steam "" false || return $?
             invalidate_scan_cache
             continue
         elif [ "$trigger_key" = "ctrl-d" ]; then
-            list_downloads_interactive
+            list_downloads_interactive || return $?
             continue
         fi
 
@@ -1071,12 +1073,12 @@ library_menu() {
 
         case "$trigger_key" in
             ctrl-o)
-                configure_wrappers "$sel_dir" "$sel_title"
+                configure_wrappers "$sel_dir" "$sel_title" || return $?
                 invalidate_scan_cache
                 continue
                 ;;
             ctrl-p)
-                set_id_interactive "$sel_dir" "$sel_title"
+                set_id_interactive "$sel_dir" "$sel_title" || return $?
                 invalidate_scan_cache
                 continue
                 ;;
@@ -1084,22 +1086,22 @@ library_menu() {
                 inject_game "$sel_dir" "$sel_appid"
                 sync_steam "$sel_appid" "$sel_title" "$sel_dir"
                 invalidate_scan_cache
-                tui_modal_notice "GBE Injection & Steam Sync" "Successfully injected GBE Fork & synchronized Steam entitlement for:\n${sel_title:-$sel_dir}"
+                tui_modal_notice "GBE Injection & Steam Sync" "Successfully injected GBE Fork & synchronized Steam entitlement for:\n${sel_title:-$sel_dir}" || return $?
                 continue
                 ;;
             ctrl-s)
                 if sync_save_remote "$sel_dir" "$sel_title"; then
-                    tui_modal_notice "Remote Sync" "Savegames synchronized with remote companion host for:\n${sel_title:-$sel_dir}"
+                    tui_modal_notice "Remote Sync" "Savegames synchronized with remote companion host for:\n${sel_title:-$sel_dir}" || return $?
                 else
-                    tui_modal_notice "Remote Sync Error" "Failed to synchronize savegames for:\n${sel_title:-$sel_dir}"
+                    tui_modal_notice "Remote Sync Error" "Failed to synchronize savegames for:\n${sel_title:-$sel_dir}" || return $?
                 fi
                 continue
                 ;;
             ctrl-b)
                 if backup_save "$sel_dir"; then
-                    tui_modal_notice "Save Backup" "Savegame snapshot created in slot for:\n${sel_title:-$sel_dir}"
+                    tui_modal_notice "Save Backup" "Savegame snapshot created in slot for:\n${sel_title:-$sel_dir}" || return $?
                 else
-                    tui_modal_notice "Save Backup Error" "Failed to create savegame snapshot for:\n${sel_title:-$sel_dir}"
+                    tui_modal_notice "Save Backup Error" "Failed to create savegame snapshot for:\n${sel_title:-$sel_dir}" || return $?
                 fi
                 continue
                 ;;
@@ -1128,25 +1130,26 @@ library_menu() {
                                 --prompt="Restore Slot > " \
                                 --height=30% \
                                 --reverse 2>/dev/null) || p_rc=$?
+                            check_fzf_status "$p_rc" || return $?
                             [ "$p_rc" -eq 130 ] || [ -z "$pick" ] && continue
                             chosen_slot=$(echo "$pick" | cut -f1)
                             chosen_slot="${chosen_slot#slot}"
                         fi
                         if restore_save "$sel_dir" "$chosen_slot"; then
-                            tui_modal_notice "Save Restore" "Savegame restored successfully from slot${chosen_slot} for:\n${sel_title:-$sel_dir}"
+                            tui_modal_notice "Save Restore" "Savegame restored successfully from slot${chosen_slot} for:\n${sel_title:-$sel_dir}" || return $?
                         else
-                            tui_modal_notice "Save Restore Error" "Failed to restore savegame from slot${chosen_slot} for:\n${sel_title:-$sel_dir}"
+                            tui_modal_notice "Save Restore Error" "Failed to restore savegame from slot${chosen_slot} for:\n${sel_title:-$sel_dir}" || return $?
                         fi
                     else
-                        tui_modal_notice "Save Restore" "No snapshot recovery slots found for:\n${sel_title:-$sel_dir}"
+                        tui_modal_notice "Save Restore" "No snapshot recovery slots found for:\n${sel_title:-$sel_dir}" || return $?
                     fi
                 else
-                    tui_modal_notice "Save Restore" "No snapshot recovery directory (.save_snapshots) found for:\n${sel_title:-$sel_dir}"
+                    tui_modal_notice "Save Restore" "No snapshot recovery directory (.save_snapshots) found for:\n${sel_title:-$sel_dir}" || return $?
                 fi
                 continue
                 ;;
             ctrl-x)
-                manage_game_fixes_interactive "$sel_appid" "$sel_title" "$sel_dir"
+                manage_game_fixes_interactive "$sel_appid" "$sel_title" "$sel_dir" || return $?
                 invalidate_scan_cache
                 continue
                 ;;
@@ -1158,6 +1161,7 @@ library_menu() {
                     # User selected return directly to Master Dashboard
                     break
                 fi
+                check_fzf_status "$launch_rc" || return $?
                 ;;
         esac
     done
@@ -1218,11 +1222,14 @@ search_steam() {
     raw_results=$(curl -s --connect-timeout 5 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
 
     local items
-    items=$(echo "$raw_results" | jq -r '.items[]? | "\(.id)\t\(.name)"' 2>/dev/null || true)
+    items=$(printf '%s' "$raw_results" | store_search_items) || {
+        echo "[ERROR] Invalid Steam search catalog." >&2
+        return 1
+    }
 
     if [ -z "$items" ]; then
         log_msg "WARN" "STORE" "Game '$query' not found on Steam Store API."
-        tui_modal_notice "Steam Store Search" "Game '$query' was not found on Steam Store."
+        tui_modal_notice "Steam Store Search" "Game '$query' was not found on Steam Store." || return $?
         [ "$standalone" = "true" ] && exit_tui_screen
         return 0
     fi
@@ -1361,9 +1368,10 @@ search_steam() {
                     if [ "$launch_rc" -eq 10 ]; then
                         break
                     fi
+                    check_fzf_status "$launch_rc" || return $?
                 else
                     log_msg "ERROR" "LAUNCH" "Binary executable not found in $gdir for $sel_name"
-                    tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir"
+                    tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir" || return $?
                 fi
             else
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-D>: Starting All-in-One Live Stream Download for $sel_name ($target_os)"
@@ -1382,7 +1390,7 @@ search_steam() {
 6	Cancel / Return
 EOF
 )
-                local action_sel
+                local action_sel action_rc=0
                 action_sel=$(echo "$action_palette" | fzf \
                     --delimiter=$'\t' \
                     --with-nth=2 \
@@ -1391,7 +1399,9 @@ EOF
                     --header="ACTION PALETTE (Enter: Execute │ Esc: Return)" \
                     --prompt="Action > " \
                     --height=40% \
-                    --reverse 2>/dev/null) || action_sel="6"
+                    --reverse 2>/dev/null) || action_rc=$?
+                check_fzf_status "$action_rc" || return $?
+                [ "$action_rc" -eq 130 ] && continue
 
                 local act_opt
                 act_opt=$(echo "$action_sel" | awk -F'\t' '{print $1}')
@@ -1406,9 +1416,10 @@ EOF
                             if [ "$launch_rc" -eq 10 ]; then
                                 break
                             fi
+                            check_fzf_status "$launch_rc" || return $?
                         else
                             log_msg "ERROR" "LAUNCH" "Binary executable not found in $gdir for $sel_name"
-                            tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir"
+                            tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir" || return $?
                         fi
                         ;;
                     2)
@@ -1421,7 +1432,7 @@ EOF
                         sync_steam "$sel_id" "$sel_name" "$gdir"
                         ;;
                     5)
-                        manage_game_fixes_interactive "$sel_id" "$sel_name" "$gdir"
+                        manage_game_fixes_interactive "$sel_id" "$sel_name" "$gdir" || return $?
                         ;;
                     *)
                         ;;
@@ -1436,7 +1447,7 @@ EOF
 5	Cancel / Return
 EOF
 )
-                local pkg_sel
+                local pkg_sel pkg_rc=0
                 pkg_sel=$(echo "$not_installed_palette" | fzf \
                     --delimiter=$'\t' \
                     --with-nth=2 \
@@ -1445,7 +1456,9 @@ EOF
                     --header="PACKAGE SELECTION (Enter: Execute │ Esc: Return)" \
                     --prompt="Package > " \
                     --height=40% \
-                    --reverse 2>/dev/null) || pkg_sel="5"
+                    --reverse 2>/dev/null) || pkg_rc=$?
+                check_fzf_status "$pkg_rc" || return $?
+                [ "$pkg_rc" -eq 130 ] && continue
 
                 local opt
                 opt=$(echo "$pkg_sel" | awk -F'\t' '{print $1}')
@@ -1460,7 +1473,7 @@ EOF
                         inject_game "$dest_dir" "$sel_id" --no-sync
                         ;;
                     4)
-                        manage_game_fixes_interactive "$sel_id" "$sel_name" ""
+                        manage_game_fixes_interactive "$sel_id" "$sel_name" "" || return $?
                         ;;
                     *)
                         ;;

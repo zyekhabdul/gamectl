@@ -272,6 +272,7 @@ set_id_interactive() {
         echo "[ERROR] Invalid game directory: $target_dir" >&2
         return 1
     fi
+    require_tui "LAN persona" || return $?
     target_dir="$(cd "$target_dir" && pwd)"
     [ -z "$title" ] && title="$(basename "$target_dir")"
 
@@ -330,6 +331,7 @@ set_id_interactive() {
         --height=20% \
         --reverse 2>/dev/null) || rc=$?
     [ "$rc" -eq 130 ] && return 0
+    check_fzf_status "$rc" || return $?
     local in_name
     in_name=$(echo "$in_name_raw" | head -n 1 | tr -d '\r\n')
     [ -z "$in_name" ] && in_name="$cur_name"
@@ -339,6 +341,7 @@ set_id_interactive() {
     local suggested_id
     suggested_id=$(generate_steamid64)
     local in_id_raw
+    rc=0
     in_id_raw=$(: | fzf \
         --print-query \
         --border-label="  ╢ LAN Persona :: SteamID64 ╟  " \
@@ -348,6 +351,7 @@ set_id_interactive() {
         --height=20% \
         --reverse 2>/dev/null) || rc=$?
     [ "$rc" -eq 130 ] && return 0
+    check_fzf_status "$rc" || return $?
     local in_id
     in_id=$(echo "$in_id_raw" | head -n 1 | tr -d '[:space:]')
     [ -z "$in_id" ] && in_id="${cur_id:-$suggested_id}"
@@ -357,6 +361,7 @@ set_id_interactive() {
 
     flush_tty_input
     local in_bc_raw
+    rc=0
     in_bc_raw=$(: | fzf \
         --print-query \
         --border-label="  ╢ LAN Custom Broadcast Peer IP (Optional) ╟  " \
@@ -364,7 +369,8 @@ set_id_interactive() {
         --header="Enter friend's LAN IP (e.g. 192.168.1.50) or leave blank (Enter: Next │ Esc: Skip)" \
         --prompt="Peer IP > " \
         --height=20% \
-        --reverse 2>/dev/null) || true
+        --reverse 2>/dev/null) || rc=$?
+    check_fzf_status "$rc" || return $?
     local in_bc
     in_bc=$(echo "$in_bc_raw" | head -n 1 | tr -d '[:space:]')
 
@@ -376,6 +382,7 @@ EOF
 )
     flush_tty_input
     local glob_sel
+    rc=0
     glob_sel=$(echo "$glob_entries" | fzf \
         --delimiter=$'\t' \
         --with-nth=2,3 \
@@ -384,7 +391,8 @@ EOF
         --header="Also save this persona as global default for future games?" \
         --prompt="Save Global > " \
         --height=25% \
-        --reverse 2>/dev/null) || true
+        --reverse 2>/dev/null) || rc=$?
+    check_fzf_status "$rc" || return $?
 
     local extra_args=()
     [ -n "$in_bc" ] && extra_args+=(--broadcast "$in_bc")

@@ -751,7 +751,7 @@ manage_game_fixes_interactive() {
     fi
 
     if [ -z "$appid" ] || ! [[ "$appid" =~ ^[0-9]+$ ]]; then
-        tui_modal_notice "Fix Catalog" "Numeric Steam AppID could not be determined for:\n${title:-$gdir}\nCommunity fixes catalog requires a valid Steam AppID."
+        tui_modal_notice "Fix Catalog" "Numeric Steam AppID could not be determined for:\n${title:-$gdir}\nCommunity fixes catalog requires a valid Steam AppID." || return $?
         return 1
     fi
 
@@ -815,32 +815,39 @@ import sys, json
 try:
     data = json.loads(sys.argv[1])
 except Exception:
-    sys.exit(0)
+    print("[ERROR] Invalid fixes catalog JSON", file=sys.stderr)
+    sys.exit(1)
 
 fixes = data.get("fixes", [])
+rows = []
 for f in fixes:
     fid = f.get("id", "")
     title = f.get("title", "Fix")
     filename = f.get("fixFilename", "")
     tags = [t.get("name", "") for t in f.get("tags", []) if isinstance(t, dict)]
     tag_str = ", ".join(tags) if tags else "Community Fix"
-    desc = f.get("description", "").strip().replace("\n", " ").replace("\t", " ")
+    desc = f.get("description", "").strip().replace("\n", " ").replace("\t", " ").replace("\r", " ")
     has_fix = "[READY]" if f.get("hasFix") else "[PENDING]"
-    print(f"{fid}\t{title}\t{has_fix} [{tag_str}]\t{filename}\t{desc}")
-' "$json_out" 2>/dev/null || true)
+    fields = [str(fid), title, f"{has_fix} [{tag_str}]", filename, desc]
+    if any(any(c in field for c in "\t\r\n") for field in fields):
+        print("[ERROR] Fix catalog fields contain TAB, CR or newline", file=sys.stderr)
+        sys.exit(1)
+    rows.append("\t".join(fields))
+print("\n".join(rows))
+' "$json_out") || return 1
         fi
 
         # If both fixes and backups are empty, notify and return
         if [ -z "$fix_tsv" ] && [ "$has_backup" = false ]; then
-            tui_modal_notice "Community Fix Catalog" "No community fixes, OnlineFixes, or backup snapshots found for:\n${title:-AppID $appid}"
+            tui_modal_notice "Community Fix Catalog" "No community fixes, OnlineFixes, or backup snapshots found for:\n${title:-AppID $appid}" || return $?
             return 0
         fi
 
         # Build list for FZF
         local menu_list=""
         if [ "$has_backup" = true ]; then
-            menu_list+="[RESTORE]\tRestore Pristine Game Binaries\t[ROLLBACK]\tpre-patch backup\tRestore original untouched files\n"
-            menu_list+="[SIMULATE]\tSimulate Revert (--dry-run)\t[DRY-RUN]\tdry-run audit\tAudit files that would be restored or purged\n"
+            menu_list+=$'[RESTORE]\tRestore Pristine Game Binaries\t[ROLLBACK]\tpre-patch backup\tRestore original untouched files\n'
+            menu_list+=$'[SIMULATE]\tSimulate Revert (--dry-run)\t[DRY-RUN]\tdry-run audit\tAudit files that would be restored or purged\n'
         fi
         if [ -n "$fix_tsv" ]; then
             menu_list+="$fix_tsv"
@@ -850,7 +857,7 @@ for f in fixes:
         export GAMECTL_PREVIEW_BIN="$SELF_BIN"
         export GAMECTL_PREVIEW_APPID="$appid"
         export GAMECTL_PREVIEW_GDIR="$gdir"
-        fzf_out=$(printf '%b' "$menu_list" | fzf \
+        fzf_out=$(printf '%s' "$menu_list" | fzf \
             --delimiter=$'\t' \
             --with-nth=2,3 \
             --border-label="  ╢ Community Fixes & OnlineFix :: ${title:-AppID $appid} ╟  " \
@@ -877,7 +884,7 @@ for f in fixes:
 
         if [ "$sel_fix_id" = "[RESTORE]" ]; then
             if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
-                tui_modal_notice "Revert Error" "Game directory is missing or invalid: $gdir"
+                tui_modal_notice "Revert Error" "Game directory is missing or invalid: $gdir" || return $?
                 continue
             fi
             local restore_palette
@@ -907,26 +914,26 @@ EOF
 
             if [ "$(echo "$r_sel" | cut -f1)" = "1" ]; then
                 if revert_game_fix "$gdir"; then
-                    tui_modal_notice "Revert Successful" "Community fix reverted. Pristine files restored for:\n${title:-$gdir}"
+                    tui_modal_notice "Revert Successful" "Community fix reverted. Pristine files restored for:\n${title:-$gdir}" || return $?
                     invalidate_scan_cache
                 else
-                    tui_modal_notice "Revert Error" "Failed to revert game fix. Check activity logs."
+                    tui_modal_notice "Revert Error" "Failed to revert game fix. Check activity logs." || return $?
                 fi
             fi
             continue
         elif [ "$sel_fix_id" = "[SIMULATE]" ]; then
             if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
-                tui_modal_notice "Dry-Run Error" "Game directory is missing or invalid: $gdir"
+                tui_modal_notice "Dry-Run Error" "Game directory is missing or invalid: $gdir" || return $?
                 continue
             fi
             local dry_output
             dry_output=$(revert_game_fix "$gdir" --dry-run 2>&1 || true)
-            tui_modal_notice "Dry-Run Simulation" "$dry_output"
+            tui_modal_notice "Dry-Run Simulation" "$dry_output" || return $?
             continue
         else
             # Fix selected
             if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
-                tui_modal_notice "Installation Target Missing" "Game installation directory not found for AppID $appid.\n\nTo install community fixes, the game must be installed locally."
+                tui_modal_notice "Installation Target Missing" "Game installation directory not found for AppID $appid.\n\nTo install community fixes, the game must be installed locally." || return $?
                 continue
             fi
 
@@ -961,19 +968,19 @@ EOF
             case "$f_opt" in
                 1)
                     if ! get_valid_luatools_token >/dev/null 2>&1; then
-                        tui_modal_notice "LuaTools Authentication Required" "Downloading community fixes requires an active LuaTools account session.\n\nPlease authenticate in terminal via:\n  gamectl login-luatools <token|session.json>"
+                        tui_modal_notice "LuaTools Authentication Required" "Downloading community fixes requires an active LuaTools account session.\n\nPlease authenticate in terminal via:\n  gamectl login-luatools <token|session.json>" || return $?
                         continue
                     fi
                     log_msg "INFO" "FIX" "Installing community fix '$sel_fix_title' ($sel_fix_id) for ${title:-AppID $appid}..."
                     if install_game_fix "$appid" "$gdir" --fix-id "$sel_fix_id" --yes; then
-                        tui_modal_notice "Fix Deployed" "Successfully installed community fix: $sel_fix_title\nBackup snapshot created in: .gamectl_fix_backup/"
+                        tui_modal_notice "Fix Deployed" "Successfully installed community fix: $sel_fix_title\nBackup snapshot created in: .gamectl_fix_backup/" || return $?
                         invalidate_scan_cache
                     else
-                        tui_modal_notice "Fix Error" "Failed to install fix: $sel_fix_title\nCheck activity logs for detailed failure trace."
+                        tui_modal_notice "Fix Error" "Failed to install fix: $sel_fix_title\nCheck activity logs for detailed failure trace." || return $?
                     fi
                     ;;
                 2)
-                    tui_modal_notice "Simulation Audit" "Target Directory : $gdir\nFix ID           : $sel_fix_id\nPayload Archive  : $sel_fix_file\nOnline P2P       : Automatic AppID 480 & DLL Overrides\nRollback         : Pre-install snapshot will be saved to .gamectl_fix_backup/"
+                    tui_modal_notice "Simulation Audit" "Target Directory : $gdir\nFix ID           : $sel_fix_id\nPayload Archive  : $sel_fix_file\nOnline P2P       : Automatic AppID 480 & DLL Overrides\nRollback         : Pre-install snapshot will be saved to .gamectl_fix_backup/" || return $?
                     ;;
                 *)
                     continue

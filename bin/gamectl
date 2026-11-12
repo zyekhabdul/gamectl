@@ -348,20 +348,57 @@ tui_modal_notice() {
     local msg="${2:-}"
     local height="${3:-25%}"
 
-    if [ ! -t 0 ] || [ ! -t 1 ] || ! command -v fzf >/dev/null 2>&1; then
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
         log_msg "INFO" "UI" "[$title] $msg"
         echo "[$title] $msg"
         return 0
     fi
+    require_tui "$title" || return $?
 
+    local fzf_rc=0
     printf "%b\n" "$msg" | fzf \
         --border-label="  ╢ $title ╟  " \
         --border-label-pos=2 \
         --header="NOTICE (Enter or Esc: Dismiss)" \
         --prompt="> " \
         --height="$height" \
-        --reverse 2>/dev/null || true
+        --reverse 2>/dev/null || fzf_rc=$?
+    check_fzf_status "$fzf_rc" || return $?
     return 0
+}
+
+require_tui() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] ${1:-Interactive mode} requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for ${1:-interactive mode}." >&2
+        return 127
+    fi
+}
+
+check_fzf_status() {
+    case "$1" in
+        0|1|130) return 0 ;;
+        *) echo "[ERROR] Interactive selection failed (fzf exit code $1)." >&2; return "$1" ;;
+    esac
+}
+
+validate_tui_fields() {
+    local field
+    for field in "$@"; do
+        if [[ "$field" == *[$'\t\r\n']* ]]; then
+            printf '[ERROR] TUI fields cannot contain TAB, CR or newline: %q\n' "$field" >&2
+            return 1
+        fi
+    done
+}
+
+store_search_items() {
+    jq -r 'if any(.items[]?; (.id | tostring | test("[\\t\\r\\n]")) or (.name | test("[\\t\\r\\n]")))
+        then error("TUI catalog contains TAB, CR or newline")
+        else .items[]? | "\(.id)\t\(.name)" end'
 }
 
 # Canonical user-isolated runtime directory (0700 permissions)
@@ -738,6 +775,7 @@ find_game_binary() {
     )
     for c in "${candidates[@]}"; do
         if [ -x "$dir/$c" ] && [ ! -d "$dir/$c" ]; then
+            validate_tui_fields "$c" || continue
             echo "$c"
             return 0
         fi
@@ -747,7 +785,8 @@ find_game_binary() {
     local f fname
     for f in "$dir"/*; do
         if [ -x "$f" ] && [ ! -d "$f" ]; then
-            fname=$(basename "$f")
+            fname="${f##*/}"
+            validate_tui_fields "$fname" || continue
             case "$fname" in
                 *.so|*.so.*|*.dll|*.dylib|installscript.vdf|*.png|*.bmp|*.txt|*.pkg|createdump|monoconfig|monomachineconfig)
                     continue
@@ -766,6 +805,7 @@ find_game_binary() {
     )
     for c in "${win_candidates[@]}"; do
         if [ -f "$dir/$c" ] && [ ! -d "$dir/$c" ]; then
+            validate_tui_fields "$c" || continue
             chmod +x "$dir/$c" 2>/dev/null || true
             echo "$c"
             return 0
@@ -775,7 +815,8 @@ find_game_binary() {
     # Priority 4: Any root .exe excluding setup/redist/crash handlers
     for f in "$dir"/*.exe "$dir"/*.EXE; do
         [ -f "$f" ] || continue
-        fname=$(basename "$f")
+        fname="${f##*/}"
+        validate_tui_fields "$fname" || continue
         case "$fname" in
             UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|vcredist*|dotnet*|vc_redist*|*CrashReport*)
                 continue
@@ -793,7 +834,8 @@ find_game_binary() {
         if [ -d "$dir/$sub" ]; then
             for f in "$dir/$sub"/*.exe "$dir/$sub"/*.EXE; do
                 [ -f "$f" ] || continue
-                fname=$(basename "$f")
+                fname="${f##*/}"
+                validate_tui_fields "$fname" || continue
                 case "$fname" in
                     UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|vcredist*|dotnet*|vc_redist*|*CrashReport*)
                         continue
@@ -1225,7 +1267,8 @@ scan_installed_games() {
 
     # Fast-path: Check cache validity (TTL: 60s, invalidated if candidate library directories are newer)
     local use_cached=false
-    if [ "$force_refresh" = false ] && [ -f "$cache_file" ]; then
+    if [ "$force_refresh" = false ] && [ -f "$cache_file" ] &&
+       [ "$(head -n 1 "$cache_file")" = "# gamectl scanner v2" ]; then
         local now mtime
         now=$(date +%s)
         mtime=$(stat -c%Y "$cache_file" 2>/dev/null || echo 0)
@@ -1242,7 +1285,7 @@ scan_installed_games() {
     fi
 
     if [ "$use_cached" = false ]; then
-        : > "$cache_file.tmp"
+        printf '%s\n' '# gamectl scanner v2' > "$cache_file.tmp"
         declare -A seen_dirs=()
 
         # 1. Scan Steam Libraries
@@ -1250,7 +1293,7 @@ scan_installed_games() {
         local re_appid='"appid"[[:space:]]+"([0-9]+)"'
         local re_name='"name"[[:space:]]+"([^"]+)"'
         local re_installdir='"installdir"[[:space:]]+"([^"]+)"'
-        while read -r steam_lib; do
+        while IFS= read -r steam_lib; do
             [ -d "$steam_lib" ] || continue
             for acf in "$steam_lib"/appmanifest_*.acf; do
                 [ -f "$acf" ] || continue
@@ -1273,6 +1316,7 @@ scan_installed_games() {
                 [ -z "$installdir" ] && continue
 
                 local gdir="$steam_lib/common/$installdir"
+                validate_tui_fields "$appid" "$name" "$gdir" || continue
                 [ -d "$gdir" ] || continue
                 [[ -v seen_dirs["$gdir"] ]] && continue
                 seen_dirs["$gdir"]=1
@@ -1366,6 +1410,7 @@ scan_installed_games() {
             [ -d "$base_dir" ] || continue
             for gdir in "$base_dir"/*; do
                 [ -d "$gdir" ] || continue
+                validate_tui_fields "$gdir" || continue
                 [[ -v seen_dirs["$gdir"] ]] && continue
                 seen_dirs["$gdir"]=1
 
@@ -1391,8 +1436,10 @@ scan_installed_games() {
 
                 local title="$folder_name"
                 if [ -f "$gdir/.gamectl_title" ]; then
-                    read -r title < "$gdir/.gamectl_title" 2>/dev/null || title="$folder_name"
+                    title=$(cat "$gdir/.gamectl_title" 2>/dev/null) || title="$folder_name"
                 fi
+                [ -n "$title" ] || title="$folder_name"
+                validate_tui_fields "$title" "$gbin" || continue
 
                 local is_win_bin=false
                 case "$gbin" in
@@ -1457,7 +1504,7 @@ scan_installed_games() {
                 *VALVE_DLL*)  c_badge="${UI_CYAN}[VALVE_DLL] ${UI_RST}" ;;
                 *)            c_badge="${UI_ICE}[STANDALONE]${UI_RST}" ;;
             esac
-            printf "%b\t%b\t%b\t%s\t%s\n" "${UI_DIM}${c_appid}${UI_RST}" "${UI_BOLD}${c_title}${UI_RST}" "$c_badge" "$c_gdir" "$c_gbin"
+            printf "%s\t%s\t%s\t%s\t%s\n" "${UI_DIM}${c_appid}${UI_RST}" "${UI_BOLD}${c_title}${UI_RST}" "$c_badge" "$c_gdir" "$c_gbin"
         done < "$cache_file"
     else
         while IFS=$'\t' read -r c_appid c_title c_status c_gdir c_gbin; do
@@ -2262,6 +2309,7 @@ set_id_interactive() {
         echo "[ERROR] Invalid game directory: $target_dir" >&2
         return 1
     fi
+    require_tui "LAN persona" || return $?
     target_dir="$(cd "$target_dir" && pwd)"
     [ -z "$title" ] && title="$(basename "$target_dir")"
 
@@ -2320,6 +2368,7 @@ set_id_interactive() {
         --height=20% \
         --reverse 2>/dev/null) || rc=$?
     [ "$rc" -eq 130 ] && return 0
+    check_fzf_status "$rc" || return $?
     local in_name
     in_name=$(echo "$in_name_raw" | head -n 1 | tr -d '\r\n')
     [ -z "$in_name" ] && in_name="$cur_name"
@@ -2329,6 +2378,7 @@ set_id_interactive() {
     local suggested_id
     suggested_id=$(generate_steamid64)
     local in_id_raw
+    rc=0
     in_id_raw=$(: | fzf \
         --print-query \
         --border-label="  ╢ LAN Persona :: SteamID64 ╟  " \
@@ -2338,6 +2388,7 @@ set_id_interactive() {
         --height=20% \
         --reverse 2>/dev/null) || rc=$?
     [ "$rc" -eq 130 ] && return 0
+    check_fzf_status "$rc" || return $?
     local in_id
     in_id=$(echo "$in_id_raw" | head -n 1 | tr -d '[:space:]')
     [ -z "$in_id" ] && in_id="${cur_id:-$suggested_id}"
@@ -2347,6 +2398,7 @@ set_id_interactive() {
 
     flush_tty_input
     local in_bc_raw
+    rc=0
     in_bc_raw=$(: | fzf \
         --print-query \
         --border-label="  ╢ LAN Custom Broadcast Peer IP (Optional) ╟  " \
@@ -2354,7 +2406,8 @@ set_id_interactive() {
         --header="Enter friend's LAN IP (e.g. 192.168.1.50) or leave blank (Enter: Next │ Esc: Skip)" \
         --prompt="Peer IP > " \
         --height=20% \
-        --reverse 2>/dev/null) || true
+        --reverse 2>/dev/null) || rc=$?
+    check_fzf_status "$rc" || return $?
     local in_bc
     in_bc=$(echo "$in_bc_raw" | head -n 1 | tr -d '[:space:]')
 
@@ -2366,6 +2419,7 @@ EOF
 )
     flush_tty_input
     local glob_sel
+    rc=0
     glob_sel=$(echo "$glob_entries" | fzf \
         --delimiter=$'\t' \
         --with-nth=2,3 \
@@ -2374,7 +2428,8 @@ EOF
         --header="Also save this persona as global default for future games?" \
         --prompt="Save Global > " \
         --height=25% \
-        --reverse 2>/dev/null) || true
+        --reverse 2>/dev/null) || rc=$?
+    check_fzf_status "$rc" || return $?
 
     local extra_args=()
     [ -n "$in_bc" ] && extra_args+=(--broadcast "$in_bc")
@@ -3707,6 +3762,10 @@ parse_acf_download_state() {
         pct="100%"
     fi
 
+    if [[ "$name$installdir$acf_file" == *[$'\t\r\n']* ]]; then
+        echo "[ERROR] ACF fields cannot contain TAB, CR or newline." >&2
+        return 1
+    fi
     printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
         "$appid" "$name" "$status_str" "$pct" "$bytes_dl" "$bytes_total" "$state_flags" "$installdir" "$acf_file"
 }
@@ -4011,7 +4070,8 @@ list_downloads_interactive() {
                 dl_fmt=$(format_bytes "$a_dl")
                 tot_fmt=$(format_bytes "$a_total")
                 local detail="${a_title} (${dl_fmt}/${tot_fmt})"
-                entries+="${a_id}\tSteam\t${ui_status}\t${a_pct}\t${detail}\t${a_path}\n"
+                validate_tui_fields "$a_id" "$detail" "$a_path" || continue
+                entries+="${a_id}"$'\t'"Steam"$'\t'"${ui_status}"$'\t'"${a_pct}"$'\t'"${detail}"$'\t'"${a_path}"$'\n'
                 total_items=$((total_items + 1))
             fi
         done
@@ -4058,19 +4118,20 @@ list_downloads_interactive() {
             fi
 
             local st_detail="${st_title} (${st_bytes}, PID: ${st_pid})"
-            entries+="${st_appid}\tStandalone\t${st_ui}\t${st_pct}\t${st_detail}\t${st_dir}\n"
+            validate_tui_fields "$st_appid" "$st_detail" "$st_dir" || continue
+            entries+="${st_appid}"$'\t'"Standalone"$'\t'"${st_ui}"$'\t'"${st_pct}"$'\t'"${st_detail}"$'\t'"${st_dir}"$'\n'
             total_items=$((total_items + 1))
         done
         shopt -u nullglob
 
         if [ "$total_items" -eq 0 ]; then
-            entries+="0\tInfo\t${UI_DIM}[NO ACTIVE DOWNLOADS]${UI_RST}\t0%\tNo active downloads found in Steam or Standalone engine. Press Esc to return.\t\n"
+            entries+="0"$'\t'"Info"$'\t'"${UI_DIM}[NO ACTIVE DOWNLOADS]${UI_RST}"$'\t'"0%"$'\t'"No active downloads found in Steam or Standalone engine. Press Esc to return."$'\t\n'
         fi
 
         flush_tty_input
         local fzf_out fzf_rc=0
         export GAMECTL_PREVIEW_BIN="$SELF_BIN"
-        fzf_out=$(printf "%b" "$entries" | fzf \
+        fzf_out=$(printf "%s" "$entries" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3,5 \
             --expect=ctrl-k \
@@ -4111,16 +4172,16 @@ list_downloads_interactive() {
                 if [[ "$t_pid" =~ ^[0-9]+$ ]] && kill -0 "$t_pid" 2>/dev/null; then
                     kill -STOP "$t_pid" 2>/dev/null || true
                     log_msg "INFO" "DOWNLOAD" "Paused standalone download PID $t_pid (AppID: $sel_appid) via SIGSTOP"
-                    tui_modal_notice "Standalone Download Paused" "Dispatched SIGSTOP to process PID: $t_pid (AppID: $sel_appid).\nUse Action Menu to resume or terminate."
+                    tui_modal_notice "Standalone Download Paused" "Dispatched SIGSTOP to process PID: $t_pid (AppID: $sel_appid).\nUse Action Menu to resume or terminate." || return $?
                 else
-                    tui_modal_notice "Pause Standalone" "Downloader process (PID: $t_pid) is no longer active."
+                    tui_modal_notice "Pause Standalone" "Downloader process (PID: $t_pid) is no longer active." || return $?
                 fi
             elif command -v steam >/dev/null 2>&1; then
                 steam "steam://pause/$sel_appid" >/dev/null 2>&1 &
                 log_msg "INFO" "DOWNLOAD" "Paused download for AppID $sel_appid"
-                tui_modal_notice "Download Paused" "Dispatched pause signal to Steam Client for AppID: $sel_appid"
+                tui_modal_notice "Download Paused" "Dispatched pause signal to Steam Client for AppID: $sel_appid" || return $?
             else
-                tui_modal_notice "Pause Unsupported" "Steam client CLI is not available in PATH."
+                tui_modal_notice "Pause Unsupported" "Steam client CLI is not available in PATH." || return $?
             fi
             continue
         fi
@@ -4157,6 +4218,7 @@ EOF
             --height=35% \
             --reverse 2>/dev/null) || act_rc=$?
 
+        check_fzf_status "$act_rc" || return $?
         [ "$act_rc" -eq 130 ] && continue
         [ -z "$act_sel" ] && continue
 
@@ -4170,7 +4232,7 @@ EOF
                     if [[ "$t_pid" =~ ^[0-9]+$ ]] && kill -0 "$t_pid" 2>/dev/null; then
                         kill -STOP "$t_pid" 2>/dev/null || true
                         log_msg "INFO" "DOWNLOAD" "Paused standalone download PID $t_pid (AppID: $sel_appid) via SIGSTOP"
-                        tui_modal_notice "Download Paused" "Sent SIGSTOP to standalone downloader PID $t_pid."
+                        tui_modal_notice "Download Paused" "Sent SIGSTOP to standalone downloader PID $t_pid." || return $?
                     fi
                 elif command -v steam >/dev/null 2>&1; then
                     steam "steam://pause/$sel_appid" >/dev/null 2>&1 &
@@ -4183,7 +4245,7 @@ EOF
                     if [[ "$t_pid" =~ ^[0-9]+$ ]] && kill -0 "$t_pid" 2>/dev/null; then
                         kill -CONT "$t_pid" 2>/dev/null || true
                         log_msg "INFO" "DOWNLOAD" "Resumed standalone download PID $t_pid (AppID: $sel_appid) via SIGCONT"
-                        tui_modal_notice "Download Resumed" "Sent SIGCONT to standalone downloader PID $t_pid."
+                        tui_modal_notice "Download Resumed" "Sent SIGCONT to standalone downloader PID $t_pid." || return $?
                     fi
                 elif command -v steam >/dev/null 2>&1; then
                     steam "steam://resume/$sel_appid" >/dev/null 2>&1 &
@@ -4197,7 +4259,7 @@ EOF
                         kill -TERM "$t_pid" 2>/dev/null || true
                         rm -rf "$sel_ref" 2>/dev/null || true
                         log_msg "WARN" "DOWNLOAD" "Terminated standalone download PID $t_pid (AppID: $sel_appid) via SIGTERM"
-                        tui_modal_notice "Download Terminated" "Sent SIGTERM to standalone downloader PID $t_pid and purged staging."
+                        tui_modal_notice "Download Terminated" "Sent SIGTERM to standalone downloader PID $t_pid and purged staging." || return $?
                     fi
                 else
                     local g_dir=""
@@ -4211,9 +4273,9 @@ EOF
                     if [ -n "$g_dir" ] && [ -d "$g_dir" ]; then
                         log_msg "INFO" "DOWNLOAD" "Injecting GBE Fork LAN runtime into: $g_dir"
                         "$SELF_BIN" inject "$g_dir" "$sel_appid"
-                        tui_modal_notice "GBE Runtime Injected" "Goldberg emulator LAN runtime successfully injected into:\n$g_dir"
+                        tui_modal_notice "GBE Runtime Injected" "Goldberg emulator LAN runtime successfully injected into:\n$g_dir" || return $?
                     else
-                        tui_modal_notice "Target Not Found" "Steam common game directory not found:\n$g_dir"
+                        tui_modal_notice "Target Not Found" "Steam common game directory not found:\n$g_dir" || return $?
                     fi
                 fi
                 ;;
@@ -4233,9 +4295,9 @@ EOF
                     if [ -n "$g_dir" ] && [ -d "$g_dir" ]; then
                         log_msg "INFO" "DOWNLOAD" "Injecting GBE Fork LAN runtime into target dir: $g_dir"
                         "$SELF_BIN" inject "$g_dir" "$sel_appid"
-                        tui_modal_notice "GBE Runtime Injected" "Goldberg emulator LAN runtime successfully injected into:\n$g_dir"
+                        tui_modal_notice "GBE Runtime Injected" "Goldberg emulator LAN runtime successfully injected into:\n$g_dir" || return $?
                     else
-                        tui_modal_notice "Target Not Found" "Target installation directory not found or not yet created:\n$g_dir"
+                        tui_modal_notice "Target Not Found" "Target installation directory not found or not yet created:\n$g_dir" || return $?
                     fi
                 else
                     continue
@@ -4631,11 +4693,14 @@ unlock_interactive() {
         local raw_results
         raw_results=$(curl -s --connect-timeout 5 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
         local search_items
-        search_items=$(echo "$raw_results" | jq -r '.items[]? | "\(.id)\t\(.name)"' 2>/dev/null || true)
+        search_items=$(printf '%s' "$raw_results" | store_search_items) || {
+            echo "[ERROR] Invalid Steam search catalog." >&2
+            return 1
+        }
 
         if [ -z "$search_items" ]; then
             log_msg "WARN" "ADOPT" "Game title '$u_input' not found on Steam Store API"
-            tui_modal_notice "Game Not Found" "Game title '$u_input' was not found on Steam Store.\nPlease verify title or provide numeric AppID."
+            tui_modal_notice "Game Not Found" "Game title '$u_input' was not found on Steam Store.\nPlease verify title or provide numeric AppID." || return $?
             return 1
         fi
 
@@ -4695,7 +4760,7 @@ unlock_interactive() {
         local clean_notice
         clean_notice=$(echo "$adopt_out" | grep -E '\[SUCCESS\]|\[DEFERRED\]|\[WARN\]' | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^[[:space:]]*//')
         [ -z "$clean_notice" ] && clean_notice="Physical ACF adoption complete for $u_title ($u_appid)."
-        tui_modal_notice "Steam ACF Adoption" "$clean_notice\n\nGame Location: $existing_dir" "30%"
+        tui_modal_notice "Steam ACF Adoption" "$clean_notice\n\nGame Location: $existing_dir" "30%" || return $?
         return 0
     fi
 
@@ -4718,6 +4783,7 @@ EOF
         --height=35% \
         --reverse 2>/dev/null) || b_rc=$?
 
+    check_fzf_status "$b_rc" || return $?
     [ "$b_rc" -eq 130 ] && return 0
     local b_opt
     b_opt=$(echo "$bridge_sel" | awk -F'\t' '{print $1}')
@@ -4735,9 +4801,9 @@ EOF
             if command -v steam >/dev/null 2>&1; then
                 steam "steam://install/$u_appid" >/dev/null 2>&1 &
                 log_msg "INFO" "ADOPT" "Triggered steam://install/$u_appid native install intent"
-                tui_modal_notice "Steam Client Intent" "Entitlement registered in SLSsteam.\nPushed steam://install/$u_appid to Steam Client." "25%"
+                tui_modal_notice "Steam Client Intent" "Entitlement registered in SLSsteam.\nPushed steam://install/$u_appid to Steam Client." "25%" || return $?
             else
-                tui_modal_notice "Steam Entitlement Registered" "Entitlement registered in SLSsteam.\nSteam Client executable not found in PATH." "25%"
+                tui_modal_notice "Steam Entitlement Registered" "Entitlement registered in SLSsteam.\nSteam Client executable not found in PATH." "25%" || return $?
             fi
             ;;
         *)
@@ -5503,7 +5569,7 @@ manage_game_fixes_interactive() {
     fi
 
     if [ -z "$appid" ] || ! [[ "$appid" =~ ^[0-9]+$ ]]; then
-        tui_modal_notice "Fix Catalog" "Numeric Steam AppID could not be determined for:\n${title:-$gdir}\nCommunity fixes catalog requires a valid Steam AppID."
+        tui_modal_notice "Fix Catalog" "Numeric Steam AppID could not be determined for:\n${title:-$gdir}\nCommunity fixes catalog requires a valid Steam AppID." || return $?
         return 1
     fi
 
@@ -5567,32 +5633,39 @@ import sys, json
 try:
     data = json.loads(sys.argv[1])
 except Exception:
-    sys.exit(0)
+    print("[ERROR] Invalid fixes catalog JSON", file=sys.stderr)
+    sys.exit(1)
 
 fixes = data.get("fixes", [])
+rows = []
 for f in fixes:
     fid = f.get("id", "")
     title = f.get("title", "Fix")
     filename = f.get("fixFilename", "")
     tags = [t.get("name", "") for t in f.get("tags", []) if isinstance(t, dict)]
     tag_str = ", ".join(tags) if tags else "Community Fix"
-    desc = f.get("description", "").strip().replace("\n", " ").replace("\t", " ")
+    desc = f.get("description", "").strip().replace("\n", " ").replace("\t", " ").replace("\r", " ")
     has_fix = "[READY]" if f.get("hasFix") else "[PENDING]"
-    print(f"{fid}\t{title}\t{has_fix} [{tag_str}]\t{filename}\t{desc}")
-' "$json_out" 2>/dev/null || true)
+    fields = [str(fid), title, f"{has_fix} [{tag_str}]", filename, desc]
+    if any(any(c in field for c in "\t\r\n") for field in fields):
+        print("[ERROR] Fix catalog fields contain TAB, CR or newline", file=sys.stderr)
+        sys.exit(1)
+    rows.append("\t".join(fields))
+print("\n".join(rows))
+' "$json_out") || return 1
         fi
 
         # If both fixes and backups are empty, notify and return
         if [ -z "$fix_tsv" ] && [ "$has_backup" = false ]; then
-            tui_modal_notice "Community Fix Catalog" "No community fixes, OnlineFixes, or backup snapshots found for:\n${title:-AppID $appid}"
+            tui_modal_notice "Community Fix Catalog" "No community fixes, OnlineFixes, or backup snapshots found for:\n${title:-AppID $appid}" || return $?
             return 0
         fi
 
         # Build list for FZF
         local menu_list=""
         if [ "$has_backup" = true ]; then
-            menu_list+="[RESTORE]\tRestore Pristine Game Binaries\t[ROLLBACK]\tpre-patch backup\tRestore original untouched files\n"
-            menu_list+="[SIMULATE]\tSimulate Revert (--dry-run)\t[DRY-RUN]\tdry-run audit\tAudit files that would be restored or purged\n"
+            menu_list+=$'[RESTORE]\tRestore Pristine Game Binaries\t[ROLLBACK]\tpre-patch backup\tRestore original untouched files\n'
+            menu_list+=$'[SIMULATE]\tSimulate Revert (--dry-run)\t[DRY-RUN]\tdry-run audit\tAudit files that would be restored or purged\n'
         fi
         if [ -n "$fix_tsv" ]; then
             menu_list+="$fix_tsv"
@@ -5602,7 +5675,7 @@ for f in fixes:
         export GAMECTL_PREVIEW_BIN="$SELF_BIN"
         export GAMECTL_PREVIEW_APPID="$appid"
         export GAMECTL_PREVIEW_GDIR="$gdir"
-        fzf_out=$(printf '%b' "$menu_list" | fzf \
+        fzf_out=$(printf '%s' "$menu_list" | fzf \
             --delimiter=$'\t' \
             --with-nth=2,3 \
             --border-label="  ╢ Community Fixes & OnlineFix :: ${title:-AppID $appid} ╟  " \
@@ -5629,7 +5702,7 @@ for f in fixes:
 
         if [ "$sel_fix_id" = "[RESTORE]" ]; then
             if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
-                tui_modal_notice "Revert Error" "Game directory is missing or invalid: $gdir"
+                tui_modal_notice "Revert Error" "Game directory is missing or invalid: $gdir" || return $?
                 continue
             fi
             local restore_palette
@@ -5659,26 +5732,26 @@ EOF
 
             if [ "$(echo "$r_sel" | cut -f1)" = "1" ]; then
                 if revert_game_fix "$gdir"; then
-                    tui_modal_notice "Revert Successful" "Community fix reverted. Pristine files restored for:\n${title:-$gdir}"
+                    tui_modal_notice "Revert Successful" "Community fix reverted. Pristine files restored for:\n${title:-$gdir}" || return $?
                     invalidate_scan_cache
                 else
-                    tui_modal_notice "Revert Error" "Failed to revert game fix. Check activity logs."
+                    tui_modal_notice "Revert Error" "Failed to revert game fix. Check activity logs." || return $?
                 fi
             fi
             continue
         elif [ "$sel_fix_id" = "[SIMULATE]" ]; then
             if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
-                tui_modal_notice "Dry-Run Error" "Game directory is missing or invalid: $gdir"
+                tui_modal_notice "Dry-Run Error" "Game directory is missing or invalid: $gdir" || return $?
                 continue
             fi
             local dry_output
             dry_output=$(revert_game_fix "$gdir" --dry-run 2>&1 || true)
-            tui_modal_notice "Dry-Run Simulation" "$dry_output"
+            tui_modal_notice "Dry-Run Simulation" "$dry_output" || return $?
             continue
         else
             # Fix selected
             if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
-                tui_modal_notice "Installation Target Missing" "Game installation directory not found for AppID $appid.\n\nTo install community fixes, the game must be installed locally."
+                tui_modal_notice "Installation Target Missing" "Game installation directory not found for AppID $appid.\n\nTo install community fixes, the game must be installed locally." || return $?
                 continue
             fi
 
@@ -5713,19 +5786,19 @@ EOF
             case "$f_opt" in
                 1)
                     if ! get_valid_luatools_token >/dev/null 2>&1; then
-                        tui_modal_notice "LuaTools Authentication Required" "Downloading community fixes requires an active LuaTools account session.\n\nPlease authenticate in terminal via:\n  gamectl login-luatools <token|session.json>"
+                        tui_modal_notice "LuaTools Authentication Required" "Downloading community fixes requires an active LuaTools account session.\n\nPlease authenticate in terminal via:\n  gamectl login-luatools <token|session.json>" || return $?
                         continue
                     fi
                     log_msg "INFO" "FIX" "Installing community fix '$sel_fix_title' ($sel_fix_id) for ${title:-AppID $appid}..."
                     if install_game_fix "$appid" "$gdir" --fix-id "$sel_fix_id" --yes; then
-                        tui_modal_notice "Fix Deployed" "Successfully installed community fix: $sel_fix_title\nBackup snapshot created in: .gamectl_fix_backup/"
+                        tui_modal_notice "Fix Deployed" "Successfully installed community fix: $sel_fix_title\nBackup snapshot created in: .gamectl_fix_backup/" || return $?
                         invalidate_scan_cache
                     else
-                        tui_modal_notice "Fix Error" "Failed to install fix: $sel_fix_title\nCheck activity logs for detailed failure trace."
+                        tui_modal_notice "Fix Error" "Failed to install fix: $sel_fix_title\nCheck activity logs for detailed failure trace." || return $?
                     fi
                     ;;
                 2)
-                    tui_modal_notice "Simulation Audit" "Target Directory : $gdir\nFix ID           : $sel_fix_id\nPayload Archive  : $sel_fix_file\nOnline P2P       : Automatic AppID 480 & DLL Overrides\nRollback         : Pre-install snapshot will be saved to .gamectl_fix_backup/"
+                    tui_modal_notice "Simulation Audit" "Target Directory : $gdir\nFix ID           : $sel_fix_id\nPayload Archive  : $sel_fix_file\nOnline P2P       : Automatic AppID 480 & DLL Overrides\nRollback         : Pre-install snapshot will be saved to .gamectl_fix_backup/" || return $?
                     ;;
                 *)
                     continue
@@ -6320,6 +6393,7 @@ manage_prefix() {
 
     # Interactive menu if action is empty and stdin is terminal
     if [ -z "$action" ]; then
+        require_tui "Wine prefix manager" || return $?
         if [ -t 0 ]; then
             if command -v fzf >/dev/null 2>&1; then
                 flush_tty_input
@@ -6380,32 +6454,8 @@ EOF
 
                 action=$(echo "$pfx_sel" | awk -F'\t' '{print $1}')
             else
-                echo "${UI_BOX}╭─ WINE PREFIX SWISS ARMY KNIFE ──────────────────────────────╮${UI_RST}"
-                echo "│ ${UI_CYAN}Game Directory${UI_RST} : ${UI_BOLD}$game_dir${UI_RST}"
-                echo "│ ${UI_CYAN}Prefix Path   ${UI_RST} : ${UI_BOLD}$pfx_dir${UI_RST}"
-                echo "│ ${UI_CYAN}Active Runner ${UI_RST} : ${UI_GREEN}$runner_bin${UI_RST}"
-                echo "${UI_BOX}╰─────────────────────────────────────────────────────────────╯${UI_RST}"
-                echo "  ${UI_PURPLE}1)${UI_RST} winecfg      ${UI_DIM}(Wine Audio, Graphics & Windows Version Config)${UI_RST}"
-                echo "  ${UI_PURPLE}2)${UI_RST} regedit      ${UI_DIM}(Windows Registry Editor)${UI_RST}"
-                echo "  ${UI_PURPLE}3)${UI_RST} cmd          ${UI_DIM}(Windows Command Prompt)${UI_RST}"
-                echo "  ${UI_PURPLE}4)${UI_RST} shell        ${UI_DIM}(Host Bash Subshell with active WINEPREFIX)${UI_RST}"
-                echo "  ${UI_PURPLE}5)${UI_RST} winetricks   ${UI_DIM}(Winetricks GUI / Package Manager)${UI_RST}"
-                echo "  ${UI_AMBER}6)${UI_RST} kill         ${UI_DIM}(Terminate locked / hung Wineserver)${UI_RST}"
-                echo "  ${UI_RED}7)${UI_RST} clean        ${UI_DIM}(Backup Saves & Wipe Entire Wine Prefix)${UI_RST}"
-                echo "  ${UI_CYAN}8)${UI_RST} Exit"
-                echo
-                local choice=""
-                read -t 15 -r -p "Select action [1-8]: " choice || choice="8"
-                case "$choice" in
-                    1) action="winecfg" ;;
-                    2) action="regedit" ;;
-                    3) action="cmd" ;;
-                    4) action="shell" ;;
-                    5) action="winetricks" ;;
-                    6) action="kill" ;;
-                    7) action="clean" ;;
-                    *) echo "[INFO] Operation canceled."; return 0 ;;
-                esac
+                echo "[ERROR] fzf is required for Wine prefix manager." >&2
+                return 127
             fi
         else
             echo "Usage: gamectl pfx <game_dir> [winecfg|regedit|cmd|shell|kill|clean|winetricks] [args...]" >&2
@@ -6903,6 +6953,7 @@ build_wrapper_command() {
 
 # Interactive wrapper configuration for a game or global defaults
 configure_wrappers() {
+    require_tui "Runtime wrappers" || return $?
     local gdir="${1:-}"
     local title="${2:-}"
     local w_file
@@ -6989,6 +7040,7 @@ EOF
             --height=45% \
             --reverse 2>/dev/null) || fzf_rc=$?
 
+        check_fzf_status "$fzf_rc" || return $?
         local opt
         if [ "$fzf_rc" -eq 130 ]; then
             opt="9"
@@ -7032,6 +7084,7 @@ EOF
 
 # Global Configuration Manager TUI
 configure_global() {
+    require_tui "Global settings" || return $?
     mkdir -p "$HOME/.config/gamectl"
 
     while true; do
@@ -7062,6 +7115,7 @@ configure_global() {
             [ -z "$r_host" ] && r_host="Not Configured"
         fi
 
+        validate_tui_fields "$p_name" "$p_id" "$r_host" || return 1
         local menu_entries
         menu_entries=$(cat <<EOF
 1	Global LAN Persona	Name: $p_name | SteamID: ${p_id:-Auto}
@@ -7084,6 +7138,7 @@ EOF
             --height=40% \
             --reverse 2>/dev/null) || fzf_rc=$?
 
+        check_fzf_status "$fzf_rc" || return $?
         [ "$fzf_rc" -eq 130 ] && break
         [ -z "$selection" ] && continue
 
@@ -7102,12 +7157,15 @@ EOF
                     --prompt="Player Name > " \
                     --height=20% \
                     --reverse 2>/dev/null) || rc=$?
+                check_fzf_status "$rc" || return $?
                 [ "$rc" -eq 130 ] && continue
                 local new_name
                 new_name=$(echo "$in_name_raw" | head -n 1 | tr -d '\r\n')
+                validate_tui_fields "$new_name" || return 1
                 [ -n "$new_name" ] && p_name="$new_name"
 
                 flush_tty_input
+                rc=0
                 in_id_raw=$(: | fzf \
                     --print-query \
                     --border-label="  ╢ Configure SteamID64 ╟  " \
@@ -7116,6 +7174,7 @@ EOF
                     --prompt="SteamID64 > " \
                     --height=20% \
                     --reverse 2>/dev/null) || rc=$?
+                check_fzf_status "$rc" || return $?
                 [ "$rc" -eq 130 ] && continue
                 local new_id
                 new_id=$(echo "$in_id_raw" | head -n 1 | tr -d '[:space:]')
@@ -7134,7 +7193,7 @@ EOF
                 log_msg "INFO" "CONFIG" "Saved global LAN persona: $p_name | $p_id"
                 ;;
             2)
-                configure_wrappers ""
+                configure_wrappers "" || return $?
                 ;;
             3)
                 while true; do
@@ -7144,7 +7203,8 @@ EOF
                         while IFS= read -r l_path; do
                             [ -z "$l_path" ] && continue
                             [[ "$l_path" =~ ^[[:space:]]*# ]] && continue
-                            lib_items+="${l_idx}\t[REMOVE] $l_path\tSelect to remove this library path\n"
+                            validate_tui_fields "$l_path" || return 1
+                            lib_items+="${l_idx}"$'\t'"[REMOVE] $l_path"$'\t'"Select to remove this library path"$'\n'
                             l_idx=$((l_idx + 1))
                         done < "$HOME/.config/gamectl/libraries"
                     fi
@@ -7153,7 +7213,7 @@ EOF
 add	[+] Register New Library Path	Enter filesystem path (e.g. ~/Games)
 EOF
 )
-                    [ -n "$lib_items" ] && lib_menu="${lib_menu}"$'\n'"$(printf '%b' "$lib_items")"
+                    [ -n "$lib_items" ] && lib_menu="${lib_menu}"$'\n'"${lib_items%$'\n'}"
                     lib_menu="${lib_menu}"$'\n'"back	[<] Return to Global Settings	Back"
 
                     flush_tty_input
@@ -7168,6 +7228,7 @@ EOF
                         --height=40% \
                         --reverse 2>/dev/null) || l_rc=$?
 
+                    check_fzf_status "$l_rc" || return $?
                     [ "$l_rc" -eq 130 ] && break
                     [ -z "$lib_sel" ] && continue
 
@@ -7185,9 +7246,11 @@ EOF
                             --prompt="Path > " \
                             --height=20% \
                             --reverse 2>/dev/null) || p_rc=$?
+                        check_fzf_status "$p_rc" || return $?
                         [ "$p_rc" -eq 130 ] && continue
                         local new_path
                         new_path=$(echo "$in_p_raw" | head -n 1 | tr -d '\r\n')
+                        validate_tui_fields "$new_path" || return 1
                         if [ -n "$new_path" ]; then
                             new_path="${new_path/#\~/$HOME}"
                             echo "$new_path" >> "$HOME/.config/gamectl/libraries"
@@ -7218,6 +7281,7 @@ EOF
                     --prompt="SSH Host > " \
                     --height=20% \
                     --reverse 2>/dev/null) || rc=$?
+                check_fzf_status "$rc" || return $?
                 [ "$rc" -eq 130 ] && continue
                 local new_rhost
                 new_rhost=$(echo "$in_host_raw" | head -n 1 | tr -d '[:space:]')
@@ -7389,7 +7453,7 @@ EOF
                         return "$log_fzf_rc"
                     fi
                 else
-                    tui_modal_notice "Log Stream" "Log file is currently empty or does not exist:\n$log_file"
+                    tui_modal_notice "Log Stream" "Log file is currently empty or does not exist:\n$log_file" || return $?
                 fi
                 ;;
             4)
@@ -7413,9 +7477,9 @@ EOF
                 if ! kill -0 "$game_pid" 2>/dev/null; then
                     rm -f "$info_file" 2>/dev/null || true
                     log_msg "INFO" "LAUNCH" "Game '$title' (PID $game_pid) terminated gracefully"
-                    tui_modal_notice "Game Stopped" "Game '$title' (PID $game_pid) terminated gracefully."
+                    tui_modal_notice "Game Stopped" "Game '$title' (PID $game_pid) terminated gracefully." || return $?
                 else
-                    tui_modal_notice "Process Still Alive" "Process did not respond to SIGTERM. Select 'Force Kill' (Option 5) for immediate teardown."
+                    tui_modal_notice "Process Still Alive" "Process did not respond to SIGTERM. Select 'Force Kill' (Option 5) for immediate teardown." || return $?
                 fi
                 ;;
             5)
@@ -7434,7 +7498,7 @@ EOF
                 fi
                 rm -f "$info_file" 2>/dev/null || true
                 log_msg "WARN" "LAUNCH" "Game '$title' (PID $game_pid) force-killed"
-                tui_modal_notice "Force Terminated" "Game '$title' (PID $game_pid) force-killed via SIGKILL."
+                tui_modal_notice "Force Terminated" "Game '$title' (PID $game_pid) force-killed via SIGKILL." || return $?
                 ;;
             *)
                 return 0
@@ -9721,7 +9785,7 @@ EOF
         selection=$(echo "$fzf_out" | sed -n '2p')
 
         if [ "$trigger_key" = "ctrl-l" ]; then
-            view_logs_interactive
+            view_logs_interactive || return $?
             continue
         fi
 
@@ -9732,22 +9796,23 @@ EOF
 
         case "$sel_key" in
             1)
-                library_menu false
+                library_menu false || return $?
                 ;;
             2)
-                search_steam "" false
+                search_steam "" false || return $?
                 ;;
             3)
-                list_downloads_interactive
+                list_downloads_interactive || return $?
                 ;;
             4)
-                unlock_interactive
+                unlock_interactive || return $?
                 ;;
             5)
-                configure_global
+                configure_global || return $?
                 ;;
             6)
                 flush_tty_input
+                local audit_rc=0
                 doctor_audit 2>&1 | fzf \
                     --ansi \
                     --no-sort \
@@ -9756,10 +9821,11 @@ EOF
                     --header="SYSTEM DIAGNOSTICS (Arrows: Scroll │ Esc / q / Enter: Return to Dashboard)" \
                     --prompt="Audit > " \
                     --bind="q:abort" \
-                    --reverse 2>/dev/null || true
+                    --reverse 2>/dev/null || audit_rc=$?
+                check_fzf_status "$audit_rc" || return $?
                 ;;
             7)
-                view_logs_interactive
+                view_logs_interactive || return $?
                 ;;
             *)
                 break
@@ -9815,14 +9881,14 @@ library_menu() {
 
         # Global in-process hotkeys that do not require item selection
         if [ "$trigger_key" = "ctrl-l" ]; then
-            view_logs_interactive
+            view_logs_interactive || return $?
             continue
         elif [ "$trigger_key" = "ctrl-f" ]; then
-            search_steam "" false
+            search_steam "" false || return $?
             invalidate_scan_cache
             continue
         elif [ "$trigger_key" = "ctrl-d" ]; then
-            list_downloads_interactive
+            list_downloads_interactive || return $?
             continue
         fi
 
@@ -9837,12 +9903,12 @@ library_menu() {
 
         case "$trigger_key" in
             ctrl-o)
-                configure_wrappers "$sel_dir" "$sel_title"
+                configure_wrappers "$sel_dir" "$sel_title" || return $?
                 invalidate_scan_cache
                 continue
                 ;;
             ctrl-p)
-                set_id_interactive "$sel_dir" "$sel_title"
+                set_id_interactive "$sel_dir" "$sel_title" || return $?
                 invalidate_scan_cache
                 continue
                 ;;
@@ -9850,22 +9916,22 @@ library_menu() {
                 inject_game "$sel_dir" "$sel_appid"
                 sync_steam "$sel_appid" "$sel_title" "$sel_dir"
                 invalidate_scan_cache
-                tui_modal_notice "GBE Injection & Steam Sync" "Successfully injected GBE Fork & synchronized Steam entitlement for:\n${sel_title:-$sel_dir}"
+                tui_modal_notice "GBE Injection & Steam Sync" "Successfully injected GBE Fork & synchronized Steam entitlement for:\n${sel_title:-$sel_dir}" || return $?
                 continue
                 ;;
             ctrl-s)
                 if sync_save_remote "$sel_dir" "$sel_title"; then
-                    tui_modal_notice "Remote Sync" "Savegames synchronized with remote companion host for:\n${sel_title:-$sel_dir}"
+                    tui_modal_notice "Remote Sync" "Savegames synchronized with remote companion host for:\n${sel_title:-$sel_dir}" || return $?
                 else
-                    tui_modal_notice "Remote Sync Error" "Failed to synchronize savegames for:\n${sel_title:-$sel_dir}"
+                    tui_modal_notice "Remote Sync Error" "Failed to synchronize savegames for:\n${sel_title:-$sel_dir}" || return $?
                 fi
                 continue
                 ;;
             ctrl-b)
                 if backup_save "$sel_dir"; then
-                    tui_modal_notice "Save Backup" "Savegame snapshot created in slot for:\n${sel_title:-$sel_dir}"
+                    tui_modal_notice "Save Backup" "Savegame snapshot created in slot for:\n${sel_title:-$sel_dir}" || return $?
                 else
-                    tui_modal_notice "Save Backup Error" "Failed to create savegame snapshot for:\n${sel_title:-$sel_dir}"
+                    tui_modal_notice "Save Backup Error" "Failed to create savegame snapshot for:\n${sel_title:-$sel_dir}" || return $?
                 fi
                 continue
                 ;;
@@ -9894,25 +9960,26 @@ library_menu() {
                                 --prompt="Restore Slot > " \
                                 --height=30% \
                                 --reverse 2>/dev/null) || p_rc=$?
+                            check_fzf_status "$p_rc" || return $?
                             [ "$p_rc" -eq 130 ] || [ -z "$pick" ] && continue
                             chosen_slot=$(echo "$pick" | cut -f1)
                             chosen_slot="${chosen_slot#slot}"
                         fi
                         if restore_save "$sel_dir" "$chosen_slot"; then
-                            tui_modal_notice "Save Restore" "Savegame restored successfully from slot${chosen_slot} for:\n${sel_title:-$sel_dir}"
+                            tui_modal_notice "Save Restore" "Savegame restored successfully from slot${chosen_slot} for:\n${sel_title:-$sel_dir}" || return $?
                         else
-                            tui_modal_notice "Save Restore Error" "Failed to restore savegame from slot${chosen_slot} for:\n${sel_title:-$sel_dir}"
+                            tui_modal_notice "Save Restore Error" "Failed to restore savegame from slot${chosen_slot} for:\n${sel_title:-$sel_dir}" || return $?
                         fi
                     else
-                        tui_modal_notice "Save Restore" "No snapshot recovery slots found for:\n${sel_title:-$sel_dir}"
+                        tui_modal_notice "Save Restore" "No snapshot recovery slots found for:\n${sel_title:-$sel_dir}" || return $?
                     fi
                 else
-                    tui_modal_notice "Save Restore" "No snapshot recovery directory (.save_snapshots) found for:\n${sel_title:-$sel_dir}"
+                    tui_modal_notice "Save Restore" "No snapshot recovery directory (.save_snapshots) found for:\n${sel_title:-$sel_dir}" || return $?
                 fi
                 continue
                 ;;
             ctrl-x)
-                manage_game_fixes_interactive "$sel_appid" "$sel_title" "$sel_dir"
+                manage_game_fixes_interactive "$sel_appid" "$sel_title" "$sel_dir" || return $?
                 invalidate_scan_cache
                 continue
                 ;;
@@ -9924,6 +9991,7 @@ library_menu() {
                     # User selected return directly to Master Dashboard
                     break
                 fi
+                check_fzf_status "$launch_rc" || return $?
                 ;;
         esac
     done
@@ -9984,11 +10052,14 @@ search_steam() {
     raw_results=$(curl -s --connect-timeout 5 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
 
     local items
-    items=$(echo "$raw_results" | jq -r '.items[]? | "\(.id)\t\(.name)"' 2>/dev/null || true)
+    items=$(printf '%s' "$raw_results" | store_search_items) || {
+        echo "[ERROR] Invalid Steam search catalog." >&2
+        return 1
+    }
 
     if [ -z "$items" ]; then
         log_msg "WARN" "STORE" "Game '$query' not found on Steam Store API."
-        tui_modal_notice "Steam Store Search" "Game '$query' was not found on Steam Store."
+        tui_modal_notice "Steam Store Search" "Game '$query' was not found on Steam Store." || return $?
         [ "$standalone" = "true" ] && exit_tui_screen
         return 0
     fi
@@ -10127,9 +10198,10 @@ search_steam() {
                     if [ "$launch_rc" -eq 10 ]; then
                         break
                     fi
+                    check_fzf_status "$launch_rc" || return $?
                 else
                     log_msg "ERROR" "LAUNCH" "Binary executable not found in $gdir for $sel_name"
-                    tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir"
+                    tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir" || return $?
                 fi
             else
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-D>: Starting All-in-One Live Stream Download for $sel_name ($target_os)"
@@ -10148,7 +10220,7 @@ search_steam() {
 6	Cancel / Return
 EOF
 )
-                local action_sel
+                local action_sel action_rc=0
                 action_sel=$(echo "$action_palette" | fzf \
                     --delimiter=$'\t' \
                     --with-nth=2 \
@@ -10157,7 +10229,9 @@ EOF
                     --header="ACTION PALETTE (Enter: Execute │ Esc: Return)" \
                     --prompt="Action > " \
                     --height=40% \
-                    --reverse 2>/dev/null) || action_sel="6"
+                    --reverse 2>/dev/null) || action_rc=$?
+                check_fzf_status "$action_rc" || return $?
+                [ "$action_rc" -eq 130 ] && continue
 
                 local act_opt
                 act_opt=$(echo "$action_sel" | awk -F'\t' '{print $1}')
@@ -10172,9 +10246,10 @@ EOF
                             if [ "$launch_rc" -eq 10 ]; then
                                 break
                             fi
+                            check_fzf_status "$launch_rc" || return $?
                         else
                             log_msg "ERROR" "LAUNCH" "Binary executable not found in $gdir for $sel_name"
-                            tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir"
+                            tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir" || return $?
                         fi
                         ;;
                     2)
@@ -10187,7 +10262,7 @@ EOF
                         sync_steam "$sel_id" "$sel_name" "$gdir"
                         ;;
                     5)
-                        manage_game_fixes_interactive "$sel_id" "$sel_name" "$gdir"
+                        manage_game_fixes_interactive "$sel_id" "$sel_name" "$gdir" || return $?
                         ;;
                     *)
                         ;;
@@ -10202,7 +10277,7 @@ EOF
 5	Cancel / Return
 EOF
 )
-                local pkg_sel
+                local pkg_sel pkg_rc=0
                 pkg_sel=$(echo "$not_installed_palette" | fzf \
                     --delimiter=$'\t' \
                     --with-nth=2 \
@@ -10211,7 +10286,9 @@ EOF
                     --header="PACKAGE SELECTION (Enter: Execute │ Esc: Return)" \
                     --prompt="Package > " \
                     --height=40% \
-                    --reverse 2>/dev/null) || pkg_sel="5"
+                    --reverse 2>/dev/null) || pkg_rc=$?
+                check_fzf_status "$pkg_rc" || return $?
+                [ "$pkg_rc" -eq 130 ] && continue
 
                 local opt
                 opt=$(echo "$pkg_sel" | awk -F'\t' '{print $1}')
@@ -10226,7 +10303,7 @@ EOF
                         inject_game "$dest_dir" "$sel_id" --no-sync
                         ;;
                     4)
-                        manage_game_fixes_interactive "$sel_id" "$sel_name" ""
+                        manage_game_fixes_interactive "$sel_id" "$sel_name" "" || return $?
                         ;;
                     *)
                         ;;
@@ -10245,6 +10322,8 @@ EOF
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
 export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive preview_search_game preview_download get_depot_dl_progress preview_log_entry preview_process_log preview_adopt_candidate manage_game_fixes_interactive preview_fix_entry
+
+export -f require_tui check_fzf_status validate_tui_fields store_search_items
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

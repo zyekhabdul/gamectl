@@ -1317,6 +1317,10 @@ parse_acf_download_state() {
         pct="100%"
     fi
 
+    if [[ "$name$installdir$acf_file" == *[$'\t\r\n']* ]]; then
+        echo "[ERROR] ACF fields cannot contain TAB, CR or newline." >&2
+        return 1
+    fi
     printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
         "$appid" "$name" "$status_str" "$pct" "$bytes_dl" "$bytes_total" "$state_flags" "$installdir" "$acf_file"
 }
@@ -1621,7 +1625,8 @@ list_downloads_interactive() {
                 dl_fmt=$(format_bytes "$a_dl")
                 tot_fmt=$(format_bytes "$a_total")
                 local detail="${a_title} (${dl_fmt}/${tot_fmt})"
-                entries+="${a_id}\tSteam\t${ui_status}\t${a_pct}\t${detail}\t${a_path}\n"
+                validate_tui_fields "$a_id" "$detail" "$a_path" || continue
+                entries+="${a_id}"$'\t'"Steam"$'\t'"${ui_status}"$'\t'"${a_pct}"$'\t'"${detail}"$'\t'"${a_path}"$'\n'
                 total_items=$((total_items + 1))
             fi
         done
@@ -1668,19 +1673,20 @@ list_downloads_interactive() {
             fi
 
             local st_detail="${st_title} (${st_bytes}, PID: ${st_pid})"
-            entries+="${st_appid}\tStandalone\t${st_ui}\t${st_pct}\t${st_detail}\t${st_dir}\n"
+            validate_tui_fields "$st_appid" "$st_detail" "$st_dir" || continue
+            entries+="${st_appid}"$'\t'"Standalone"$'\t'"${st_ui}"$'\t'"${st_pct}"$'\t'"${st_detail}"$'\t'"${st_dir}"$'\n'
             total_items=$((total_items + 1))
         done
         shopt -u nullglob
 
         if [ "$total_items" -eq 0 ]; then
-            entries+="0\tInfo\t${UI_DIM}[NO ACTIVE DOWNLOADS]${UI_RST}\t0%\tNo active downloads found in Steam or Standalone engine. Press Esc to return.\t\n"
+            entries+="0"$'\t'"Info"$'\t'"${UI_DIM}[NO ACTIVE DOWNLOADS]${UI_RST}"$'\t'"0%"$'\t'"No active downloads found in Steam or Standalone engine. Press Esc to return."$'\t\n'
         fi
 
         flush_tty_input
         local fzf_out fzf_rc=0
         export GAMECTL_PREVIEW_BIN="$SELF_BIN"
-        fzf_out=$(printf "%b" "$entries" | fzf \
+        fzf_out=$(printf "%s" "$entries" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3,5 \
             --expect=ctrl-k \
@@ -1721,16 +1727,16 @@ list_downloads_interactive() {
                 if [[ "$t_pid" =~ ^[0-9]+$ ]] && kill -0 "$t_pid" 2>/dev/null; then
                     kill -STOP "$t_pid" 2>/dev/null || true
                     log_msg "INFO" "DOWNLOAD" "Paused standalone download PID $t_pid (AppID: $sel_appid) via SIGSTOP"
-                    tui_modal_notice "Standalone Download Paused" "Dispatched SIGSTOP to process PID: $t_pid (AppID: $sel_appid).\nUse Action Menu to resume or terminate."
+                    tui_modal_notice "Standalone Download Paused" "Dispatched SIGSTOP to process PID: $t_pid (AppID: $sel_appid).\nUse Action Menu to resume or terminate." || return $?
                 else
-                    tui_modal_notice "Pause Standalone" "Downloader process (PID: $t_pid) is no longer active."
+                    tui_modal_notice "Pause Standalone" "Downloader process (PID: $t_pid) is no longer active." || return $?
                 fi
             elif command -v steam >/dev/null 2>&1; then
                 steam "steam://pause/$sel_appid" >/dev/null 2>&1 &
                 log_msg "INFO" "DOWNLOAD" "Paused download for AppID $sel_appid"
-                tui_modal_notice "Download Paused" "Dispatched pause signal to Steam Client for AppID: $sel_appid"
+                tui_modal_notice "Download Paused" "Dispatched pause signal to Steam Client for AppID: $sel_appid" || return $?
             else
-                tui_modal_notice "Pause Unsupported" "Steam client CLI is not available in PATH."
+                tui_modal_notice "Pause Unsupported" "Steam client CLI is not available in PATH." || return $?
             fi
             continue
         fi
@@ -1767,6 +1773,7 @@ EOF
             --height=35% \
             --reverse 2>/dev/null) || act_rc=$?
 
+        check_fzf_status "$act_rc" || return $?
         [ "$act_rc" -eq 130 ] && continue
         [ -z "$act_sel" ] && continue
 
@@ -1780,7 +1787,7 @@ EOF
                     if [[ "$t_pid" =~ ^[0-9]+$ ]] && kill -0 "$t_pid" 2>/dev/null; then
                         kill -STOP "$t_pid" 2>/dev/null || true
                         log_msg "INFO" "DOWNLOAD" "Paused standalone download PID $t_pid (AppID: $sel_appid) via SIGSTOP"
-                        tui_modal_notice "Download Paused" "Sent SIGSTOP to standalone downloader PID $t_pid."
+                        tui_modal_notice "Download Paused" "Sent SIGSTOP to standalone downloader PID $t_pid." || return $?
                     fi
                 elif command -v steam >/dev/null 2>&1; then
                     steam "steam://pause/$sel_appid" >/dev/null 2>&1 &
@@ -1793,7 +1800,7 @@ EOF
                     if [[ "$t_pid" =~ ^[0-9]+$ ]] && kill -0 "$t_pid" 2>/dev/null; then
                         kill -CONT "$t_pid" 2>/dev/null || true
                         log_msg "INFO" "DOWNLOAD" "Resumed standalone download PID $t_pid (AppID: $sel_appid) via SIGCONT"
-                        tui_modal_notice "Download Resumed" "Sent SIGCONT to standalone downloader PID $t_pid."
+                        tui_modal_notice "Download Resumed" "Sent SIGCONT to standalone downloader PID $t_pid." || return $?
                     fi
                 elif command -v steam >/dev/null 2>&1; then
                     steam "steam://resume/$sel_appid" >/dev/null 2>&1 &
@@ -1807,7 +1814,7 @@ EOF
                         kill -TERM "$t_pid" 2>/dev/null || true
                         rm -rf "$sel_ref" 2>/dev/null || true
                         log_msg "WARN" "DOWNLOAD" "Terminated standalone download PID $t_pid (AppID: $sel_appid) via SIGTERM"
-                        tui_modal_notice "Download Terminated" "Sent SIGTERM to standalone downloader PID $t_pid and purged staging."
+                        tui_modal_notice "Download Terminated" "Sent SIGTERM to standalone downloader PID $t_pid and purged staging." || return $?
                     fi
                 else
                     local g_dir=""
@@ -1821,9 +1828,9 @@ EOF
                     if [ -n "$g_dir" ] && [ -d "$g_dir" ]; then
                         log_msg "INFO" "DOWNLOAD" "Injecting GBE Fork LAN runtime into: $g_dir"
                         "$SELF_BIN" inject "$g_dir" "$sel_appid"
-                        tui_modal_notice "GBE Runtime Injected" "Goldberg emulator LAN runtime successfully injected into:\n$g_dir"
+                        tui_modal_notice "GBE Runtime Injected" "Goldberg emulator LAN runtime successfully injected into:\n$g_dir" || return $?
                     else
-                        tui_modal_notice "Target Not Found" "Steam common game directory not found:\n$g_dir"
+                        tui_modal_notice "Target Not Found" "Steam common game directory not found:\n$g_dir" || return $?
                     fi
                 fi
                 ;;
@@ -1843,9 +1850,9 @@ EOF
                     if [ -n "$g_dir" ] && [ -d "$g_dir" ]; then
                         log_msg "INFO" "DOWNLOAD" "Injecting GBE Fork LAN runtime into target dir: $g_dir"
                         "$SELF_BIN" inject "$g_dir" "$sel_appid"
-                        tui_modal_notice "GBE Runtime Injected" "Goldberg emulator LAN runtime successfully injected into:\n$g_dir"
+                        tui_modal_notice "GBE Runtime Injected" "Goldberg emulator LAN runtime successfully injected into:\n$g_dir" || return $?
                     else
-                        tui_modal_notice "Target Not Found" "Target installation directory not found or not yet created:\n$g_dir"
+                        tui_modal_notice "Target Not Found" "Target installation directory not found or not yet created:\n$g_dir" || return $?
                     fi
                 else
                     continue
@@ -2241,11 +2248,14 @@ unlock_interactive() {
         local raw_results
         raw_results=$(curl -s --connect-timeout 5 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
         local search_items
-        search_items=$(echo "$raw_results" | jq -r '.items[]? | "\(.id)\t\(.name)"' 2>/dev/null || true)
+        search_items=$(printf '%s' "$raw_results" | store_search_items) || {
+            echo "[ERROR] Invalid Steam search catalog." >&2
+            return 1
+        }
 
         if [ -z "$search_items" ]; then
             log_msg "WARN" "ADOPT" "Game title '$u_input' not found on Steam Store API"
-            tui_modal_notice "Game Not Found" "Game title '$u_input' was not found on Steam Store.\nPlease verify title or provide numeric AppID."
+            tui_modal_notice "Game Not Found" "Game title '$u_input' was not found on Steam Store.\nPlease verify title or provide numeric AppID." || return $?
             return 1
         fi
 
@@ -2305,7 +2315,7 @@ unlock_interactive() {
         local clean_notice
         clean_notice=$(echo "$adopt_out" | grep -E '\[SUCCESS\]|\[DEFERRED\]|\[WARN\]' | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^[[:space:]]*//')
         [ -z "$clean_notice" ] && clean_notice="Physical ACF adoption complete for $u_title ($u_appid)."
-        tui_modal_notice "Steam ACF Adoption" "$clean_notice\n\nGame Location: $existing_dir" "30%"
+        tui_modal_notice "Steam ACF Adoption" "$clean_notice\n\nGame Location: $existing_dir" "30%" || return $?
         return 0
     fi
 
@@ -2328,6 +2338,7 @@ EOF
         --height=35% \
         --reverse 2>/dev/null) || b_rc=$?
 
+    check_fzf_status "$b_rc" || return $?
     [ "$b_rc" -eq 130 ] && return 0
     local b_opt
     b_opt=$(echo "$bridge_sel" | awk -F'\t' '{print $1}')
@@ -2345,9 +2356,9 @@ EOF
             if command -v steam >/dev/null 2>&1; then
                 steam "steam://install/$u_appid" >/dev/null 2>&1 &
                 log_msg "INFO" "ADOPT" "Triggered steam://install/$u_appid native install intent"
-                tui_modal_notice "Steam Client Intent" "Entitlement registered in SLSsteam.\nPushed steam://install/$u_appid to Steam Client." "25%"
+                tui_modal_notice "Steam Client Intent" "Entitlement registered in SLSsteam.\nPushed steam://install/$u_appid to Steam Client." "25%" || return $?
             else
-                tui_modal_notice "Steam Entitlement Registered" "Entitlement registered in SLSsteam.\nSteam Client executable not found in PATH." "25%"
+                tui_modal_notice "Steam Entitlement Registered" "Entitlement registered in SLSsteam.\nSteam Client executable not found in PATH." "25%" || return $?
             fi
             ;;
         *)

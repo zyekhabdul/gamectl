@@ -134,7 +134,8 @@ scan_installed_games() {
 
     # Fast-path: Check cache validity (TTL: 60s, invalidated if candidate library directories are newer)
     local use_cached=false
-    if [ "$force_refresh" = false ] && [ -f "$cache_file" ]; then
+    if [ "$force_refresh" = false ] && [ -f "$cache_file" ] &&
+       [ "$(head -n 1 "$cache_file")" = "# gamectl scanner v2" ]; then
         local now mtime
         now=$(date +%s)
         mtime=$(stat -c%Y "$cache_file" 2>/dev/null || echo 0)
@@ -151,7 +152,7 @@ scan_installed_games() {
     fi
 
     if [ "$use_cached" = false ]; then
-        : > "$cache_file.tmp"
+        printf '%s\n' '# gamectl scanner v2' > "$cache_file.tmp"
         declare -A seen_dirs=()
 
         # 1. Scan Steam Libraries
@@ -159,7 +160,7 @@ scan_installed_games() {
         local re_appid='"appid"[[:space:]]+"([0-9]+)"'
         local re_name='"name"[[:space:]]+"([^"]+)"'
         local re_installdir='"installdir"[[:space:]]+"([^"]+)"'
-        while read -r steam_lib; do
+        while IFS= read -r steam_lib; do
             [ -d "$steam_lib" ] || continue
             for acf in "$steam_lib"/appmanifest_*.acf; do
                 [ -f "$acf" ] || continue
@@ -182,6 +183,7 @@ scan_installed_games() {
                 [ -z "$installdir" ] && continue
 
                 local gdir="$steam_lib/common/$installdir"
+                validate_tui_fields "$appid" "$name" "$gdir" || continue
                 [ -d "$gdir" ] || continue
                 [[ -v seen_dirs["$gdir"] ]] && continue
                 seen_dirs["$gdir"]=1
@@ -275,6 +277,7 @@ scan_installed_games() {
             [ -d "$base_dir" ] || continue
             for gdir in "$base_dir"/*; do
                 [ -d "$gdir" ] || continue
+                validate_tui_fields "$gdir" || continue
                 [[ -v seen_dirs["$gdir"] ]] && continue
                 seen_dirs["$gdir"]=1
 
@@ -300,8 +303,10 @@ scan_installed_games() {
 
                 local title="$folder_name"
                 if [ -f "$gdir/.gamectl_title" ]; then
-                    read -r title < "$gdir/.gamectl_title" 2>/dev/null || title="$folder_name"
+                    title=$(cat "$gdir/.gamectl_title" 2>/dev/null) || title="$folder_name"
                 fi
+                [ -n "$title" ] || title="$folder_name"
+                validate_tui_fields "$title" "$gbin" || continue
 
                 local is_win_bin=false
                 case "$gbin" in
@@ -366,7 +371,7 @@ scan_installed_games() {
                 *VALVE_DLL*)  c_badge="${UI_CYAN}[VALVE_DLL] ${UI_RST}" ;;
                 *)            c_badge="${UI_ICE}[STANDALONE]${UI_RST}" ;;
             esac
-            printf "%b\t%b\t%b\t%s\t%s\n" "${UI_DIM}${c_appid}${UI_RST}" "${UI_BOLD}${c_title}${UI_RST}" "$c_badge" "$c_gdir" "$c_gbin"
+            printf "%s\t%s\t%s\t%s\t%s\n" "${UI_DIM}${c_appid}${UI_RST}" "${UI_BOLD}${c_title}${UI_RST}" "$c_badge" "$c_gdir" "$c_gbin"
         done < "$cache_file"
     else
         while IFS=$'\t' read -r c_appid c_title c_status c_gdir c_gbin; do
