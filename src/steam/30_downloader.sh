@@ -918,7 +918,7 @@ trigger_steam_install() {
     return 0
 }
 
-# Steam Native Game Downloader & Provisioner (SLSsteam-Moon & Standalone CDN Engine)
+# Steam Native Game Downloader & Provisioner (Standalone CDN Engine)
 download_game() {
     local appid="${1:-}"
     # Strip ANSI escape sequences & non-digits
@@ -934,8 +934,7 @@ download_game() {
     local action="all"          # "all", "inject", "raw"
     local source="auto"         # "auto", "ryuu", "sushi", "luatools"
     local engine="standalone"   # Default to Pure Standalone CDN engine (Zero Steam Client)
-    local is_strict_standalone=false
-    [ "${GAMECTL_HEADLESS:-0}" = "1" ] && is_strict_standalone=true
+    local is_strict_standalone=true
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -1182,9 +1181,9 @@ EOF
         fi
     fi
 
-    # Route 2: SLSsteam Native Content Engine (Steam Client URI install)
+    # Route 2: Steam Client URI Install (Legacy Content Engine)
     echo "=========================================="
-    echo " STEAM NATIVE CONTENT ENGINE (SLSsteam-Moon)"
+    echo " STEAM NATIVE CONTENT ENGINE"
     echo "=========================================="
     echo " AppID      : $appid"
     echo " Title      : $title"

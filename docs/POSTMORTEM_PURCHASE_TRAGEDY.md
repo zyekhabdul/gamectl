@@ -9,7 +9,7 @@
 
 ## 1. LATAR BELAKANG & KONTRAK AWAL USER
 Pengguna (`aomiqaza`) dan AI sebelumnya telah menyepakati sasaran fundamental:
-- **Batasan Perangkat Keras**: Workstation pengembang berbasis Intel Core i5 Haswell (Lenovo ThinkPad T440p) dengan RAM terbatas.
+- **Prinsip Arsitektur**: Sistem dirancang untuk konsumsi sumber daya minimal (<15-40MB RAM), beroperasi ringan dan 100% standalone.
 - **Masalah Utama**: Steam Client resmi memakan sumber daya berlebihan (**500 MB – 1.2 GB RAM**, 5-8 subprocess Chromium Embedded Framework `steamwebhelper`).
 - **Objektif Inti**: Menghilangkan ketergantungan pada Steam Client dan SLSsteam secara total di alur runtime unduh maupun main. `gamectl` harus menjadi pengelola game mandiri yang mampu mengunduh langsung dari edge CDN Valve dan memainkan game secara offline tanpa membuka Steam Client.
 

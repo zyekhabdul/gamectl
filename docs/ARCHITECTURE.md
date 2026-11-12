@@ -12,7 +12,7 @@ Client distribusi game modern umumnya mengadopsi arsitektur multi-proses berbasi
 - **Renderer & GPU Process**: Membutuhkan alokasi frame buffer GPU dan rasterisasi tampilan UI.
 - **Resource Profiling**:
   - Alokasi RAM: 800 MB hingga 1.3 GB (tersebar di beberapa proses child).
-  - CPU Utilization: 15% - 25% pada prosesor dual-core (Haswell generation) saat melakukan parsing DOM dan render animasi toko/library.
+  - CPU Utilization: 15% - 25% pada prosesor dual-core saat melakukan parsing DOM dan render animasi toko/library.
   - Disk I/O: Menulis cache visual (thumbnails, shader cache, webcache) secara kontinyu ke storage lokal.
 
 ### 1.2 Efisiensi Arsitektur Headless CLI

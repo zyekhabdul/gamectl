@@ -64,7 +64,7 @@ Sebagai alternatif dari perkakas populer (seperti SteamTools, LuaTools, GreenLum
    - Menjamin seluruh aset fisik DLC terpasang lengkap di direktori game.
 4. **Zero-Client Download Invariant**:
    - Seluruh proses pencarian dan pengunduhan berjalan tanpa membuka aplikasi resmi Steam Client.
-   - Tidak memakan 1 GB RAM untuk Chromium subprocess (`steamwebhelper`), sangat optimal untuk laptop low-spec (Haswell T440p) dan mesin headless.
+   - Tidak memakan 1 GB RAM untuk Chromium subprocess (`steamwebhelper`), optimal untuk perangkat dengan sumber daya terbatas dan mesin headless.
 
 ---
 
