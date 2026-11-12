@@ -244,11 +244,11 @@ setup_onlinefix() {
     fi
 
     if [ "$has_spacewar" -eq 1 ]; then
-        echo "[VERIFIED] Spacewar (AppID 480) already registered in Steam/SLSsteam library."
+        echo "[VERIFIED] Spacewar (AppID 480) already registered in Steam library."
     else
         echo "[INFO] Spacewar (AppID 480) not registered yet. Running automatic registration..."
         sync_steam 480 "Spacewar" "$gdir"
-        echo "[VERIFIED] Spacewar (AppID 480) successfully registered to Steam/SLSsteam."
+        echo "[VERIFIED] Spacewar (AppID 480) registered for Steam compatibility."
     fi
 
     # 3. Audit & Sync OnlineFix.ini PlayerName
@@ -355,10 +355,7 @@ launch_game() {
     setup_steam_interceptor "$interceptor_dir"
     export PATH="$interceptor_dir:$PATH"
 
-    # SLSsteam path prioritization for DRM stub wrapper intercept (fallback)
-    if [ -d "$HOME/.local/share/SLSsteam/path" ]; then
-        export PATH="$PATH:$HOME/.local/share/SLSsteam/path"
-    fi
+
 
     # Capture current CPU scaling governor for clean restoration
     local prev_governor=""

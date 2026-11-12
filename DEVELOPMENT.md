@@ -73,7 +73,7 @@ The Entitlement & ACF adoption engine (`src/steam/30_downloader.sh`, CLI: `gamec
 1. **Local File Adoption**: Directs Steam to recognize already existing standalone/offline game directories, avoiding duplicate downloads.
 2. **Community Steam Input**: Activates Steam Input mapping, enabling native gyro, trackpad, and custom community controller layouts on handhelds (Steam Deck, ROG Ally, Legion Go).
 3. **Vulkan Shader Pre-Caching**: Instructs Steam to pull and pre-compile official Vulkan pipeline shaders from Valve CDN, preventing runtime stutter during gameplay.
-4. **Full DLC Activation**: Automatically resolves and registers DLC IDs via Steam Web API into `~/.config/SLSsteam/config.yaml` and creates atomic `appmanifest_<appid>.acf` manifests.
+4. **Full DLC Activation (Steam Client Bridge)**: When running optional Steam adoption, automatically resolves and registers DLC IDs via Steam Web API into `~/.config/SLSsteam/config.yaml` and creates atomic `appmanifest_<appid>.acf` manifests.
 
 ---
 

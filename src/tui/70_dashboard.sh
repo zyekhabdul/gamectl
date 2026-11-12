@@ -1440,9 +1440,9 @@ EOF
             else
                 local not_installed_palette
                 not_installed_palette=$(cat <<EOF
-1	[All-in-One] Download & Auto-Provision via Steam Native CDN (SLSsteam)
-2	[Steam Entitlement & ACF] Adopt files, Steam Input & Shaders (Full DLC)
-3	[Standalone] Inject GBE LAN runtime (Steam-free)
+1	[Sovereign Standalone] Download & Auto-Provision via CDN (Zero-Steam GBE)
+2	[Steam Client Bridge] Adopt files & DLC to Steam Client (Requires Steam)
+3	[Offline GBE] Inject GBE LAN runtime (Steam-free)
 4	[Fixes & OnlineFix] Check Community Fixes & Online-Fix Catalog
 5	Cancel / Return
 EOF

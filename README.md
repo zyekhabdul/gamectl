@@ -93,8 +93,8 @@ Empirical comparisons measured on Arch Linux x86_64 (Linux kernel 6.x, AMD Ryzen
 - **Isolated Windows Runner & Prefix Engine**: Discovers installed Windows compatibility runners (`umu-run` -> `GE-Proton` / Steam `Proton` -> `wine`) and maintains strictly isolated prefixes in `$GAME_DIR/pfx`, keeping host `~/.wine` pristine.
 - **Modular Performance Wrappers**: On-the-fly toggle for `gamemoderun`, `mangohud`, `gamescope` dynamic FSR upscaling, and Mesa multithreaded GL via interactive dialogs (`<Ctrl-O>`) or CLI flags.
 - **LAN Multi-Identity & SteamID Manager (`gamectl set-id`)**: Generates deterministic 17-digit SteamID64 tokens and distinct LAN gamer tags to prevent co-op network collisions, with custom peer discovery (`custom_broadcasts.txt`).
-- **High-Speed SLSsteam Native CDN Downloader (`gamectl download`)**: Downloads game files directly from official Valve Content Servers at line speeds via multi-provider manifest harvesting (Ryuu, Sushi, LuaTools) and stplug-in Lua key synthesis with zero third-party downloader bloat.
-- **Steam Entitlement & ACF Adoption Engine (`gamectl entitle`, `gamectl adopt-steam`)**: Adopts local/offline files into the official Steam client, unlocking community Steam Input mappings (gyro/touchpad), Valve CDN Vulkan shader pre-caching, and base-game DLC activation via `~/.config/SLSsteam/config.yaml` and native `appmanifest_<appid>.acf`. (Backward-compatible alias: `gamectl unlock`).
+- **High-Speed Standalone CDN Downloader (`gamectl download`)**: Primary engine: downloads game files directly from official Valve Content Servers at line speeds via multi-provider manifest harvesting (Ryuu, Sushi, LuaTools) and native Rust streaming (`gamectl-depot-dl`) with zero Steam Client requirement.
+- **Steam Entitlement & ACF Adoption Engine (`gamectl entitle`, `gamectl adopt-steam`)**: (Optional Secondary Bridge) Adopts local/offline files into the official Steam client, unlocking community Steam Input mappings (gyro/touchpad), Valve CDN Vulkan shader pre-caching, and base-game DLC activation via `~/.config/SLSsteam/config.yaml` and native `appmanifest_<appid>.acf`. (Backward-compatible alias: `gamectl unlock`).
 - **Universal Mod DLL Overrides & P2P Hook Engine (`gamectl mod-overrides`)**: Detects mod loaders and P2P compatibility layers (BepInEx, UE4SS, REFramework, ReShade, OnlineFix), injects deduplicated `WINEDLLOVERRIDES`, and registers Spacewar AppID 480.
 - **Headless GE-Proton Release Manager (`gamectl proton-*`)**: Fetches upstream GitHub releases, streams tarball installation directly into `~/.local/share/Steam/compatibilitytools.d/`, and prunes older versions safely.
 - **Wine Prefix Swiss Army Knife (`gamectl pfx`) & Wineserver Guard**: Dedicated maintenance toolkit (`winecfg`, `regedit`, `cmd`, `shell`, `winetricks`, `kill`, `clean`) with deterministic wineserver teardown (`wineserver -w` / `-k`) to eliminate registry lock contention.
@@ -339,7 +339,7 @@ gamectl fix-install 470220 --restart
 # Revert deployed game fix and restore original pristine vanilla files:
 gamectl fix-revert "$HOME/Games/UNO"
 
-# Gracefully hot-reload running Steam client (SLSsteam & Steam Deck Game Mode):
+# Gracefully hot-reload running Steam client (Steam Deck Game Mode & Client Bridge):
 gamectl restart-steam
 ```
 

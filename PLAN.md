@@ -16,7 +16,7 @@
 - Reproduksi backup/restore, watchdog game, dan rsync membuktikan kegagalan masih menghasilkan sukses palsu. Review terdahulu juga membuktikan penulisan melalui symlink keluar target dan kehabisan descriptor pada downloader Rust.
 - Risiko yang baru ditelusuri dari source, seperti dua penulis yang berbagi staging atau kegagalan rename setelah penghapusan file lama, wajib mendapat reproduksi deterministik sebelum dinyatakan selesai.
 - Rujukan tersimpan: [maintenance audit](docs/MAINTENANCE_AUDIT_2026-11-10.md), [verification follow-up](docs/VERIFICATION_2026-11-10.md), dan [TUI lifecycle analysis](docs/ANALYSIS_TUI_LOGS_AND_SCREEN_LIFECYCLE.md). Log `/tmp` dari sesi review hanya bukti tambahan sementara, bukan dependensi pengujian.
-- Batas desain tetap mengikuti ADR-022: default standalone tidak memulai Steam/SLSsteam. Pertahankan pilihan eksplisit `--sls` dan kontrak `--raw`; tidak menambah fitur bypass atau mengubah format save tanpa kebutuhan remediasi.
+- Batas desain mengikuti ADR-022 & Two-Tier Architecture: default 100% sovereign standalone via gamectl-depot-dl dan GBE injection (is_strict_standalone=true). Pilihan --sls/--engine steam adalah jembatan sekunder opsional (Tier 2); tidak ada silent fallback ke Steam.
 - Tetap gunakan dependensi/pola yang tersedia. Dependency baru, perubahan API lintas modul, atau perubahan arsitektur mendasar memerlukan RFC sesuai aturan proyek sebelum implementasi terkait.
 - Kerjakan berurutan pada source modular. Rebuild `bin/gamectl` setelah perubahan Bash; jangan mengedit bundle secara langsung. Jangan menaikkan status packet hanya berdasarkan jumlah tes, mutation score, atau lint.
 

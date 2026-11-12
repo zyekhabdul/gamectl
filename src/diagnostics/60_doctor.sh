@@ -168,24 +168,22 @@ doctor_audit() {
 
     # Layer 7: Steam Client & SLSsteam Integration
     echo
-    echo "  ${UI_PURPLE}[LAYER 7] Steam Client & SLSsteam Integration${UI_RST}"
+    echo "  ${UI_PURPLE}[LAYER 7] Steam Client & Secondary Bridge Integration${UI_RST}"
     local s_root
     s_root="$(get_steam_root 2>/dev/null || true)"
     if [ -n "$s_root" ] && [ -d "$s_root" ]; then
         echo "    • $(printf '%-12s' "Steam Root") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($s_root)${UI_RST}"
         pass_cnt=$((pass_cnt + 1))
     else
-        echo "    • $(printf '%-12s' "Steam Root") : ${UI_AMBER}[WARN]${UI_RST} Steam client directory not found"
-        warn_cnt=$((warn_cnt + 1))
+        echo "    • $(printf '%-12s' "Steam Root") : ${UI_DIM}[OPTIONAL]${UI_RST} ${UI_DIM}Steam client not detected (Standalone primary)${UI_RST}"
     fi
 
     local sls_file="$HOME/.config/SLSsteam/config.yaml"
     if [ -f "$sls_file" ]; then
-        echo "    • $(printf '%-12s' "SLSsteam") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($sls_file)${UI_RST}"
+        echo "    • $(printf '%-12s' "SLSsteam") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}(Secondary bridge active: $sls_file)${UI_RST}"
         pass_cnt=$((pass_cnt + 1))
     else
-        echo "    • $(printf '%-12s' "SLSsteam") : ${UI_AMBER}[WARN]${UI_RST} SLSsteam config.yaml not found (needed for zero-download unlock)"
-        warn_cnt=$((warn_cnt + 1))
+        echo "    • $(printf '%-12s' "SLSsteam") : ${UI_DIM}[OPTIONAL]${UI_RST} ${UI_DIM}Secondary bridge inactive (Standalone GBE primary)${UI_RST}"
     fi
 
     # Layer 8: Security Sandboxing & Process Isolation
