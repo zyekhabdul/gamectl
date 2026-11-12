@@ -713,7 +713,13 @@ EOF
             fi
 
             # 1. Create save snapshot backup
-            backup_save "$game_dir" true || true
+            if [ -d "$game_dir/saves" ] || [ -L "$game_dir/saves" ]; then
+                if ! backup_save "$game_dir" true; then
+                    echo "[ERROR] Pre-wipe save snapshot backup failed. Aborting prefix wipe to protect saves." >&2
+                    log_msg "ERROR" "PFX" "Pre-wipe save snapshot backup failed for $(basename "$game_dir")"
+                    return 1
+                fi
+            fi
 
             # 2. Kill running wineserver
             if [ -n "$ws_bin" ]; then

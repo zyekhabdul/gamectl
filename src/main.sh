@@ -345,7 +345,7 @@ case "${1:-}" in
         ;;
     --backup|backup|backup-save)
         if [ -n "${2:-}" ]; then
-            backup_save "$2"
+            backup_save "$2" || exit $?
         else
             echo "Usage: gamectl backup <game_dir>"
             exit 1
@@ -353,7 +353,7 @@ case "${1:-}" in
         ;;
     --restore|restore|restore-save)
         if [ -n "${2:-}" ]; then
-            restore_save "$2" "${3:-1}"
+            restore_save "$2" "${3:-1}" || exit $?
         else
             echo "Usage: gamectl restore <game_dir> [slot_num]"
             exit 1

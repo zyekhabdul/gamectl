@@ -1088,13 +1088,19 @@ library_menu() {
                 continue
                 ;;
             ctrl-s)
-                sync_save_remote "$sel_dir" "$sel_title"
-                tui_modal_notice "Remote Sync" "Savegames synchronized with remote companion host for:\n${sel_title:-$sel_dir}"
+                if sync_save_remote "$sel_dir" "$sel_title"; then
+                    tui_modal_notice "Remote Sync" "Savegames synchronized with remote companion host for:\n${sel_title:-$sel_dir}"
+                else
+                    tui_modal_notice "Remote Sync Error" "Failed to synchronize savegames for:\n${sel_title:-$sel_dir}"
+                fi
                 continue
                 ;;
             ctrl-b)
-                backup_save "$sel_dir"
-                tui_modal_notice "Save Backup" "Savegame snapshot created in slot for:\n${sel_title:-$sel_dir}"
+                if backup_save "$sel_dir"; then
+                    tui_modal_notice "Save Backup" "Savegame snapshot created in slot for:\n${sel_title:-$sel_dir}"
+                else
+                    tui_modal_notice "Save Backup Error" "Failed to create savegame snapshot for:\n${sel_title:-$sel_dir}"
+                fi
                 continue
                 ;;
             ctrl-r)

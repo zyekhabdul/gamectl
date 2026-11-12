@@ -302,7 +302,12 @@ launch_game() {
 
     echo "[INFO] Preparing launch: $title..."
     log_msg "INFO" "LAUNCH" "Preparing launch: $title ($gdir/$gbin)"
-    backup_save "$gdir" true || true
+    if [ -d "$gdir/saves" ] || [ -L "$gdir/saves" ]; then
+        if ! backup_save "$gdir" true; then
+            echo "[WARN] Pre-launch save snapshot backup failed for '$title'. Proceeding with launch." >&2
+            log_msg "WARN" "LAUNCH" "Pre-launch save snapshot backup failed for $title"
+        fi
+    fi
 
     # Resolve wrappers and extra flags
     declare -a GAMECTL_WRAPPER_PREFIX=()
@@ -782,8 +787,12 @@ pull_save_remote() {
     fi
 
     # Protect local savegame before pulling remote overwrites
-    if [ "$is_dry_run" = false ] && [ -d "$sdir" ]; then
-        backup_save "$gdir" true || true
+    if [ "$is_dry_run" = false ] && { [ -d "$sdir" ] || [ -L "$sdir" ]; }; then
+        if ! backup_save "$gdir" true; then
+            echo "[ERROR] Pre-pull local save backup failed. Aborting pull to prevent unrecoverable save overwrite." >&2
+            log_msg "ERROR" "SAVE" "Pre-pull local save backup failed for '$title'"
+            return 1
+        fi
     fi
 
     mkdir -p "$sdir"

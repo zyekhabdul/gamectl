@@ -412,16 +412,16 @@ fetch_cached_json() {
 backup_save() {
     local game_dir="$1"
     local is_quiet="${2:-false}"
+
+    if [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
+        [ "$is_quiet" = true ] || echo "[ERROR] Target game directory not found: ${game_dir:-<empty>}" >&2
+        return 1
+    fi
+
     local save_dir="$game_dir/saves"
-    if [ -d "$save_dir" ]; then
-        local snap_dir="$game_dir/.save_snapshots"
-        mkdir -p "$snap_dir"
-        [ -d "$snap_dir/slot2" ] && rm -rf "$snap_dir/slot3" && mv "$snap_dir/slot2" "$snap_dir/slot3"
-        [ -d "$snap_dir/slot1" ] && mv "$snap_dir/slot1" "$snap_dir/slot2"
-        cp -a "$save_dir" "$snap_dir/slot1"
-        echo "[INFO] Save snapshot created successfully in slot1 ($snap_dir/slot1)"
-        log_msg "INFO" "SAVE" "Save snapshot created in slot1 for $(basename "$game_dir")"
-    else
+
+    # If saves path does not exist (neither a directory nor a symlink)
+    if [ ! -e "$save_dir" ] && [ ! -L "$save_dir" ]; then
         if [ "$is_quiet" = true ]; then
             return 0
         fi
@@ -431,6 +431,85 @@ backup_save() {
         echo "       Press <CTRL-I> first to enable portable saves." >&2
         return 1
     fi
+
+    # Symlink validation: ensure target exists and is a directory
+    if [ -L "$save_dir" ]; then
+        local target_path
+        target_path=$(readlink -f "$save_dir" 2>/dev/null || true)
+        if [ -z "$target_path" ] || [ ! -d "$target_path" ]; then
+            [ "$is_quiet" = true ] || echo "[ERROR] Portable saves symlink points to invalid directory: $save_dir -> ${target_path:-broken}" >&2
+            log_msg "ERROR" "SAVE" "Portable saves symlink is broken for $(basename "$game_dir")"
+            return 1
+        fi
+    elif [ ! -d "$save_dir" ]; then
+        [ "$is_quiet" = true ] || echo "[ERROR] Portable saves path is not a directory: $save_dir" >&2
+        log_msg "ERROR" "SAVE" "Portable saves path is not a directory for $(basename "$game_dir")"
+        return 1
+    fi
+
+    local snap_dir="$game_dir/.save_snapshots"
+    mkdir -p "$snap_dir" 2>/dev/null || {
+        [ "$is_quiet" = true ] || echo "[ERROR] Failed to create snapshots directory: $snap_dir" >&2
+        return 1
+    }
+
+    # Per-game lock using atomic directory creation
+    local lock_dir="$snap_dir/.lock"
+    local lock_pid=$$
+    local lock_retries=15
+    while ! mkdir "$lock_dir" 2>/dev/null; do
+        if [ -f "$lock_dir/pid" ]; then
+            local holder_pid
+            holder_pid=$(cat "$lock_dir/pid" 2>/dev/null || true)
+            if [ -n "$holder_pid" ] && ! kill -0 "$holder_pid" 2>/dev/null; then
+                rm -rf "$lock_dir" 2>/dev/null || true
+                continue
+            fi
+        fi
+        lock_retries=$((lock_retries - 1))
+        if [ "$lock_retries" -le 0 ]; then
+            [ "$is_quiet" = true ] || echo "[ERROR] Concurrent save mutation in progress for: $(basename "$game_dir")" >&2
+            log_msg "ERROR" "SAVE" "Lock contention on backup for $(basename "$game_dir")"
+            return 1
+        fi
+        sleep 0.1
+    done
+    echo "$lock_pid" > "$lock_dir/pid" 2>/dev/null || true
+    trap 'rm -rf "'"$lock_dir"'" 2>/dev/null || true' INT TERM
+
+    # Stage snapshot in temporary folder on the snapshot filesystem
+    local stage_dir="$snap_dir/.stage_backup_${lock_pid}_$RANDOM"
+    rm -rf "$stage_dir" 2>/dev/null || true
+    mkdir -p "$stage_dir" 2>/dev/null || {
+        rm -rf "$lock_dir" 2>/dev/null || true
+        trap - INT TERM
+        return 1
+    }
+
+    # Copy files dereferencing symlinks so snapshot is an independent copy
+    local cp_rc=0
+    cp -aL "$save_dir/." "$stage_dir/" 2>/dev/null || cp_rc=$?
+
+    if [ "$cp_rc" -ne 0 ]; then
+        rm -rf "$stage_dir" 2>/dev/null || true
+        rm -rf "$lock_dir" 2>/dev/null || true
+        trap - INT TERM
+        [ "$is_quiet" = true ] || echo "[ERROR] Failed to copy savegame files to snapshot staging." >&2
+        log_msg "ERROR" "SAVE" "Failed to copy savegame files for $(basename "$game_dir")"
+        return 1
+    fi
+
+    # Rotate slots ONLY after copy to staging has succeeded
+    [ -d "$snap_dir/slot2" ] && rm -rf "$snap_dir/slot3" && mv "$snap_dir/slot2" "$snap_dir/slot3"
+    [ -d "$snap_dir/slot1" ] && mv "$snap_dir/slot1" "$snap_dir/slot2"
+    mv "$stage_dir" "$snap_dir/slot1"
+
+    rm -rf "$lock_dir" 2>/dev/null || true
+    trap - INT TERM
+
+    [ "$is_quiet" = true ] || echo "[INFO] Save snapshot created successfully in slot1 ($snap_dir/slot1)"
+    log_msg "INFO" "SAVE" "Save snapshot created in slot1 for $(basename "$game_dir")"
+    return 0
 }
 
 # Restore savegame snapshot from recovery slot (slot1, slot2, or slot3)
@@ -445,6 +524,15 @@ restore_save() {
     fi
 
     local snap_dir="$game_dir/.save_snapshots"
+    local save_dir="$game_dir/saves"
+    local stash_dir="$snap_dir/.pre_restore_stash"
+
+    # Auto-recovery: if active save was lost during an interrupted restore but stash exists, recover it
+    if [ ! -d "$save_dir" ] && [ ! -L "$save_dir" ] && [ -d "$stash_dir" ]; then
+        mv "$stash_dir" "$save_dir" 2>/dev/null || true
+        log_msg "WARN" "SAVE" "Recovered missing active saves from .pre_restore_stash for $(basename "$game_dir")"
+    fi
+
     if [ ! -d "$snap_dir" ]; then
         [ "$is_quiet" = true ] || echo "[ERROR] No savegame snapshots directory found in: $game_dir" >&2
         return 1
@@ -472,18 +560,80 @@ restore_save() {
         return 1
     fi
 
-    local save_dir="$game_dir/saves"
-    # Safety stash: backup current saves if directory exists and is not empty
-    if [ -d "$save_dir" ] && [ -n "$(find "$save_dir" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
-        local stash_dir="$snap_dir/.pre_restore_stash"
-        rm -rf "$stash_dir" 2>/dev/null || true
-        mkdir -p "$stash_dir"
-        cp -a "$save_dir/." "$stash_dir/" 2>/dev/null || true
+    # Per-game lock
+    local lock_dir="$snap_dir/.lock"
+    local lock_pid=$$
+    local lock_retries=15
+    while ! mkdir "$lock_dir" 2>/dev/null; do
+        if [ -f "$lock_dir/pid" ]; then
+            local holder_pid
+            holder_pid=$(cat "$lock_dir/pid" 2>/dev/null || true)
+            if [ -n "$holder_pid" ] && ! kill -0 "$holder_pid" 2>/dev/null; then
+                rm -rf "$lock_dir" 2>/dev/null || true
+                continue
+            fi
+        fi
+        lock_retries=$((lock_retries - 1))
+        if [ "$lock_retries" -le 0 ]; then
+            [ "$is_quiet" = true ] || echo "[ERROR] Concurrent save mutation in progress for: $(basename "$game_dir")" >&2
+            log_msg "ERROR" "SAVE" "Lock contention on restore for $(basename "$game_dir")"
+            return 1
+        fi
+        sleep 0.1
+    done
+    echo "$lock_pid" > "$lock_dir/pid" 2>/dev/null || true
+    trap 'rm -rf "'"$lock_dir"'" 2>/dev/null || true' INT TERM
+
+    # Stage restored snapshot on the target game filesystem
+    local restore_stage="$game_dir/.save_restore_stage_${lock_pid}_$RANDOM"
+    rm -rf "$restore_stage" 2>/dev/null || true
+    mkdir -p "$restore_stage" 2>/dev/null || {
+        rm -rf "$lock_dir" 2>/dev/null || true
+        trap - INT TERM
+        return 1
+    }
+
+    local cp_rc=0
+    cp -aL "$target_slot/." "$restore_stage/" 2>/dev/null || cp_rc=$?
+
+    if [ "$cp_rc" -ne 0 ]; then
+        rm -rf "$restore_stage" 2>/dev/null || true
+        rm -rf "$lock_dir" 2>/dev/null || true
+        trap - INT TERM
+        [ "$is_quiet" = true ] || echo "[ERROR] Failed to stage snapshot files for restore." >&2
+        log_msg "ERROR" "SAVE" "Restore staging failed for $(basename "$game_dir")"
+        return 1
     fi
 
-    mkdir -p "$save_dir"
-    rm -rf "${save_dir:?}"/* "${save_dir:?}"/.[!.]* 2>/dev/null || true
-    cp -a "$target_slot/." "$save_dir/" 2>/dev/null || true
+    # Safety stash: move current active saves to stash directory before replacement
+    if [ -e "$save_dir" ] || [ -L "$save_dir" ]; then
+        rm -rf "$stash_dir" 2>/dev/null || true
+        if ! mv "$save_dir" "$stash_dir" 2>/dev/null; then
+            rm -rf "$restore_stage" 2>/dev/null || true
+            rm -rf "$lock_dir" 2>/dev/null || true
+            trap - INT TERM
+            [ "$is_quiet" = true ] || echo "[ERROR] Failed to stash current savegame before replacement." >&2
+            log_msg "ERROR" "SAVE" "Failed to stash savegame before restore for $(basename "$game_dir")"
+            return 1
+        fi
+    fi
+
+    # Atomic rename commit into active save_dir
+    if ! mv "$restore_stage" "$save_dir" 2>/dev/null; then
+        # Replacement failed: rollback from stash
+        if [ -d "$stash_dir" ] || [ -L "$stash_dir" ]; then
+            mv "$stash_dir" "$save_dir" 2>/dev/null || true
+        fi
+        rm -rf "$restore_stage" 2>/dev/null || true
+        rm -rf "$lock_dir" 2>/dev/null || true
+        trap - INT TERM
+        [ "$is_quiet" = true ] || echo "[ERROR] Failed to commit restored savegame directory." >&2
+        log_msg "ERROR" "SAVE" "Failed to commit restored savegame for $(basename "$game_dir")"
+        return 1
+    fi
+
+    rm -rf "$lock_dir" 2>/dev/null || true
+    trap - INT TERM
 
     [ "$is_quiet" = true ] || echo "[VERIFIED] Savegame restored successfully from slot${slot} ($target_slot -> $save_dir)"
     log_msg "INFO" "SAVE" "Savegame restored from slot${slot} for $(basename "$game_dir")"

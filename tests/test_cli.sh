@@ -2814,6 +2814,79 @@ test_bounded_fzf_interactive_entrypoint_guards() {
 }
 run_test "TUI Safety (Chunk 25.01): Bounded non-TTY detection on interactive entrypoints" test_bounded_fzf_interactive_entrypoint_guards
 
+test_savegame_snapshots_independence_and_recovery_contracts() {
+    source "$REPO_ROOT/src/core/00_header.sh"
+    source "$REPO_ROOT/src/core/10_utils.sh"
+
+    local t_game
+    t_game=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_chunk25_02_XXXXXX")
+    local s_dir="$t_game/saves"
+    mkdir -p "$s_dir/sub folder"
+    echo "data_sub" > "$s_dir/sub folder/nested save.dat"
+    echo "dot_secret" > "$s_dir/.hidden_save"
+
+    # 1. Independent snapshot copy test
+    backup_save "$t_game" true >/dev/null 2>&1 || { rm -rf "$t_game"; return 1; }
+    [ -d "$t_game/.save_snapshots/slot1/sub folder" ] || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$t_game/.save_snapshots/slot1/sub folder/nested save.dat")" = "data_sub" ] || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$t_game/.save_snapshots/slot1/.hidden_save")" = "dot_secret" ] || { rm -rf "$t_game"; return 1; }
+
+    # Mutate active save
+    echo "mutated_sub" > "$s_dir/sub folder/nested save.dat"
+    echo "mutated_dot" > "$s_dir/.hidden_save"
+
+    # Verify snapshot remains unmodified (not symlinked back to active save)
+    [ "$(cat "$t_game/.save_snapshots/slot1/sub folder/nested save.dat")" = "data_sub" ] || { rm -rf "$t_game"; return 1; }
+    [ "$(cat "$t_game/.save_snapshots/slot1/.hidden_save")" = "dot_secret" ] || { rm -rf "$t_game"; return 1; }
+
+    # 2. Symlink handling test
+    local t_ext t_sym
+    t_ext=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_ext_XXXXXX")
+    echo "ext_save" > "$t_ext/ext.dat"
+    t_sym=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_sym_XXXXXX")
+    ln -s "$t_ext" "$t_sym/saves"
+
+    backup_save "$t_sym" true >/dev/null 2>&1 || { rm -rf "$t_game" "$t_ext" "$t_sym"; return 1; }
+    [ -d "$t_sym/.save_snapshots/slot1" ] || { rm -rf "$t_game" "$t_ext" "$t_sym"; return 1; }
+    [ ! -L "$t_sym/.save_snapshots/slot1" ] || { rm -rf "$t_game" "$t_ext" "$t_sym"; return 1; }
+    [ "$(cat "$t_sym/.save_snapshots/slot1/ext.dat")" = "ext_save" ] || { rm -rf "$t_game" "$t_ext" "$t_sym"; return 1; }
+
+    # Broken symlink test (must fail cleanly without creating snapshot)
+    ln -sfn "/nonexistent/broken/path/$$" "$t_sym/saves"
+    if backup_save "$t_sym" true >/dev/null 2>&1; then
+        rm -rf "$t_game" "$t_ext" "$t_sym"
+        return 1
+    fi
+
+    # 3. Empty directory snapshot
+    local t_empty
+    t_empty=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_empty_XXXXXX")
+    mkdir -p "$t_empty/saves"
+    backup_save "$t_empty" true >/dev/null 2>&1 || { rm -rf "$t_game" "$t_ext" "$t_sym" "$t_empty"; return 1; }
+    [ -d "$t_empty/.save_snapshots/slot1" ] || { rm -rf "$t_game" "$t_ext" "$t_sym" "$t_empty"; return 1; }
+
+    # 4. Recoverable restore from stash
+    mkdir -p "$t_game/.save_snapshots/.pre_restore_stash"
+    echo "stashed_val" > "$t_game/.save_snapshots/.pre_restore_stash/recovered.dat"
+    rm -rf "$t_game/saves"
+    restore_save "$t_game" 1 true >/dev/null 2>&1 || { rm -rf "$t_game" "$t_ext" "$t_sym" "$t_empty"; return 1; }
+    [ -f "$t_game/saves/sub folder/nested save.dat" ] || { rm -rf "$t_game" "$t_ext" "$t_sym" "$t_empty"; return 1; }
+    [ "$(cat "$t_game/saves/sub folder/nested save.dat")" = "data_sub" ] || { rm -rf "$t_game" "$t_ext" "$t_sym" "$t_empty"; return 1; }
+
+    # 5. Lock contention handling
+    mkdir -p "$t_game/.save_snapshots/.lock"
+    echo "$$" > "$t_game/.save_snapshots/.lock/pid"
+    if backup_save "$t_game" true >/dev/null 2>&1; then
+        rm -rf "$t_game" "$t_ext" "$t_sym" "$t_empty"
+        return 1
+    fi
+    rm -rf "$t_game/.save_snapshots/.lock"
+
+    rm -rf "$t_game" "$t_ext" "$t_sym" "$t_empty"
+    return 0
+}
+run_test "Savegame Integrity (Chunk 25.02): Independent snapshots & recoverable replacement" test_savegame_snapshots_independence_and_recovery_contracts
+
 # ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
