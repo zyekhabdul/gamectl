@@ -605,8 +605,15 @@ clean	Wipe Wine Prefix	Create save snapshot backup & wipe entire pfx directory
 EOF
 )
 
+                export GAMECTL_PFX_NAME="$game_name"
+                export GAMECTL_PFX_DIR="$game_dir"
+                export GAMECTL_PFX_PATH="$pfx_dir"
+                export GAMECTL_PFX_RUNNER="$runner_bin"
+                export GAMECTL_PFX_STATUS="${pfx_color}${pfx_status}"
+                export GAMECTL_PFX_SIZE="$pfx_size"
+
                 local preview_cmd
-                preview_cmd="echo -e '\033[38;5;60m╭─ WINE PREFIX OVERVIEW ──────────────────────────────╮\033[0m\n  Game Title  : \033[1m$game_name\033[0m\n  Directory   : $game_dir\n  Prefix Path : $pfx_dir\n  Active Wine : \033[38;5;111m$runner_bin\033[0m\n  Status      : ${pfx_color}${pfx_status}\033[0m (Size: $pfx_size)\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n\033[38;5;60m╭─ ACTION DETAIL ─────────────────────────────────────╮\033[0m\n  Tool   : \033[1m{1}\033[0m - {2}\n  Desc   : {3}\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m'"
+                preview_cmd='printf "\033[38;5;60m╭─ WINE PREFIX OVERVIEW ──────────────────────────────╮\033[0m\n  Game Title  : \033[1m%s\033[0m\n  Directory   : %s\n  Prefix Path : %s\n  Active Wine : \033[38;5;111m%s\033[0m\n  Status      : %b\033[0m (Size: %s)\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n\033[38;5;60m╭─ ACTION DETAIL ─────────────────────────────────────╮\033[0m\n  Tool   : \033[1m%s\033[0m - %s\n  Desc   : %s\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n" "$GAMECTL_PFX_NAME" "$GAMECTL_PFX_DIR" "$GAMECTL_PFX_PATH" "$GAMECTL_PFX_RUNNER" "$GAMECTL_PFX_STATUS" "$GAMECTL_PFX_SIZE" {1} {2} {3}'
 
                 local pfx_sel fzf_rc=0
                 pfx_sel=$(echo "$pfx_palette" | fzf \
@@ -621,7 +628,13 @@ EOF
                     --height=70% \
                     --reverse 2>/dev/null) || fzf_rc=$?
 
-                [ "$fzf_rc" -eq 130 ] && return 0
+                if [ "$fzf_rc" -eq 130 ]; then
+                    return 0
+                fi
+                if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+                    echo "[ERROR] Wine prefix manager failed (fzf exit code $fzf_rc)." >&2
+                    return "$fzf_rc"
+                fi
                 [ -z "$pfx_sel" ] && return 0
 
                 action=$(echo "$pfx_sel" | awk -F'\t' '{print $1}')

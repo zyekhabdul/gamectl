@@ -598,11 +598,11 @@ restart_steam_client() {
 # Preview pane generator for Community Fixes and OnlineFix catalog
 preview_fix_entry() {
     local fix_id="${1:-}"
-    local appid="${2:-}"
+    local appid="${2:-${GAMECTL_PREVIEW_APPID:-}}"
     local fix_title="${3:-}"
     local fix_file="${4:-}"
     local fix_tags="${5:-}"
-    local gdir="${6:-}"
+    local gdir="${6:-${GAMECTL_PREVIEW_GDIR:-}}"
     local fix_desc="${7:-}"
 
     fix_id=$(strip_ansi "$fix_id" | tr -d '[:space:]')
@@ -755,6 +755,15 @@ manage_game_fixes_interactive() {
         return 1
     fi
 
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Interactive fixes manager requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for interactive mode but was not found in PATH." >&2
+        return 127
+    fi
+
     # 2. Resolve target installation directory if missing
     if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
         gdir=$(resolve_game_install_dir "$appid" 2>/dev/null || true)
@@ -838,6 +847,9 @@ for f in fixes:
         fi
 
         local fzf_out="" fzf_rc=0
+        export GAMECTL_PREVIEW_BIN="$SELF_BIN"
+        export GAMECTL_PREVIEW_APPID="$appid"
+        export GAMECTL_PREVIEW_GDIR="$gdir"
         fzf_out=$(printf '%b' "$menu_list" | fzf \
             --delimiter=$'\t' \
             --with-nth=2,3 \
@@ -845,10 +857,16 @@ for f in fixes:
             --border-label-pos=2 \
             --header="SELECT FIX OR ACTION (Enter: Select / Execute │ Esc: Return)" \
             --prompt="Fix > " \
-            --preview="$SELF_BIN --preview-fix {1} '$appid' {2} {4} {3} '$gdir'" \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-fix {1} "$GAMECTL_PREVIEW_APPID" {2} {4} {3} "$GAMECTL_PREVIEW_GDIR"' \
             --preview-window=right:55%:border-rounded:wrap 2>/dev/null) || fzf_rc=$?
 
-        [ "$fzf_rc" -eq 130 ] && break
+        if [ "$fzf_rc" -eq 130 ]; then
+            break
+        fi
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Community fixes menu failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
         [ -z "$fzf_out" ] && continue
 
         local sel_fix_id sel_fix_title sel_fix_tags sel_fix_file
@@ -868,7 +886,7 @@ for f in fixes:
 2	Cancel / Return
 EOF
 )
-            local r_sel
+            local r_sel fzf_r_rc=0
             r_sel=$(echo "$restore_palette" | fzf \
                 --delimiter=$'\t' \
                 --with-nth=2 \
@@ -877,7 +895,15 @@ EOF
                 --header="RESTORE CONFIRMATION (Enter: Execute │ Esc: Cancel)" \
                 --prompt="Confirm > " \
                 --height=30% \
-                --reverse 2>/dev/null) || r_sel="2"
+                --reverse 2>/dev/null) || fzf_r_rc=$?
+
+            if [ "$fzf_r_rc" -eq 130 ]; then
+                continue
+            fi
+            if [ "$fzf_r_rc" -ne 0 ] && [ "$fzf_r_rc" -ne 1 ]; then
+                echo "[ERROR] Snapshot restore confirmation failed (fzf exit code $fzf_r_rc)." >&2
+                return "$fzf_r_rc"
+            fi
 
             if [ "$(echo "$r_sel" | cut -f1)" = "1" ]; then
                 if revert_game_fix "$gdir"; then
@@ -911,7 +937,7 @@ EOF
 3	Cancel / Return
 EOF
 )
-            local f_sel
+            local f_sel fzf_f_rc=0
             f_sel=$(echo "$fix_palette" | fzf \
                 --delimiter=$'\t' \
                 --with-nth=2 \
@@ -920,7 +946,15 @@ EOF
                 --header="FIX DEPLOYMENT (Enter: Select │ Esc: Return)" \
                 --prompt="Action > " \
                 --height=35% \
-                --reverse 2>/dev/null) || f_sel="3"
+                --reverse 2>/dev/null) || fzf_f_rc=$?
+
+            if [ "$fzf_f_rc" -eq 130 ]; then
+                continue
+            fi
+            if [ "$fzf_f_rc" -ne 0 ] && [ "$fzf_f_rc" -ne 1 ]; then
+                echo "[ERROR] Fix deployment prompt failed (fzf exit code $fzf_f_rc)." >&2
+                return "$fzf_f_rc"
+            fi
 
             local f_opt
             f_opt=$(echo "$f_sel" | cut -f1)

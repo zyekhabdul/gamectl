@@ -846,6 +846,15 @@ preview_log_entry() {
 
 # Interactive Centralized Activity & Runtime Log Viewer
 view_logs_interactive() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Interactive log viewer requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for interactive mode but was not found in PATH." >&2
+        return 127
+    fi
+
     flush_tty_input
     local log_file
     log_file="$(get_runtime_log_file)"
@@ -855,6 +864,8 @@ view_logs_interactive() {
     fi
 
     local fzf_rc=0
+    export GAMECTL_LOG_FILE="$log_file"
+    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
     if command -v tac >/dev/null 2>&1; then
         tac "$log_file" 2>/dev/null
     else
@@ -864,18 +875,34 @@ view_logs_interactive() {
         --border-label-pos=2 \
         --header="ACTIVITY LOGS (Arrows: Navigate │ Ctrl-X: Clear Log │ Esc: Return)" \
         --prompt="Logs > " \
-        --preview="$SELF_BIN --preview-log {}" \
+        --preview='"$GAMECTL_PREVIEW_BIN" --preview-log {}' \
         --preview-window=down:35%:border-rounded:wrap \
-        --bind="ctrl-x:execute(: > '$log_file')+reload(command -v tac >/dev/null 2>&1 && tac '$log_file' 2>/dev/null || sed -e '1!G;h;\$!d' '$log_file' 2>/dev/null)" \
+        --bind='ctrl-x:execute(: > "$GAMECTL_LOG_FILE")+reload(command -v tac >/dev/null 2>&1 && tac "$GAMECTL_LOG_FILE" 2>/dev/null || sed -e "1!G;h;\$!d" "$GAMECTL_LOG_FILE" 2>/dev/null)' \
         --height=85% \
         --reverse 2>/dev/null || fzf_rc=$?
 
     flush_tty_input
+    if [ "$fzf_rc" -eq 130 ]; then
+        return 0
+    fi
+    if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+        echo "[ERROR] Activity log viewer failed (fzf exit code $fzf_rc)." >&2
+        return "$fzf_rc"
+    fi
     return 0
 }
 
 # Master Dashboard Hub (Two-Panel Interactive TUI)
 dashboard_menu() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Master Dashboard requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for Master Dashboard but was not found in PATH." >&2
+        return 127
+    fi
+
     enter_tui_screen
     clean_stale_locks
 
@@ -883,10 +910,13 @@ dashboard_menu() {
     initial_count=$(scan_installed_games 2>/dev/null | wc -l || echo "0")
     log_msg "INFO" "DASHBOARD" "Cockpit active ($initial_count titles indexed)"
 
+    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
+
     while true; do
         flush_tty_input
         local game_count
         game_count=$(scan_installed_games 2>/dev/null | wc -l || echo "0")
+        export GAMECTL_GAME_COUNT="$game_count"
 
         local menu_entries
         menu_entries=$(cat <<EOF
@@ -909,11 +939,15 @@ EOF
             --border-label-pos=2 \
             --header="MASTER DASHBOARD (Arrows/Numbers: Select │ Enter: Open │ Ctrl-L: Logs │ Esc: Exit)" \
             --prompt="Dashboard > " \
-            --preview="$SELF_BIN --preview-dashboard {1} $game_count" \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-dashboard {1} "$GAMECTL_GAME_COUNT"' \
             --preview-window=right:55%:border-rounded:wrap \
         ) || fzf_rc=$?
 
         [ "$fzf_rc" -eq 130 ] && break
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Master Dashboard menu failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
         [ -z "$fzf_out" ] && continue
 
         local trigger_key selection
@@ -972,9 +1006,20 @@ EOF
 
 # Main Library View
 library_menu() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Game Library requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for Game Library but was not found in PATH." >&2
+        return 127
+    fi
+
     local standalone="${1:-false}"
     [ "$standalone" = "true" ] && enter_tui_screen
     clean_stale_locks
+
+    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
 
     while true; do
         flush_tty_input
@@ -987,11 +1032,15 @@ library_menu() {
             --border-label-pos=2 \
             --header=$'GAME LIBRARY (Enter: Launch │ Esc: Dashboard Hub)\nShortcuts: Ctrl-F (Search) │ Ctrl-D (Downloads) │ Ctrl-L (Logs) │ Ctrl-I (Inject) │ Ctrl-O (Wrappers) │ Ctrl-P (LAN ID) │ Ctrl-S (Sync) │ Ctrl-B (Backup) │ Ctrl-R (Restore) │ Ctrl-X (Fixes)' \
             --prompt="Library > " \
-            --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview {1} {2} {3} {4} {5}' \
             --preview-window=right:55%:border-rounded:wrap \
         ) || fzf_rc=$?
 
         [ "$fzf_rc" -eq 130 ] && break
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Game Library menu failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
         [ -z "$fzf_out" ] && continue
 
         local trigger_key selection
@@ -1113,6 +1162,15 @@ library_menu() {
 
 # Live Steam Search View (Actionable TUI Search)
 search_steam() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Interactive Steam search requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for interactive mode but was not found in PATH." >&2
+        return 127
+    fi
+
     local query="${1:-}"
     local standalone="${2:-false}"
     [ "$standalone" = "true" ] && enter_tui_screen
@@ -1133,6 +1191,10 @@ search_steam() {
             flush_tty_input
             [ "$standalone" = "true" ] && exit_tui_screen
             [ "$fzf_rc" -eq 130 ] && return 0
+        fi
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Search query prompt failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
         fi
 
         query=$(echo "$query_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
@@ -1203,6 +1265,8 @@ search_steam() {
 
     _refresh_search_results
 
+    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
+
     while true; do
         flush_tty_input
         local fzf_out fzf_rc=0
@@ -1215,11 +1279,15 @@ search_steam() {
             --border-label-pos=2 \
             --header="STEAM CATALOG (Enter: Actions │ Ctrl-A: All-in-One │ Ctrl-U: Entitle │ Ctrl-S: Standalone │ Esc: Back)" \
             --prompt="Steam Store > " \
-            --preview="$SELF_BIN --preview-search {1} {2} {3}" \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-search {1} {2} {3}' \
             --preview-window=right:52%:border-rounded:wrap \
         ) || fzf_rc=$?
 
         [ "$fzf_rc" -eq 130 ] && break
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Steam search catalog failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
         [ -z "$fzf_out" ] && continue
 
         local trigger_key selection

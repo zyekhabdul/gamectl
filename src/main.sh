@@ -372,8 +372,10 @@ case "${1:-}" in
         ;;
     logs|--logs)
         enter_tui_screen
-        view_logs_interactive
+        log_rc=0
+        view_logs_interactive || log_rc=$?
         exit_tui_screen
+        [ "$log_rc" -ne 0 ] && exit "$log_rc"
         ;;
     --sync|sync|sync-remote|sync-companion|sync-tuf)
         if [ -n "${2:-}" ]; then

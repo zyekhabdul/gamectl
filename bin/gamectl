@@ -3797,6 +3797,15 @@ preview_download() {
 
 # Interactive Download Monitor TUI
 list_downloads_interactive() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Interactive download monitor requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for interactive mode but was not found in PATH." >&2
+        return 127
+    fi
+
     local run_dir
     run_dir="$(get_runtime_dir)"
     while true; do
@@ -3886,6 +3895,7 @@ list_downloads_interactive() {
 
         flush_tty_input
         local fzf_out fzf_rc=0
+        export GAMECTL_PREVIEW_BIN="$SELF_BIN"
         fzf_out=$(printf "%b" "$entries" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3,5 \
@@ -3894,11 +3904,15 @@ list_downloads_interactive() {
             --border-label-pos=2 \
             --header="DOWNLOADS (Enter: Actions │ Ctrl-K: Pause │ Esc: Back)" \
             --prompt="Downloads > " \
-            --preview="$SELF_BIN --preview-download {1} {2} {6}" \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-download {1} {2} {6}' \
             --preview-window=right:60%:border-rounded:wrap \
         ) || fzf_rc=$?
 
         [ "$fzf_rc" -eq 130 ] && break
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Download monitor failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
         [ -z "$fzf_out" ] && continue
 
         local trigger_key selection
@@ -4397,6 +4411,15 @@ adopt_steam() { unlock_game "$@"; }
 
 # Interactive Steam ACF Adoption & Asset Manager Wizard (Dual Input: Title or AppID)
 unlock_interactive() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Interactive ACF adoption requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for interactive mode but was not found in PATH." >&2
+        return 127
+    fi
+
     flush_tty_input
     local u_input_raw="" fzf_rc=0
     u_input_raw=$(: | fzf \
@@ -4410,6 +4433,10 @@ unlock_interactive() {
 
     # Only abort if user cancelled via ESC or Ctrl-C (exit status 130)
     [ "$fzf_rc" -eq 130 ] && return 0
+    if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+        echo "[ERROR] Adoption query input failed (fzf exit code $fzf_rc)." >&2
+        return "$fzf_rc"
+    fi
 
     local u_input
     u_input=$(echo "$u_input_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
@@ -4439,6 +4466,7 @@ unlock_interactive() {
         fi
 
         local sel_item fzf_sel_rc=0
+        export GAMECTL_PREVIEW_BIN="$SELF_BIN"
         sel_item=$(echo "$search_items" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2 \
@@ -4446,12 +4474,18 @@ unlock_interactive() {
             --border-label-pos=2 \
             --header="SELECT GAME FOR ACF ADOPTION (Enter: Select │ Esc: Cancel)" \
             --prompt="Adopt Game > " \
-            --preview="$SELF_BIN --preview-adopt {1} {2}" \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-adopt {1} {2}' \
             --preview-window=down:45%:border-rounded \
             --height=55% \
             --reverse 2>/dev/null) || fzf_sel_rc=$?
 
-        [ "$fzf_sel_rc" -eq 130 ] && return 0
+        if [ "$fzf_sel_rc" -eq 130 ]; then
+            return 0
+        fi
+        if [ "$fzf_sel_rc" -ne 0 ] && [ "$fzf_sel_rc" -ne 1 ]; then
+            echo "[ERROR] Game adoption picker failed (fzf exit code $fzf_sel_rc)." >&2
+            return "$fzf_sel_rc"
+        fi
         [ -z "$sel_item" ] && return 0
 
         u_appid=$(echo "$sel_item" | awk -F'\t' '{print $1}')
@@ -5142,11 +5176,11 @@ restart_steam_client() {
 # Preview pane generator for Community Fixes and OnlineFix catalog
 preview_fix_entry() {
     local fix_id="${1:-}"
-    local appid="${2:-}"
+    local appid="${2:-${GAMECTL_PREVIEW_APPID:-}}"
     local fix_title="${3:-}"
     local fix_file="${4:-}"
     local fix_tags="${5:-}"
-    local gdir="${6:-}"
+    local gdir="${6:-${GAMECTL_PREVIEW_GDIR:-}}"
     local fix_desc="${7:-}"
 
     fix_id=$(strip_ansi "$fix_id" | tr -d '[:space:]')
@@ -5299,6 +5333,15 @@ manage_game_fixes_interactive() {
         return 1
     fi
 
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Interactive fixes manager requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for interactive mode but was not found in PATH." >&2
+        return 127
+    fi
+
     # 2. Resolve target installation directory if missing
     if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
         gdir=$(resolve_game_install_dir "$appid" 2>/dev/null || true)
@@ -5382,6 +5425,9 @@ for f in fixes:
         fi
 
         local fzf_out="" fzf_rc=0
+        export GAMECTL_PREVIEW_BIN="$SELF_BIN"
+        export GAMECTL_PREVIEW_APPID="$appid"
+        export GAMECTL_PREVIEW_GDIR="$gdir"
         fzf_out=$(printf '%b' "$menu_list" | fzf \
             --delimiter=$'\t' \
             --with-nth=2,3 \
@@ -5389,10 +5435,16 @@ for f in fixes:
             --border-label-pos=2 \
             --header="SELECT FIX OR ACTION (Enter: Select / Execute │ Esc: Return)" \
             --prompt="Fix > " \
-            --preview="$SELF_BIN --preview-fix {1} '$appid' {2} {4} {3} '$gdir'" \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-fix {1} "$GAMECTL_PREVIEW_APPID" {2} {4} {3} "$GAMECTL_PREVIEW_GDIR"' \
             --preview-window=right:55%:border-rounded:wrap 2>/dev/null) || fzf_rc=$?
 
-        [ "$fzf_rc" -eq 130 ] && break
+        if [ "$fzf_rc" -eq 130 ]; then
+            break
+        fi
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Community fixes menu failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
         [ -z "$fzf_out" ] && continue
 
         local sel_fix_id sel_fix_title sel_fix_tags sel_fix_file
@@ -5412,7 +5464,7 @@ for f in fixes:
 2	Cancel / Return
 EOF
 )
-            local r_sel
+            local r_sel fzf_r_rc=0
             r_sel=$(echo "$restore_palette" | fzf \
                 --delimiter=$'\t' \
                 --with-nth=2 \
@@ -5421,7 +5473,15 @@ EOF
                 --header="RESTORE CONFIRMATION (Enter: Execute │ Esc: Cancel)" \
                 --prompt="Confirm > " \
                 --height=30% \
-                --reverse 2>/dev/null) || r_sel="2"
+                --reverse 2>/dev/null) || fzf_r_rc=$?
+
+            if [ "$fzf_r_rc" -eq 130 ]; then
+                continue
+            fi
+            if [ "$fzf_r_rc" -ne 0 ] && [ "$fzf_r_rc" -ne 1 ]; then
+                echo "[ERROR] Snapshot restore confirmation failed (fzf exit code $fzf_r_rc)." >&2
+                return "$fzf_r_rc"
+            fi
 
             if [ "$(echo "$r_sel" | cut -f1)" = "1" ]; then
                 if revert_game_fix "$gdir"; then
@@ -5455,7 +5515,7 @@ EOF
 3	Cancel / Return
 EOF
 )
-            local f_sel
+            local f_sel fzf_f_rc=0
             f_sel=$(echo "$fix_palette" | fzf \
                 --delimiter=$'\t' \
                 --with-nth=2 \
@@ -5464,7 +5524,15 @@ EOF
                 --header="FIX DEPLOYMENT (Enter: Select │ Esc: Return)" \
                 --prompt="Action > " \
                 --height=35% \
-                --reverse 2>/dev/null) || f_sel="3"
+                --reverse 2>/dev/null) || fzf_f_rc=$?
+
+            if [ "$fzf_f_rc" -eq 130 ]; then
+                continue
+            fi
+            if [ "$fzf_f_rc" -ne 0 ] && [ "$fzf_f_rc" -ne 1 ]; then
+                echo "[ERROR] Fix deployment prompt failed (fzf exit code $fzf_f_rc)." >&2
+                return "$fzf_f_rc"
+            fi
 
             local f_opt
             f_opt=$(echo "$f_sel" | cut -f1)
@@ -6104,8 +6172,15 @@ clean	Wipe Wine Prefix	Create save snapshot backup & wipe entire pfx directory
 EOF
 )
 
+                export GAMECTL_PFX_NAME="$game_name"
+                export GAMECTL_PFX_DIR="$game_dir"
+                export GAMECTL_PFX_PATH="$pfx_dir"
+                export GAMECTL_PFX_RUNNER="$runner_bin"
+                export GAMECTL_PFX_STATUS="${pfx_color}${pfx_status}"
+                export GAMECTL_PFX_SIZE="$pfx_size"
+
                 local preview_cmd
-                preview_cmd="echo -e '\033[38;5;60m╭─ WINE PREFIX OVERVIEW ──────────────────────────────╮\033[0m\n  Game Title  : \033[1m$game_name\033[0m\n  Directory   : $game_dir\n  Prefix Path : $pfx_dir\n  Active Wine : \033[38;5;111m$runner_bin\033[0m\n  Status      : ${pfx_color}${pfx_status}\033[0m (Size: $pfx_size)\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n\033[38;5;60m╭─ ACTION DETAIL ─────────────────────────────────────╮\033[0m\n  Tool   : \033[1m{1}\033[0m - {2}\n  Desc   : {3}\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m'"
+                preview_cmd='printf "\033[38;5;60m╭─ WINE PREFIX OVERVIEW ──────────────────────────────╮\033[0m\n  Game Title  : \033[1m%s\033[0m\n  Directory   : %s\n  Prefix Path : %s\n  Active Wine : \033[38;5;111m%s\033[0m\n  Status      : %b\033[0m (Size: %s)\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n\033[38;5;60m╭─ ACTION DETAIL ─────────────────────────────────────╮\033[0m\n  Tool   : \033[1m%s\033[0m - %s\n  Desc   : %s\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n" "$GAMECTL_PFX_NAME" "$GAMECTL_PFX_DIR" "$GAMECTL_PFX_PATH" "$GAMECTL_PFX_RUNNER" "$GAMECTL_PFX_STATUS" "$GAMECTL_PFX_SIZE" {1} {2} {3}'
 
                 local pfx_sel fzf_rc=0
                 pfx_sel=$(echo "$pfx_palette" | fzf \
@@ -6120,7 +6195,13 @@ EOF
                     --height=70% \
                     --reverse 2>/dev/null) || fzf_rc=$?
 
-                [ "$fzf_rc" -eq 130 ] && return 0
+                if [ "$fzf_rc" -eq 130 ]; then
+                    return 0
+                fi
+                if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+                    echo "[ERROR] Wine prefix manager failed (fzf exit code $fzf_rc)." >&2
+                    return "$fzf_rc"
+                fi
                 [ -z "$pfx_sel" ] && return 0
 
                 action=$(echo "$pfx_sel" | awk -F'\t' '{print $1}')
@@ -7013,6 +7094,15 @@ preview_process_log() {
 
 # Interactive Live HUD for running game process (Zero-Flicker FZF Modal)
 game_controller_hud() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Process HUD requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for Process HUD but was not found in PATH." >&2
+        return 127
+    fi
+
     local game_pid="$1"
     local title="$2"
     local log_file="$3"
@@ -7055,8 +7145,15 @@ EOF
 )
         fi
 
+        export GAMECTL_HUD_TITLE="$title"
+        export GAMECTL_HUD_PID="$game_pid"
+        export GAMECTL_HUD_RUN_TYPE="$run_type"
+        export GAMECTL_HUD_COLOR="$status_color"
+        export GAMECTL_HUD_BADGE="$status_badge"
+        export GAMECTL_HUD_LOG="$log_file"
+
         local preview_cmd
-        preview_cmd="echo -e '\033[38;5;60m╭─ PROCESS STATUS ────────────────────────────────────╮\033[0m\n  Target Game : \033[1m$title\033[0m\n  Process PID : \033[1m$game_pid\033[0m ($run_type)\n  Status      : ${status_color}${status_badge}\033[0m\n  Log File    : $log_file\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n\033[38;5;60m╭─ RECENT LOG TAIL (Last 15 lines) ──────────────────╮\033[0m'; tail -n 15 '$log_file' 2>/dev/null || echo '  (No logs recorded)'"
+        preview_cmd='printf "\033[38;5;60m╭─ PROCESS STATUS ────────────────────────────────────╮\033[0m\n  Target Game : \033[1m%s\033[0m\n  Process PID : \033[1m%s\033[0m (%s)\n  Status      : %b%s\033[0m\n  Log File    : %s\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n\033[38;5;60m╭─ RECENT LOG TAIL (Last 15 lines) ──────────────────╮\033[0m\n" "$GAMECTL_HUD_TITLE" "$GAMECTL_HUD_PID" "$GAMECTL_HUD_RUN_TYPE" "$GAMECTL_HUD_COLOR" "$GAMECTL_HUD_BADGE" "$GAMECTL_HUD_LOG"; if [ -n "$GAMECTL_HUD_LOG" ] && [ -f "$GAMECTL_HUD_LOG" ]; then tail -n 15 "$GAMECTL_HUD_LOG" 2>/dev/null; else echo "  (No logs recorded)"; fi'
 
         local hud_sel fzf_rc=0
         hud_sel=$(echo "$hud_palette" | fzf \
@@ -7071,7 +7168,13 @@ EOF
             --height=70% \
             --reverse 2>/dev/null) || fzf_rc=$?
 
-        [ "$fzf_rc" -eq 130 ] && return 0
+        if [ "$fzf_rc" -eq 130 ]; then
+            return 0
+        fi
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Process HUD failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
         [ -z "$hud_sel" ] && return 0
 
         local opt
@@ -7086,6 +7189,9 @@ EOF
                 ;;
             3)
                 if [ -s "$log_file" ]; then
+                    export GAMECTL_LOG_FILE="$log_file"
+                    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
+                    local log_fzf_rc=0
                     awk '{printf "%d\t%s\n", NR, $0}' "$log_file" 2>/dev/null | (command -v tac >/dev/null 2>&1 && tac || sed -e '1!G;h;$!d') | fzf \
                         --delimiter=$'\t' \
                         --with-nth=1,2 \
@@ -7093,10 +7199,15 @@ EOF
                         --border-label-pos=2 \
                         --header="PROCESS LOGS (Esc / Enter: Return)" \
                         --prompt="Log > " \
-                        --preview="$SELF_BIN --preview-process-log '$log_file' {1}" \
+                        --preview='"$GAMECTL_PREVIEW_BIN" --preview-process-log "$GAMECTL_LOG_FILE" {1}' \
                         --preview-window=down:35%:border-rounded:wrap \
                         --height=80% \
-                        --reverse 2>/dev/null || true
+                        --reverse 2>/dev/null || log_fzf_rc=$?
+
+                    if [ "$log_fzf_rc" -ne 0 ] && [ "$log_fzf_rc" -ne 1 ] && [ "$log_fzf_rc" -ne 130 ]; then
+                        echo "[ERROR] Process log viewer failed (fzf exit code $log_fzf_rc)." >&2
+                        return "$log_fzf_rc"
+                    fi
                 else
                     tui_modal_notice "Log Stream" "Log file is currently empty or does not exist:\n$log_file"
                 fi
@@ -9312,6 +9423,15 @@ preview_log_entry() {
 
 # Interactive Centralized Activity & Runtime Log Viewer
 view_logs_interactive() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Interactive log viewer requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for interactive mode but was not found in PATH." >&2
+        return 127
+    fi
+
     flush_tty_input
     local log_file
     log_file="$(get_runtime_log_file)"
@@ -9321,6 +9441,8 @@ view_logs_interactive() {
     fi
 
     local fzf_rc=0
+    export GAMECTL_LOG_FILE="$log_file"
+    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
     if command -v tac >/dev/null 2>&1; then
         tac "$log_file" 2>/dev/null
     else
@@ -9330,18 +9452,34 @@ view_logs_interactive() {
         --border-label-pos=2 \
         --header="ACTIVITY LOGS (Arrows: Navigate │ Ctrl-X: Clear Log │ Esc: Return)" \
         --prompt="Logs > " \
-        --preview="$SELF_BIN --preview-log {}" \
+        --preview='"$GAMECTL_PREVIEW_BIN" --preview-log {}' \
         --preview-window=down:35%:border-rounded:wrap \
-        --bind="ctrl-x:execute(: > '$log_file')+reload(command -v tac >/dev/null 2>&1 && tac '$log_file' 2>/dev/null || sed -e '1!G;h;\$!d' '$log_file' 2>/dev/null)" \
+        --bind='ctrl-x:execute(: > "$GAMECTL_LOG_FILE")+reload(command -v tac >/dev/null 2>&1 && tac "$GAMECTL_LOG_FILE" 2>/dev/null || sed -e "1!G;h;\$!d" "$GAMECTL_LOG_FILE" 2>/dev/null)' \
         --height=85% \
         --reverse 2>/dev/null || fzf_rc=$?
 
     flush_tty_input
+    if [ "$fzf_rc" -eq 130 ]; then
+        return 0
+    fi
+    if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+        echo "[ERROR] Activity log viewer failed (fzf exit code $fzf_rc)." >&2
+        return "$fzf_rc"
+    fi
     return 0
 }
 
 # Master Dashboard Hub (Two-Panel Interactive TUI)
 dashboard_menu() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Master Dashboard requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for Master Dashboard but was not found in PATH." >&2
+        return 127
+    fi
+
     enter_tui_screen
     clean_stale_locks
 
@@ -9349,10 +9487,13 @@ dashboard_menu() {
     initial_count=$(scan_installed_games 2>/dev/null | wc -l || echo "0")
     log_msg "INFO" "DASHBOARD" "Cockpit active ($initial_count titles indexed)"
 
+    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
+
     while true; do
         flush_tty_input
         local game_count
         game_count=$(scan_installed_games 2>/dev/null | wc -l || echo "0")
+        export GAMECTL_GAME_COUNT="$game_count"
 
         local menu_entries
         menu_entries=$(cat <<EOF
@@ -9375,11 +9516,15 @@ EOF
             --border-label-pos=2 \
             --header="MASTER DASHBOARD (Arrows/Numbers: Select │ Enter: Open │ Ctrl-L: Logs │ Esc: Exit)" \
             --prompt="Dashboard > " \
-            --preview="$SELF_BIN --preview-dashboard {1} $game_count" \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-dashboard {1} "$GAMECTL_GAME_COUNT"' \
             --preview-window=right:55%:border-rounded:wrap \
         ) || fzf_rc=$?
 
         [ "$fzf_rc" -eq 130 ] && break
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Master Dashboard menu failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
         [ -z "$fzf_out" ] && continue
 
         local trigger_key selection
@@ -9438,9 +9583,20 @@ EOF
 
 # Main Library View
 library_menu() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Game Library requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for Game Library but was not found in PATH." >&2
+        return 127
+    fi
+
     local standalone="${1:-false}"
     [ "$standalone" = "true" ] && enter_tui_screen
     clean_stale_locks
+
+    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
 
     while true; do
         flush_tty_input
@@ -9453,11 +9609,15 @@ library_menu() {
             --border-label-pos=2 \
             --header=$'GAME LIBRARY (Enter: Launch │ Esc: Dashboard Hub)\nShortcuts: Ctrl-F (Search) │ Ctrl-D (Downloads) │ Ctrl-L (Logs) │ Ctrl-I (Inject) │ Ctrl-O (Wrappers) │ Ctrl-P (LAN ID) │ Ctrl-S (Sync) │ Ctrl-B (Backup) │ Ctrl-R (Restore) │ Ctrl-X (Fixes)' \
             --prompt="Library > " \
-            --preview="$SELF_BIN --preview {1} {2} {3} {4} {5}" \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview {1} {2} {3} {4} {5}' \
             --preview-window=right:55%:border-rounded:wrap \
         ) || fzf_rc=$?
 
         [ "$fzf_rc" -eq 130 ] && break
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Game Library menu failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
         [ -z "$fzf_out" ] && continue
 
         local trigger_key selection
@@ -9579,6 +9739,15 @@ library_menu() {
 
 # Live Steam Search View (Actionable TUI Search)
 search_steam() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Interactive Steam search requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for interactive mode but was not found in PATH." >&2
+        return 127
+    fi
+
     local query="${1:-}"
     local standalone="${2:-false}"
     [ "$standalone" = "true" ] && enter_tui_screen
@@ -9599,6 +9768,10 @@ search_steam() {
             flush_tty_input
             [ "$standalone" = "true" ] && exit_tui_screen
             [ "$fzf_rc" -eq 130 ] && return 0
+        fi
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Search query prompt failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
         fi
 
         query=$(echo "$query_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
@@ -9669,6 +9842,8 @@ search_steam() {
 
     _refresh_search_results
 
+    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
+
     while true; do
         flush_tty_input
         local fzf_out fzf_rc=0
@@ -9681,11 +9856,15 @@ search_steam() {
             --border-label-pos=2 \
             --header="STEAM CATALOG (Enter: Actions │ Ctrl-A: All-in-One │ Ctrl-U: Entitle │ Ctrl-S: Standalone │ Esc: Back)" \
             --prompt="Steam Store > " \
-            --preview="$SELF_BIN --preview-search {1} {2} {3}" \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-search {1} {2} {3}' \
             --preview-window=right:52%:border-rounded:wrap \
         ) || fzf_rc=$?
 
         [ "$fzf_rc" -eq 130 ] && break
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Steam search catalog failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
         [ -z "$fzf_out" ] && continue
 
         local trigger_key selection
@@ -10243,8 +10422,10 @@ case "${1:-}" in
         ;;
     logs|--logs)
         enter_tui_screen
-        view_logs_interactive
+        log_rc=0
+        view_logs_interactive || log_rc=$?
         exit_tui_screen
+        [ "$log_rc" -ne 0 ] && exit "$log_rc"
         ;;
     --sync|sync|sync-remote|sync-companion|sync-tuf)
         if [ -n "${2:-}" ]; then

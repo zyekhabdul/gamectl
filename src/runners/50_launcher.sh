@@ -28,6 +28,15 @@ preview_process_log() {
 
 # Interactive Live HUD for running game process (Zero-Flicker FZF Modal)
 game_controller_hud() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Process HUD requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for Process HUD but was not found in PATH." >&2
+        return 127
+    fi
+
     local game_pid="$1"
     local title="$2"
     local log_file="$3"
@@ -70,8 +79,15 @@ EOF
 )
         fi
 
+        export GAMECTL_HUD_TITLE="$title"
+        export GAMECTL_HUD_PID="$game_pid"
+        export GAMECTL_HUD_RUN_TYPE="$run_type"
+        export GAMECTL_HUD_COLOR="$status_color"
+        export GAMECTL_HUD_BADGE="$status_badge"
+        export GAMECTL_HUD_LOG="$log_file"
+
         local preview_cmd
-        preview_cmd="echo -e '\033[38;5;60m╭─ PROCESS STATUS ────────────────────────────────────╮\033[0m\n  Target Game : \033[1m$title\033[0m\n  Process PID : \033[1m$game_pid\033[0m ($run_type)\n  Status      : ${status_color}${status_badge}\033[0m\n  Log File    : $log_file\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n\033[38;5;60m╭─ RECENT LOG TAIL (Last 15 lines) ──────────────────╮\033[0m'; tail -n 15 '$log_file' 2>/dev/null || echo '  (No logs recorded)'"
+        preview_cmd='printf "\033[38;5;60m╭─ PROCESS STATUS ────────────────────────────────────╮\033[0m\n  Target Game : \033[1m%s\033[0m\n  Process PID : \033[1m%s\033[0m (%s)\n  Status      : %b%s\033[0m\n  Log File    : %s\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n\033[38;5;60m╭─ RECENT LOG TAIL (Last 15 lines) ──────────────────╮\033[0m\n" "$GAMECTL_HUD_TITLE" "$GAMECTL_HUD_PID" "$GAMECTL_HUD_RUN_TYPE" "$GAMECTL_HUD_COLOR" "$GAMECTL_HUD_BADGE" "$GAMECTL_HUD_LOG"; if [ -n "$GAMECTL_HUD_LOG" ] && [ -f "$GAMECTL_HUD_LOG" ]; then tail -n 15 "$GAMECTL_HUD_LOG" 2>/dev/null; else echo "  (No logs recorded)"; fi'
 
         local hud_sel fzf_rc=0
         hud_sel=$(echo "$hud_palette" | fzf \
@@ -86,7 +102,13 @@ EOF
             --height=70% \
             --reverse 2>/dev/null) || fzf_rc=$?
 
-        [ "$fzf_rc" -eq 130 ] && return 0
+        if [ "$fzf_rc" -eq 130 ]; then
+            return 0
+        fi
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Process HUD failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
         [ -z "$hud_sel" ] && return 0
 
         local opt
@@ -101,6 +123,9 @@ EOF
                 ;;
             3)
                 if [ -s "$log_file" ]; then
+                    export GAMECTL_LOG_FILE="$log_file"
+                    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
+                    local log_fzf_rc=0
                     awk '{printf "%d\t%s\n", NR, $0}' "$log_file" 2>/dev/null | (command -v tac >/dev/null 2>&1 && tac || sed -e '1!G;h;$!d') | fzf \
                         --delimiter=$'\t' \
                         --with-nth=1,2 \
@@ -108,10 +133,15 @@ EOF
                         --border-label-pos=2 \
                         --header="PROCESS LOGS (Esc / Enter: Return)" \
                         --prompt="Log > " \
-                        --preview="$SELF_BIN --preview-process-log '$log_file' {1}" \
+                        --preview='"$GAMECTL_PREVIEW_BIN" --preview-process-log "$GAMECTL_LOG_FILE" {1}' \
                         --preview-window=down:35%:border-rounded:wrap \
                         --height=80% \
-                        --reverse 2>/dev/null || true
+                        --reverse 2>/dev/null || log_fzf_rc=$?
+
+                    if [ "$log_fzf_rc" -ne 0 ] && [ "$log_fzf_rc" -ne 1 ] && [ "$log_fzf_rc" -ne 130 ]; then
+                        echo "[ERROR] Process log viewer failed (fzf exit code $log_fzf_rc)." >&2
+                        return "$log_fzf_rc"
+                    fi
                 else
                     tui_modal_notice "Log Stream" "Log file is currently empty or does not exist:\n$log_file"
                 fi

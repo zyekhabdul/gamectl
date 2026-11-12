@@ -1581,6 +1581,15 @@ preview_download() {
 
 # Interactive Download Monitor TUI
 list_downloads_interactive() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Interactive download monitor requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for interactive mode but was not found in PATH." >&2
+        return 127
+    fi
+
     local run_dir
     run_dir="$(get_runtime_dir)"
     while true; do
@@ -1670,6 +1679,7 @@ list_downloads_interactive() {
 
         flush_tty_input
         local fzf_out fzf_rc=0
+        export GAMECTL_PREVIEW_BIN="$SELF_BIN"
         fzf_out=$(printf "%b" "$entries" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3,5 \
@@ -1678,11 +1688,15 @@ list_downloads_interactive() {
             --border-label-pos=2 \
             --header="DOWNLOADS (Enter: Actions │ Ctrl-K: Pause │ Esc: Back)" \
             --prompt="Downloads > " \
-            --preview="$SELF_BIN --preview-download {1} {2} {6}" \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-download {1} {2} {6}' \
             --preview-window=right:60%:border-rounded:wrap \
         ) || fzf_rc=$?
 
         [ "$fzf_rc" -eq 130 ] && break
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Download monitor failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
         [ -z "$fzf_out" ] && continue
 
         local trigger_key selection
@@ -2181,6 +2195,15 @@ adopt_steam() { unlock_game "$@"; }
 
 # Interactive Steam ACF Adoption & Asset Manager Wizard (Dual Input: Title or AppID)
 unlock_interactive() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Interactive ACF adoption requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for interactive mode but was not found in PATH." >&2
+        return 127
+    fi
+
     flush_tty_input
     local u_input_raw="" fzf_rc=0
     u_input_raw=$(: | fzf \
@@ -2194,6 +2217,10 @@ unlock_interactive() {
 
     # Only abort if user cancelled via ESC or Ctrl-C (exit status 130)
     [ "$fzf_rc" -eq 130 ] && return 0
+    if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+        echo "[ERROR] Adoption query input failed (fzf exit code $fzf_rc)." >&2
+        return "$fzf_rc"
+    fi
 
     local u_input
     u_input=$(echo "$u_input_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
@@ -2223,6 +2250,7 @@ unlock_interactive() {
         fi
 
         local sel_item fzf_sel_rc=0
+        export GAMECTL_PREVIEW_BIN="$SELF_BIN"
         sel_item=$(echo "$search_items" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2 \
@@ -2230,12 +2258,18 @@ unlock_interactive() {
             --border-label-pos=2 \
             --header="SELECT GAME FOR ACF ADOPTION (Enter: Select │ Esc: Cancel)" \
             --prompt="Adopt Game > " \
-            --preview="$SELF_BIN --preview-adopt {1} {2}" \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-adopt {1} {2}' \
             --preview-window=down:45%:border-rounded \
             --height=55% \
             --reverse 2>/dev/null) || fzf_sel_rc=$?
 
-        [ "$fzf_sel_rc" -eq 130 ] && return 0
+        if [ "$fzf_sel_rc" -eq 130 ]; then
+            return 0
+        fi
+        if [ "$fzf_sel_rc" -ne 0 ] && [ "$fzf_sel_rc" -ne 1 ]; then
+            echo "[ERROR] Game adoption picker failed (fzf exit code $fzf_sel_rc)." >&2
+            return "$fzf_sel_rc"
+        fi
         [ -z "$sel_item" ] && return 0
 
         u_appid=$(echo "$sel_item" | awk -F'\t' '{print $1}')

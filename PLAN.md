@@ -1,6 +1,6 @@
 # WORK PACKET 24: LINUX RUNTIME MATURITY, TELEMETRY, & COMMUNITY FIXES INTEGRATION
 
-**Track**: Linux Runtime Maturity & TUI Parity  
+Track: Maintenance (Linux Runtime Safety & TUI Hardening)  
 **Status**: DELIVERED [BASELINE TESTS PASS]; REMEDIATION OPEN
 
 **Branch**: `main`  
@@ -77,7 +77,7 @@ Menuntaskan seluruh kesenjangan tampilan dan fitur interaktif Linux runtime matu
 
 # WORK PACKET 25: RUNTIME SAFETY REMEDIATION BEFORE WINDOWS EXPANSION
 
-- **Track**: Maintenance / Security / Save Integrity / Process Ownership / Failure Reporting
+- Track: Maintenance / Security / Save Integrity / Process Ownership / Failure Reporting
 - **Status**: PLANNED [NOT IMPLEMENTED]
 - **Reviewed at**: 2026-11-12, source commit `b63062d212f551aba24750175f57c89e58626780`
 - **Documentation branch**: `fix/remediation-plan-25`
@@ -112,9 +112,9 @@ Menuntaskan seluruh kesenjangan tampilan dan fitur interaktif Linux runtime matu
 | 25.09 | P1 | Standalone/provisioning/fix mutations gagal secara jujur | 25.02, 25.04, 25.07, 25.08 |
 | 25.10 | P2 | Build verifikasi membuktikan artifact berasal dari source yang diuji | 25.01-25.09 |
 
-### [ ] Chunk 25.01: Safe preview arguments and bounded fzf failure handling
+### [x] Chunk 25.01: Safe preview arguments and bounded fzf failure handling [VERIFIED]
 
-**Target Files**: `src/steam/35_fixes.sh`, `src/steam/30_downloader.sh`, `src/runners/50_launcher.sh`, `src/tui/70_dashboard.sh`, `tests/test_cli.sh`. Mulai dari menu fixes; perluas hanya ke call-site yang memiliki pola interpolasi berbahaya yang sama.
+**Target Files**: `src/steam/35_fixes.sh`, `src/steam/30_downloader.sh`, `src/runners/50_launcher.sh`, `src/runners/40_wrappers.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `tests/test_cli.sh`. Mulai dari menu fixes; perluas hanya ke call-site yang memiliki pola interpolasi berbahaya yang sama.
 
 **Execution**:
 1. Audit seluruh `--preview`/`--bind` yang memasukkan path, title, atau log ke string shell. Pada `manage_game_fixes_interactive`, hentikan interpolasi langsung `'$gdir'`; teruskan data lewat placeholder fzf yang di-escape atau environment per pemanggilan dengan ekspansi terkutip pada command tetap. Lindungi path `SELF_BIN` juga.
@@ -125,7 +125,7 @@ Menuntaskan seluruh kesenjangan tampilan dan fitur interaktif Linux runtime matu
 **Acceptance / Verification**:
 - Marker injeksi tidak terbentuk; preview untuk nama file yang sah tetap menampilkan target yang benar.
 - fzf exit 2/127 dan tidak adanya TTY berhenti dalam timeout uji; Esc tetap membatalkan dengan perilaku navigasi semula.
-- Tes memeriksa pemanggilan/hasil aktual; assertion keberadaan string `--preview-fix` saja tidak menutup chunk ini.
+- Tes memeriksa pemanggilan/hasil aktual; assertion keberadaan string `--preview-fix` saja tidak menutup chunk ini. Commit: `fix(tui): safe preview arguments and bounded fzf failure handling`.
 
 ### [ ] Chunk 25.02: Independent snapshots and recoverable save replacement
 

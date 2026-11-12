@@ -2731,6 +2731,90 @@ EOF
 run_test "Store Search Invariant (Chunk 1 & 8): Multi-tier ProtonDB and platform resolution" test_preview_search_community_protondb_parsing_contract
 
 # ------------------------------------------------------------------------------
+# Work Packet 25: Runtime Safety & Bounded TUI Execution
+# ------------------------------------------------------------------------------
+
+test_safe_preview_arguments_and_pty_injection_guard() {
+    # Chunk 25.01: Fixture with spaces, apostrophes, Unicode, and command injection payload
+    local t_base
+    t_base=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_inj_XXXXXX")
+    local gdir="$t_base/Assassin's Creed (測試); touch $t_base/INJECTION_TRIGGERED; echo 'test"
+    mkdir -p "$gdir/.gamectl_fix_backup/20261112_100000/backup_files"
+    cat <<'META' > "$gdir/.gamectl_fix_backup/latest.json"
+{
+  "timestamp": "20261112_100000",
+  "appid": "105600",
+  "fix_title": "SafeFix",
+  "backed_up_count": 1
+}
+META
+
+    # 1. Direct preview-fix execution with apostrophes & metacharacters
+    local p_out
+    p_out=$("$GAMECTL" --preview-fix "[RESTORE]" "105600" "Assassin's Creed (測試)" "" "" "$gdir" 2>&1 || true)
+    grep -F -q "COMMUNITY FIX & ONLINEFIX HARVESTER" <<< "$p_out" || { rm -rf "$t_base"; return 1; }
+    grep -F -q "[RESTORE ROLLBACK]" <<< "$p_out" || { rm -rf "$t_base"; return 1; }
+    grep -F -q "$gdir" <<< "$p_out" || { rm -rf "$t_base"; return 1; }
+
+    # 2. PTY execution through real fzf with SHELL=/bin/sh to verify injection marker is not created
+    python3 -c '
+import pty, os, time, sys, signal
+
+t_base = sys.argv[1]
+gdir = sys.argv[2]
+gamectl_bin = sys.argv[3]
+
+pid, fd = pty.fork()
+if pid == 0:
+    os.environ["SHELL"] = "/bin/sh"
+    os.execlp(gamectl_bin, gamectl_bin, "fixes", "105600", "Assassin\x27s Creed (測試)", gdir)
+else:
+    time.sleep(0.5)
+    os.write(fd, b"\x1b")
+    time.sleep(0.2)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        pass
+    os.waitpid(pid, 0)
+    os.close(fd)
+' "$t_base" "$gdir" "$GAMECTL" >/dev/null 2>&1 || true
+
+    # Invariant: Injection marker MUST NOT exist
+    if [ -f "$t_base/INJECTION_TRIGGERED" ]; then
+        rm -rf "$t_base"
+        return 1
+    fi
+
+    rm -rf "$t_base"
+    return 0
+}
+run_test "TUI Safety (Chunk 25.01): Safe preview arguments & PTY injection guard" test_safe_preview_arguments_and_pty_injection_guard
+
+test_bounded_fzf_interactive_entrypoint_guards() {
+    # Chunk 25.01: Interactive entrypoints must reject non-TTY with exit code 1 without infinite loops
+    local out1 rc1=0 out2 rc2=0 out3 rc3=0 out4 rc4=0
+    out1=$("$GAMECTL" fixes 105600 "Test" < /dev/null 2>&1) || rc1=$?
+    [ "$rc1" -eq 1 ] || return 1
+    grep -F -q "[ERROR] Interactive fixes manager requires a terminal (TTY)." <<< "$out1" || return 1
+
+    out2=$("$GAMECTL" logs < /dev/null 2>&1) || rc2=$?
+    [ "$rc2" -eq 1 ] || return 1
+    grep -F -q "[ERROR] Interactive log viewer requires a terminal (TTY)." <<< "$out2" || return 1
+
+    out3=$("$GAMECTL" < /dev/null 2>&1) || rc3=$?
+    [ "$rc3" -eq 1 ] || return 1
+    grep -F -q "[ERROR] Master Dashboard requires a terminal (TTY)." <<< "$out3" || return 1
+
+    out4=$("$GAMECTL" library < /dev/null 2>&1) || rc4=$?
+    [ "$rc4" -eq 1 ] || return 1
+    grep -F -q "[ERROR] Game Library requires a terminal (TTY)." <<< "$out4" || return 1
+
+    return 0
+}
+run_test "TUI Safety (Chunk 25.01): Bounded non-TTY detection on interactive entrypoints" test_bounded_fzf_interactive_entrypoint_guards
+
+# ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
 echo
