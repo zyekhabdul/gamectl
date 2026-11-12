@@ -2756,29 +2756,8 @@ META
     grep -F -q "[RESTORE ROLLBACK]" <<< "$p_out" || { rm -rf "$t_base"; return 1; }
     grep -F -q "$gdir" <<< "$p_out" || { rm -rf "$t_base"; return 1; }
 
-    # 2. PTY execution through real fzf with SHELL=/bin/sh to verify injection marker is not created
-    python3 -c '
-import pty, os, time, sys, signal
-
-t_base = sys.argv[1]
-gdir = sys.argv[2]
-gamectl_bin = sys.argv[3]
-
-pid, fd = pty.fork()
-if pid == 0:
-    os.environ["SHELL"] = "/bin/sh"
-    os.execlp(gamectl_bin, gamectl_bin, "fixes", "105600", "Assassin\x27s Creed (測試)", gdir)
-else:
-    time.sleep(0.5)
-    os.write(fd, b"\x1b")
-    time.sleep(0.2)
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except OSError:
-        pass
-    os.waitpid(pid, 0)
-    os.close(fd)
-' "$t_base" "$gdir" "$GAMECTL" >/dev/null 2>&1 || true
+    # Require actual preview output, clean Esc, and bounded error exits in a real PTY.
+    python3 "$SCRIPT_DIR/test_tui_safety.py" || { rm -rf "$t_base"; return 1; }
 
     # Invariant: Injection marker MUST NOT exist
     if [ -f "$t_base/INJECTION_TRIGGERED" ]; then
@@ -2886,6 +2865,7 @@ test_savegame_snapshots_independence_and_recovery_contracts() {
     return 0
 }
 run_test "Savegame Integrity (Chunk 25.02): Independent snapshots & recoverable replacement" test_savegame_snapshots_independence_and_recovery_contracts
+run_test "Savegame Failure Paths (Chunk 25.02): I/O rollback, signals & real lock contention" python3 "$SCRIPT_DIR/test_save_safety.py"
 
 # ------------------------------------------------------------------------------
 # Final Execution Summary
