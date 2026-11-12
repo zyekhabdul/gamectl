@@ -1,16 +1,16 @@
 # WORK PACKET 25: RUNTIME SAFETY REMEDIATION BEFORE WINDOWS EXPANSION
 
 - Track: Maintenance / Security / Save Integrity / Process Ownership / Failure Reporting
-- **Status**: IN PROGRESS [CHUNK 25.01 VERIFIED]
-- **Reviewed at**: 2026-11-12, source commit `b63062d212f551aba24750175f57c89e58626780`
-- **Documentation branch**: `fix/remediation-plan-25`
+- **Status**: IN PROGRESS [CHUNKS 25.01-25.02 REOPENED AFTER REVIEW]
+- **Reviewed at**: 2026-11-12, baseline commit `27f5a718e36177b37a761575d041125fa132f256`
+- **Review branch**: `fix/review-completed-25`
 - **Execution branches**: branch `fix/` terpisah untuk tiap perubahan yang dapat diverifikasi
 - **Max Chunks**: 10 pekerjaan aktif; backlog Packet 26 belum diperinci menjadi chunk aktif
-- **Scope of this document change**: perencanaan; belum ada perbaikan source runtime
+- **Scope of this review**: audit task yang dicentang, perbaikan kegagalan save, dan penguatan regresi; Chunk 25.03-25.10 tetap terbuka
 
 ## 1. Baseline, evidence, and boundaries
 
-- Baseline pada salinan commit yang sama: 130/130 tes CLI, 31 tes Rust, dan 3 doctest lulus. `make lint` dan `scripts/build.sh --check` juga lulus. Angka ini bukan bukti kasus kegagalan di bawah sudah tertangani.
+- Baseline rencana awal (`b63062d`): 130/130 tes CLI, 31 tes Rust, dan 3 doctest lulus. Review `27f5a71`: 133/133 tes CLI, 31 tes Rust, dan 3 doctest lulus; reproduksi failure-path baru tetap gagal pada source tersebut. Lihat [audit task selesai](docs/REVIEW_COMPLETED_TASKS_2026-11-12.md) untuk perbaikan dan batas verifikasinya.
 - Reproduksi tambahan memakai direktori sementara, worker dummy, fault injection, serta fzf nyata dalam PTY. Tidak memakai save/game pengguna atau target SSH nyata.
 - Review preview membuktikan nama direktori dapat menjalankan perintah marker; Pause menghentikan shell tetapi counter worker terus meningkat; parser tetap melaporkan DOWNLOADING setelah error parsial; error fzf 2 menyebabkan loop hingga timeout.
 - Reproduksi backup/restore, watchdog game, dan rsync membuktikan kegagalan masih menghasilkan sukses palsu. Review terdahulu juga membuktikan penulisan melalui symlink keluar target dan kehabisan descriptor pada downloader Rust.
@@ -35,7 +35,9 @@
 | 25.09 | P1 | Standalone/provisioning/fix mutations gagal secara jujur | 25.02, 25.04, 25.07, 25.08 |
 | 25.10 | P2 | Build verifikasi membuktikan artifact berasal dari source yang diuji | 25.01-25.09 |
 
-### [x] Chunk 25.01: Safe preview arguments and bounded fzf failure handling [VERIFIED]
+### [ ] Chunk 25.01: Safe preview arguments and bounded fzf failure handling [PARTIALLY VERIFIED]
+
+**Review 2026-11-12**: Perbaikan awal `d4623c0` terbukti melindungi preview fixes dengan path game dan executable berspasi/apostrof/Unicode/metakarakter. Tes `tests/test_tui_safety.py` mewajibkan preview nyata tampil, Esc keluar 0, dan fzf 2/127 diteruskan pada fixes/logs/library/dashboard. Tes PTY lama menelan error dan tidak menunggu preview; sekarang menggunakan harness ini. Masih terbuka: validasi TAB/newline dalam format baris scanner/catalog dan audit error pada submenu/pemanggil bertingkat; jangan menutup seluruh chunk berdasarkan empat entrypoint tersebut.
 
 **Target Files**: `src/steam/35_fixes.sh`, `src/steam/30_downloader.sh`, `src/runners/50_launcher.sh`, `src/runners/40_wrappers.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `tests/test_cli.sh`. Mulai dari menu fixes; perluas hanya ke call-site yang memiliki pola interpolasi berbahaya yang sama.
 
@@ -50,7 +52,9 @@
 - fzf exit 2/127 dan tidak adanya TTY berhenti dalam timeout uji; Esc tetap membatalkan dengan perilaku navigasi semula.
 - Tes memeriksa pemanggilan/hasil aktual; assertion keberadaan string `--preview-fix` saja tidak menutup chunk ini. Commit: `fix(tui): safe preview arguments and bounded fzf failure handling`.
 
-### [x] Chunk 25.02: Independent snapshots and recoverable save replacement [VERIFIED]
+### [ ] Chunk 25.02: Independent snapshots and recoverable save replacement [PARTIALLY VERIFIED]
+
+**Review 2026-11-12**: Implementasi awal `27f5a71` masih mengabaikan error rotasi, menghapus trap pemanggil, menghapus stash lama sebelum commit, dan melakukan recovery sebelum lock. Perbaikan review menambah rename terperiksa dengan rollback, staging `mktemp`, trap dalam subshell, PID pemilik aktual, dan recovery setelah lock. `tests/test_save_safety.py` menguji copy/rename gagal, rollback gagal, TERM, symlink, trap, serta dua penulis nyata. Lock gagal/rollback tidak tuntas berhenti aman dan menyimpan recovery. Masih terbuka: jurnal crash/SIGKILL/mati daya dan recovery teruji yang dapat dijalankan ulang; lock/staging sisa harus diperiksa manual, bukan diambil alih otomatis. Proteksi restore/pull saat game hidup tetap bergantung pada 25.03.
 
 **Target Files**: `src/core/10_utils.sh`, `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/tui/70_dashboard.sh`, `tests/test_cli.sh`.
 
