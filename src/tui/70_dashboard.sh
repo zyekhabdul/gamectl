@@ -1083,10 +1083,12 @@ library_menu() {
                 continue
                 ;;
             ctrl-i)
-                inject_game "$sel_dir" "$sel_appid"
-                sync_steam "$sel_appid" "$sel_title" "$sel_dir"
+                if inject_game "$sel_dir" "$sel_appid" --no-sync; then
+                    tui_modal_notice "Standalone GBE Injection" "Successfully injected GBE Fork for:\n${sel_title:-$sel_dir}" || return $?
+                else
+                    tui_modal_notice "GBE Injection Failed" "Failed to prepare standalone runtime for:\n${sel_title:-$sel_dir}" || return $?
+                fi
                 invalidate_scan_cache
-                tui_modal_notice "GBE Injection & Steam Sync" "Successfully injected GBE Fork & synchronized Steam entitlement for:\n${sel_title:-$sel_dir}" || return $?
                 continue
                 ;;
             ctrl-s)
@@ -1336,7 +1338,7 @@ search_steam() {
         # Direct hotkey triggers
         if [ "$trigger_key" = "ctrl-a" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Injecting GBE + Syncing Steam for $sel_name ($sel_id)"
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Injecting standalone GBE for $sel_name ($sel_id)"
                 inject_game "$gdir" "$sel_id"
             else
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Starting All-in-One Background Download for $sel_name ($target_os)"
@@ -1426,7 +1428,7 @@ EOF
                         inject_game "$gdir" "$sel_id" --no-sync
                         ;;
                     3)
-                        inject_game "$gdir" "$sel_id"
+                        inject_game "$gdir" "$sel_id" --all
                         ;;
                     4)
                         sync_steam "$sel_id" "$sel_name" "$gdir"

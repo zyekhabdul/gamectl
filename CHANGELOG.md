@@ -7,6 +7,9 @@ All notable changes to `gamectl` are documented in this file according to [Keep 
 ## [Unreleased]
 
 ### Fixed
+- Keep GBE injection and OnlineFix setup offline by default; Steam synchronization requires an explicit bridge action or `inject --all`.
+- Preserve original libraries on injection failures, verify installed template bytes before launch, and propagate standalone provisioning errors.
+- Keep game tracking and process scopes active until the launched process exits.
 - Reject unsupported save recovery slots and path-like slot arguments before modifying current saves.
 - Load the core logging utilities in downloader regression fixtures, matching the bundled application's module dependencies.
 - Make `make lint` validate every shell file individually, including tests and shell completions. Previously, Bash parsed only the first file and treated the remaining paths as script arguments.

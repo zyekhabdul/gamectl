@@ -1160,7 +1160,6 @@ EOF
                 echo "[ERROR] Standalone CDN download failed (exit code $dl_rc)." >&2
                 return 1
             fi
-            echo "STATUS=COMPLETED" >> "$stage_dir/status.info"
 
             # Preserve staged lua manifests in target_dir for offline DLC discovery
             shopt -s nullglob globstar
@@ -1171,9 +1170,14 @@ EOF
 
             if [ "$action" != "raw" ]; then
                 fetch_dlc "$target_dir" "$appid" 2>/dev/null || true
-                inject_game "$target_dir" "$appid" --no-sync 2>/dev/null || true
+                if ! inject_game "$target_dir" "$appid" --no-sync; then
+                    echo "STATUS=FAILED" >> "$stage_dir/status.info"
+                    echo "[ERROR] Download completed, but standalone GBE provisioning failed." >&2
+                    return 1
+                fi
             fi
 
+            echo "STATUS=COMPLETED" >> "$stage_dir/status.info"
             invalidate_scan_cache
             echo "[SUCCESS] Standalone download & provisioning complete for $title ($appid) in $target_dir."
             log_msg "INFO" "DOWNLOAD" "Standalone download & provisioning complete for $title ($appid) in $target_dir"

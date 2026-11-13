@@ -412,8 +412,8 @@ META
     audit_proton_compatibility "$appid"
     detect_fix_custom_launcher "$resolved_dir"
 
-    # 11. Chain Auto-Execute: setup_onlinefix
-    echo "[INFO] Running automated P2P compatibility and Spacewar entitlement setup..."
+    # 11. Configure local OnlineFix files without registering Steam entitlements.
+    echo "[INFO] Running local P2P compatibility setup..."
     setup_onlinefix "$resolved_dir" --yes || true
 
     echo "=============================================================================="

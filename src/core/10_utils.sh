@@ -39,6 +39,44 @@ get_gbe_template() {
     return 1
 }
 
+# Check the installed bytes, not the presence of an original-library backup.
+is_gbe_library() {
+    local library="$1" platform=linux arch=x64 template
+    case "${library##*/}" in
+        steam_api64.dll) platform=windows ;;
+        steam_api.dll) platform=windows; arch=x86 ;;
+        libsteam_api.so)
+            if file -Lb "$library" 2>/dev/null | grep -qi '32-bit'; then arch=x86; fi
+            ;;
+        *) return 1 ;;
+    esac
+    template=$(get_gbe_template "$platform" "$arch") || return 1
+    cmp -s -- "$template" "$library"
+}
+
+# Stage replacements beside their destination so failed copies preserve the live library.
+install_gbe_library() {
+    local template="$1" destination="$2" staged
+    mkdir -p "$(dirname "$destination")" || return 1
+    if [ -e "$destination.orig" ] || [ -L "$destination.orig" ]; then
+        [ -f "$destination.orig" ] || return 1
+    elif [ -f "$destination" ]; then
+        staged=$(mktemp "$destination.orig.gamectl.XXXXXX") || return 1
+        if ! cp -a -- "$destination" "$staged" || ! mv -nT -- "$staged" "$destination.orig"; then
+            rm -f -- "$staged"
+            return 1
+        fi
+        rm -f -- "$staged"
+    fi
+    staged=$(mktemp "$destination.gamectl.XXXXXX") || return 1
+    if ! cp "$template" "$staged" || ! chmod +x "$staged" || \
+       ! cmp -s -- "$template" "$staged" || ! mv -fT -- "$staged" "$destination"; then
+        rm -f -- "$staged"
+        echo "[ERROR] Failed to install GBE library: $destination" >&2
+        return 1
+    fi
+}
+
 # Auto-download and provision Goldberg Emulator (GBE Fork) templates into destination
 setup_gbe_templates() {
     local auto_yes=false

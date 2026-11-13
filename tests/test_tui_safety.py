@@ -15,6 +15,7 @@ import termios
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +66,29 @@ sys.exit(code)
         (self.base / "fzf-counter").unlink(missing_ok=True)
         self.env["PATH"] = str(stub_dir) + os.pathsep + os.environ["PATH"]
         self.env["TEST_FZF_STEPS"] = json.dumps(responses)
+
+    def test_library_inject_is_offline_and_reports_failure(self):
+        row = f"105600\tTest\tSTANDALONE\t{self.game}\tgame.exe\n"
+        self.env["TEST_INSTALLED_ROW"] = row
+        for code in (0, 23):
+            with self.subTest(injection_exit=code):
+                self.env["TEST_INJECT_RC"] = str(code)
+                self.scripted_fzf([(0, "ctrl-i\n" + row), (130, "")])
+                rc, output = self.run_pty(["bash", "-c", '''
+source "$TEST_ROOT/bin/gamectl"
+clean_stale_locks() { :; }
+invalidate_scan_cache() { :; }
+scan_installed_games() { printf '%s' "$TEST_INSTALLED_ROW"; }
+inject_game() { printf '%s\\n' "$*" > "$HOME/inject.calls"; return "$TEST_INJECT_RC"; }
+sync_steam() { touch "$HOME/unexpected-steam"; }
+tui_modal_notice() { printf '%s' "$1" > "$HOME/notice"; }
+library_menu
+'''])
+                self.assertEqual(rc, 0, output.decode(errors="replace"))
+                self.assertIn("--no-sync", (self.base / "inject.calls").read_text())
+                self.assertFalse((self.base / "unexpected-steam").exists())
+                expected = "Standalone GBE Injection" if code == 0 else "GBE Injection Failed"
+                self.assertEqual((self.base / "notice").read_text(), expected)
 
     def test_scanner_rejects_row_separators_and_preserves_literal_backslashes(self):
         library = self.base / "library"
@@ -260,6 +284,23 @@ game_controller_hud "$test_pid" "Player's 測試 $HOME" "$TEST_LOG" "$TEST_GAME"
             self.assertEqual(rc, 127, output.decode(errors="replace"))
             self.assertIn(b"[ERROR]", output)
 
+    def test_pty_keeps_output_written_just_before_exit(self):
+        original_select = select.select
+        calls = 0
+
+        def delayed_select(*args):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                time.sleep(0.1)
+                return [], [], []
+            return original_select(*args)
+
+        with patch.object(select, "select", side_effect=delayed_select):
+            rc, output = self.run_pty(["bash", "-c", "printf '[ERROR] finished\\n'; exit 127"])
+        self.assertEqual(rc, 127)
+        self.assertIn(b"[ERROR] finished", output)
+
     def run_pty(self, argv, preview_text=None):
         pid, fd = pty.fork()
         if pid == 0:
@@ -287,6 +328,16 @@ game_controller_hud "$test_pid" "Player's 測試 $HOME" "$TEST_LOG" "$TEST_GAME"
                 done, status_now = os.waitpid(pid, os.WNOHANG)
                 if done:
                     status = status_now
+                    while select.select([fd], [], [], 0)[0]:
+                        try:
+                            chunk = os.read(fd, 65536)
+                        except OSError as error:
+                            if error.errno != errno.EIO:
+                                raise
+                            break
+                        if not chunk:
+                            break
+                        output.extend(chunk)
                     break
             self.assertIsNotNone(status, bytes(output).decode(errors="replace")[-2000:])
             if preview_text:

@@ -232,12 +232,19 @@ gamectl check-sandbox
 
 ### 4. P2P Multiplayer Compatibility & Mod DLL Overrides
 ```bash
-# Setup P2P compatibility layer, DLL overrides, and Spacewar AppID 480:
+# Setup local P2P compatibility and DLL overrides without Steam registration:
 gamectl mod-overrides "$HOME/Games/CoopGame"
 
 # Backward-compatible command alias:
 gamectl onlinefix "$HOME/Games/CoopGame"
+
+# Optional Steam Client bridge, only when deliberately requested:
+gamectl sync-steam 480 Spacewar "$HOME/Games/CoopGame"
 ```
+
+`gamectl inject <dir> [appid]` prepares the offline runtime without syncing Steam.
+Use `gamectl inject <dir> <appid> --all` to explicitly request Steam synchronization.
+Injection and standalone provisioning return an error when a required template or file operation fails.
 
 ### 5. GE-Proton Release Manager
 ```bash

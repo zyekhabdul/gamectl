@@ -1060,9 +1060,14 @@ MOCK
     chmod +x "$mock_bin"
     export GAMECTL_DEPOT_DL_BIN="$mock_bin"
 
+    inject_game() {
+        [ "$1" = "$test_target" ] && [ "$2" = 99998 ] && [ "$3" = --no-sync ] || return 1
+        touch "$test_root/injected"
+    }
     local out
     out=$(download_game "99998" "$test_target" "DummyTitle" --engine standalone)
     local rc=$?
+    [ -f "$test_root/injected" ] || { rm -rf "$test_root"; return 1; }
 
     rm -rf "$test_root"
     unset XDG_CONFIG_HOME STEAM_ROOT XDG_CACHE_HOME GAMECTL_DEPOT_DL_BIN
@@ -1234,6 +1239,11 @@ test_luatools_auth_cli_commands() {
 run_test "Manifest Harvester: auth-status & login-luatools CLI contracts" test_luatools_auth_cli_commands
 
 test_fix_check_cli_contract() {
+    curl() {
+        [ "${@: -1}" = 'https://lua.tools/api/denuvo/fixes?appid=470220' ] || return 1
+        printf '%s' '{"appid":470220,"name":"UNO","fixes":[{"id":1,"title":"Online Fix","fixFilename":"fix.zip","hasFix":true}]}'
+    }
+    export -f curl
     local out1
     out1=$("$GAMECTL" fix-check 2>&1 || true)
     echo "$out1" | grep -q "Usage: gamectl fix-check" || return 1
@@ -1422,10 +1432,15 @@ MOCK
     export GAMECTL_DEPOT_DL_BIN="$mock_bin"
     export XDG_CACHE_HOME="$test_cache"
 
+    inject_game() {
+        [ "$1" = "$test_target" ] && [ "$2" = 99997 ] && [ "$3" = --no-sync ] || return 1
+        touch "$test_root/injected"
+    }
     # Invoke download_game WITHOUT any --engine or --sls flag
     local out
     out=$(download_game "99997" "$test_target" "DefaultTitle")
     local rc=$?
+    [ -f "$test_root/injected" ] || { rm -rf "$test_root"; return 1; }
 
     rm -rf "$test_root"
     unset GAMECTL_DEPOT_DL_BIN XDG_CACHE_HOME
@@ -1611,6 +1626,7 @@ EOF_UNPACKED
 run_test "SteamStub PE Unpacker: Automatic selection of unpacked binary" test_steamstub_pe_unpack_resolution_contract
 
 test_harvest_dlc_manifests_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
     source "$REPO_ROOT/src/steam/30_downloader.sh"
     source "$REPO_ROOT/src/runners/50_launcher.sh"
 
@@ -1660,8 +1676,10 @@ EOF_DLC
     touch "$t_game/game.sh"
     chmod +x "$t_game/game.sh"
     setup_gbe_templates() { return 0; }
-    get_gbe_template() { return 1; }
-    inject_game "$t_game" "100" --no-sync >/dev/null 2>&1 || true
+    local t_template="$t_dir/template.so"
+    printf 'GBE template fixture' > "$t_template"
+    get_gbe_template() { printf '%s\n' "$t_template"; }
+    inject_game "$t_game" "100" --no-sync >/dev/null 2>&1 || { rm -rf "$t_dir"; return 1; }
     [ -f "$t_game/steam_settings/configs.app.ini" ] || { rm -rf "$t_dir"; return 1; }
     grep -q "unlock_all=1" "$t_game/steam_settings/configs.app.ini" || { rm -rf "$t_dir"; return 1; }
 
@@ -2866,6 +2884,7 @@ test_savegame_snapshots_independence_and_recovery_contracts() {
 }
 run_test "Savegame Integrity (Chunk 25.02): Independent snapshots & recoverable replacement" test_savegame_snapshots_independence_and_recovery_contracts
 run_test "Savegame Failure Paths (Chunk 25.02): I/O rollback, signals & real lock contention" python3 "$SCRIPT_DIR/test_save_safety.py"
+run_test "Standalone Safety: Injection failures, Steam isolation & process lifecycle" python3 "$SCRIPT_DIR/test_standalone_safety.py"
 
 # ------------------------------------------------------------------------------
 # Final Execution Summary

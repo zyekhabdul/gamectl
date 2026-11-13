@@ -197,7 +197,7 @@ EOF
     done
 }
 
-# Setup P2P Multiplayer Compatibility Layer, mod DLL overrides & Spacewar (AppID 480) entitlement
+# Setup local P2P compatibility and mod DLL overrides without Steam registration.
 setup_onlinefix() {
     local gdir="${1:-}"
     shift || true
@@ -215,7 +215,7 @@ setup_onlinefix() {
     fi
     gdir="$(cd "$gdir" && pwd)"
 
-    echo "[INFO] Running OnlineFix setup and Spacewar entitlement audit in: $gdir..."
+    echo "[INFO] Running local OnlineFix compatibility setup in: $gdir..."
 
     # 1. Discover OnlineFix signature files
     local of_files
@@ -231,27 +231,8 @@ setup_onlinefix() {
     fi
     echo "[VERIFIED] OnlineFix signature detected."
 
-    # 2. Spacewar (AppID 480) Entitlement & ACF Check
-    local s_primary
-    s_primary="$(get_steam_primary_apps 2>/dev/null || echo "$HOME/.local/share/Steam/steamapps")"
-    local has_spacewar=0
-    if [ -f "$s_primary/appmanifest_480.acf" ]; then
-        has_spacewar=1
-    fi
-    local sls_cfg="$HOME/.config/SLSsteam/config.yaml"
-    if [ -f "$sls_cfg" ] && grep -q -E '^[[:space:]]*480:' "$sls_cfg" 2>/dev/null; then
-        has_spacewar=1
-    fi
-
-    if [ "$has_spacewar" -eq 1 ]; then
-        echo "[VERIFIED] Spacewar (AppID 480) already registered in Steam library."
-    else
-        echo "[INFO] Spacewar (AppID 480) not registered yet. Running automatic registration..."
-        sync_steam 480 "Spacewar" "$gdir"
-        echo "[VERIFIED] Spacewar (AppID 480) registered for Steam compatibility."
-    fi
-
-    # 3. Audit & Sync OnlineFix.ini PlayerName
+    # Steam registration remains available through the explicit sync-steam command.
+    # 2. Audit & Sync OnlineFix.ini PlayerName
     local ini_file
     ini_file=$(find "$gdir" -maxdepth 3 \( -name "pfx" -o -name ".git" \) -prune -o -iname "OnlineFix.ini" -print 2>/dev/null | head -n 1)
     if [ -n "$ini_file" ] && [ -f "$ini_file" ]; then
@@ -455,11 +436,7 @@ launch_game() {
         has_steam_api=true
         local unshielded_candidates=()
         for api_cand in "${probe_candidates[@]}"; do
-            local c_sz
-            c_sz=$(stat -c%s "$api_cand" 2>/dev/null || echo 0)
-            if [ "$c_sz" -ge 5000000 ] || [ -f "$api_cand.orig" ]; then
-                : # Already shielded
-            else
+            if ! is_gbe_library "$api_cand"; then
                 unshielded_candidates+=("$api_cand")
             fi
         done
@@ -470,12 +447,8 @@ launch_game() {
 
             local still_unshielded=()
             for api_cand in "${unshielded_candidates[@]}"; do
-                if [ -f "$api_cand" ]; then
-                    local re_sz
-                    re_sz=$(stat -c%s "$api_cand" 2>/dev/null || echo 0)
-                    if [ "$re_sz" -lt 5000000 ] && [ ! -f "$api_cand.orig" ]; then
-                        still_unshielded+=("$api_cand")
-                    fi
+                if ! is_gbe_library "$api_cand"; then
+                    still_unshielded+=("$api_cand")
                 fi
             done
 
@@ -641,7 +614,11 @@ EOF
 
     # Detached background watchdog to restore CPU governor and cleanup when process exits
     (
-        wait "$game_pid" 2>/dev/null
+        # This watchdog is a sibling of the game, so shell wait cannot reap it.
+        if ! tail --pid="$game_pid" --sleep-interval=0.2 -f /dev/null >/dev/null 2>&1; then
+            log_msg "ERROR" "LAUNCH" "Unable to monitor game process $game_pid"
+            exit 1
+        fi
         if [ -n "$unit_name" ]; then
             systemctl --user stop "$unit_name.scope" 2>/dev/null || true
         fi
@@ -666,6 +643,7 @@ EOF
     fi
 
     trap - INT TERM EXIT
+    export PATH="$prev_path"
     return "$hud_exit"
 }
 
@@ -830,7 +808,7 @@ pull_from_tuf() {
 inject_game() {
     local target_dir="$1"
     local appid="${2:-}"
-    local sync_mode="${3:-all}"
+    local sync_mode="${3:---no-sync}"
 
     # Strip ANSI escape sequences
     target_dir=$(strip_ansi "$target_dir")
@@ -880,9 +858,20 @@ inject_game() {
 
     # Check existing steam libraries in target folder
     local found_win64 found_win32 found_linux
-    found_win64=$(find "$target_dir" -maxdepth 4 -name "steam_api64.dll" 2>/dev/null | head -n 1)
-    found_win32=$(find "$target_dir" -maxdepth 4 -name "steam_api.dll" 2>/dev/null | head -n 1)
-    found_linux=$(find "$target_dir" -maxdepth 4 -name "libsteam_api.so" 2>/dev/null | head -n 1)
+    local api_targets=() api_file
+    while IFS= read -r -d '' api_file; do
+        [ -f "$api_file" ] && api_targets+=("$api_file")
+    done < <(find "$target_dir" -maxdepth 4 \
+        \( -name pfx -o -name .git -o -name saves -o -name .save_snapshots \) -prune \
+        -o \( -name steam_api64.dll -o -name steam_api.dll -o -name libsteam_api.so \) -print0 2>/dev/null)
+    found_win64="" found_win32="" found_linux=""
+    for api_file in "${api_targets[@]}"; do
+        case "${api_file##*/}" in
+            steam_api64.dll) found_win64="${found_win64:-$api_file}" ;;
+            steam_api.dll) found_win32="${found_win32:-$api_file}" ;;
+            libsteam_api.so) found_linux="${found_linux:-$api_file}" ;;
+        esac
+    done
 
     if [ -n "$gbin" ] && [ -f "$target_dir/$gbin" ]; then
         local btype
@@ -911,7 +900,7 @@ inject_game() {
         fi
     elif [ -n "$found_linux" ]; then
         target_platform="linux"
-        if file -b "$found_linux" | grep -qi "32-bit"; then
+        if file -Lb "$found_linux" | grep -qi "32-bit"; then
             arch="x86"
             is_32bit=true
         else
@@ -930,32 +919,31 @@ inject_game() {
     fi
 
     # 2. Perform Shim Injections (with backup of originals)
-    local primary_shim_dir="$target_dir"
+    local shim_dirs=("$target_dir")
 
     # 2a. Windows Shim Injection (if windows steam files exist or target is windows)
     if [ -n "$found_win64" ] || [ -n "$found_win32" ] || [ "$target_platform" = "windows" ]; then
         local win_targets=()
-        if [ -n "$found_win64" ]; then
-            win_targets+=("$found_win64:x64")
-        fi
-        if [ -n "$found_win32" ]; then
-            win_targets+=("$found_win32:x86")
-        fi
+        for api_file in "${api_targets[@]}"; do
+            case "${api_file##*/}" in
+                steam_api64.dll|steam_api.dll) win_targets+=("$api_file") ;;
+            esac
+        done
 
         # If neither found but target is windows, determine destination based on detected arch or gbin location
         if [ ${#win_targets[@]} -eq 0 ] && [ "$target_platform" = "windows" ]; then
             local bin_subdir="$target_dir"
             [ -n "$gbin" ] && [ -f "$target_dir/$gbin" ] && bin_subdir="$(dirname "$target_dir/$gbin")"
             if [ "$is_32bit" = true ]; then
-                win_targets+=("$bin_subdir/steam_api.dll:x86")
+                win_targets+=("$bin_subdir/steam_api.dll")
             else
-                win_targets+=("$bin_subdir/steam_api64.dll:x64")
+                win_targets+=("$bin_subdir/steam_api64.dll")
             fi
         fi
 
         for entry in "${win_targets[@]}"; do
-            local t_dll="${entry%%:*}"
-            local t_arch="${entry##*:}"
+            local t_dll="$entry" t_arch=x64
+            [ "${t_dll##*/}" = steam_api.dll ] && t_arch=x86
             local t_template
             t_template=$(get_gbe_template "windows" "$t_arch") || true
 
@@ -964,25 +952,13 @@ inject_game() {
                 setup_gbe_templates --yes --win-only >/dev/null 2>&1 || true
                 t_template=$(get_gbe_template "windows" "$t_arch") || true
                 if [ -z "$t_template" ] || [ ! -f "$t_template" ]; then
-                    echo "[WARN] Windows GBE Fork template ($t_arch) not found. Run 'gamectl setup-gbe' to install." >&2
-                    continue
+                    echo "[ERROR] Windows GBE Fork template ($t_arch) not found. Run 'gamectl setup-gbe' to install." >&2
+                    return 1
                 fi
             fi
 
-            # Backup original Valve DLL if present (<7MB and .orig not existing)
-            if [ -f "$t_dll" ]; then
-                local sz
-                sz=$(stat -c%s "$t_dll" 2>/dev/null || echo 0)
-                if [ "$sz" -lt 7000000 ] && [ ! -f "$t_dll.orig" ]; then
-                    cp -a "$t_dll" "$t_dll.orig"
-                    echo "[INFO] Original $(basename "$t_dll") backed up to: $t_dll.orig"
-                fi
-            fi
-
-            mkdir -p "$(dirname "$t_dll")"
-            cp "$t_template" "$t_dll"
-            chmod +x "$t_dll" 2>/dev/null || true
-            primary_shim_dir="$(dirname "$t_dll")"
+            install_gbe_library "$t_template" "$t_dll" || return 1
+            shim_dirs+=("$(dirname "$t_dll")")
             echo "[INFO] Windows GBE Fork DLL ($t_arch) installed at: $t_dll"
         done
     fi
@@ -991,7 +967,7 @@ inject_game() {
     if [ -n "$found_linux" ] || [ "$target_platform" = "linux" ]; then
         local linux_arch="x64"
         if [ -n "$found_linux" ]; then
-            if file -b "$found_linux" | grep -qi "32-bit"; then
+            if file -Lb "$found_linux" | grep -qi "32-bit"; then
                 linux_arch="x86"
             fi
         elif [ "$is_32bit" = true ]; then
@@ -1007,36 +983,35 @@ inject_game() {
             target_so="$target_dir/lib32/libsteam_api.so"
         fi
 
-        local src_so
-        src_so=$(get_gbe_template "linux" "$linux_arch") || true
-        if [ -z "$src_so" ] || [ ! -f "$src_so" ]; then
-            echo "[WARN] Linux GBE Fork template ($linux_arch) not found. Attempting automatic provisioning..." >&2
-            setup_gbe_templates --yes --linux-only >/dev/null 2>&1 || true
-            src_so=$(get_gbe_template "linux" "$linux_arch") || true
-        fi
-        if [ -n "$src_so" ] && [ -f "$src_so" ]; then
-            # Backup original Valve SO if present (<7MB and .orig not existing)
+        local linux_targets=()
+        for api_file in "${api_targets[@]}"; do
+            [ "${api_file##*/}" = libsteam_api.so ] && linux_targets+=("$api_file")
+        done
+        [ ${#linux_targets[@]} -gt 0 ] || linux_targets+=("$target_so")
+        for target_so in "${linux_targets[@]}"; do
             if [ -f "$target_so" ]; then
-                local sz
-                sz=$(stat -c%s "$target_so" 2>/dev/null || echo 0)
-                if [ "$sz" -lt 7000000 ] && [ ! -f "$target_so.orig" ]; then
-                    cp -a "$target_so" "$target_so.orig"
-                    echo "[INFO] Original libsteam_api.so backed up to: $target_so.orig"
-                fi
+                linux_arch=x64
+                if file -Lb "$target_so" | grep -qi '32-bit'; then linux_arch=x86; fi
             fi
-
-            mkdir -p "$(dirname "$target_so")"
-            cp "$src_so" "$target_so"
-            chmod +x "$target_so"
-            primary_shim_dir="$(dirname "$target_so")"
+            local src_so
+            src_so=$(get_gbe_template "linux" "$linux_arch") || true
+            if [ -z "$src_so" ] || [ ! -f "$src_so" ]; then
+                echo "[WARN] Linux GBE Fork template ($linux_arch) not found. Attempting automatic provisioning..." >&2
+                setup_gbe_templates --yes --linux-only >/dev/null 2>&1 || true
+                src_so=$(get_gbe_template "linux" "$linux_arch") || true
+            fi
+            if [ -z "$src_so" ] || [ ! -f "$src_so" ]; then
+                echo "[ERROR] Linux GBE Fork template ($linux_arch) not found at: ${src_so:-empty}" >&2
+                return 1
+            fi
+            install_gbe_library "$src_so" "$target_so" || return 1
+            shim_dirs+=("$(dirname "$target_so")")
             echo "[INFO] Linux GBE Fork ELF ($linux_arch) installed at: $target_so"
-        else
-            [ "$target_platform" = "linux" ] && echo "[WARN] Linux GBE Fork template ($linux_arch) not found at: ${src_so:-empty}" >&2
-        fi
+        done
     fi
 
     # 3. Setup steam_settings and configs.user.ini
-    mkdir -p "$target_dir/steam_settings"
+    mkdir -p "$target_dir/steam_settings" || return 1
     local user_name=""
     local steamid=""
 
@@ -1056,7 +1031,7 @@ inject_game() {
         steamid=$(resolve_active_steamid)
     fi
 
-    cat <<EOF > "$target_dir/steam_settings/configs.user.ini"
+    cat <<EOF > "$target_dir/steam_settings/configs.user.ini" || return 1
 [user::general]
 account_name=$user_name
 account_steamid=$steamid
@@ -1068,7 +1043,7 @@ EOF
 
     # Scaffold configs.app.ini to unlock all DLCs in GBE Fork
     if [ ! -f "$target_dir/steam_settings/configs.app.ini" ]; then
-        cat <<EOF > "$target_dir/steam_settings/configs.app.ini"
+        cat <<EOF > "$target_dir/steam_settings/configs.app.ini" || return 1
 [app::dlc]
 unlock_all=1
 EOF
@@ -1076,7 +1051,7 @@ EOF
 
     # Scaffold custom_broadcasts.txt if missing
     if [ ! -f "$target_dir/steam_settings/custom_broadcasts.txt" ]; then
-        cat <<EOF > "$target_dir/steam_settings/custom_broadcasts.txt"
+        cat <<EOF > "$target_dir/steam_settings/custom_broadcasts.txt" || return 1
 # GBE Fork LAN Custom Broadcast IP list
 # Add peer IPs or broadcast subnets (one IP per line)
 127.0.0.1
@@ -1084,30 +1059,27 @@ EOF
 EOF
     fi
 
-    # If shim is in a subfolder, link steam_settings beside it as per GBE specification
-    if [ "$primary_shim_dir" != "$target_dir" ] && [ -d "$primary_shim_dir" ]; then
-        ln -sfn "$target_dir/steam_settings" "$primary_shim_dir/steam_settings" 2>/dev/null || true
-    fi
-
     # 4. Setup isolated portable saves folder and markers
-    mkdir -p -m 700 "$target_dir/saves"
-    chmod 700 "$target_dir/saves" 2>/dev/null || true
-    echo -n "saves" > "$target_dir/local_save.txt"
-    if [ "$primary_shim_dir" != "$target_dir" ] && [ -d "$primary_shim_dir" ]; then
-        echo -n "saves" > "$primary_shim_dir/local_save.txt" 2>/dev/null || true
-        ln -sfn "$target_dir/saves" "$primary_shim_dir/saves" 2>/dev/null || true
-    fi
+    mkdir -p -m 700 "$target_dir/saves" || return 1
+    chmod 700 "$target_dir/saves" || return 1
+    local shim_dir
+    for shim_dir in "${shim_dirs[@]}"; do
+        printf saves > "$shim_dir/local_save.txt" || return 1
+        if [ "$shim_dir" != "$target_dir" ]; then
+            ln -sfn "$target_dir/steam_settings" "$shim_dir/steam_settings" || return 1
+            ln -sfn "$target_dir/saves" "$shim_dir/saves" || return 1
+        fi
+        if [ -n "$appid" ] && [ "$appid" != STANDALONE ]; then
+            printf '%s' "$appid" > "$shim_dir/steam_appid.txt" || return 1
+        fi
+    done
 
     # 5. Write steam_appid.txt if available
     if [ -n "$appid" ] && [ "$appid" != "STANDALONE" ]; then
-        echo -n "$appid" > "$target_dir/steam_appid.txt"
-        if [ "$primary_shim_dir" != "$target_dir" ] && [ -d "$primary_shim_dir" ]; then
-            echo -n "$appid" > "$primary_shim_dir/steam_appid.txt" 2>/dev/null || true
-        fi
         echo "[INFO] AppID $appid registered in: $target_dir/steam_appid.txt"
         fetch_dlc "$target_dir" "$appid"
-        if [ "$sync_mode" != "--no-sync" ] && [ "$sync_mode" != "no-sync" ] && [ "$sync_mode" != "standalone" ]; then
-            sync_steam "$appid" "$(basename "$target_dir")" "$target_dir"
+        if [ "$sync_mode" = "--all" ] || [ "$sync_mode" = "all" ]; then
+            sync_steam "$appid" "$(basename "$target_dir")" "$target_dir" || return $?
         else
             echo "[INFO] Standalone Mode active: Skipping Steam Client synchronization."
         fi
