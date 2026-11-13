@@ -3,18 +3,23 @@
 - **Dokumen**: `SOVEREIGN_ORIGINAL_PURPOSE.md`
 - **Klasifikasi**: Prinsip Inti & Batasan Arsitektur Proyek (Single Source of Truth)
 - **Status**: DISAHKAN (RATIFIED)
-- **Penetapan Pengguna**: *"gamectl adalah game manajer, sekaligus alternatif seperti tools steam popular: bisa search game steam dan dapatkan dengan full dlc, bisa dimainkan offline (sebisanya)"*
+- **Penetapan Pengguna (2026-11-13)**: *"pengganti steam dengan keunggulan ringan, standalone, stabil jangka panjang"*.
+
+Tujuan ini mengatur setiap perubahan kode, diagnostik, dokumentasi, dan memori AI.
+Arahan lama tentang SLSsteam sebagai engine, fallback, atau syarat kesiapan tidak berlaku untuk alur mandiri.
+Mengadopsi cara kerja sebuah tool tidak berarti memasang atau bergantung pada aplikasi tersebut.
 
 ---
 
 ## 1. DEFINISI & IDENTITAS PROYEK
 
-**`gamectl`** adalah pengelola game berdaulat (*sovereign game manager*), peluncur (*launcher*), dan downloader independen berbasis Terminal User Interface (TUI) untuk ekosistem Linux (Wayland & X11) dan perangkat handheld.
+**`gamectl`** adalah pengganti Steam untuk pengelolaan, pengunduhan, dan peluncuran game yang didukung: ringan, mandiri, dan dirancang agar dapat dipelihara jangka panjang.
 
 ### Filosofi Utama: "Zero Bloat, Maximum Sovereignty"
-1. **Anti-Bloat**: Dilarang menggunakan Electron, Chromium Embedded Framework (CEF), WebKit, atau GTK berat. Konsumsi RAM idle wajib berada di bawah **15 MB RSS** dengan waktu startup sub-**80ms**.
+1. **Ringan**: Gunakan runtime kecil dan dependensi yang memang diperlukan. Angka RAM dan startup harus disertai hasil pengukuran; target performa bukan bukti performa aktual.
 2. **Sovereign (Berdaulat)**: Kepemilikan aset dan runtime sepenuhnya berada di tangan pengguna secara lokal. Tidak ada ketergantungan wajib pada server cloud pihak ketiga, akun login tertutup, maupun aplikasi klien desktop yang menyita memori (seperti Steam Client resmi ~1 GB RAM).
 3. **Decoupled Architecture**: Komponen download, manajemen lisensi, dan runtime peluncur beroperasi secara modular dan independen satu sama lain.
+4. **Stabil Jangka Panjang**: Alur mandiri tidak boleh bergantung pada hook atau pola memori internal Steam Client. Kegagalan provider, template, penulisan file, dan proses harus dilaporkan dengan benar; pemulihan harus menjaga data pengguna. Klaim stabil memerlukan bukti skenario kegagalan dan pengujian runtime yang relevan.
 
 ---
 
@@ -32,7 +37,7 @@
 |  (Sovereign Cockpit)  |           |  (Search & Harvest)   |       |  (Zero Client Play)   |
 |-----------------------|           |-----------------------|       |-----------------------|
 | • POSIX Bash + fzf+jq |           | • Cari game via API   |       | • Main tanpa Steam    |
-| • RAM < 15 MB RSS     |           | • Unduh Valve CDN     |       | • Goldberg Emulator   |
+| • Runtime ringan     |           | • Unduh Valve CDN     |       | • Goldberg Emulator   |
 | • Multi-Dir Discovery |           | • Full DLC Included   |       | • Full DLC Unlocked   |
 | • 3-Slot Save Snap    |           | • Ephemeral Rust DL   |       | • Savegame di ./saves |
 | • cgroups v2 Scope    |           | • Zero Client needed  |       | • "Sebisanya" DRM Fix |
@@ -61,7 +66,7 @@ Sebagai alternatif dari perkakas populer (seperti SteamTools, LuaTools, GreenLum
    - Melakukan dekripsi in-flight via instruksi hardware AES-NI dan dekompresi zstd/lzma langsung ke disk.
 3. **Penyertaan Seluruh DLC (Full DLC Included)**:
    - Mengunduh depot game dasar sekaligus seluruh depot DLC terkait yang terdaftar pada manifest.
-   - Menjamin seluruh aset fisik DLC terpasang lengkap di direktori game.
+   - Laporkan depot yang tersedia dan yang gagal; jangan menjanjikan seluruh DLC tersedia tanpa verifikasi manifest dan hasil unduhan.
 4. **Zero-Client Download Invariant**:
    - Seluruh proses pencarian dan pengunduhan berjalan tanpa membuka aplikasi resmi Steam Client.
    - Tidak memakan 1 GB RAM untuk Chromium subprocess (`steamwebhelper`), optimal untuk perangkat dengan sumber daya terbatas dan mesin headless.
@@ -77,13 +82,11 @@ Tujuan akhir adalah kebebasan memainkan game tanpa ketergantungan runtime:
      - Menyediakan file identitas `steam_appid.txt` dan mapping seluruh DLC di `steam_settings/DLC.txt`.
      - Mengalihkan penyimpanan savegame lokal ke `<game_dir>/saves/`.
 2. **Klausul Batasan Realitas ("Sebisanya")**:
-   - **Game Steamworks Biasa (>90% katalog)**: 100% langsung dapat dimainkan secara offline mandiri tanpa pernah menyentuh Steam Client.
+   - **Kompatibilitas per Game**: Kemampuan berjalan offline harus dibuktikan pada game yang diuji. Tidak ada jaminan persentase katalog atau klaim semua game dapat berjalan mandiri.
    - **Game Ber-DRM Keras / SteamStub**:
      - Windows PE: Di-bypass menggunakan Steamless CLI.
      - Linux ELF ber-seksi `.bind`: Dideteksi secara forensik, diberikan diagnostik transparan ke pengguna, dan diarahkan ke runner yang tepat.
-   - **Dukungan Opsi Steam Client (Opt-in)**:
-     - Jika pengguna sewaktu-waktu ingin membuka Steam Client resmi (misalnya untuk menggunakan profil Steam Input, gyro, atau pre-caching Vulkan shader), `gamectl` menyediakan sinkronisasi ke SLSsteam.
-     - **Invarian Anti-PURCHASE**: Stplugin Lua yang dibuat wajib memuat baris `addappid(<appid>)` di baris pertama, sehingga Steam Client SELALU menampilkan tombol **PLAY**, bukan tombol **PURCHASE**.
+   - **Batas Integrasi Eksternal**: Perintah bridge yang dipertahankan untuk kompatibilitas hanya boleh berjalan atas pilihan eksplisit. Keberadaannya tidak mengubah tujuan produk, tidak membenarkan pemasangan Steam/SLSsteam, dan bukan solusi untuk kegagalan jalur mandiri.
 
 ---
 
@@ -91,4 +94,5 @@ Tujuan akhir adalah kebebasan memainkan game tanpa ketergantungan runtime:
 1. **Dilarang Menjadikan SLSsteam Sebagai Ketergantungan Default**: SLSsteam adalah parasit proses Steam Client. Menghubungkan game standalone ke SLSsteam saat Steam Client mati adalah blunder arsitektur.
 2. **Dilarang Membiarkan Biner Game Tanpa Emulator**: Mengeksekusi biner game yang memiliki dependensi `steam_api` resmi Valve tanpa di-shim GBE Fork akan memicu panggilan paksa ke Steam Client.
 3. **Dilarang Memaksa Direktori Steam Sebagai Lokasi Tunggal**: Game standalone harus bebas diletakkan di direktori sovereign manapun (`~/Games/`, drive eksternal, dll).
-4. **Dilarang Mengabaikan Kondisi Offline**: Ekstraksi lisensi DLC dan peluncuran game wajib dapat beroperasi 100% saat jaringan internet terputus total.
+4. **Dilarang Mengabaikan Kondisi Offline**: Gunakan data lokal yang tersedia. Bila data yang diperlukan belum ada, laporkan batasannya; jangan menghidupkan Steam atau mengklaim sukses palsu.
+5. **Dilarang Menyamakan Tes Lokal dengan Kesiapan Runtime**: Catat apa yang diuji dan yang belum. Dokumen historis, status ADR lama, dan tes mock tidak mengesampingkan tujuan pengguna atau bukti source saat ini.

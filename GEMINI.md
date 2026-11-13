@@ -22,3 +22,7 @@ All agents (Antigravity CLI, OpenCode, Claude Code, Codex) MUST strictly adhere 
 - **Memory & RAG**: Obsidian 4-file governance (`~/.gemini/config/rules/obsidian-rag.md`)
 - **MCP Discovery**: On-demand dual-file configuration protocol (`~/.gemini/config/rules/mcp-discovery.md`)
 - **Communication**: Caveman terse high-density, strict no-emoji.
+
+## Project purpose (user directive, 2026-11-13)
+
+`gamectl` is a Steam replacement: lightweight, standalone, and maintainable for long-term stability. Read [the project purpose](docs/SOVEREIGN_ORIGINAL_PURPOSE.md) before planning changes. Historical Steam/SLSsteam engine, fallback, and readiness instructions do not authorize installing or starting those clients to repair the standalone workflow. Existing explicit bridge commands are compatibility features, not the project's architectural direction.

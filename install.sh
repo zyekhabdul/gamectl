@@ -113,14 +113,13 @@ else
     echo "[VERIFIED] All core system dependencies found."
 fi
 
-# Audit Python YAML engine for SLSsteam sync
+# YAML is used only by explicitly requested Steam bridge commands.
 if python3 -c "import ruamel.yaml" >/dev/null 2>&1; then
-    echo "[VERIFIED] Python: ruamel.yaml detected (YAML layout-preserving mode active)."
+    echo "[INFO] Optional Steam bridge: ruamel.yaml available."
 elif python3 -c "import yaml" >/dev/null 2>&1; then
-    echo "[INFO] Python: PyYAML detected."
+    echo "[INFO] Optional Steam bridge: PyYAML available."
 else
-    echo "[WARN] Python YAML engine not found ('python-ruamel-yaml' or 'python-yaml')."
-    echo "       Required for offline entitlement synchronization."
+    echo "[INFO] Optional Steam bridge YAML engine not installed; standalone operation does not require it."
 fi
 
 # Audit Decentralized LAN runtime templates (Goldberg Emulator Fork)

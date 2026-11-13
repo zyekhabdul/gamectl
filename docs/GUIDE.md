@@ -1,5 +1,7 @@
 # Panduan Lengkap Operasional & Integrasi gamectl
 
+Tujuan yang mengikat: [pengganti Steam yang ringan, standalone, dan stabil jangka panjang](SOVEREIGN_ORIGINAL_PURPOSE.md). Integrasi Steam lama hanya kompatibilitas opt-in; bukan dependensi atau solusi untuk kegagalan jalur mandiri.
+
 Dokumen ini merupakan panduan praktis (*operational manual*) yang menghubungkan spesifikasi arsitektur headless di [ARCHITECTURE.md](file:///home/aomiqaza/Projects/gamectl/docs/ARCHITECTURE.md) dengan implementasi nyata pada lingkungan workstation Linux.
 
 ---
@@ -25,11 +27,11 @@ Pastikan paket berikut telah terpasang pada distribusi Linux:
 - `rsync` & `openssh` (protokol transfer savegame multi-node)
 - `file` (inspeksi header binary ELF 32-bit / 64-bit)
 - `unzip` (ekstraksi archive manifest ZIP, template GBE, dan bypass fix)
-- `python3` & `python-ruamel-yaml` / `python-yaml` (sinkronisasi konfigurasi SLSsteam)
+- `python3` (pemrosesan metadata dan konfigurasi lokal)
 
 Pada Arch Linux:
 ```bash
-sudo pacman -S fzf jq curl rsync openssh file unzip python python-ruamel-yaml
+sudo pacman -S fzf jq curl rsync openssh file unzip python
 ```
 
 ### 2.2 Dependensi Runner (GBE Fork & Windows Compatibility)
@@ -217,7 +219,7 @@ Mekanisme ini secara otomatis:
 1. Menambahkan AppID ke daftar lisensi SLSsteam (`~/.config/SLSsteam/config.yaml`).
 2. Menarik seluruh katalog DLC dari Steam Web API dan memetakan `DlcData` di SLSsteam.
 3. Menulis manifest `~/.local/share/Steam/steamapps/appmanifest_<appid>.acf` berstatus `StateFlags: 4` (Installed).
-4. Saat Steam client dibuka, game langsung terdaftar di library dengan seluruh DLC aktif.
+4. Hasil registrasi harus diverifikasi terpisah pada Steam Client. Langkah bridge ini tidak membuktikan kesiapan game mandiri atau ketersediaan seluruh DLC.
 
 ### 4.5 Pengaturan Identitas LAN & SteamID (`gamectl set-id`)
 Untuk bermain co-op offline atau game multiplayer LAN menggunakan GBE Fork tanpa bentrok ID antar komputer:
@@ -279,10 +281,10 @@ game
 
 | Tombol | Deskripsi & Alur Kerja |
 | :--- | :--- |
-| `<ENTER>` | **Launch Game**: Membuat auto-snapshot savegame, merangkai active wrappers (`gamemoderun`, `mangohud`, `gamescope`), menaikkan CPU governor ke `performance`, mengaktifkan `mesa_glthread=true`, lalu meluncurkan game. Saat game ditutup, CPU governor dikembalikan ke `powersave`. |
+| `<ENTER>` | **Launch Game**: Menyiapkan snapshot savegame, memvalidasi runtime lokal, dan menjalankan game dengan wrapper yang dipilih. `mesa_glthread` hanya aktif jika dipilih eksplisit; governor dipulihkan ke nilai sebelumnya. |
 | `<Ctrl-O>` | **Configure Runtime Wrappers**: Membuka dialog interaktif untuk mengaktifkan/menonaktifkan GameMode, MangoHud, Gamescope, dan FSR upscaling per-game. |
 | `<Ctrl-P>` | **Configure LAN Persona & SteamID**: Mengatur nama pemain LAN, mengubah SteamID64, dan mendaftarkan IP peer broadcast teman bermain. |
-| `<Ctrl-I>` | **Instant GBE Inject & Steam Sync**: Mengubah game `[VALVE_SO]` / `[VALVE_DLL]` atau `[STANDALONE]` menjadi `[GBE_FORK]` portabel, mengunduh DLC, dan menyinkronkan status instalasi ke Steam resmi + SLSsteam secara instan. |
+| `<Ctrl-I>` | **Standalone GBE Injection**: Menyiapkan runtime lokal dan save portabel tanpa sinkronisasi Steam. Kegagalan injection ditampilkan sebagai kegagalan. |
 | `<Ctrl-S>` | **Remote Save Sync**: Menguji konektivitas SSH ke remote host (`ConnectTimeout=1`). Jika online dan terkonfigurasi, melakukan sinkronisasi delta via `rsync` dari folder `./saves` lokal ke direktori game pada remote host. |
 | `<Ctrl-B>` | **Manual Snapshot**: Membuat salinan cadangan instan savegame ke rotasi slot `.save_snapshots`. |
 | `<ESC>` / `<Ctrl-C>` | Keluar dari antarmuka `gamectl`. |

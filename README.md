@@ -4,13 +4,10 @@
 
 ### Sovereign TUI Game Manager & Launcher for Linux Purists
 
-*Zero Electron. Zero Chromium. Zero Bloat. Sub-80ms Startup.*
+*A lightweight, standalone Steam replacement designed for long-term maintenance.*
 
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20SteamDeck-blue?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/zyekhabdul/gamectl)
 [![Shell](https://img.shields.io/badge/Shell-POSIX%20Bash-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white)](https://github.com/zyekhabdul/gamectl)
-[![Memory](https://img.shields.io/badge/Memory-<%2015%20MB%20RSS-brightgreen?style=for-the-badge&logo=speedtest&logoColor=white)](https://github.com/zyekhabdul/gamectl)
-[![Startup](https://img.shields.io/badge/Startup-<%2080ms-success?style=for-the-badge&logo=lightning&logoColor=white)](https://github.com/zyekhabdul/gamectl)
-[![Tests](https://img.shields.io/badge/Tests-75%2F75%20Passing-success?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/zyekhabdul/gamectl)
 [![PyPI](https://img.shields.io/badge/PyPI-gamectl-3775A9?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/project/gamectl/)
 [![License](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](LICENSE)
 [![Display](https://img.shields.io/badge/Compositor-Wayland%20%7C%20X11-orange?style=for-the-badge&logo=wayland&logoColor=white)](https://github.com/zyekhabdul/gamectl)
@@ -21,7 +18,7 @@
 curl -fsSL https://raw.githubusercontent.com/zyekhabdul/gamectl/main/install.sh | bash
 ```
 
-[Quickstart](#quick-installation) • [Benchmark](#benchmark-matrix-headless-sovereign-vs-gui-launchers) • [Core Capabilities](#core-capabilities) • [Keyboard Shortcuts](#keyboard-shortcuts-reference) • [CLI Reference](#cli-command-reference) • [Ecosystems](#supported-ecosystems--handhelds) • [Architecture](docs/ARCHITECTURE.md)
+[Quickstart](#quick-installation) • [Project purpose](docs/SOVEREIGN_ORIGINAL_PURPOSE.md) • [Core Capabilities](#core-capabilities) • [Keyboard Shortcuts](#keyboard-shortcuts-reference) • [CLI Reference](#cli-command-reference) • [Ecosystems](#supported-ecosystems--handhelds) • [Architecture](docs/ARCHITECTURE.md)
 
 </div>
 
@@ -41,27 +38,15 @@ curl -fsSL https://raw.githubusercontent.com/zyekhabdul/gamectl/main/install.sh 
 ╰──────────────────────────────────────────────┴───────────────────────────────────────────────────╯
 ```
 
-**gamectl** is an ultra-lightweight (< 15 MB RAM RSS), high-performance Terminal User Interface (TUI) game manager and launcher designed for Linux workstations and handhelds. It manages, launches, and synchronizes standalone portable games with zero dependency on heavyweight graphical client runtimes (such as Electron, Chromium, or CEF).
+**gamectl** is a Steam replacement for managing, downloading, and launching supported games. Its goals are low resource use, standalone operation, and long-term stability. The core workflow does not require Steam Client or SLSsteam.
 
-Engineered for Linux purists and minimalist desktop environments (Wayland / Niri / Sway / Hyprland / X11), `gamectl` delivers instant sub-80ms startup, isolated runtime prefixes, decentralized LAN multiplayer, and disaster-proof savegame snapshotting.
+It uses a native CLI/TUI, isolated runtime prefixes, local multiplayer configuration, and savegame snapshots. Follow [the project purpose](docs/SOVEREIGN_ORIGINAL_PURPOSE.md) when changing code or agent memory; legacy Steam bridge commands are not an implementation target or a fix for standalone failures.
 
 ---
 
-## Benchmark Matrix: Headless Sovereign vs GUI Launchers
+## Performance and Verification
 
-Empirical comparisons measured on Arch Linux x86_64 (Linux kernel 6.x, AMD Ryzen / Intel Core, NVMe storage):
-
-| Metric / Dimension | `gamectl` (TUI) | Heroic Games Launcher | Lutris | Bottles |
-| :--- | :--- | :--- | :--- | :--- |
-| **Startup Latency** | **< 80 ms** | ~1,200 - 2,500 ms | ~2,200 - 3,500 ms | ~3,100 - 4,800 ms |
-| **Idle Memory (RSS)** | **< 15 MB** | ~180 - 380 MB | ~120 - 240 MB | ~200 - 420 MB |
-| **Runtime Stack** | **POSIX Bash + fzf + jq** | Electron + Chromium + Node | Python 3 + GTK 3/4 | Python 3 + GTK 4 + libadwaita |
-| **Prefix Architecture** | **Per-game isolated (`./pfx`)** | Global / Managed per game | Shared / Centralized | Flatpak / Centralized bottles |
-| **Savegame Disaster Guard** | **Automated 3-slot rotation** | Manual / Cloud-dependent | None (Manual sync) | Centralized snapshots |
-| **Audio Latency Tuning** | **Automated PipeWire/Pulse** | Manual environment variables | Manual environment variables | Manual environment variables |
-| **Wineserver Teardown** | **Deterministic sync & kill** | Prone to orphan daemons | Prone to lingering processes | Handled via Flatpak sandbox |
-| **Headless / Remote Ops** | **100% Native CLI & TUI** | No (GUI required) | Partial CLI | No (GUI required) |
-| **Asset Overhead** | **Zero bundled web assets** | ~150 - 300 MB disk space | ~80 - 150 MB disk space | ~200 - 400 MB disk space |
+Low memory use and fast startup are design goals. Publish measured values only with the command, environment, revision, and scope that produced them. Passing local tests does not prove compatibility with every game or long-term runtime stability.
 
 ---
 
@@ -82,7 +67,7 @@ Empirical comparisons measured on Arch Linux x86_64 (Linux kernel 6.x, AMD Ryzen
 
 ## Core Capabilities
 
-- **Zero-Bloat & Instant Startup**: Written in pure POSIX Bash, `fzf`, and `jq`. Cuts 95%+ memory overhead compared to conventional graphical game launchers.
+- **Small Native Runtime**: Bash, `fzf`, `jq`, and a native Rust downloader; no embedded browser runtime.
 - **Dynamic Multi-Library Autodetection**: Automatically scans and aggregates games across all Steam library partitions (`libraryfolders.vdf` + ACF manifests), portable directories (`~/Games/`), Lutris paths, and custom locations via `~/.config/gamectl/libraries` or `GAMECTL_LIBRARY_DIRS`.
 - **Split-Pane Live Inspection Cockpit**: Left pane lists your library with ANSI status badges; right pane streams real-time binary architectures (ELF 32/64-bit, PE32/PE32+), runner paths, wrapper profiles, LAN multiplayer personas, and savegame sizes.
 - **cgroups v2 Process Tree Isolation (`gamectl launch --scope`)**: Encapsulates game execution in a dedicated systemd user scope (`gamectl-<title>-<pid>`), terminating all background helpers (`winedevice.exe`, `explorer.exe`, crash reporters) atomically on exit with zero zombie processes.
@@ -93,9 +78,8 @@ Empirical comparisons measured on Arch Linux x86_64 (Linux kernel 6.x, AMD Ryzen
 - **Isolated Windows Runner & Prefix Engine**: Discovers installed Windows compatibility runners (`umu-run` -> `GE-Proton` / Steam `Proton` -> `wine`) and maintains strictly isolated prefixes in `$GAME_DIR/pfx`, keeping host `~/.wine` pristine.
 - **Modular Performance Wrappers**: On-the-fly toggle for `gamemoderun`, `mangohud`, `gamescope` dynamic FSR upscaling, and Mesa multithreaded GL via interactive dialogs (`<Ctrl-O>`) or CLI flags.
 - **LAN Multi-Identity & SteamID Manager (`gamectl set-id`)**: Generates deterministic 17-digit SteamID64 tokens and distinct LAN gamer tags to prevent co-op network collisions, with custom peer discovery (`custom_broadcasts.txt`).
-- **High-Speed Standalone CDN Downloader (`gamectl download`)**: Primary engine: downloads game files directly from official Valve Content Servers at line speeds via multi-provider manifest harvesting (Ryuu, Sushi, LuaTools) and native Rust streaming (`gamectl-depot-dl`) with zero Steam Client requirement.
-- **Steam Entitlement & ACF Adoption Engine (`gamectl entitle`, `gamectl adopt-steam`)**: (Optional Secondary Bridge) Adopts local/offline files into the official Steam client, unlocking community Steam Input mappings (gyro/touchpad), Valve CDN Vulkan shader pre-caching, and base-game DLC activation via `~/.config/SLSsteam/config.yaml` and native `appmanifest_<appid>.acf`. (Backward-compatible alias: `gamectl unlock`).
-- **Universal Mod DLL Overrides & P2P Hook Engine (`gamectl mod-overrides`)**: Detects mod loaders and P2P compatibility layers (BepInEx, UE4SS, REFramework, ReShade, OnlineFix), injects deduplicated `WINEDLLOVERRIDES`, and registers Spacewar AppID 480.
+- **Standalone CDN Downloader (`gamectl download`)**: Uses manifest providers and native Rust streaming (`gamectl-depot-dl`) without requiring Steam Client. Missing manifests, keys, or failed provisioning produce errors instead of switching clients.
+- **Mod DLL Overrides & Local P2P Configuration (`gamectl mod-overrides`)**: Detects mod loaders and local compatibility files and prepares `WINEDLLOVERRIDES` without registering Steam entitlements.
 - **Headless GE-Proton Release Manager (`gamectl proton-*`)**: Fetches upstream GitHub releases, streams tarball installation directly into `~/.local/share/Steam/compatibilitytools.d/`, and prunes older versions safely.
 - **Wine Prefix Swiss Army Knife (`gamectl pfx`) & Wineserver Guard**: Dedicated maintenance toolkit (`winecfg`, `regedit`, `cmd`, `shell`, `winetricks`, `kill`, `clean`) with deterministic wineserver teardown (`wineserver -w` / `-k`) to eliminate registry lock contention.
 - **Real-Time PipeWire Audio Scheduling**: Exports optimal quantum buffer configurations (`PIPEWIRE_LATENCY="256/48000"`, `PULSE_LATENCY_MSEC=60`) to prevent audio crackling and buffer starvation during high CPU spikes.
@@ -280,7 +264,7 @@ gamectl pfx "$HOME/Games/MyGame" clean -y
 
 ### 7. Decentralized LAN Steam Runtime & Portable Saves
 ```bash
-# Inject standalone LAN runtime and sync offline entitlement (All-in-One):
+# Prepare the standalone LAN runtime and portable saves without Steam sync:
 gamectl inject "$HOME/Games/Limbo" 48000
 
 # Inject standalone LAN runtime only (zero Steam client sync):
@@ -294,7 +278,7 @@ gamectl set-id "MyGamerTag" auto --global
 
 ### 8. Headless Asset Downloader Engine
 ```bash
-# Download game files, inject decentralized runtime, and sync entitlement:
+# Download supported game files and prepare the standalone runtime:
 gamectl download 48000 "$HOME/Games/Limbo" "LIMBO"
 
 # Download game assets only without injection:
@@ -307,8 +291,8 @@ gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" -f
 gamectl downloads
 ```
 
-### 9. Steam Entitlement & ACF Adoption Engine (Zero-Download Full DLC)
-Adopts offline or standalone game files into the official Steam client, enabling community Steam Input (gyro/trackpad profiles), Valve CDN Vulkan shader pre-caching, and full DLC entitlement without re-downloading:
+### 9. Legacy Steam Bridge Commands (Explicit Opt-In)
+These compatibility commands target an external Steam Client. They are outside the standalone workflow, are not required for gamectl readiness, and must not be used as a recovery fallback or as a reason to install Steam/SLSsteam:
 
 ```bash
 # Entitle AppID, adopt local assets, and register full DLC into Steam:

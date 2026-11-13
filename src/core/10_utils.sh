@@ -267,10 +267,6 @@ get_remote_host() {
 clean_stale_locks() {
     local run_dir
     run_dir="$(get_runtime_dir)"
-    rm -f /tmp/steam_chrome_shmem_* /tmp/steam_chrome_overlay_* 2>/dev/null || true
-    rm -f "$run_dir"/steam_chrome_* 2>/dev/null || true
-    rm -f "$HOME/.config/SLSsteam/cache/.picsbuffer.lock" 2>/dev/null || true
-
     # Self-healing cleanup of orphaned standalone download staging directories
     local st_dir
     shopt -s nullglob

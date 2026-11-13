@@ -1,5 +1,8 @@
 # GAMECTL — DEVELOPER GUIDE & COMPILATION ARCHITECTURE
 
+Tujuan yang mengikat: [pengganti Steam yang ringan, standalone, dan stabil jangka panjang](docs/SOVEREIGN_ORIGINAL_PURPOSE.md).
+Alur inti tidak boleh bergantung pada Steam Client, SLSsteam, atau hook pola memori client. Integrasi lama bukan syarat untuk memperbaiki atau menilai kesiapan alur mandiri.
+
 ## 1. Source-to-Bundle Architecture
 
 `gamectl` adheres strictly to a deterministic **Source-to-Bundle** design pattern:
@@ -22,7 +25,7 @@ src/
 ├── steam/
 │   ├── 20_discovery.sh    # Multi-path Steam root discovery, manifest scanning, active steam process guard, desktop launcher
 │   ├── 25_identity.sh     # SteamID64 generation, active SteamID resolution, persona configuration, set-id
-│   └── 30_downloader.sh   # Dynamic multi-drive library routing, dual-OS DepotDownloader negotiation, entitlement sync
+│   └── 30_downloader.sh   # Standalone native downloader, manifest harvesting, local library routing
 ├── runners/
 │   ├── 40_wrappers.sh     # Windows runner, wineserver resolver, detect_dll_overrides, GE-Proton manager, manage_prefix
 │   └── 50_launcher.sh     # Prefix isolation, normalized remote sync, P2P compatibility, PipeWire audio, wineserver guard
@@ -67,9 +70,9 @@ bin/gamectl doctor
 
 ---
 
-## 4. Steam Entitlement & ACF Adoption Subsystem
+## 4. Legacy Steam Bridge Compatibility (Explicit Opt-In)
 
-The Entitlement & ACF adoption engine (`src/steam/30_downloader.sh`, CLI: `gamectl entitle` / `adopt-steam` / `unlock`) enables zero-download integration with the official Steam client:
+These legacy commands (`gamectl entitle` / `adopt-steam` / `unlock`) integrate with an external Steam Client only when explicitly requested. They are not the gamectl runtime, a standalone dependency, a recovery fallback, or evidence of standalone readiness:
 1. **Local File Adoption**: Directs Steam to recognize already existing standalone/offline game directories, avoiding duplicate downloads.
 2. **Community Steam Input**: Activates Steam Input mapping, enabling native gyro, trackpad, and custom community controller layouts on handhelds (Steam Deck, ROG Ally, Legion Go).
 3. **Vulkan Shader Pre-Caching**: Instructs Steam to pull and pre-compile official Vulkan pipeline shaders from Valve CDN, preventing runtime stutter during gameplay.

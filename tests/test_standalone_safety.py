@@ -165,6 +165,33 @@ launch_game "$TEST_GAME" game.sh Test < /dev/null
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse((self.base / "sync.calls").exists())
 
+    def test_cleanup_does_not_remove_steam_client_locks(self):
+        result = self.run_shell('''
+source "$TEST_ROOT/src/core/10_utils.sh"
+rm() {
+    case "$*" in
+        *steam_chrome*|*SLSsteam*) touch "$HOME/steam-lock-touched"; return 0 ;;
+    esac
+    command rm "$@"
+}
+clean_stale_locks
+''')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.base / "steam-lock-touched").exists())
+
+    def test_missing_bridge_yaml_is_not_a_standalone_warning(self):
+        result = self.run_shell('''
+python3() {
+    case "$*" in *'import ruamel.yaml'*|*'import yaml'*) return 1 ;; esac
+    command python3 "$@"
+}
+doctor_audit
+''')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        yaml_line = next(line for line in result.stdout.splitlines() if "YAML" in line and "•" in line)
+        self.assertIn("[OPTIONAL]", yaml_line)
+        self.assertNotIn("[WARN]", yaml_line)
+
     def test_injection_replaces_every_library_and_skips_prefixes(self):
         libraries = [self.library]
         for name in ("bin/libsteam_api.so", "win/steam_api64.dll", "win/steam_api.dll"):
@@ -197,6 +224,27 @@ download_game 123 "$TEST_GAME" Test
 ''')
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("provisioning complete", result.stdout)
+
+    def test_default_download_never_falls_back_to_a_client(self):
+        with zipfile.ZipFile(self.base / "manifest.zip", "w") as archive:
+            archive.writestr("123_1.manifest", bytes.fromhex("d017f671"))
+        downloader = self.base / "downloader"
+        downloader.write_text("#!/usr/bin/env bash\nexit 0\n")
+        downloader.chmod(0o755)
+        for missing in ("binary", "keys"):
+            with self.subTest(missing=missing):
+                self.env["TEST_MISSING"] = missing
+                result = self.run_shell('''
+resolve_depot_dl_bin() { [ "$TEST_MISSING" != binary ] && echo "$HOME/downloader"; }
+fetch_manifest() { echo "$HOME/manifest.zip"; }
+harvest_dlc_manifests() { :; }
+deploy_sls_manifest() { touch "$HOME/unexpected-client"; }
+trigger_steam_install() { touch "$HOME/unexpected-client"; }
+download_game 123 "$TEST_GAME" Test
+''')
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse((self.base / "unexpected-client").exists())
+                self.assertNotIn("[SUCCESS]", result.stdout)
 
     def test_tracking_survives_until_the_game_exits(self):
         self.library.unlink()

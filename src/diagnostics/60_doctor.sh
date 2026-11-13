@@ -38,21 +38,18 @@ doctor_audit() {
         warn_cnt=$((warn_cnt + 1))
     fi
 
-    # Layer 2: Python Runtime & YAML Engine
+    # YAML belongs to the optional Steam bridge, not standalone readiness.
     echo
-    echo "  ${UI_PURPLE}[LAYER 2] Python Runtime & YAML Engine${UI_RST}"
+    echo "  ${UI_PURPLE}[LAYER 2] Python Runtime${UI_RST}"
     if command -v python3 >/dev/null 2>&1; then
         echo "    • $(printf '%-10s' "python3") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(python3 --version 2>&1))${UI_RST}"
         pass_cnt=$((pass_cnt + 1))
         if python3 -c "import ruamel.yaml" 2>/dev/null; then
-            echo "    • $(printf '%-10s' "YAML") : ${UI_GREEN}[READY]${UI_RST} ruamel.yaml (Preserves SLSsteam layout)"
-            pass_cnt=$((pass_cnt + 1))
+            echo "    • $(printf '%-10s' "YAML") : ${UI_DIM}[OPTIONAL]${UI_RST} ruamel.yaml available for explicit Steam bridge commands"
         elif python3 -c "import yaml" 2>/dev/null; then
-            echo "    • $(printf '%-10s' "YAML") : ${UI_GREEN}[READY]${UI_RST} PyYAML fallback installed"
-            pass_cnt=$((pass_cnt + 1))
+            echo "    • $(printf '%-10s' "YAML") : ${UI_DIM}[OPTIONAL]${UI_RST} PyYAML available for explicit Steam bridge commands"
         else
-            echo "    • $(printf '%-10s' "YAML") : ${UI_AMBER}[WARN]${UI_RST} Neither ruamel.yaml nor pyyaml found"
-            warn_cnt=$((warn_cnt + 1))
+            echo "    • $(printf '%-10s' "YAML") : ${UI_DIM}[OPTIONAL]${UI_RST} Not installed; standalone operation does not require YAML"
         fi
     else
         echo "    • $(printf '%-10s' "python3") : ${UI_RED}[MISSING]${UI_RST} Python 3 runtime not found"

@@ -1,5 +1,7 @@
 # FORENSIC POSTMORTEM: THE "PURCHASE" BLUNDER & STANDALONE ARCHITECTURE RATIFICATION
 
+Historical incident record. Follow [the current project purpose](SOVEREIGN_ORIGINAL_PURPOSE.md) and current source/tests. Code snippets, size heuristics, and success claims below describe past implementations and must not be copied as current launch or provisioning rules.
+
 - **Incident ID**: INC-2026-11-07-PURCHASE-BLUNDER
 - **Target Repository**: `gamectl` (CLI & Runner Framework)
 - **Status**: RESOLVED & ARCHITECTURALLY RATIFIED

@@ -7,6 +7,7 @@ All notable changes to `gamectl` are documented in this file according to [Keep 
 ## [Unreleased]
 
 ### Fixed
+- Make the standalone project purpose authoritative, remove unsupported readiness/performance claims, and stop treating optional bridge YAML or Steam lock cleanup as standalone requirements.
 - Keep GBE injection and OnlineFix setup offline by default; Steam synchronization requires an explicit bridge action or `inject --all`.
 - Preserve original libraries on injection failures, verify installed template bytes before launch, and propagate standalone provisioning errors.
 - Keep game tracking and process scopes active until the launched process exits.
