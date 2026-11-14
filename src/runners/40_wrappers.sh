@@ -1309,7 +1309,18 @@ configure_global() {
             lt_status="Active ($u_name)"
         fi
 
-        validate_tui_fields "$p_name" "$p_id" "$r_host" "$lt_status" || return 1
+        local hc_status="Not Configured"
+        local hc_key
+        hc_key=$(get_hubcap_api_key 2>/dev/null || true)
+        if [ -n "$hc_key" ]; then
+            if [ ${#hc_key} -gt 8 ]; then
+                hc_status="Active (${hc_key:0:4}...${hc_key: -4})"
+            else
+                hc_status="Active"
+            fi
+        fi
+
+        validate_tui_fields "$p_name" "$p_id" "$r_host" "$lt_status" "$hc_status" || return 1
         local menu_entries
         menu_entries=$(cat <<EOF
 1	Global LAN Persona	Name: $p_name | SteamID: ${p_id:-Auto}
@@ -1317,7 +1328,8 @@ configure_global() {
 3	Custom Game Libraries	$lib_count paths registered
 4	Remote Companion Host	$r_host
 5	LuaTools Provider Session	$lt_status
-6	Return to Master Dashboard Hub	Return
+6	Hubcap Manifest API Key	$hc_status
+7	Return to Master Dashboard Hub	Return
 EOF
 )
 
@@ -1492,6 +1504,29 @@ EOF
                 login_luatools_interactive || return $?
                 ;;
             6)
+                flush_tty_input
+                local in_hc_raw rc=0
+                in_hc_raw=$(: | fzf \
+                    --print-query \
+                    --border-label="  ╢ Hubcap Manifest API Key ╟  " \
+                    --border-label-pos=2 \
+                    --header="Enter Hubcap API key (prefix 'smm_') or '-' to clear (Current: $hc_status │ Enter: Save │ Esc: Cancel)" \
+                    --prompt="Hubcap Key > " \
+                    --height=20% \
+                    --reverse 2>/dev/null) || rc=$?
+                check_fzf_status "$rc" || return $?
+                [ "$rc" -eq 130 ] && continue
+                local new_hckey
+                new_hckey=$(echo "$in_hc_raw" | head -n 1 | tr -d '[:space:]')
+                if [ "$new_hckey" = "-" ]; then
+                    set_config_value "hubcap_api_key" ""
+                    log_msg "INFO" "CONFIG" "Cleared Hubcap Manifest API key"
+                elif [ -n "$new_hckey" ]; then
+                    set_config_value "hubcap_api_key" "$new_hckey"
+                    log_msg "INFO" "CONFIG" "Saved Hubcap Manifest API key (${new_hckey:0:4}...)"
+                fi
+                ;;
+            7)
                 break
                 ;;
             0|q|Q|cancel)

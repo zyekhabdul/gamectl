@@ -2,7 +2,7 @@
 export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive preview_search_game preview_download get_depot_dl_progress preview_log_entry preview_process_log preview_adopt_candidate manage_game_fixes_interactive preview_fix_entry
 
 export -f require_tui check_fzf_status validate_tui_fields store_search_items tui_exec_action login_luatools_interactive
-export -f is_gbe_library install_gbe_library
+export -f is_gbe_library install_gbe_library get_config_value set_config_value get_hubcap_api_key
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -123,7 +123,18 @@ case "${1:-}" in
         library_menu true
         ;;
     config|config-global|configure)
-        configure_global
+        if [ "${2:-}" = "set" ] && [ -n "${3:-}" ]; then
+            set_config_value "$3" "${4:-}"
+            echo "[SUCCESS] Configuration updated: $3=${4:-}"
+        elif [ "${2:-}" = "get" ] && [ -n "${3:-}" ]; then
+            get_config_value "$3" "${4:-}"
+        elif [ "${2:-}" = "list" ] || [ "${2:-}" = "show" ]; then
+            if [ -f "$HOME/.config/gamectl/config" ]; then
+                cat "$HOME/.config/gamectl/config"
+            fi
+        else
+            configure_global
+        fi
         ;;
     doctor|audit)
         doctor_audit
@@ -420,7 +431,8 @@ gamectl - Sovereign TUI Game Manager & Launcher (Zero-Bloat)
 Usage:
   gamectl [menu]      Open Master Dashboard Hub TUI (alias: dashboard)
   gamectl library     Open Game Library TUI directly (alias: list-ui)
-  gamectl config      Open global configuration menu (~/.config/gamectl/) (alias: configure)
+  gamectl config [set <k> <v>|get <k>|list]
+                      Open global configuration menu or read/write settings (~/.config/gamectl/config)
   gamectl doctor      Run 7-layer system & GPU health diagnostics (alias: audit)
   gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread] [--scope|--no-scope] [--prime|--no-prime] [--sandbox|--no-sandbox]
                       Launch game with isolated prefix and runtime wrapper options
@@ -432,7 +444,7 @@ Usage:
   gamectl download-status
                       Display active download tasks across Steam & Standalone engines
   gamectl fetch-manifest <appid> [dest] [source]
-                      Harvest manifest archive across Ryuu/Sushi/LuaTools providers
+                      Harvest manifest archive across Hubcap/Ryuu/Sushi/LuaTools providers
   gamectl auth-status Display current LuaTools authentication session & auto-refresh status
   gamectl login-luatools <code|token|file>
                       Authenticate standalone LuaTools provider (6-char code, refresh token, or json)

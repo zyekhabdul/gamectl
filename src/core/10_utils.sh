@@ -1152,3 +1152,62 @@ cli_unpack_stub() {
         return 1
     fi
 }
+
+# Read a configuration key from ~/.config/gamectl/config
+get_config_value() {
+    local key="$1"
+    local default_val="${2:-}"
+    local cfg_file="$HOME/.config/gamectl/config"
+    [ -f "$cfg_file" ] || { echo "$default_val"; return 0; }
+    local val
+    val=$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$cfg_file" 2>/dev/null | tail -n 1 | sed -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//" | tr -d '\r')
+    if [ -z "$val" ] && [ "$key" = "hubcap_key" ]; then
+        val=$(grep -E "^[[:space:]]*hubcap_api_key[[:space:]]*=" "$cfg_file" 2>/dev/null | tail -n 1 | sed -E "s/^[[:space:]]*hubcap_api_key[[:space:]]*=[[:space:]]*//" | tr -d '\r')
+    elif [ -z "$val" ] && [ "$key" = "hubcap_api_key" ]; then
+        val=$(grep -E "^[[:space:]]*hubcap_key[[:space:]]*=" "$cfg_file" 2>/dev/null | tail -n 1 | sed -E "s/^[[:space:]]*hubcap_key[[:space:]]*=[[:space:]]*//" | tr -d '\r')
+    fi
+    if [ -n "$val" ]; then
+        echo "$val"
+    else
+        echo "$default_val"
+    fi
+}
+
+# Write or update a configuration key in ~/.config/gamectl/config
+set_config_value() {
+    local key="$1"
+    local val="$2"
+    [ "$key" = "hubcap_key" ] && key="hubcap_api_key"
+    local cfg_dir="$HOME/.config/gamectl"
+    local cfg_file="$cfg_dir/config"
+    mkdir -p "$cfg_dir"
+    [ -f "$cfg_file" ] || touch "$cfg_file"
+    if grep -q -E "^[[:space:]]*${key}[[:space:]]*=" "$cfg_file" 2>/dev/null; then
+        sed -i -E "s|^[[:space:]]*${key}[[:space:]]*=.*|${key}=${val}|" "$cfg_file"
+    else
+        echo "${key}=${val}" >> "$cfg_file"
+    fi
+}
+
+# Resolve Hubcap Manifest API key across environment, config file, and legacy stash
+get_hubcap_api_key() {
+    if [ -n "${HUBCAP_API_KEY:-}" ]; then
+        echo "$HUBCAP_API_KEY"
+        return 0
+    elif [ -n "${HUBCAP_KEY:-}" ]; then
+        echo "$HUBCAP_KEY"
+        return 0
+    fi
+
+    local key
+    key=$(get_config_value "hubcap_api_key")
+    if [ -z "$key" ]; then
+        key=$(get_config_value "hubcap_key")
+    fi
+
+    if [ -z "$key" ] && [ -f "$HOME/.config/gamectl/hubcap_api_key" ]; then
+        key=$(head -n 1 "$HOME/.config/gamectl/hubcap_api_key" 2>/dev/null | tr -d '[:space:]')
+    fi
+
+    echo "$key"
+}

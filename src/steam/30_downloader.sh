@@ -656,7 +656,20 @@ fetch_manifest() {
     src_headers[src_count]=""
     src_count=$((src_count + 1))
 
-    # Source 2: Ryuu direct mirror
+    # Source 2: Hubcap Manifest REST API (Community Discord key-gated database)
+    local hubcap_key
+    hubcap_key=$(get_hubcap_api_key 2>/dev/null || true)
+    if [ -n "$hubcap_key" ]; then
+        src_names[src_count]="Hubcap"
+        src_urls[src_count]="https://hubcapmanifest.com/api/v1/manifest/${appid}"
+        src_headers[src_count]="Authorization: Bearer $hubcap_key"
+        src_count=$((src_count + 1))
+    elif [ "${pref_source,,}" = "hubcap" ]; then
+        echo "[ERROR] Hubcap API key is not configured. Run 'gamectl config set hubcap_key <smm_key>' and retry." >&2
+        return 1
+    fi
+
+    # Source 3: Ryuu direct mirror
     src_names[src_count]="Ryuu"
     src_urls[src_count]="http://167.235.229.108/${appid}"
     src_headers[src_count]=""
@@ -745,6 +758,10 @@ fetch_manifest() {
         return 0
     else
         echo "[ERROR] Manifest archive for AppID $appid not found across available providers." >&2
+        if [ -z "$hubcap_key" ]; then
+            echo "[NOTE] Hubcap provider was skipped (no API key configured)." >&2
+            echo "[NOTE] To configure Hubcap key: run 'gamectl config set hubcap_key smm_...' or open Master Dashboard -> Global Settings." >&2
+        fi
         local token
         token=$(get_valid_luatools_token 2>/dev/null || true)
         if [ -z "$token" ]; then
