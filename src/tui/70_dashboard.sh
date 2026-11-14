@@ -1293,15 +1293,16 @@ search_steam() {
     while true; do
         flush_tty_input
         local fzf_out fzf_rc=0
+        local fzf_header="STEAM CATALOG (Enter: Actions │ Ctrl-F: New Search │ Esc: Dashboard)\n[INFO] Filter bar below filters current list. Press Ctrl-F to search a new game."
         fzf_out=$(echo -n "$results" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
-            --expect=ctrl-a,ctrl-u,ctrl-s,ctrl-d \
-            --bind="ctrl-a:accept,ctrl-u:accept,ctrl-s:accept,ctrl-d:accept" \
+            --expect=ctrl-a,ctrl-u,ctrl-s,ctrl-d,ctrl-f \
+            --bind="ctrl-a:accept,ctrl-u:accept,ctrl-s:accept,ctrl-d:accept,ctrl-f:accept" \
             --border-label="  ╢ gamectl :: Steam Store Catalog ╟  " \
             --border-label-pos=2 \
-            --header="STEAM CATALOG (Enter: Actions │ Ctrl-A: All-in-One │ Ctrl-U: Entitle │ Ctrl-S: Standalone │ Esc: Back)" \
-            --prompt="Steam Store > " \
+            --header="$fzf_header" \
+            --prompt="Filter Results > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview-search {1} {2} {3}' \
             --preview-window=right:52%:border-rounded:wrap \
         ) || fzf_rc=$?
@@ -1316,6 +1317,46 @@ search_steam() {
         local trigger_key selection
         trigger_key=$(echo "$fzf_out" | sed -n '1p')
         selection=$(echo "$fzf_out" | sed -n '2,$p')
+
+        if [ "$trigger_key" = "ctrl-f" ]; then
+            local new_query_raw="" new_fzf_rc=0
+            new_query_raw=$(: | fzf \
+                --print-query \
+                --border-label="  ╢ gamectl :: Steam Store Search ╟  " \
+                --border-label-pos=2 \
+                --header="Type game title to search (Enter: Search │ Esc: Keep Current List)" \
+                --prompt="Search Store > " \
+                --height=20% \
+                --reverse 2>/dev/null) || new_fzf_rc=$?
+
+            if [ "$new_fzf_rc" -eq 130 ]; then
+                continue
+            fi
+            local new_q
+            new_q=$(echo "$new_query_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            if [ -z "$new_q" ]; then
+                continue
+            fi
+
+            log_msg "INFO" "STORE" "Searching '$new_q' on Steam Store API..."
+            local new_encoded_query
+            new_encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$new_q")
+            local new_raw_results
+            new_raw_results=$(curl -s --connect-timeout 5 "https://store.steampowered.com/api/storesearch/?term=${new_encoded_query}&l=english&cc=US" 2>/dev/null)
+            local new_items
+            new_items=$(printf '%s' "$new_raw_results" | store_search_items) || true
+
+            if [ -z "$new_items" ]; then
+                log_msg "WARN" "STORE" "Game '$new_q' not found on Steam Store API."
+                tui_modal_notice "Steam Store Search" "Game '$new_q' was not found on Steam Store." || true
+                continue
+            fi
+
+            query="$new_q"
+            items="$new_items"
+            _refresh_search_results
+            continue
+        fi
 
         [ -z "$selection" ] && continue
 
