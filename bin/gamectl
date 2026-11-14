@@ -2969,12 +2969,13 @@ login_luatools_interactive() {
 
         local lt_menu
         lt_menu=$(cat <<EOF
-1	Login with 6-Character Code	Redeem pairing code from https://lua.tools or Discord /login
-2	Login with Refresh Token	Paste raw refresh token / JWT string
-3	Import session.json File	Import from Lumen or existing backup file
-4	Clear Session / Logout	Remove saved session and deactivate provider
-5	Check Session Status	View detailed token lifetime & active identity
-6	Return / Cancel	Back
+1	Login via Discord (/login)	Join discord.gg/luatools -> type /login in bot chat -> enter 6-char code
+2	Auto-Detect & Sync from Lumen	Import active session from Lumen client directory (~/.local/share/Lumen)
+3	Open Discord Server in Browser	Launch https://discord.gg/luatools in default browser
+4	Advanced: Manual Token / File	Paste refresh token or import custom JSON session file
+5	Clear Session / Logout	Remove active session and deactivate provider
+6	Check Session Status	View identity, token lifetime & provider health
+7	Return / Back	Back
 EOF
 )
 
@@ -2985,9 +2986,9 @@ EOF
             --with-nth=2,3 \
             --border-label="  ╢ LuaTools Session Auth :: $status_desc ╟  " \
             --border-label-pos=2 \
-            --header="LUATOOLS CONFIGURATION (Enter: Select │ Esc: Return)" \
+            --header="LUATOOLS DISCORD AUTH (Enter: Select │ Esc: Return)" \
             --prompt="LuaTools > " \
-            --height=40% \
+            --height=45% \
             --reverse 2>/dev/null) || rc=$?
 
         check_fzf_status "$rc" || return $?
@@ -3003,59 +3004,106 @@ EOF
                 local code_raw c_rc=0
                 code_raw=$(: | fzf \
                     --print-query \
-                    --border-label="  ╢ LuaTools 6-Character Pairing Code ╟  " \
+                    --border-label="  ╢ Discord Bot Login (/login) ╟  " \
                     --border-label-pos=2 \
-                    --header="Enter 6-character code (Enter: Redeem │ Esc: Cancel)" \
+                    --header=$'1. Di server Discord (discord.gg/luatools), ketik: /login di #bot-spam\n2. Masukkan 6-karakter kode bot di bawah (atau ketik "open" untuk buka Discord):' \
                     --prompt="Code > " \
-                    --height=20% \
+                    --height=25% \
                     --reverse 2>/dev/null) || c_rc=$?
                 check_fzf_status "$c_rc" || return $?
                 [ "$c_rc" -eq 130 ] && continue
                 local code
                 code=$(echo "$code_raw" | head -n 1 | tr -d '[:space:]')
+                if [ "${code,,}" = "open" ]; then
+                    xdg-open "https://discord.gg/luatools" 2>/dev/null || sensible-browser "https://discord.gg/luatools" 2>/dev/null || true
+                    continue
+                fi
                 if [ -n "$code" ]; then
-                    tui_exec_action "LuaTools Code Redeem" login_luatools "$code"
+                    tui_exec_action "LuaTools Discord Code Redeem" login_luatools "$code"
                 fi
                 ;;
             2)
-                flush_tty_input
-                local tok_raw t_rc=0
-                tok_raw=$(: | fzf \
-                    --print-query \
-                    --border-label="  ╢ LuaTools Refresh Token ╟  " \
-                    --border-label-pos=2 \
-                    --header="Paste refresh token string (Enter: Submit │ Esc: Cancel)" \
-                    --prompt="Token > " \
-                    --height=20% \
-                    --reverse 2>/dev/null) || t_rc=$?
-                check_fzf_status "$t_rc" || return $?
-                [ "$t_rc" -eq 130 ] && continue
-                local tok
-                tok=$(echo "$tok_raw" | head -n 1 | tr -d '[:space:]')
-                if [ -n "$tok" ]; then
-                    tui_exec_action "LuaTools Token Exchange" login_luatools "$tok"
+                local lumen_candidates=(
+                    "${XDG_DATA_HOME:-$HOME/.local/share}/Lumen/luatools/backend/data/lua_tools_auth.json"
+                    "$HOME/.config/Lumen/luatools/backend/data/lua_tools_auth.json"
+                    "$HOME/.local/share/Lumen/backend/data/lua_tools_auth.json"
+                    "$HOME/.config/Lumen/backend/data/lua_tools_auth.json"
+                )
+                local found_lumen=""
+                for cand in "${lumen_candidates[@]}"; do
+                    if [ -f "$cand" ]; then
+                        found_lumen="$cand"
+                        break
+                    fi
+                done
+                if [ -n "$found_lumen" ]; then
+                    tui_exec_action "Import Lumen Session" login_luatools "$found_lumen"
+                else
+                    tui_modal_notice "Lumen Auto-Sync" "No Lumen session file found on this system.\nUse Option 1 to login with Discord /login code."
                 fi
                 ;;
             3)
-                flush_tty_input
-                local file_raw f_rc=0
-                file_raw=$(: | fzf \
-                    --print-query \
-                    --border-label="  ╢ Import session.json File ╟  " \
-                    --border-label-pos=2 \
-                    --header="Enter filesystem path to session.json (Enter: Import │ Esc: Cancel)" \
-                    --prompt="File Path > " \
-                    --height=20% \
-                    --reverse 2>/dev/null) || f_rc=$?
-                check_fzf_status "$f_rc" || return $?
-                [ "$f_rc" -eq 130 ] && continue
-                local fpath
-                fpath=$(echo "$file_raw" | head -n 1 | tr -d '[:space:]')
-                if [ -n "$fpath" ]; then
-                    tui_exec_action "Import LuaTools Session" login_luatools "$fpath"
-                fi
+                xdg-open "https://discord.gg/luatools" 2>/dev/null || sensible-browser "https://discord.gg/luatools" 2>/dev/null || true
+                tui_modal_notice "Discord Server" "Opened https://discord.gg/luatools in your default browser.\nType /login in #bot-spam or any bot channel to get your 6-character code."
                 ;;
             4)
+                local adv_menu
+                adv_menu=$(cat <<EOF
+1	Login with Refresh Token	Paste raw refresh token / JWT string
+2	Import session.json File	Specify custom filesystem path to session.json
+3	Back	Return
+EOF
+)
+                flush_tty_input
+                local a_sel a_rc=0
+                a_sel=$(echo "$adv_menu" | fzf \
+                    --delimiter=$'\t' \
+                    --with-nth=2 \
+                    --border-label="  ╢ Advanced Authentication ╟  " \
+                    --border-label-pos=2 \
+                    --header="MANUAL AUTH (Enter: Select │ Esc: Return)" \
+                    --prompt="Manual > " \
+                    --height=30% \
+                    --reverse 2>/dev/null) || a_rc=$?
+                check_fzf_status "$a_rc" || return $?
+                [ "$a_rc" -eq 130 ] && continue
+                local a_opt
+                a_opt=$(echo "$a_sel" | cut -f1 | tr -d '[:space:]')
+                if [ "$a_opt" = "1" ]; then
+                    flush_tty_input
+                    local tok_raw t_rc=0
+                    tok_raw=$(: | fzf \
+                        --print-query \
+                        --border-label="  ╢ LuaTools Refresh Token ╟  " \
+                        --border-label-pos=2 \
+                        --header="Paste refresh token string (Enter: Submit │ Esc: Cancel)" \
+                        --prompt="Token > " \
+                        --height=20% \
+                        --reverse 2>/dev/null) || t_rc=$?
+                    check_fzf_status "$t_rc" || return $?
+                    [ "$t_rc" -eq 130 ] && continue
+                    local tok
+                    tok=$(echo "$tok_raw" | head -n 1 | tr -d '[:space:]')
+                    [ -n "$tok" ] && tui_exec_action "LuaTools Token Exchange" login_luatools "$tok"
+                elif [ "$a_opt" = "2" ]; then
+                    flush_tty_input
+                    local file_raw f_rc=0
+                    file_raw=$(: | fzf \
+                        --print-query \
+                        --border-label="  ╢ Import session.json File ╟  " \
+                        --border-label-pos=2 \
+                        --header="Enter filesystem path to session.json (Enter: Import │ Esc: Cancel)" \
+                        --prompt="File Path > " \
+                        --height=20% \
+                        --reverse 2>/dev/null) || f_rc=$?
+                    check_fzf_status "$f_rc" || return $?
+                    [ "$f_rc" -eq 130 ] && continue
+                    local fpath
+                    fpath=$(echo "$file_raw" | head -n 1 | tr -d '[:space:]')
+                    [ -n "$fpath" ] && tui_exec_action "Import LuaTools Session" login_luatools "$fpath"
+                fi
+                ;;
+            5)
                 if [ -f "$cfg_auth" ]; then
                     rm -f "$cfg_auth"
                     tui_modal_notice "LuaTools Session" "Session file removed from ~/.config/gamectl/lua_tools_auth.json.\nLuaTools provider is now deactivated."
@@ -3063,10 +3111,10 @@ EOF
                     tui_modal_notice "LuaTools Session" "No active session file found in ~/.config/gamectl/lua_tools_auth.json."
                 fi
                 ;;
-            5)
+            6)
                 tui_exec_action "LuaTools Session Status" luatools_status
                 ;;
-            6|*)
+            7|*)
                 break
                 ;;
         esac
