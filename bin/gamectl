@@ -362,6 +362,7 @@ GAMECTL_IN_ALT_SCREEN=0
 enter_tui_screen() {
     if [ -t 1 ] && [ "${TERM:-}" != "dumb" ] && [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 0 ]; then
         tput smcup 2>/dev/null || printf '\033[?1049h'
+        printf '\033[2J\033[H' 2>/dev/null || true
         GAMECTL_IN_ALT_SCREEN=1
         trap 'trap - EXIT INT TERM; exit_tui_screen; exit' EXIT INT TERM
     fi
@@ -370,7 +371,10 @@ enter_tui_screen() {
 
 exit_tui_screen() {
     if [ -t 1 ] && [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 1 ]; then
+        printf '\033[2J\033[H' 2>/dev/null || true
         tput rmcup 2>/dev/null || printf '\033[?1049l'
+        tput cnorm 2>/dev/null || printf '\033[?25h'
+        stty echo icanon 2>/dev/null || true
         GAMECTL_IN_ALT_SCREEN=0
     fi
     return 0
@@ -399,6 +403,48 @@ tui_modal_notice() {
         --reverse 2>/dev/null || fzf_rc=$?
     check_fzf_status "$fzf_rc" || return $?
     return 0
+}
+
+# Execute command with captured TUI review screen (Zero Raw Leaks)
+tui_exec_action() {
+    local action_title="$1"
+    shift
+    local cmd=("$@")
+
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        "${cmd[@]}"
+        return $?
+    fi
+
+    local run_dir
+    run_dir="$(get_runtime_dir)"
+    local tmp_log="$run_dir/action_review_$$.log"
+    : > "$tmp_log"
+
+    echo "[INFO] Running: $action_title..." > "$tmp_log"
+    local rc=0
+    "${cmd[@]}" >> "$tmp_log" 2>&1 || rc=$?
+
+    local status_token="${UI_GREEN}[SUCCESS]${UI_RST}"
+    [ "$rc" -ne 0 ] && status_token="${UI_RED}[FAILED (Exit $rc)]${UI_RST}"
+
+    flush_tty_input
+    if command -v fzf >/dev/null 2>&1; then
+        local fzf_rc=0
+        fzf \
+            --border-label="  ╢ Result: $action_title :: $status_token ╟  " \
+            --border-label-pos=2 \
+            --header="ACTION EXECUTION REVIEW (Arrows: Scroll │ Esc / Enter: Return to Dashboard)" \
+            --prompt="Review > " \
+            --preview="printf '\033[38;5;60m╭─ EXECUTION TRACE ───────────────────────────────────╮\033[0m\n'; cat '$tmp_log'; printf '\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n'" \
+            --preview-window=down:75%:border-rounded:wrap \
+            --height=85% \
+            --reverse < "$tmp_log" >/dev/null 2>&1 || fzf_rc=$?
+    fi
+
+    rm -f "$tmp_log" 2>/dev/null || true
+    flush_tty_input
+    return "$rc"
 }
 
 require_tui() {
@@ -10185,26 +10231,26 @@ search_steam() {
         if [ "$trigger_key" = "ctrl-a" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Injecting standalone GBE for $sel_name ($sel_id)"
-                inject_game "$gdir" "$sel_id"
+                tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$gdir" "$sel_id"
             else
-                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Starting All-in-One Background Download for $sel_name ($target_os)"
-                download_game "$sel_id" "$dest_dir" "$sel_name" --all --background --os "$target_os"
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Starting All-in-One Download for $sel_name ($target_os)"
+                tui_exec_action "All-in-One Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
             fi
         elif [ "$trigger_key" = "ctrl-u" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-U>: Synchronizing Steam Entitlement & ACF for $sel_name ($sel_id)"
-                sync_steam "$sel_id" "$sel_name" "$gdir"
+                tui_exec_action "Synchronize Steam Entitlement ($sel_name)" sync_steam "$sel_id" "$sel_name" "$gdir"
             else
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-U>: Adopting Steam Entitlement & ACF for $sel_name ($sel_id)"
-                unlock_game "$sel_id" "$sel_name"
+                tui_exec_action "Adopt Steam Entitlement ($sel_name)" unlock_game "$sel_id" "$sel_name"
             fi
         elif [ "$trigger_key" = "ctrl-s" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Injecting Standalone GBE Fork for $sel_name ($sel_id)"
-                inject_game "$gdir" "$sel_id" --no-sync
+                tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$gdir" "$sel_id" --no-sync
             else
-                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Starting Standalone Background Download for $sel_name ($target_os)"
-                download_game "$sel_id" "$dest_dir" "$sel_name" --inject-only --background --os "$target_os"
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Starting Standalone Download for $sel_name ($target_os)"
+                tui_exec_action "Standalone Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --inject-only --os "$target_os"
             fi
         elif [ "$trigger_key" = "ctrl-d" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
@@ -10222,8 +10268,8 @@ search_steam() {
                     tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir" || return $?
                 fi
             else
-                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-D>: Starting All-in-One Live Stream Download for $sel_name ($target_os)"
-                download_game "$sel_id" "$dest_dir" "$sel_name" --all --foreground --os "$target_os"
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-D>: Starting Live Stream Download for $sel_name ($target_os)"
+                tui_exec_action "Live Stream Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
             fi
         else
             # Enter key: Open Modal Action Palette
@@ -10271,13 +10317,13 @@ EOF
                         fi
                         ;;
                     2)
-                        inject_game "$gdir" "$sel_id" --no-sync
+                        tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$gdir" "$sel_id" --no-sync
                         ;;
                     3)
-                        inject_game "$gdir" "$sel_id" --all
+                        tui_exec_action "Inject GBE + Steam Sync ($sel_name)" inject_game "$gdir" "$sel_id" --all
                         ;;
                     4)
-                        sync_steam "$sel_id" "$sel_name" "$gdir"
+                        tui_exec_action "Synchronize Steam Entitlement ($sel_name)" sync_steam "$sel_id" "$sel_name" "$gdir"
                         ;;
                     5)
                         manage_game_fixes_interactive "$sel_id" "$sel_name" "$gdir" || return $?
@@ -10312,13 +10358,13 @@ EOF
                 opt=$(echo "$pkg_sel" | awk -F'\t' '{print $1}')
                 case "$opt" in
                     1)
-                        download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
+                        tui_exec_action "Sovereign Standalone Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
                         ;;
                     2)
-                        unlock_game "$sel_id" "$sel_name"
+                        tui_exec_action "Adopt Steam Entitlement ($sel_name)" unlock_game "$sel_id" "$sel_name"
                         ;;
                     3)
-                        inject_game "$dest_dir" "$sel_id" --no-sync
+                        tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$dest_dir" "$sel_id" --no-sync
                         ;;
                     4)
                         manage_game_fixes_interactive "$sel_id" "$sel_name" "" || return $?
@@ -10341,7 +10387,7 @@ EOF
 # Export functions for subshells in fzf
 export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive preview_search_game preview_download get_depot_dl_progress preview_log_entry preview_process_log preview_adopt_candidate manage_game_fixes_interactive preview_fix_entry
 
-export -f require_tui check_fzf_status validate_tui_fields store_search_items
+export -f require_tui check_fzf_status validate_tui_fields store_search_items tui_exec_action
 export -f is_gbe_library install_gbe_library
 
 # Top-level Menu

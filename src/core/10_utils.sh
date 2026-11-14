@@ -304,6 +304,7 @@ GAMECTL_IN_ALT_SCREEN=0
 enter_tui_screen() {
     if [ -t 1 ] && [ "${TERM:-}" != "dumb" ] && [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 0 ]; then
         tput smcup 2>/dev/null || printf '\033[?1049h'
+        printf '\033[2J\033[H' 2>/dev/null || true
         GAMECTL_IN_ALT_SCREEN=1
         trap 'trap - EXIT INT TERM; exit_tui_screen; exit' EXIT INT TERM
     fi
@@ -312,7 +313,10 @@ enter_tui_screen() {
 
 exit_tui_screen() {
     if [ -t 1 ] && [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 1 ]; then
+        printf '\033[2J\033[H' 2>/dev/null || true
         tput rmcup 2>/dev/null || printf '\033[?1049l'
+        tput cnorm 2>/dev/null || printf '\033[?25h'
+        stty echo icanon 2>/dev/null || true
         GAMECTL_IN_ALT_SCREEN=0
     fi
     return 0
@@ -341,6 +345,48 @@ tui_modal_notice() {
         --reverse 2>/dev/null || fzf_rc=$?
     check_fzf_status "$fzf_rc" || return $?
     return 0
+}
+
+# Execute command with captured TUI review screen (Zero Raw Leaks)
+tui_exec_action() {
+    local action_title="$1"
+    shift
+    local cmd=("$@")
+
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        "${cmd[@]}"
+        return $?
+    fi
+
+    local run_dir
+    run_dir="$(get_runtime_dir)"
+    local tmp_log="$run_dir/action_review_$$.log"
+    : > "$tmp_log"
+
+    echo "[INFO] Running: $action_title..." > "$tmp_log"
+    local rc=0
+    "${cmd[@]}" >> "$tmp_log" 2>&1 || rc=$?
+
+    local status_token="${UI_GREEN}[SUCCESS]${UI_RST}"
+    [ "$rc" -ne 0 ] && status_token="${UI_RED}[FAILED (Exit $rc)]${UI_RST}"
+
+    flush_tty_input
+    if command -v fzf >/dev/null 2>&1; then
+        local fzf_rc=0
+        fzf \
+            --border-label="  ╢ Result: $action_title :: $status_token ╟  " \
+            --border-label-pos=2 \
+            --header="ACTION EXECUTION REVIEW (Arrows: Scroll │ Esc / Enter: Return to Dashboard)" \
+            --prompt="Review > " \
+            --preview="printf '\033[38;5;60m╭─ EXECUTION TRACE ───────────────────────────────────╮\033[0m\n'; cat '$tmp_log'; printf '\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n'" \
+            --preview-window=down:75%:border-rounded:wrap \
+            --height=85% \
+            --reverse < "$tmp_log" >/dev/null 2>&1 || fzf_rc=$?
+    fi
+
+    rm -f "$tmp_log" 2>/dev/null || true
+    flush_tty_input
+    return "$rc"
 }
 
 require_tui() {

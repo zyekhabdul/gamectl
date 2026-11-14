@@ -1339,26 +1339,26 @@ search_steam() {
         if [ "$trigger_key" = "ctrl-a" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Injecting standalone GBE for $sel_name ($sel_id)"
-                inject_game "$gdir" "$sel_id"
+                tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$gdir" "$sel_id"
             else
-                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Starting All-in-One Background Download for $sel_name ($target_os)"
-                download_game "$sel_id" "$dest_dir" "$sel_name" --all --background --os "$target_os"
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Starting All-in-One Download for $sel_name ($target_os)"
+                tui_exec_action "All-in-One Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
             fi
         elif [ "$trigger_key" = "ctrl-u" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-U>: Synchronizing Steam Entitlement & ACF for $sel_name ($sel_id)"
-                sync_steam "$sel_id" "$sel_name" "$gdir"
+                tui_exec_action "Synchronize Steam Entitlement ($sel_name)" sync_steam "$sel_id" "$sel_name" "$gdir"
             else
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-U>: Adopting Steam Entitlement & ACF for $sel_name ($sel_id)"
-                unlock_game "$sel_id" "$sel_name"
+                tui_exec_action "Adopt Steam Entitlement ($sel_name)" unlock_game "$sel_id" "$sel_name"
             fi
         elif [ "$trigger_key" = "ctrl-s" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Injecting Standalone GBE Fork for $sel_name ($sel_id)"
-                inject_game "$gdir" "$sel_id" --no-sync
+                tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$gdir" "$sel_id" --no-sync
             else
-                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Starting Standalone Background Download for $sel_name ($target_os)"
-                download_game "$sel_id" "$dest_dir" "$sel_name" --inject-only --background --os "$target_os"
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Starting Standalone Download for $sel_name ($target_os)"
+                tui_exec_action "Standalone Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --inject-only --os "$target_os"
             fi
         elif [ "$trigger_key" = "ctrl-d" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
@@ -1376,8 +1376,8 @@ search_steam() {
                     tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir" || return $?
                 fi
             else
-                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-D>: Starting All-in-One Live Stream Download for $sel_name ($target_os)"
-                download_game "$sel_id" "$dest_dir" "$sel_name" --all --foreground --os "$target_os"
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-D>: Starting Live Stream Download for $sel_name ($target_os)"
+                tui_exec_action "Live Stream Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
             fi
         else
             # Enter key: Open Modal Action Palette
@@ -1425,13 +1425,13 @@ EOF
                         fi
                         ;;
                     2)
-                        inject_game "$gdir" "$sel_id" --no-sync
+                        tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$gdir" "$sel_id" --no-sync
                         ;;
                     3)
-                        inject_game "$gdir" "$sel_id" --all
+                        tui_exec_action "Inject GBE + Steam Sync ($sel_name)" inject_game "$gdir" "$sel_id" --all
                         ;;
                     4)
-                        sync_steam "$sel_id" "$sel_name" "$gdir"
+                        tui_exec_action "Synchronize Steam Entitlement ($sel_name)" sync_steam "$sel_id" "$sel_name" "$gdir"
                         ;;
                     5)
                         manage_game_fixes_interactive "$sel_id" "$sel_name" "$gdir" || return $?
@@ -1466,13 +1466,13 @@ EOF
                 opt=$(echo "$pkg_sel" | awk -F'\t' '{print $1}')
                 case "$opt" in
                     1)
-                        download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
+                        tui_exec_action "Sovereign Standalone Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
                         ;;
                     2)
-                        unlock_game "$sel_id" "$sel_name"
+                        tui_exec_action "Adopt Steam Entitlement ($sel_name)" unlock_game "$sel_id" "$sel_name"
                         ;;
                     3)
-                        inject_game "$dest_dir" "$sel_id" --no-sync
+                        tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$dest_dir" "$sel_id" --no-sync
                         ;;
                     4)
                         manage_game_fixes_interactive "$sel_id" "$sel_name" "" || return $?
