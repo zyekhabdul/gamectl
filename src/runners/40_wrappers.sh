@@ -1301,14 +1301,23 @@ configure_global() {
             [ -z "$r_host" ] && r_host="Not Configured"
         fi
 
-        validate_tui_fields "$p_name" "$p_id" "$r_host" || return 1
+        local lt_status="Not Configured"
+        local cfg_auth="$HOME/.config/gamectl/lua_tools_auth.json"
+        if [ -f "$cfg_auth" ]; then
+            local u_name
+            u_name=$(jq -r '.user.user_metadata.custom_claims.global_name // .user.user_metadata.full_name // .user.email // "Active"' "$cfg_auth" 2>/dev/null || echo "Active")
+            lt_status="Active ($u_name)"
+        fi
+
+        validate_tui_fields "$p_name" "$p_id" "$r_host" "$lt_status" || return 1
         local menu_entries
         menu_entries=$(cat <<EOF
 1	Global LAN Persona	Name: $p_name | SteamID: ${p_id:-Auto}
 2	Default Runtime Wrappers	$w_desc
 3	Custom Game Libraries	$lib_count paths registered
 4	Remote Companion Host	$r_host
-5	Return to Master Dashboard Hub	Return
+5	LuaTools Provider Session	$lt_status
+6	Return to Master Dashboard Hub	Return
 EOF
 )
 
@@ -1480,6 +1489,9 @@ EOF
                 fi
                 ;;
             5)
+                login_luatools_interactive || return $?
+                ;;
+            6)
                 break
                 ;;
             0|q|Q|cancel)

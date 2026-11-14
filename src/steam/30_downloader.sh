@@ -422,9 +422,130 @@ luatools_status() {
         fi
     else
         echo "[STATUS] LuaTools Session: NOT CONFIGURED"
-        echo "  • Public providers (Ryuu, Sushi) are ACTIVE (Zero login required)."
+        echo "  • Public providers (ManifestHub, Ryuu, Sushi) are ACTIVE (Zero login required)."
         echo "  • To unlock LuaTools provider: gamectl login-luatools <6-character-code | token>"
     fi
+}
+
+# Interactive TUI Wizard for LuaTools Authentication
+login_luatools_interactive() {
+    require_tui "LuaTools Authentication" || return $?
+
+    local cfg_auth="$HOME/.config/gamectl/lua_tools_auth.json"
+    mkdir -p "$HOME/.config/gamectl"
+
+    while true; do
+        local status_desc="Not Configured"
+        local user_name=""
+        if [ -f "$cfg_auth" ]; then
+            user_name=$(jq -r '.user.user_metadata.custom_claims.global_name // .user.user_metadata.full_name // .user.email // "Authenticated"' "$cfg_auth" 2>/dev/null || echo "Authenticated")
+            status_desc="ACTIVE ($user_name)"
+        fi
+
+        local lt_menu
+        lt_menu=$(cat <<EOF
+1	Login with 6-Character Code	Redeem pairing code from https://lua.tools or Discord /login
+2	Login with Refresh Token	Paste raw refresh token / JWT string
+3	Import session.json File	Import from Lumen or existing backup file
+4	Clear Session / Logout	Remove saved session and deactivate provider
+5	Check Session Status	View detailed token lifetime & active identity
+6	Return / Cancel	Back
+EOF
+)
+
+        flush_tty_input
+        local sel rc=0
+        sel=$(echo "$lt_menu" | fzf \
+            --delimiter=$'\t' \
+            --with-nth=2,3 \
+            --border-label="  ╢ LuaTools Session Auth :: $status_desc ╟  " \
+            --border-label-pos=2 \
+            --header="LUATOOLS CONFIGURATION (Enter: Select │ Esc: Return)" \
+            --prompt="LuaTools > " \
+            --height=40% \
+            --reverse 2>/dev/null) || rc=$?
+
+        check_fzf_status "$rc" || return $?
+        [ "$rc" -eq 130 ] && break
+        [ -z "$sel" ] && continue
+
+        local opt
+        opt=$(echo "$sel" | cut -f1 | tr -d '[:space:]')
+
+        case "$opt" in
+            1)
+                flush_tty_input
+                local code_raw c_rc=0
+                code_raw=$(: | fzf \
+                    --print-query \
+                    --border-label="  ╢ LuaTools 6-Character Pairing Code ╟  " \
+                    --border-label-pos=2 \
+                    --header="Enter 6-character code (Enter: Redeem │ Esc: Cancel)" \
+                    --prompt="Code > " \
+                    --height=20% \
+                    --reverse 2>/dev/null) || c_rc=$?
+                check_fzf_status "$c_rc" || return $?
+                [ "$c_rc" -eq 130 ] && continue
+                local code
+                code=$(echo "$code_raw" | head -n 1 | tr -d '[:space:]')
+                if [ -n "$code" ]; then
+                    tui_exec_action "LuaTools Code Redeem" login_luatools "$code"
+                fi
+                ;;
+            2)
+                flush_tty_input
+                local tok_raw t_rc=0
+                tok_raw=$(: | fzf \
+                    --print-query \
+                    --border-label="  ╢ LuaTools Refresh Token ╟  " \
+                    --border-label-pos=2 \
+                    --header="Paste refresh token string (Enter: Submit │ Esc: Cancel)" \
+                    --prompt="Token > " \
+                    --height=20% \
+                    --reverse 2>/dev/null) || t_rc=$?
+                check_fzf_status "$t_rc" || return $?
+                [ "$t_rc" -eq 130 ] && continue
+                local tok
+                tok=$(echo "$tok_raw" | head -n 1 | tr -d '[:space:]')
+                if [ -n "$tok" ]; then
+                    tui_exec_action "LuaTools Token Exchange" login_luatools "$tok"
+                fi
+                ;;
+            3)
+                flush_tty_input
+                local file_raw f_rc=0
+                file_raw=$(: | fzf \
+                    --print-query \
+                    --border-label="  ╢ Import session.json File ╟  " \
+                    --border-label-pos=2 \
+                    --header="Enter filesystem path to session.json (Enter: Import │ Esc: Cancel)" \
+                    --prompt="File Path > " \
+                    --height=20% \
+                    --reverse 2>/dev/null) || f_rc=$?
+                check_fzf_status "$f_rc" || return $?
+                [ "$f_rc" -eq 130 ] && continue
+                local fpath
+                fpath=$(echo "$file_raw" | head -n 1 | tr -d '[:space:]')
+                if [ -n "$fpath" ]; then
+                    tui_exec_action "Import LuaTools Session" login_luatools "$fpath"
+                fi
+                ;;
+            4)
+                if [ -f "$cfg_auth" ]; then
+                    rm -f "$cfg_auth"
+                    tui_modal_notice "LuaTools Session" "Session file removed from ~/.config/gamectl/lua_tools_auth.json.\nLuaTools provider is now deactivated."
+                else
+                    tui_modal_notice "LuaTools Session" "No active session file found in ~/.config/gamectl/lua_tools_auth.json."
+                fi
+                ;;
+            5)
+                tui_exec_action "LuaTools Session Status" luatools_status
+                ;;
+            6|*)
+                break
+                ;;
+        esac
+    done
 }
 
 # Multi-Provider Manifest & Key Harvester
@@ -576,6 +697,12 @@ fetch_manifest() {
         return 0
     else
         echo "[ERROR] Manifest archive for AppID $appid not found across available providers." >&2
+        local token
+        token=$(get_valid_luatools_token 2>/dev/null || true)
+        if [ -z "$token" ]; then
+            echo "[NOTE] LuaTools extended catalog was skipped (no active session)." >&2
+            echo "[NOTE] To authenticate with LuaTools: run 'gamectl login-luatools' or open Master Dashboard -> Global Settings -> LuaTools Session." >&2
+        fi
         return 1
     fi
 }
