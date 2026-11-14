@@ -964,21 +964,22 @@ EOF
         local sel_key
         sel_key=$(echo "$selection" | awk -F'\t' '{print $1}')
 
+        local sub_rc=0
         case "$sel_key" in
             1)
-                library_menu false || return $?
+                library_menu false || sub_rc=$?
                 ;;
             2)
-                search_steam "" false || return $?
+                search_steam "" false || sub_rc=$?
                 ;;
             3)
-                list_downloads_interactive || return $?
+                list_downloads_interactive || sub_rc=$?
                 ;;
             4)
-                unlock_interactive || return $?
+                unlock_interactive || sub_rc=$?
                 ;;
             5)
-                configure_global || return $?
+                configure_global || sub_rc=$?
                 ;;
             6)
                 flush_tty_input
@@ -992,15 +993,18 @@ EOF
                     --prompt="Audit > " \
                     --bind="q:abort" \
                     --reverse 2>/dev/null || audit_rc=$?
-                check_fzf_status "$audit_rc" || return $?
+                check_fzf_status "$audit_rc" || sub_rc=$?
                 ;;
             7)
-                view_logs_interactive || return $?
+                view_logs_interactive || sub_rc=$?
                 ;;
             *)
                 break
                 ;;
         esac
+        if [ "$sub_rc" -ne 0 ] && [ "$sub_rc" -ne 1 ] && [ "$sub_rc" -ne 130 ]; then
+            return "$sub_rc"
+        fi
         flush_tty_input
     done
     exit_tui_screen
@@ -1050,15 +1054,19 @@ library_menu() {
         selection=$(echo "$fzf_out" | sed -n '2p')
 
         # Global in-process hotkeys that do not require item selection
+        local hk_rc=0
         if [ "$trigger_key" = "ctrl-l" ]; then
-            view_logs_interactive || return $?
-            continue
+            view_logs_interactive || hk_rc=$?
         elif [ "$trigger_key" = "ctrl-f" ]; then
-            search_steam "" false || return $?
+            search_steam "" false || hk_rc=$?
             invalidate_scan_cache
-            continue
         elif [ "$trigger_key" = "ctrl-d" ]; then
-            list_downloads_interactive || return $?
+            list_downloads_interactive || hk_rc=$?
+        fi
+        if [ "$hk_rc" -ne 0 ] && [ "$hk_rc" -ne 1 ] && [ "$hk_rc" -ne 130 ]; then
+            return "$hk_rc"
+        fi
+        if [ "$trigger_key" = "ctrl-l" ] || [ "$trigger_key" = "ctrl-f" ] || [ "$trigger_key" = "ctrl-d" ]; then
             continue
         fi
 
