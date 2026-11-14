@@ -10506,7 +10506,7 @@ search_steam() {
     while true; do
         flush_tty_input
         local fzf_out fzf_rc=0
-        local fzf_header="STEAM CATALOG (Enter: Actions │ Ctrl-F: New Search │ Esc: Dashboard)\n[INFO] Filter bar below filters current list. Press Ctrl-F to search a new game."
+        local fzf_header=$'STEAM CATALOG (Enter: Actions │ Ctrl-F: New Search │ Esc: Dashboard)\n[INFO] Filter bar below filters current list. Press Ctrl-F to search a new game.'
         fzf_out=$(echo -n "$results" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
