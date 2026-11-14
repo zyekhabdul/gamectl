@@ -373,8 +373,6 @@ tui_exec_action() {
     echo "[INFO] Running: $action_title..." >> "$tmp_log"
 
     # Shield parent shell from SIGINT termination so child process handles abort cleanly
-    local prev_trap
-    prev_trap=$(trap -p INT || true)
     trap '' INT
 
     local rc=0
@@ -383,8 +381,8 @@ tui_exec_action() {
     rc="${PIPESTATUS[0]}"
     set -e
 
-    if [ -n "$prev_trap" ]; then
-        eval "$prev_trap"
+    if [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 1 ]; then
+        trap 'trap - EXIT INT TERM; exit_tui_screen; exit' EXIT INT TERM
     else
         trap - INT
     fi
