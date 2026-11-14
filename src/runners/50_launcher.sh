@@ -1095,6 +1095,16 @@ EOF
 cli_launch() {
     local l_dir="${1:-}"
     shift || true
+
+    # Auto-resolve numeric AppID to installed game directory
+    if [[ "$l_dir" =~ ^[0-9]+$ ]] && [ ! -d "$l_dir" ]; then
+        local resolved_dir
+        resolved_dir=$(scan_installed_games 2>/dev/null | awk -F'\t' -v aid="$l_dir" '$1 == aid {print $4}' | head -n 1)
+        if [ -n "$resolved_dir" ] && [ -d "$resolved_dir" ]; then
+            l_dir="$resolved_dir"
+        fi
+    fi
+
     local l_bin=""
     local l_title=""
     local l_flags=()

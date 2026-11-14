@@ -78,6 +78,7 @@ struct DepotCtx<'a> {
     depot_downloaded: Arc<AtomicU64>,
     depot_bytes_total: u64,
     downloads_sem: Arc<Semaphore>,
+    files_sem: Arc<Semaphore>,
 }
 
 /// How a file's bytes are sourced.
@@ -351,6 +352,7 @@ impl DownloadEngine {
                 depot_downloaded: Arc::new(AtomicU64::new(0)),
                 depot_bytes_total: bytes_total,
                 downloads_sem: Arc::new(Semaphore::new(self.request.max_downloads)),
+                files_sem: Arc::new(Semaphore::new((self.request.max_downloads * 4).max(32).min(64))),
             };
 
             let mut tasks = FuturesUnordered::new();
@@ -394,6 +396,16 @@ impl DownloadEngine {
 
     /// Plan + execute one content file of a depot.
     async fn execute_file(&self, ctx: &DepotCtx<'_>, file: &ManifestFile) -> Result<()> {
+        let _file_permit = ctx
+            .files_sem
+            .acquire()
+            .await
+            .map_err(|e| Error::TaskFailed(e.to_string()))?;
+
+        if ctx.depot_cancel.is_cancelled() || self.cancel.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+
         let rel = util::safe_relative_path(&file.path).ok_or_else(|| {
             Error::Manifest(format!(
                 "unsafe or empty file path '{}' in manifest",
