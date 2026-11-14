@@ -2629,6 +2629,7 @@ manifest_has_payload_magic() {
 validate_manifest_zip() {
     local z_file="$1"
     local appid="${2:-}"
+    local require_depots="${3:-false}"
     [ -f "$z_file" ] || return 1
     unzip -tq "$z_file" >/dev/null 2>&1 || return 1
 
@@ -2666,8 +2667,8 @@ validate_manifest_zip() {
     done
     rm -rf "$audit_tmp"
 
-    # If no .manifest was found or .lua only, check if .lua has addappid
-    if [ "$has_valid_manifest" -eq 0 ]; then
+    # Lua-only archives serve the explicit bridge, but cannot supply CDN file lists.
+    if [ "$has_valid_manifest" -eq 0 ] && [ "$require_depots" != true ]; then
         if echo "$entries" | grep -Eq '\.lua$'; then
             has_valid_manifest=1
         fi
@@ -2910,6 +2911,7 @@ fetch_manifest() {
     local appid="$1"
     local dest_file="${2:-}"
     local pref_source="${3:-auto}"
+    local require_depots="${4:-false}"
 
     # Strip any ANSI escape sequences
     appid=$(strip_ansi "$appid" | tr -dc "0-9")
@@ -2923,7 +2925,7 @@ fetch_manifest() {
     local cached_zip="$cache_dir/${appid}.zip"
 
     # 1. Check valid persistent cache
-    if [ -f "$cached_zip" ] && validate_manifest_zip "$cached_zip" "$appid"; then
+    if [ -f "$cached_zip" ] && validate_manifest_zip "$cached_zip" "$appid" "$require_depots"; then
         echo "[INFO] Using cached manifest archive: $cached_zip" >&2
         if [ -n "$dest_file" ]; then
             cp -f "$cached_zip" "$dest_file"
@@ -2936,7 +2938,7 @@ fetch_manifest() {
 
     # 2. Check local repository stash (~/.local/share/gamectl/manifests/)
     local stash_zip="$HOME/.local/share/gamectl/manifests/${appid}.zip"
-    if [ -f "$stash_zip" ] && validate_manifest_zip "$stash_zip" "$appid"; then
+    if [ -f "$stash_zip" ] && validate_manifest_zip "$stash_zip" "$appid" "$require_depots"; then
         echo "[INFO] Using local stash manifest archive: $stash_zip" >&2
         cp -f "$stash_zip" "$cached_zip"
         if [ -n "$dest_file" ]; then
@@ -2990,6 +2992,9 @@ fetch_manifest() {
         src_urls[src_count]="https://lua.tools/api/manifest/download?appid=${appid}&source=Luie"
         src_headers[src_count]="Authorization: Bearer $token"
         src_count=$((src_count + 1))
+    elif [ "${pref_source,,}" = luatools ]; then
+        echo "[ERROR] LuaTools session unavailable. Authenticate with 'gamectl login-luatools <code | session.json>' and retry." >&2
+        return 1
     fi
 
     local found=0
@@ -3024,7 +3029,7 @@ fetch_manifest() {
                 fi
             fi
 
-            if validate_manifest_zip "$dl_tmp" "$appid"; then
+            if validate_manifest_zip "$dl_tmp" "$appid" "$require_depots"; then
                 echo "[VERIFIED] Manifest archive acquired from $name." >&2
                 cp -f "$dl_tmp" "$cached_zip"
                 if [ -n "$dest_file" ]; then
@@ -3037,7 +3042,7 @@ fetch_manifest() {
                 rm -f "$dl_tmp"
                 break
             else
-                echo "[WARN] Provider $name returned corrupt or invalid manifest zip." >&2
+                echo "[WARN] Provider $name returned an invalid archive or lacks the required depot manifests." >&2
                 rm -f "$dl_tmp"
             fi
         else
@@ -3528,13 +3533,13 @@ download_game() {
     if [ "$engine" = "standalone" ]; then
         local manifest_zip
         echo "[INFO] Manifest archive not provided. Attempting automatic harvest (source: $source)..." >&2
-        manifest_zip=$(fetch_manifest "$appid" "" "$source" 2>/dev/null || true)
+        manifest_zip=$(fetch_manifest "$appid" "" "$source" true) || return 1
         if [ -z "$manifest_zip" ] || [ ! -f "$manifest_zip" ]; then
             echo "[ERROR] Manifest archive for AppID $appid could not be acquired across providers." >&2
             return 1
         fi
 
-        if ! validate_manifest_zip "$manifest_zip" "$appid"; then
+        if ! validate_manifest_zip "$manifest_zip" "$appid" true; then
             echo "[ERROR] Manifest zip validation failed: $manifest_zip" >&2
             return 1
         fi

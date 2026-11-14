@@ -225,6 +225,70 @@ download_game 123 "$TEST_GAME" Test
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("provisioning complete", result.stdout)
 
+    def test_download_skips_lua_only_cache_stash_and_provider(self):
+        lua = 'addappid(123, 1, "' + "00" * 32 + '")\n'
+        for name, payload in (("lua-only.zip", False), ("complete.zip", True)):
+            with zipfile.ZipFile(self.base / name, "w") as archive:
+                archive.writestr("123.lua", lua)
+                if payload:
+                    archive.writestr("123_1.manifest", bytes.fromhex("d017f671"))
+        downloader = self.base / "downloader"
+        downloader.write_text('#!/usr/bin/env bash\ntouch "$HOME/download.started"\n')
+        downloader.chmod(0o755)
+        for location in ("cache", "stash", "provider"):
+            with self.subTest(location=location):
+                for path in (self.base / "cache/gamectl/manifests/123.zip",
+                             self.base / ".local/share/gamectl/manifests/123.zip",
+                             self.base / "download.started"):
+                    path.unlink(missing_ok=True)
+                if location != "provider":
+                    directory = (self.base / "cache/gamectl/manifests" if location == "cache"
+                                 else self.base / ".local/share/gamectl/manifests")
+                    directory.mkdir(parents=True, exist_ok=True)
+                    (directory / "123.zip").write_bytes((self.base / "lua-only.zip").read_bytes())
+                self.env["TEST_LOCATION"] = location
+                result = self.run_shell('''
+get_valid_luatools_token() { return 1; }
+harvest_dlc_manifests() { :; }
+resolve_depot_dl_bin() { echo "$HOME/downloader"; }
+curl() {
+    local output="" previous="" arg
+    for arg in "$@"; do
+        [ "$previous" = -o ] && output="$arg"
+        previous="$arg"
+    done
+    if [ "$TEST_LOCATION" = provider ] && [[ "${@: -1}" == https://codeload.github.com/* ]]; then
+        cp "$HOME/lua-only.zip" "$output"
+    else
+        cp "$HOME/complete.zip" "$output"
+    fi
+    printf 200
+}
+download_game 123 "$TEST_GAME" Test --raw
+''')
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertTrue((self.base / "download.started").is_file())
+
+    def test_luatools_without_session_explains_download_failure(self):
+        result = self.run_shell('''
+get_valid_luatools_token() { return 1; }
+resolve_depot_dl_bin() { echo "$TEST_ROOT/bin/gamectl-depot-dl"; }
+curl() { echo unexpected-network-call >&2; return 90; }
+download_game 123 "$TEST_GAME" Test --source luatools --raw
+''')
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("login-luatools", result.stderr)
+        self.assertNotIn("unexpected-network-call", result.stderr)
+
+    def test_manifest_fetch_keeps_lua_only_support_for_bridge(self):
+        cache = self.base / "cache/gamectl/manifests/123.zip"
+        cache.parent.mkdir(parents=True)
+        with zipfile.ZipFile(cache, "w") as archive:
+            archive.writestr("123.lua", "addappid(123)\n")
+        result = self.run_shell('fetch_manifest 123')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.strip(), str(cache))
+
     def test_default_download_never_falls_back_to_a_client(self):
         with zipfile.ZipFile(self.base / "manifest.zip", "w") as archive:
             archive.writestr("123_1.manifest", bytes.fromhex("d017f671"))

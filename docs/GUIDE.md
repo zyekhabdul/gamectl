@@ -193,7 +193,7 @@ gamectl inject /path/to/game [appid] --no-sync
 ### 4.3 Headless Downloader (`gamectl download`)
 Untuk mengunduh game tanpa membuka client Steam atau browser:
 ```bash
-# 1. Unduh All-in-One di background (Unduh + Injeksi GBE + Sync Steam):
+# 1. Unduh + injeksi GBE secara standalone:
 gamectl download 48000 "$HOME/Games/Limbo" "LIMBO"
 
 # 2. Unduh + Injeksi GBE saja (Standalone tanpa client Steam):
@@ -205,6 +205,12 @@ gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" --raw
 # 4. Unduh di foreground (stream progres langsung ke terminal):
 gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" -f
 ```
+
+Sumber `auto` mencoba provider manifest yang tersedia. Download standalone membutuhkan
+file depot `.manifest` beserta key; arsip yang hanya berisi Lua dilewati agar provider
+berikutnya dapat dicoba. Jika memilih `--source luatools`, siapkan sesi melalui
+`gamectl login-luatools <code | session.json>`. Error provider ditampilkan di terminal;
+Steam/SLS tidak dijalankan sebagai fallback.
 
 ### 4.4 Registrasi Library Steam Tanpa Download (`gamectl unlock`)
 Untuk menampilkan game dan seluruh DLC-nya di Library Steam resmi tanpa perlu mengunduh file aset game:
