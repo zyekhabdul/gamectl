@@ -422,12 +422,21 @@ preview_dashboard() {
             fi
 
             local c_dir="$HOME/.cache/gamectl"
-            local c_total=0 c_size="0B" c_steam=0 c_pdb=0
-            if [ -d "$c_dir" ]; then
-                c_total=$(find "$c_dir" -type f 2>/dev/null | wc -l)
+            local c_size="0B" c_steam=0 c_pdb=0
+            local c_cache="$run_dir/cache_stat.cache"
+            if [ -f "$c_cache" ] && [ $(($(date +%s) - $(stat -c%Y "$c_cache" 2>/dev/null || echo 0))) -lt 60 ]; then
+                read -r c_size c_steam c_pdb < "$c_cache"
+            elif [ -d "$c_dir" ]; then
                 c_size=$(du -sh "$c_dir" 2>/dev/null | awk '{print $1}' || echo "0B")
-                c_steam=$(find "$c_dir" -name "*steam*" -o -name "store_*" 2>/dev/null | wc -l)
-                c_pdb=$(find "$c_dir" -name "*proton*" -o -name "protondb_*" 2>/dev/null | wc -l)
+                for f in "$c_dir"/*; do
+                    [ -f "$f" ] || continue
+                    local fname="${f##*/}"
+                    case "$fname" in
+                        *steam*|store_*) c_steam=$((c_steam + 1)) ;;
+                        *proton*|protondb_*) c_pdb=$((c_pdb + 1)) ;;
+                    esac
+                done
+                printf "%s %s %s\n" "$c_size" "$c_steam" "$c_pdb" > "$c_cache" 2>/dev/null || true
             fi
 
             echo "  ${UI_CYAN}Steam Store API    ${UI_RST}: $steam_st ${UI_DIM}(store.steampowered.com)${UI_RST}"
