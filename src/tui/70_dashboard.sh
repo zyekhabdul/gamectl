@@ -120,9 +120,18 @@ preview_game() {
     echo
     echo "${UI_BOX}╭─ STORAGE & SAVEGAMES ────────────────────────────────╮${UI_RST}"
     if [ -d "$gdir/saves" ]; then
-        local save_sz
-        save_sz=$(du -sh "$gdir/saves" 2>/dev/null | cut -f1)
-        echo "  ${UI_CYAN}Save Path   ${UI_RST}: ${UI_GREEN}./saves${UI_RST} ${UI_DIM}(PORTABLE - ACTIVE | Size: $save_sz)${UI_RST}"
+        local save_sz=""
+        local s_cache="$gdir/saves/.size_cache"
+        local s_mtime
+        s_mtime=$(stat -c%Y "$gdir/saves" 2>/dev/null || echo 0)
+        if [ -f "$s_cache" ] && [ "$(head -n 1 "$s_cache" 2>/dev/null)" = "$s_mtime" ]; then
+            save_sz=$(tail -n 1 "$s_cache" 2>/dev/null)
+        fi
+        if [ -z "$save_sz" ]; then
+            save_sz=$(du -sh "$gdir/saves" 2>/dev/null | cut -f1)
+            [ -w "$gdir/saves" ] && printf "%s\n%s\n" "$s_mtime" "$save_sz" > "$s_cache" 2>/dev/null || true
+        fi
+        echo "  ${UI_CYAN}Save Path   ${UI_RST}: ${UI_GREEN}./saves${UI_RST} ${UI_DIM}(PORTABLE - ACTIVE | Size: ${save_sz:-0B})${UI_RST}"
         if [ -d "$gdir/.save_snapshots" ]; then
             local snaps
             snaps=$(ls -d "$gdir/.save_snapshots"/slot* 2>/dev/null | wc -l)
@@ -202,8 +211,38 @@ preview_game() {
         echo "  ${UI_CYAN}GBE State   ${UI_RST}: ${UI_AMBER}[INACTIVE] (Official Steam/DRM binary)${UI_RST}"
         echo "  ${UI_CYAN}Note        ${UI_RST}: ${UI_DIM}Press <CTRL-I> to enable LAN co-op & custom persona${UI_RST}"
     fi
-    local total_sz
-    total_sz=$(du -sh "$gdir" 2>/dev/null | cut -f1)
+    local total_sz=""
+    if [ -n "$appid" ] && [[ "$appid" =~ ^[0-9]+$ ]]; then
+        local acf_path=""
+        if [ -f "$gdir/appmanifest_${appid}.acf" ]; then
+            acf_path="$gdir/appmanifest_${appid}.acf"
+        elif [ -f "$(dirname "$gdir")/appmanifest_${appid}.acf" ]; then
+            acf_path="$(dirname "$gdir")/appmanifest_${appid}.acf"
+        else
+            acf_path=$(find_app_acf "$appid" 2>/dev/null || true)
+        fi
+        if [ -n "$acf_path" ] && [ -f "$acf_path" ]; then
+            local bytes_on_disk
+            bytes_on_disk=$(sed -n 's/^[[:space:]]*"SizeOnDisk"[[:space:]]*"\([0-9]*\)".*/\1/p' "$acf_path" | head -n 1)
+            if [ -n "$bytes_on_disk" ] && [ "$bytes_on_disk" -gt 0 ] 2>/dev/null; then
+                total_sz=$(format_bytes "$bytes_on_disk")
+            fi
+        fi
+    fi
+    if [ -z "$total_sz" ]; then
+        local run_dir
+        run_dir="$(get_runtime_dir)"
+        local sz_hash
+        sz_hash=$(echo -n "$gdir" | md5sum 2>/dev/null | cut -d' ' -f1 || echo "")
+        local sz_cache="$run_dir/sz_${sz_hash}.cache"
+        if [ -n "$sz_hash" ] && [ -f "$sz_cache" ]; then
+            total_sz=$(cat "$sz_cache" 2>/dev/null || true)
+        fi
+        if [ -z "$total_sz" ]; then
+            total_sz=$(du -sh "$gdir" 2>/dev/null | cut -f1)
+            [ -n "$sz_hash" ] && echo "$total_sz" > "$sz_cache" 2>/dev/null || true
+        fi
+    fi
     echo "  ${UI_CYAN}Disk Size   ${UI_RST}: ${UI_BOLD}$total_sz${UI_RST}"
     echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
 
