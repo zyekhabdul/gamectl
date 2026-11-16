@@ -1,10 +1,10 @@
 # WORK PACKET 26: TUI ERGONOMICS, HEADER STREAMLINING & PREVIEW I/O OPTIMIZATION
 
 - Track: Maintenance / TUI Ergonomics / Visual Streamlining / I/O Latency Optimization / Zero-Bloat
-- **Status**: DRAFT / READY FOR EXECUTION [0/5 CHUNKS EXECUTED]
+- **Status**: IN PROGRESS [1/5 CHUNKS EXECUTED]
 - **Target Branch**: `main`
 - **Binding Purpose**: [Sovereign Original Purpose](docs/SOVEREIGN_ORIGINAL_PURPOSE.md) — lightweight, standalone, stable Steam replacement.
-- **Operational Directive**: Planning phase only; zero code mutation until explicit user execution command.
+- **Operational Directive**: Executing sequentially under review mode (Option 2).
 
 ---
 
@@ -24,7 +24,7 @@ Audit visual dan runtime performance menemukan tiga area friksi dan inefisiensi:
 
 ## 2. CHUNK BREAKDOWN & DEFINITION OF DONE (DoD)
 
-### Chunk 26.01: Game Library Header Streamlining
+### [x] Chunk 26.01: Game Library Header Streamlining [VERIFIED]
 - **Target File**: `src/tui/70_dashboard.sh` (`library_menu`)
 - **Scope**:
   - Hapus duplikasi kata `GAME LIBRARY` dan string 214-karakter shortcuts yang terpotong.
@@ -34,6 +34,7 @@ Audit visual dan runtime performance menemukan tiga area friksi dan inefisiensi:
 - **DoD**:
   - Panel kiri Game Library mendapatkan tambahan 1 baris vertikal untuk menampilkan game.
   - Zero teks terpotong (`··`) pada terminal lebar standar 80 kolom.
+  - Semua 135 CLI regression contracts pass exit 0.
 
 ### Chunk 26.02: Auxiliary Menus Header Unification
 - **Target Files**: `src/tui/70_dashboard.sh`, `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/steam/30_downloader.sh`

@@ -218,6 +218,7 @@ preview_game() {
     else
         echo "  ${UI_PILL_CTRLS} ${UI_BOLD}Cloud Sync (N/A)${UI_RST}   ${UI_PILL_CTRLB} ${UI_BOLD}Manual Save Snapshot${UI_RST}"
     fi
+    echo "  ${UI_PILL_CTRLR} ${UI_BOLD}Restore Snapshot${UI_RST}   ${UI_PILL_CTRLX} ${UI_BOLD}Ctrl-X (Fixes)${UI_RST}"
     echo "  ${UI_PILL_ESC}   ${UI_BOLD}Back to Master Dashboard Hub${UI_RST}"
     echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
     echo "========================================================"
@@ -1036,7 +1037,7 @@ library_menu() {
             --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x \
             --border-label="  ╢ gamectl :: Game Library ╟  " \
             --border-label-pos=2 \
-            --header=$'GAME LIBRARY (Enter: Launch │ Esc: Dashboard Hub)\nShortcuts: Ctrl-F (Search) │ Ctrl-D (Downloads) │ Ctrl-L (Logs) │ Ctrl-I (Inject) │ Ctrl-O (Wrappers) │ Ctrl-P (LAN ID) │ Ctrl-S (Sync) │ Ctrl-B (Backup) │ Ctrl-R (Restore) │ Ctrl-X (Fixes)' \
+            --header="Enter: Launch │ Ctrl-F: Search │ Ctrl-D: Downloads │ Esc: Dashboard" \
             --prompt="Library > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview {1} {2} {3} {4} {5}' \
             --preview-window=right:55%:border-rounded:wrap \
