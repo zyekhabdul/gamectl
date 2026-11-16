@@ -1,7 +1,7 @@
 # WORK PACKET 26: TUI ERGONOMICS, HEADER STREAMLINING & PREVIEW I/O OPTIMIZATION
 
 - Track: Maintenance / TUI Ergonomics / Visual Streamlining / I/O Latency Optimization / Zero-Bloat
-- **Status**: IN PROGRESS [1/5 CHUNKS EXECUTED]
+- **Status**: IN PROGRESS [2/5 CHUNKS EXECUTED]
 - **Target Branch**: `main`
 - **Binding Purpose**: [Sovereign Original Purpose](docs/SOVEREIGN_ORIGINAL_PURPOSE.md) — lightweight, standalone, stable Steam replacement.
 - **Operational Directive**: Executing sequentially under review mode (Option 2).
@@ -36,7 +36,7 @@ Audit visual dan runtime performance menemukan tiga area friksi dan inefisiensi:
   - Zero teks terpotong (`··`) pada terminal lebar standar 80 kolom.
   - Semua 135 CLI regression contracts pass exit 0.
 
-### Chunk 26.02: Auxiliary Menus Header Unification
+### [x] Chunk 26.02: Auxiliary Menus Header Unification [VERIFIED]
 - **Target Files**: `src/tui/70_dashboard.sh`, `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/steam/30_downloader.sh`
 - **Scope**:
   - **Master Dashboard**: Sederhanakan header ke `Enter: Open │ 1-7: Quick Select │ Ctrl-L: Logs │ Esc: Exit`.
@@ -49,6 +49,7 @@ Audit visual dan runtime performance menemukan tiga area friksi dan inefisiensi:
 - **DoD**:
   - Tidak ada menu yang mengulang judul modulnya sendiri jika sudah tercantum pada `--border-label`.
   - Format seragam di seluruh subsistem TUI.
+  - Semua 135 CLI regression contracts pass exit 0.
 
 ### Chunk 26.03: O(1) Instant ACF Size Resolution in `preview_game`
 - **Target File**: `src/tui/70_dashboard.sh` (`preview_game`)

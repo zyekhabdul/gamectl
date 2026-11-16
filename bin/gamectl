@@ -4500,7 +4500,7 @@ list_downloads_interactive() {
             --expect=ctrl-k \
             --border-label="  ╢ gamectl :: Download Manager ╟  " \
             --border-label-pos=2 \
-            --header="DOWNLOADS (Enter: Actions │ Ctrl-K: Pause │ Esc: Back)" \
+            --header="Enter: Actions │ Ctrl-K: Pause │ Esc: Back" \
             --prompt="Downloads > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview-download {1} {2} {6}' \
             --preview-window=right:60%:border-rounded:wrap \
@@ -6799,7 +6799,7 @@ EOF
                     --with-nth=1,2 \
                     --border-label="  ╢ gamectl :: Wine Prefix Manager :: $game_name ╟  " \
                     --border-label-pos=2 \
-                    --header="PREFIX PALETTE (Enter: Execute │ Esc: Return)" \
+                    --header="Enter: Execute │ Esc: Return" \
                     --prompt="Prefix > " \
                     --preview="$preview_cmd" \
                     --preview-window=down:50%:border-rounded:wrap \
@@ -7398,7 +7398,7 @@ EOF
             --with-nth=2,3 \
             --border-label="  ╢ gamectl :: Wrappers : $title ╟  " \
             --border-label-pos=2 \
-            --header="RUNTIME WRAPPERS (Enter: Toggle/Select │ Esc: Save & Return)" \
+            --header="Enter: Toggle/Select │ Esc: Save & Return" \
             --prompt="Wrappers > " \
             --height=45% \
             --reverse 2>/dev/null) || fzf_rc=$?
@@ -7815,7 +7815,7 @@ EOF
             --with-nth=1,2 \
             --border-label="  ╢ gamectl :: Process Controller :: $title ╟  " \
             --border-label-pos=2 \
-            --header="PROCESS HUD (Enter: Execute │ Esc: Return to Library)" \
+            --header="Enter: Execute │ Esc: Return to Library" \
             --prompt="HUD > " \
             --preview="$preview_cmd" \
             --preview-window=down:55%:border-rounded:wrap \
@@ -10088,7 +10088,7 @@ view_logs_interactive() {
     fi | fzf \
         --border-label="  ╢ gamectl :: Activity & Runtime Logs ╟  " \
         --border-label-pos=2 \
-        --header="ACTIVITY LOGS (Arrows: Navigate │ Ctrl-X: Clear Log │ Esc: Return)" \
+        --header="Ctrl-X: Clear Log │ Esc: Return" \
         --prompt="Logs > " \
         --preview='"$GAMECTL_PREVIEW_BIN" --preview-log {}' \
         --preview-window=down:35%:border-rounded:wrap \
@@ -10152,7 +10152,7 @@ EOF
             --expect=ctrl-l \
             --border-label="  ╢ gamectl :: Master Dashboard Hub ╟  " \
             --border-label-pos=2 \
-            --header="MASTER DASHBOARD (Arrows/Numbers: Select │ Enter: Open │ Ctrl-L: Logs │ Esc: Exit)" \
+            --header="Enter: Open │ 1-7: Quick Select │ Ctrl-L: Logs │ Esc: Exit" \
             --prompt="Dashboard > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview-dashboard {1} "$GAMECTL_GAME_COUNT"' \
             --preview-window=right:55%:border-rounded:wrap \
@@ -10204,7 +10204,7 @@ EOF
                     --no-sort \
                     --border-label="  ╢ gamectl :: System Diagnostics Audit ╟  " \
                     --border-label-pos=2 \
-                    --header="SYSTEM DIAGNOSTICS (Arrows: Scroll │ Esc / q / Enter: Return to Dashboard)" \
+                    --header="Esc / Enter / q: Return to Dashboard" \
                     --prompt="Audit > " \
                     --bind="q:abort" \
                     --reverse 2>/dev/null || audit_rc=$?

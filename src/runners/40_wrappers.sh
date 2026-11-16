@@ -622,7 +622,7 @@ EOF
                     --with-nth=1,2 \
                     --border-label="  ╢ gamectl :: Wine Prefix Manager :: $game_name ╟  " \
                     --border-label-pos=2 \
-                    --header="PREFIX PALETTE (Enter: Execute │ Esc: Return)" \
+                    --header="Enter: Execute │ Esc: Return" \
                     --prompt="Prefix > " \
                     --preview="$preview_cmd" \
                     --preview-window=down:50%:border-rounded:wrap \
@@ -1221,7 +1221,7 @@ EOF
             --with-nth=2,3 \
             --border-label="  ╢ gamectl :: Wrappers : $title ╟  " \
             --border-label-pos=2 \
-            --header="RUNTIME WRAPPERS (Enter: Toggle/Select │ Esc: Save & Return)" \
+            --header="Enter: Toggle/Select │ Esc: Save & Return" \
             --prompt="Wrappers > " \
             --height=45% \
             --reverse 2>/dev/null) || fzf_rc=$?

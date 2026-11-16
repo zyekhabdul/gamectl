@@ -95,7 +95,7 @@ EOF
             --with-nth=1,2 \
             --border-label="  ╢ gamectl :: Process Controller :: $title ╟  " \
             --border-label-pos=2 \
-            --header="PROCESS HUD (Enter: Execute │ Esc: Return to Library)" \
+            --header="Enter: Execute │ Esc: Return to Library" \
             --prompt="HUD > " \
             --preview="$preview_cmd" \
             --preview-window=down:55%:border-rounded:wrap \

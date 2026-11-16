@@ -1892,7 +1892,7 @@ list_downloads_interactive() {
             --expect=ctrl-k \
             --border-label="  ╢ gamectl :: Download Manager ╟  " \
             --border-label-pos=2 \
-            --header="DOWNLOADS (Enter: Actions │ Ctrl-K: Pause │ Esc: Back)" \
+            --header="Enter: Actions │ Ctrl-K: Pause │ Esc: Back" \
             --prompt="Downloads > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview-download {1} {2} {6}' \
             --preview-window=right:60%:border-rounded:wrap \

@@ -874,7 +874,7 @@ view_logs_interactive() {
     fi | fzf \
         --border-label="  ╢ gamectl :: Activity & Runtime Logs ╟  " \
         --border-label-pos=2 \
-        --header="ACTIVITY LOGS (Arrows: Navigate │ Ctrl-X: Clear Log │ Esc: Return)" \
+        --header="Ctrl-X: Clear Log │ Esc: Return" \
         --prompt="Logs > " \
         --preview='"$GAMECTL_PREVIEW_BIN" --preview-log {}' \
         --preview-window=down:35%:border-rounded:wrap \
@@ -938,7 +938,7 @@ EOF
             --expect=ctrl-l \
             --border-label="  ╢ gamectl :: Master Dashboard Hub ╟  " \
             --border-label-pos=2 \
-            --header="MASTER DASHBOARD (Arrows/Numbers: Select │ Enter: Open │ Ctrl-L: Logs │ Esc: Exit)" \
+            --header="Enter: Open │ 1-7: Quick Select │ Ctrl-L: Logs │ Esc: Exit" \
             --prompt="Dashboard > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview-dashboard {1} "$GAMECTL_GAME_COUNT"' \
             --preview-window=right:55%:border-rounded:wrap \
@@ -990,7 +990,7 @@ EOF
                     --no-sort \
                     --border-label="  ╢ gamectl :: System Diagnostics Audit ╟  " \
                     --border-label-pos=2 \
-                    --header="SYSTEM DIAGNOSTICS (Arrows: Scroll │ Esc / q / Enter: Return to Dashboard)" \
+                    --header="Esc / Enter / q: Return to Dashboard" \
                     --prompt="Audit > " \
                     --bind="q:abort" \
                     --reverse 2>/dev/null || audit_rc=$?
