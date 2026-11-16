@@ -1,7 +1,7 @@
 # WORK PACKET 26: TUI ERGONOMICS, HEADER STREAMLINING & PREVIEW I/O OPTIMIZATION
 
 - Track: Maintenance / TUI Ergonomics / Visual Streamlining / I/O Latency Optimization / Zero-Bloat
-- **Status**: IN PROGRESS [2/5 CHUNKS EXECUTED]
+- **Status**: IN PROGRESS [3/5 CHUNKS EXECUTED]
 - **Target Branch**: `main`
 - **Binding Purpose**: [Sovereign Original Purpose](docs/SOVEREIGN_ORIGINAL_PURPOSE.md) — lightweight, standalone, stable Steam replacement.
 - **Operational Directive**: Executing sequentially under review mode (Option 2).
@@ -51,7 +51,7 @@ Audit visual dan runtime performance menemukan tiga area friksi dan inefisiensi:
   - Format seragam di seluruh subsistem TUI.
   - Semua 135 CLI regression contracts pass exit 0.
 
-### Chunk 26.03: O(1) Instant ACF Size Resolution in `preview_game`
+### [x] Chunk 26.03: O(1) Instant ACF Size Resolution in `preview_game` [VERIFIED]
 - **Target File**: `src/tui/70_dashboard.sh` (`preview_game`)
 - **Scope**:
   - Sebelum menjalankan `du -sh "$gdir"`, periksa keberadaan `appmanifest_${appid}.acf` di `$gdir` atau di direktori steamapps induk.
@@ -60,6 +60,7 @@ Audit visual dan runtime performance menemukan tiga area friksi dan inefisiensi:
 - **DoD**:
   - Ukuran game berbasis ACF ditampilkan instan tanpa penelusuran disk rekursif.
   - Zero stuttering saat menahan tombol panah atas/bawah di Game Library.
+  - Test contract `test_preview_game_acf_instant_size_resolution_contract` pass (136/136 tests pass exit 0).
 
 ### Chunk 26.04: Aggregated Dashboard Cache Evaluation
 - **Target File**: `src/tui/70_dashboard.sh` (`preview_dashboard`)
