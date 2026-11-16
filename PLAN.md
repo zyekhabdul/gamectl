@@ -1,7 +1,7 @@
 # WORK PACKET 26: TUI ERGONOMICS, HEADER STREAMLINING & PREVIEW I/O OPTIMIZATION
 
 - Track: Maintenance / TUI Ergonomics / Visual Streamlining / I/O Latency Optimization / Zero-Bloat
-- **Status**: IN PROGRESS [3/5 CHUNKS EXECUTED]
+- **Status**: IN PROGRESS [4/5 CHUNKS EXECUTED]
 - **Target Branch**: `main`
 - **Binding Purpose**: [Sovereign Original Purpose](docs/SOVEREIGN_ORIGINAL_PURPOSE.md) — lightweight, standalone, stable Steam replacement.
 - **Operational Directive**: Executing sequentially under review mode (Option 2).
@@ -62,12 +62,13 @@ Audit visual dan runtime performance menemukan tiga area friksi dan inefisiensi:
   - Zero stuttering saat menahan tombol panah atas/bawah di Game Library.
   - Test contract `test_preview_game_acf_instant_size_resolution_contract` pass (136/136 tests pass exit 0).
 
-### Chunk 26.04: Aggregated Dashboard Cache Evaluation
+### [x] Chunk 26.04: Aggregated Dashboard Cache Evaluation [VERIFIED]
 - **Target File**: `src/tui/70_dashboard.sh` (`preview_dashboard`)
 - **Scope**:
-  - Gabungkan pemindaian file cache (`find` dan `du`) ke dalam satu pass loop shell atau evaluasi bersyarat saat menu `[05]` disorot.
+  - Gabungkan pemindaian file cache (`find` dan `du`) ke dalam satu pass loop shell dengan 60s TTL cache saat menu `[02]` disorot.
 - **DoD**:
   - Menghilangkan 3 subshell eksternal per navigasi item Dashboard.
+  - Test contract `test_preview_dashboard_cache_aggregation` pass (Exit 0).
 
 ### Chunk 26.05: Deterministic Machine Harness Verification
 - **Target Files**: `tests/test_cli.sh`, `tests/test_tui_safety.py`

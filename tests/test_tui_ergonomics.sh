@@ -62,4 +62,33 @@ EOF
 }
 
 test_preview_game_acf_instant_size_resolution
+
+test_preview_dashboard_cache_aggregation() {
+    local t_home
+    t_home=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_dash_test_XXXXXX")
+    mkdir -p "$t_home/.cache/gamectl"
+    touch "$t_home/.cache/gamectl/steam_details_12345.json"
+    touch "$t_home/.cache/gamectl/protondb_12345.json"
+
+    local out
+    out=$(HOME="$t_home" "$GAMECTL" --preview-dashboard 2 4 2>&1 || true)
+    if ! grep -q "Cached Store Items.*1 entries" <<< "$out"; then
+        echo "[FAIL] Expected 1 store entries in preview. Got:" >&2
+        echo "$out" >&2
+        rm -rf "$t_home"
+        return 1
+    fi
+    if ! grep -q "Cached ProtonDB.*1 ratings" <<< "$out"; then
+        echo "[FAIL] Expected 1 protondb ratings in preview. Got:" >&2
+        echo "$out" >&2
+        rm -rf "$t_home"
+        return 1
+    fi
+    echo "[PASS] Aggregated dashboard cache evaluation verified."
+
+    rm -rf "$t_home"
+    return 0
+}
+
+test_preview_dashboard_cache_aggregation
 echo "[VERIFIED] All TUI Ergonomics contracts passed with exit code 0."
