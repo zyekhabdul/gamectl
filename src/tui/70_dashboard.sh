@@ -1037,7 +1037,7 @@ library_menu() {
             --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x \
             --border-label="  ╢ gamectl :: Game Library ╟  " \
             --border-label-pos=2 \
-            --header="Enter: Launch │ Ctrl-F: Search │ Ctrl-D: Downloads │ Esc: Dashboard" \
+            --header="Enter: Launch │ Ctrl-I: Inject GBE │ Ctrl-F: Search │ Esc: Dashboard" \
             --prompt="Library > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview {1} {2} {3} {4} {5}' \
             --preview-window=right:55%:border-rounded:wrap \
