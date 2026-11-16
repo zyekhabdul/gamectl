@@ -1,7 +1,7 @@
 # WORK PACKET 26: TUI ERGONOMICS, HEADER STREAMLINING & PREVIEW I/O OPTIMIZATION
 
 - Track: Maintenance / TUI Ergonomics / Visual Streamlining / I/O Latency Optimization / Zero-Bloat
-- **Status**: IN PROGRESS [4/5 CHUNKS EXECUTED]
+- **Status**: COMPLETED & RATIFIED [5/5 CHUNKS EXECUTED]
 - **Target Branch**: `main`
 - **Binding Purpose**: [Sovereign Original Purpose](docs/SOVEREIGN_ORIGINAL_PURPOSE.md) — lightweight, standalone, stable Steam replacement.
 - **Operational Directive**: Executing sequentially under review mode (Option 2).
@@ -70,16 +70,19 @@ Audit visual dan runtime performance menemukan tiga area friksi dan inefisiensi:
   - Menghilangkan 3 subshell eksternal per navigasi item Dashboard.
   - Test contract `test_preview_dashboard_cache_aggregation` pass (Exit 0).
 
-### Chunk 26.05: Deterministic Machine Harness Verification
-- **Target Files**: `tests/test_cli.sh`, `tests/test_tui_safety.py`
+### [x] Chunk 26.05: Deterministic Machine Harness Verification [VERIFIED]
+- **Target Files**: `tests/test_cli.sh`, `tests/test_tui_safety.py`, `tests/test_tui_ergonomics.sh`
 - **Scope**:
   - Jalankan `./scripts/build.sh` untuk sinkronisasi binary `bin/gamectl`.
   - Verifikasi `./scripts/build.sh --check` (Exit 0).
   - Verifikasi `make lint` (Exit 0).
+  - Verifikasi `./tests/test_tui_ergonomics.sh` (Exit 0).
   - Verifikasi `bash tests/test_cli.sh` (135/135 contracts pass).
   - Verifikasi `python3 -m unittest discover -s tests` (42/42 tests pass).
+  - Verifikasi `python3 tests/test_tui_safety.py` (14/14 tests pass).
 - **DoD**:
   - Seluruh test suite lulus dengan Exit Code 0 tanpa regresi.
+  - Work Packet 26 verified and ratified.
 
 ---
 
