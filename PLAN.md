@@ -1,7 +1,7 @@
 # WORK PACKET 27: PLATFORM-SPECIFIC DEPOT FILTERING & MULTI-OS DOWNLOAD ARCHITECTURE
 
 - Track: Maintenance / Downloader Optimization / Platform Filtering / Zero-Bloat
-- **Status**: IN PROGRESS [3/4 CHUNKS EXECUTED]
+- **Status**: COMPLETED & RATIFIED [4/4 CHUNKS EXECUTED]
 - **Tujuan**: Memungkinkan filter OS saat download (`--os linux|windows|macos|all`) agar hemat bandwidth & disk, serta default otomatis ke Native Linux jika tersedia di host Linux.
 
 ---
@@ -25,9 +25,13 @@
 - Pastikan parameter `--os "$target_os"` diteruskan secara konsisten di `search_steam`, `unlock_interactive`, dan `library_menu` missing binary bridge.
 - Verifikasi: Test contract `test_tui_os_parameter_forwarding_contract` pass (Exit 0).
 
-### [ ] Chunk 27.04: Verifikasi Final & Ratifikasi
-- Kompilasi `bin/gamectl` via `./scripts/build.sh`.
-- Jalankan `make lint`, `./scripts/build.sh --check`, `tests/test_depot_filter.sh`, dan `tests/test_cli.sh`.
+### [x] Chunk 27.04: Verifikasi Final & Ratifikasi (`tests/test_cli.sh`) [VERIFIED]
+- Tambahkan 4 test contracts baru di `tests/test_cli.sh`:
+  1. `test_download_game_os_filter_linux`: verifikasi depot Windows & macOS diabaikan saat `--os linux`.
+  2. `test_download_game_os_filter_windows`: verifikasi depot Linux & macOS diabaikan saat `--os windows`.
+  3. `test_download_game_os_auto_preference`: verifikasi auto-selection depot native Linux pada Linux host.
+  4. `test_download_game_elf_chmod_execution_permission`: verifikasi hook `chmod +x` otomatis pada biner ELF.
+- Jalankan `make lint`, `./scripts/build.sh --check`, `tests/test_depot_filter.sh`, dan `tests/test_cli.sh` (139/139 CLI contracts exit 0).
 
 ---
 
@@ -36,4 +40,4 @@
 - [x] `gamectl download <appid> --os windows` hanya mengunduh depot Windows + shared.
 - [x] Default tanpa flag pada Linux memilih depot Linux jika ada.
 - [x] Biner Linux ELF otomatis executable (`chmod +x`).
-- [ ] Semua tes harness exit code 0.
+- [x] Semua tes harness exit code 0 (139/139 contracts pass).

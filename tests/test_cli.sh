@@ -2887,6 +2887,278 @@ run_test "Savegame Failure Paths (Chunk 25.02): I/O rollback, signals & real loc
 run_test "Standalone Safety: Injection failures, Steam isolation & process lifecycle" python3 "$SCRIPT_DIR/test_standalone_safety.py"
 
 # ------------------------------------------------------------------------------
+# Chunk 27.04: Platform-Specific Depot Filtering & Multi-OS Contracts
+# ------------------------------------------------------------------------------
+test_download_game_os_filter_linux() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+
+    local t_root
+    t_root=$(mktemp -d "${TEST_TMP_DIR:-/tmp}/gamectl_test_os_linux_XXXXXX")
+    local t_cfg="$t_root/config"
+    local t_cache="$t_root/cache"
+    local t_target="$t_root/games/OSLinuxTitle"
+    mkdir -p "$t_cfg/SLSsteam" "$t_cache/gamectl/manifests" "$t_target"
+    echo "AppIds: []" > "$t_cfg/SLSsteam/config.yaml"
+
+    export XDG_CONFIG_HOME="$t_cfg"
+    export XDG_CACHE_HOME="$t_cache"
+
+    local mock_zip="$t_cache/gamectl/manifests/99911.zip"
+    local stage_dir="$t_root/stage"
+    mkdir -p "$stage_dir"
+    printf "\xd0\x17\xf6\x71payload_101" > "$stage_dir/101_1.manifest"
+    printf "\xd0\x17\xf6\x71payload_102" > "$stage_dir/102_2.manifest"
+    printf "\xd0\x17\xf6\x71payload_103" > "$stage_dir/103_3.manifest"
+    cat <<'LUA' > "$stage_dir/99911.lua"
+addappid(101, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+addappid(102, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+addappid(103, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+LUA
+    cat <<'JSON' > "$stage_dir/99911.json"
+{
+    "depot": {
+        "101": { "config": { "oslist": "windows" } },
+        "102": { "config": { "oslist": "linux" } },
+        "103": { "config": { "oslist": "macos" } }
+    }
+}
+JSON
+    (cd "$stage_dir" && zip -q "$mock_zip" 101_1.manifest 102_2.manifest 103_3.manifest 99911.lua 99911.json)
+
+    local mock_bin="$t_root/mock-depot-dl"
+    cat <<'MOCK' > "$mock_bin"
+#!/usr/bin/env bash
+echo "$@" >> "$TEST_ARGS_LOG"
+exit 0
+MOCK
+    chmod +x "$mock_bin"
+    export GAMECTL_DEPOT_DL_BIN="$mock_bin"
+    export TEST_ARGS_LOG="$t_root/args.log"
+
+    inject_game() { return 0; }
+
+    download_game "99911" "$t_target" "OSLinuxTitle" --engine standalone --os linux >/dev/null 2>&1
+    local rc=$?
+
+    local passed=1
+    [ "$rc" -eq 0 ] || passed=0
+    grep -q "102_2.manifest" "$TEST_ARGS_LOG" || passed=0
+    ! grep -q "101_1.manifest" "$TEST_ARGS_LOG" || passed=0
+    ! grep -q "103_3.manifest" "$TEST_ARGS_LOG" || passed=0
+
+    rm -rf "$t_root"
+    unset XDG_CONFIG_HOME XDG_CACHE_HOME GAMECTL_DEPOT_DL_BIN TEST_ARGS_LOG
+    [ "$passed" -eq 1 ]
+}
+
+test_download_game_os_filter_windows() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+
+    local t_root
+    t_root=$(mktemp -d "${TEST_TMP_DIR:-/tmp}/gamectl_test_os_win_XXXXXX")
+    local t_cfg="$t_root/config"
+    local t_cache="$t_root/cache"
+    local t_target="$t_root/games/OSWinTitle"
+    mkdir -p "$t_cfg/SLSsteam" "$t_cache/gamectl/manifests" "$t_target"
+    echo "AppIds: []" > "$t_cfg/SLSsteam/config.yaml"
+
+    export XDG_CONFIG_HOME="$t_cfg"
+    export XDG_CACHE_HOME="$t_cache"
+
+    local mock_zip="$t_cache/gamectl/manifests/99912.zip"
+    local stage_dir="$t_root/stage"
+    mkdir -p "$stage_dir"
+    printf "\xd0\x17\xf6\x71payload_101" > "$stage_dir/101_1.manifest"
+    printf "\xd0\x17\xf6\x71payload_102" > "$stage_dir/102_2.manifest"
+    printf "\xd0\x17\xf6\x71payload_103" > "$stage_dir/103_3.manifest"
+    cat <<'LUA' > "$stage_dir/99912.lua"
+addappid(101, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+addappid(102, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+addappid(103, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+LUA
+    cat <<'JSON' > "$stage_dir/99912.json"
+{
+    "depot": {
+        "101": { "config": { "oslist": "windows" } },
+        "102": { "config": { "oslist": "linux" } },
+        "103": { "config": { "oslist": "macos" } }
+    }
+}
+JSON
+    (cd "$stage_dir" && zip -q "$mock_zip" 101_1.manifest 102_2.manifest 103_3.manifest 99912.lua 99912.json)
+
+    local mock_bin="$t_root/mock-depot-dl"
+    cat <<'MOCK' > "$mock_bin"
+#!/usr/bin/env bash
+echo "$@" >> "$TEST_ARGS_LOG"
+exit 0
+MOCK
+    chmod +x "$mock_bin"
+    export GAMECTL_DEPOT_DL_BIN="$mock_bin"
+    export TEST_ARGS_LOG="$t_root/args.log"
+
+    inject_game() { return 0; }
+
+    download_game "99912" "$t_target" "OSWinTitle" --engine standalone --os windows >/dev/null 2>&1
+    local rc=$?
+
+    local passed=1
+    [ "$rc" -eq 0 ] || passed=0
+    grep -q "101_1.manifest" "$TEST_ARGS_LOG" || passed=0
+    ! grep -q "102_2.manifest" "$TEST_ARGS_LOG" || passed=0
+    ! grep -q "103_3.manifest" "$TEST_ARGS_LOG" || passed=0
+
+    rm -rf "$t_root"
+    unset XDG_CONFIG_HOME XDG_CACHE_HOME GAMECTL_DEPOT_DL_BIN TEST_ARGS_LOG
+    [ "$passed" -eq 1 ]
+}
+
+test_download_game_os_auto_preference() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+
+    local t_root
+    t_root=$(mktemp -d "${TEST_TMP_DIR:-/tmp}/gamectl_test_os_auto_XXXXXX")
+    local t_cfg="$t_root/config"
+    local t_cache="$t_root/cache"
+    local t_target="$t_root/games/OSAutoTitle"
+    mkdir -p "$t_cfg/SLSsteam" "$t_cache/gamectl/manifests" "$t_target"
+    echo "AppIds: []" > "$t_cfg/SLSsteam/config.yaml"
+
+    export XDG_CONFIG_HOME="$t_cfg"
+    export XDG_CACHE_HOME="$t_cache"
+
+    local mock_zip="$t_cache/gamectl/manifests/99913.zip"
+    local stage_dir="$t_root/stage"
+    mkdir -p "$stage_dir"
+    printf "\xd0\x17\xf6\x71payload_101" > "$stage_dir/101_1.manifest"
+    printf "\xd0\x17\xf6\x71payload_102" > "$stage_dir/102_2.manifest"
+    printf "\xd0\x17\xf6\x71payload_103" > "$stage_dir/103_3.manifest"
+    cat <<'LUA' > "$stage_dir/99913.lua"
+addappid(101, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+addappid(102, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+addappid(103, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+LUA
+    cat <<'JSON' > "$stage_dir/99913.json"
+{
+    "depot": {
+        "101": { "config": { "oslist": "windows" } },
+        "102": { "config": { "oslist": "linux" } },
+        "103": { "config": { "oslist": "macos" } }
+    }
+}
+JSON
+    (cd "$stage_dir" && zip -q "$mock_zip" 101_1.manifest 102_2.manifest 103_3.manifest 99913.lua 99913.json)
+
+    local mock_bin="$t_root/mock-depot-dl"
+    cat <<'MOCK' > "$mock_bin"
+#!/usr/bin/env bash
+echo "$@" >> "$TEST_ARGS_LOG"
+exit 0
+MOCK
+    chmod +x "$mock_bin"
+    export GAMECTL_DEPOT_DL_BIN="$mock_bin"
+    export TEST_ARGS_LOG="$t_root/args.log"
+
+    inject_game() { return 0; }
+
+    # Without --os flag, should auto-prefer native Linux depot on Linux host
+    download_game "99913" "$t_target" "OSAutoTitle" --engine standalone >/dev/null 2>&1
+    local rc=$?
+
+    local passed=1
+    [ "$rc" -eq 0 ] || passed=0
+    grep -q "102_2.manifest" "$TEST_ARGS_LOG" || passed=0
+    ! grep -q "101_1.manifest" "$TEST_ARGS_LOG" || passed=0
+    ! grep -q "103_3.manifest" "$TEST_ARGS_LOG" || passed=0
+
+    rm -rf "$t_root"
+    unset XDG_CONFIG_HOME XDG_CACHE_HOME GAMECTL_DEPOT_DL_BIN TEST_ARGS_LOG
+    [ "$passed" -eq 1 ]
+}
+
+test_download_game_elf_chmod_execution_permission() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    source "$REPO_ROOT/src/steam/30_downloader.sh"
+
+    local t_root
+    t_root=$(mktemp -d "${TEST_TMP_DIR:-/tmp}/gamectl_test_elf_perm_XXXXXX")
+    local t_cfg="$t_root/config"
+    local t_cache="$t_root/cache"
+    local t_target="$t_root/games/OSElfTitle"
+    mkdir -p "$t_cfg/SLSsteam" "$t_cache/gamectl/manifests" "$t_target"
+    echo "AppIds: []" > "$t_cfg/SLSsteam/config.yaml"
+
+    export XDG_CONFIG_HOME="$t_cfg"
+    export XDG_CACHE_HOME="$t_cache"
+
+    local mock_zip="$t_cache/gamectl/manifests/99914.zip"
+    local stage_dir="$t_root/stage"
+    mkdir -p "$stage_dir"
+    printf "\xd0\x17\xf6\x71payload_102" > "$stage_dir/102_1.manifest"
+    echo 'addappid(102, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")' > "$stage_dir/99914.lua"
+    cat <<'JSON' > "$stage_dir/99914.json"
+{
+    "depot": {
+        "102": { "config": { "oslist": "linux" } }
+    }
+}
+JSON
+    (cd "$stage_dir" && zip -q "$mock_zip" 102_1.manifest 99914.lua 99914.json)
+
+    local mock_bin="$t_root/mock-depot-dl"
+    cat <<'MOCK' > "$mock_bin"
+#!/usr/bin/env bash
+target_dir=""
+args=("$@")
+for ((i=0; i<$#; i++)); do
+    if [ "${args[i]}" = "--dir" ]; then
+        target_dir="${args[i+1]}"
+    fi
+done
+if [ -n "$target_dir" ]; then
+    mkdir -p "$target_dir/bin" "$target_dir/assets"
+    # Linux ELF binary created non-executable (644)
+    printf "\x7f\x45\x4c\x46elf_binary_data" > "$target_dir/bin/game.x86_64"
+    chmod 644 "$target_dir/bin/game.x86_64"
+    # Non-ELF data file (644)
+    printf "REGULAR_TEXT_DATA" > "$target_dir/assets/game.dat"
+    chmod 644 "$target_dir/assets/game.dat"
+fi
+exit 0
+MOCK
+    chmod +x "$mock_bin"
+    export GAMECTL_DEPOT_DL_BIN="$mock_bin"
+
+    inject_game() { return 0; }
+
+    download_game "99914" "$t_target" "OSElfTitle" --engine standalone --os linux >/dev/null 2>&1
+    local rc=$?
+
+    local passed=1
+    [ "$rc" -eq 0 ] || passed=0
+    # ELF binary must now be executable (+x)
+    [ -x "$t_target/bin/game.x86_64" ] || passed=0
+    # Non-ELF data must NOT become executable
+    [ ! -x "$t_target/assets/game.dat" ] || passed=0
+
+    rm -rf "$t_root"
+    unset XDG_CONFIG_HOME XDG_CACHE_HOME GAMECTL_DEPOT_DL_BIN
+    [ "$passed" -eq 1 ]
+}
+
+run_test "Depot OS Filter (Chunk 27.04): --os linux depot filtering contract" test_download_game_os_filter_linux
+run_test "Depot OS Filter (Chunk 27.04): --os windows depot filtering contract" test_download_game_os_filter_windows
+run_test "Depot OS Filter (Chunk 27.04): auto-detect native Linux preference contract" test_download_game_os_auto_preference
+run_test "Depot OS Filter (Chunk 27.04): post-download ELF chmod +x hook contract" test_download_game_elf_chmod_execution_permission
+
+# ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
 echo
