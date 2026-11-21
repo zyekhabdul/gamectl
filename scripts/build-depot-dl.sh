@@ -5,7 +5,22 @@
 # ==============================================================================
 set -euo pipefail
 
-export PATH="$HOME/.cargo/bin:$PATH"
+export RUST_MIN_STACK="${RUST_MIN_STACK:-67108864}"
+export CFLAGS="${CFLAGS:-} -Dunsignee=unsigned"
+export CXXFLAGS="${CXXFLAGS:-} -Dunsignee=unsigned"
+if command -v clang >/dev/null 2>&1; then
+    export CC="${CC:-clang}"
+    export CXX="${CXX:-clang++}"
+fi
+if [ -z "${RUSTC:-}" ] && [ -x "$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc" ]; then
+    export RUSTC="$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc"
+fi
+CARGO_BIN="cargo"
+if [ -x "/usr/bin/cargo" ]; then
+    CARGO_BIN="/usr/bin/cargo"
+elif command -v cargo >/dev/null 2>&1; then
+    CARGO_BIN="$(command -v cargo)"
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -64,7 +79,7 @@ if [ "$CHECK_ONLY" = true ]; then
     fi
 fi
 
-if ! command -v cargo >/dev/null 2>&1; then
+if ! command -v "$CARGO_BIN" >/dev/null 2>&1; then
     if [ -f "$OUTPUT_DIR/$OUTPUT_NAME" ] && [ "$FORCE" = false ]; then
         echo "[WARN] Cargo / Rust toolchain not found on PATH." >&2
         echo "       Preserving validated pre-existing binary at: $OUTPUT_DIR/$OUTPUT_NAME" >&2
@@ -96,8 +111,27 @@ echo "=================================================="
 build_status=0
 (
     cd "$CRATE_DIR"
-    cargo "${CARGO_ARGS[@]}"
+    "$CARGO_BIN" "${CARGO_ARGS[@]}"
 ) || build_status=$?
+
+if [ $build_status -ne 0 ] && [ "$BUILD_PROFILE" = "release" ]; then
+    echo "[WARN] Release build failed (exit code $build_status), attempting unoptimized dev build fallback..." >&2
+    FALLBACK_ARGS=("build" "--bin" "gamectl-depot-dl")
+    [ -n "$TARGET_TRIPLE" ] && FALLBACK_ARGS+=(--target "$TARGET_TRIPLE")
+    build_status=0
+    (
+        cd "$CRATE_DIR"
+        "$CARGO_BIN" "${FALLBACK_ARGS[@]}"
+    ) || build_status=$?
+    if [ $build_status -eq 0 ]; then
+        if [ -n "$TARGET_TRIPLE" ]; then
+            TARGET_BIN="$CRATE_DIR/target/$TARGET_TRIPLE/debug/$OUTPUT_NAME"
+        else
+            TARGET_BIN="$CRATE_DIR/target/debug/$OUTPUT_NAME"
+        fi
+        BUILD_PROFILE="debug"
+    fi
+fi
 
 if [ $build_status -ne 0 ]; then
     if [ -f "$OUTPUT_DIR/$OUTPUT_NAME" ] && [ "$FORCE" = false ]; then
@@ -122,6 +156,20 @@ fi
 mkdir -p "$OUTPUT_DIR"
 cp -f "$TARGET_BIN" "$OUTPUT_DIR/$OUTPUT_NAME"
 chmod +x "$OUTPUT_DIR/$OUTPUT_NAME" 2>/dev/null || true
+
+# Mirror to runner bundle if present
+RUNNER_BIN_DIR="$REPO_ROOT/src/gamectl_runner/bin"
+if [ -d "$RUNNER_BIN_DIR" ]; then
+    cp -f "$TARGET_BIN" "$RUNNER_BIN_DIR/$OUTPUT_NAME"
+    chmod +x "$RUNNER_BIN_DIR/$OUTPUT_NAME" 2>/dev/null || true
+fi
+
+if command -v strip >/dev/null 2>&1; then
+    strip "$OUTPUT_DIR/$OUTPUT_NAME" 2>/dev/null || true
+    if [ -f "$RUNNER_BIN_DIR/$OUTPUT_NAME" ]; then
+        strip "$RUNNER_BIN_DIR/$OUTPUT_NAME" 2>/dev/null || true
+    fi
+fi
 
 file_size=$(stat -c%s "$OUTPUT_DIR/$OUTPUT_NAME" 2>/dev/null || stat -f%z "$OUTPUT_DIR/$OUTPUT_NAME" 2>/dev/null || echo "0")
 size_mb=$(awk "BEGIN {printf \"%.2f\", $file_size / (1024 * 1024)}")

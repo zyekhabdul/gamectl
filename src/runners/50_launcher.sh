@@ -151,7 +151,7 @@ EOF
                 [ -f "$info_file" ] && s_unit=$(grep -E '^SCOPE_UNIT=' "$info_file" 2>/dev/null | cut -d'=' -f2- || true)
                 log_msg "INFO" "LAUNCH" "Sending SIGTERM to process PID $game_pid ($title)..."
                 if [ -n "$s_unit" ]; then
-                    systemctl --user stop "$s_unit.scope" 2>/dev/null || true
+                    systemctl --user stop --no-block "$s_unit.scope" 2>/dev/null || true
                 fi
                 kill "$game_pid" 2>/dev/null || true
                 local wait_cnt=0
@@ -178,7 +178,7 @@ EOF
                 log_msg "WARN" "LAUNCH" "Sending SIGKILL to process PID $game_pid ($title)..."
                 if [ -n "$s_unit" ]; then
                     systemctl --user kill -s SIGKILL "$s_unit.scope" 2>/dev/null || true
-                    systemctl --user stop "$s_unit.scope" 2>/dev/null || true
+                    systemctl --user stop --no-block "$s_unit.scope" 2>/dev/null || true
                 fi
                 kill -9 "$game_pid" 2>/dev/null || true
                 if [ -d "$gdir/pfx" ]; then
@@ -356,7 +356,7 @@ launch_game() {
     _restore_launch_state() {
         trap - INT TERM EXIT
         if [ -n "${unit_name:-}" ]; then
-            systemctl --user stop "$unit_name.scope" 2>/dev/null || true
+            systemctl --user stop --no-block "$unit_name.scope" 2>/dev/null || true
         fi
         if [ -n "${prev_governor:-}" ] && [ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
             echo "$prev_governor" | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
@@ -648,7 +648,7 @@ EOF
             exit 1
         fi
         if [ -n "$unit_name" ]; then
-            systemctl --user stop "$unit_name.scope" 2>/dev/null || true
+            systemctl --user stop --no-block "$unit_name.scope" 2>/dev/null || true
         fi
         if [ "$is_win" = true ] && [ -d "$pfx_dir" ]; then
             # Remediation DEFECT-02: Wait for wineserver to flush data & release lockfile before snapshot (wineserver -w)
