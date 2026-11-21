@@ -1037,7 +1037,7 @@ is_steamstub_elf_active() {
     if command -v readelf >/dev/null 2>&1; then
         local ep_hex b_addr_hex b_size_hex
         ep_hex=$(readelf -h "$bin_path" 2>/dev/null | awk '/Entry point address:/ { print $4 }')
-        read -r b_addr_hex b_size_hex < <(readelf -S -W "$bin_path" 2>/dev/null | awk '$2 == ".bind" { print "0x"$4, "0x"$6 }')
+        read -r b_addr_hex b_size_hex < <(readelf -S -W "$bin_path" 2>/dev/null | awk '{ for (i = 1; i <= NF; i++) if ($i == ".bind") { print "0x"$(i+2), "0x"$(i+4); break } }')
         if [ -n "$ep_hex" ] && [ -n "$b_addr_hex" ] && [ -n "$b_size_hex" ]; then
             local ep=$((ep_hex)) b_start=$((b_addr_hex)) b_end=$((b_addr_hex + b_size_hex))
             if [ "$ep" -lt "$b_start" ] || [ "$ep" -ge "$b_end" ]; then
@@ -1112,6 +1112,11 @@ unpack_steamstub_pe() {
     if [ -z "$steamless_bin" ]; then
         return 1
     fi
+
+    if [ -z "$runner_bin" ]; then
+        runner_bin=$(find_runner "$gdir" 2>/dev/null || true)
+    fi
+    pfx_dir="${pfx_dir:-$gdir/pfx}"
 
     echo "  ${UI_CYAN:-}[INFO] Invoking Steamless CLI: $steamless_bin on $gbin...${UI_RST:-}"
     local unpack_rc=0
@@ -1342,7 +1347,7 @@ def unpack(target_path, output_path):
                 sys.stderr.write("[ERROR] Decryption of code section failed.\n")
                 return 1
 
-            write_len = min(len(decrypted_code), code_sec['size'])
+            write_len = min(len(decrypted_code), code_sec['size'], max(0, len(file_bytes) - code_sec['offset']))
             file_bytes[code_sec['offset'] : code_sec['offset'] + write_len] = decrypted_code[:write_len]
 
         real_ep = hdr_info['real_entrypoint']
@@ -1357,8 +1362,9 @@ def unpack(target_path, output_path):
                 if s['name'] == '.text':
                     code_sec_addr = s['addr']
                     break
-            if real_ep < code_sec_addr:
-                real_ep = real_ep + code_sec_addr
+            base_ref = base_addr if base_addr > 0 else code_sec_addr
+            if real_ep < base_ref:
+                real_ep = real_ep + base_ref
             ep_bytes = struct.pack(endian + 'Q', real_ep)
 
         file_bytes[0x18 : 0x18 + len(ep_bytes)] = ep_bytes
@@ -1378,6 +1384,7 @@ EOF_UNPACK_PY
     if [ "$py_rc" -eq 0 ] && [ -f "$out_bin" ] && [ -x "$out_bin" ]; then
         return 0
     fi
+    rm -f "$out_bin" 2>/dev/null || true
     return 1
 }
 
