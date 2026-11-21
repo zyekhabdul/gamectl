@@ -10554,6 +10554,18 @@ library_menu() {
                 ;;
             *)
                 local launch_rc=0
+                if [ -z "$sel_bin" ]; then
+                    local cand_bin
+                    cand_bin=$(find_game_binary "$sel_dir" 2>/dev/null || echo "")
+                    if [ -z "$cand_bin" ] && [ -n "$sel_appid" ] && [[ "$sel_appid" =~ ^[0-9]+$ ]]; then
+                        local target_os
+                        target_os="$(detect_app_platform_os "$sel_appid")"
+                        log_msg "INFO" "LIBRARY" "Missing executable binary in $sel_dir for $sel_title ($sel_appid). Bridging to standalone download."
+                        tui_exec_action "Download Missing Files ($sel_title)" download_game "$sel_appid" "$sel_dir" "$sel_title" --all --os "$target_os"
+                        invalidate_scan_cache
+                        continue
+                    fi
+                fi
                 launch_game "$sel_dir" "$sel_bin" "$sel_title" || launch_rc=$?
                 invalidate_scan_cache
                 if [ "$launch_rc" -eq 10 ]; then

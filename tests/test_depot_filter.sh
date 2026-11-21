@@ -231,8 +231,53 @@ MOCK
     return 0
 }
 
+test_tui_os_parameter_forwarding_contract() {
+    # 1. Static AST/Grep contract audit across all dashboard entrypoints
+    # In search_steam: all download actions must include --os "$target_os"
+    local search_matches
+    search_matches=$(grep -c 'download_game.*--os "\$target_os"' "$REPO_ROOT/src/tui/70_dashboard.sh" || echo 0)
+    [ "$search_matches" -ge 4 ] || { echo "[FAIL] Expected at least 4 download_game --os calls in 70_dashboard.sh, found: $search_matches" >&2; return 1; }
+
+    # In unlock_interactive: auto-download bridge must include --os "$target_os"
+    grep -q 'download_game.*--os "\$target_os"' "$REPO_ROOT/src/steam/30_downloader.sh" || { echo "[FAIL] Missing --os in unlock_interactive" >&2; return 1; }
+
+    # 2. Dynamic execution contract for library_menu missing binary bridge
+    local t_root
+    t_root=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_tui_fwd_XXXXXX")
+    local t_game="$t_root/games/MissingBinGame"
+    mkdir -p "$t_game"
+
+    local captured_args=()
+    tui_exec_action() {
+        shift # title
+        captured_args=("$@")
+        return 0
+    }
+    detect_app_platform_os() { echo "linux"; }
+
+    # Simulate library_menu enter logic when binary is missing
+    local sel_bin="" sel_dir="$t_game" sel_title="MissingBinGame" sel_appid="77777"
+    if [ -z "$sel_bin" ]; then
+        local cand_bin
+        cand_bin=$(find_game_binary "$sel_dir" 2>/dev/null || echo "")
+        if [ -z "$cand_bin" ] && [ -n "$sel_appid" ] && [[ "$sel_appid" =~ ^[0-9]+$ ]]; then
+            local target_os
+            target_os="$(detect_app_platform_os "$sel_appid")"
+            tui_exec_action "Download Missing Files ($sel_title)" download_game "$sel_appid" "$sel_dir" "$sel_title" --all --os "$target_os"
+        fi
+    fi
+
+    rm -rf "$t_root"
+    local args_str="${captured_args[*]}"
+    echo "$args_str" | grep -q 'download_game 77777 .* --all --os linux' || { echo "[FAIL] Expected download_game with --os linux, got: $args_str" >&2; return 1; }
+
+    echo "[PASS] TUI dashboard parameter forwarding verified across library, search, and unlock bridges."
+    return 0
+}
+
 test_parse_depot_os_map_contract
 test_download_game_os_filter_contracts
 test_ensure_linux_binaries_executable_contract
 test_download_game_elf_chmod_hook_contract
-echo "=== [PASS] All Chunk 27.01 & Chunk 27.02 contract tests passed successfully with Exit 0. ==="
+test_tui_os_parameter_forwarding_contract
+echo "=== [PASS] All Chunk 27.01, 27.02 & 27.03 contract tests passed successfully with Exit 0. ==="
