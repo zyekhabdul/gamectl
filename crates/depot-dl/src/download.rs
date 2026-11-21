@@ -634,66 +634,87 @@ impl DownloadEngine {
         }
 
         let chunk_hex = util::to_hex_lower(&chunk.id);
-        let fetch = ctx.client.fetch_chunk(
-            ctx.depot_id,
-            &chunk_hex,
-            chunk.len_compressed,
-            &ctx.depot_cancel,
-        );
-        // Cancellation must also cut short an in-flight request, not just the gaps between
-        // attempts - a hanging CDN must never delay a `cancel()` by the request timeout.
-        let raw = tokio::select! {
-            biased;
-            _ = ctx.depot_cancel.cancelled() => return Err(Error::Cancelled),
-            _ = self.cancel.cancelled() => return Err(Error::Cancelled),
-            result = fetch => result?,
-        };
-        let network_len = raw.len() as u64;
+        let mut last_error: Option<Error> = None;
 
-        // Decrypt + verify + write (blocking).
-        let key = ctx.key;
-        let offset = chunk.offset;
-        let handle = Arc::clone(&file_handle);
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            let data = chunk::process_chunk(
-                &raw,
-                &key,
-                chunk.len_uncompressed,
-                chunk.adler32,
+        for chunk_attempt in 0..3 {
+            if ctx.depot_cancel.is_cancelled() || self.cancel.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+
+            let fetch = ctx.client.fetch_chunk(
+                ctx.depot_id,
                 &chunk_hex,
-            )?;
-            let mut guard = handle.lock().expect("file handle mutex");
-            let f = guard.as_mut().expect("file handle open");
-            write_at(f, &data, offset).map_err(Error::Io)?;
-            Ok(())
-        })
-        .await
-        .map_err(|e| Error::TaskFailed(e.to_string()))??;
+                chunk.len_compressed,
+                &ctx.depot_cancel,
+            );
+            // Cancellation must also cut short an in-flight request, not just the gaps between
+            // attempts - a hanging CDN must never delay a `cancel()` by the request timeout.
+            let raw = tokio::select! {
+                biased;
+                _ = ctx.depot_cancel.cancelled() => return Err(Error::Cancelled),
+                _ = self.cancel.cancelled() => return Err(Error::Cancelled),
+                result = fetch => result?,
+            };
+            let network_len = raw.len() as u64;
 
-        let downloaded = self
-            .total_downloaded
-            .fetch_add(network_len, Ordering::Relaxed)
-            + network_len;
-        let uncompressed = self
-            .total_uncompressed
-            .fetch_add(u64::from(chunk.len_uncompressed), Ordering::Relaxed)
-            + u64::from(chunk.len_uncompressed);
-        ctx.depot_downloaded
-            .fetch_add(network_len, Ordering::Relaxed);
-        let file_done = done_bytes.fetch_add(u64::from(chunk.len_uncompressed), Ordering::Relaxed)
-            + u64::from(chunk.len_uncompressed);
+            // Decrypt + verify + write (blocking).
+            let key = ctx.key;
+            let offset = chunk.offset;
+            let handle = Arc::clone(&file_handle);
+            let chunk_hex_clone = chunk_hex.clone();
+            let process_result = tokio::task::spawn_blocking(move || -> Result<()> {
+                let data = chunk::process_chunk(
+                    &raw,
+                    &key,
+                    chunk.len_uncompressed,
+                    chunk.adler32,
+                    &chunk_hex_clone,
+                )?;
+                let mut guard = handle.lock().expect("file handle mutex");
+                let f = guard.as_mut().expect("file handle open");
+                write_at(f, &data, offset).map_err(Error::Io)?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::TaskFailed(e.to_string()))?;
 
-        self.emit_best_effort(ProgressEvent::ChunkCompleted {
-            depot_id: ctx.depot_id,
-            path: display_path,
-            file_bytes_completed: file_done,
-            file_size,
-            downloaded_increment: network_len,
-            uncompressed_increment: u64::from(chunk.len_uncompressed),
-            total_downloaded: downloaded,
-            total_uncompressed: uncompressed,
-        });
-        Ok(())
+            match process_result {
+                Ok(()) => {
+                    let downloaded = self
+                        .total_downloaded
+                        .fetch_add(network_len, Ordering::Relaxed)
+                        + network_len;
+                    let uncompressed = self
+                        .total_uncompressed
+                        .fetch_add(u64::from(chunk.len_uncompressed), Ordering::Relaxed)
+                        + u64::from(chunk.len_uncompressed);
+                    ctx.depot_downloaded
+                        .fetch_add(network_len, Ordering::Relaxed);
+                    let file_done = done_bytes
+                        .fetch_add(u64::from(chunk.len_uncompressed), Ordering::Relaxed)
+                        + u64::from(chunk.len_uncompressed);
+
+                    self.emit_best_effort(ProgressEvent::ChunkCompleted {
+                        depot_id: ctx.depot_id,
+                        path: display_path,
+                        file_bytes_completed: file_done,
+                        file_size,
+                        downloaded_increment: network_len,
+                        uncompressed_increment: u64::from(chunk.len_uncompressed),
+                        total_downloaded: downloaded,
+                        total_uncompressed: uncompressed,
+                    });
+                    return Ok(());
+                }
+                Err(error) if error.rotates_cdn_server() && chunk_attempt + 1 < 3 => {
+                    last_error = Some(error);
+                    continue;
+                }
+                Err(fatal) => return Err(fatal),
+            }
+        }
+
+        Err(last_error.unwrap_or(Error::Cancelled))
     }
 
     async fn emit(&self, event: ProgressEvent) {
