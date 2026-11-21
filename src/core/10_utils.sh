@@ -983,8 +983,11 @@ resolve_unpacked_binary() {
                 "${base_no_ext}_unpacked.exe" \
                 "${base_no_ext}-unpacked.exe" \
                 "${gbin}.unpacked.exe" \
+                "${base_no_ext}.unpacked" \
+                "${base_no_ext}_unpacked" \
                 "${gbin}.unpacked"; do
         if [ -f "$gdir/$cand" ]; then
+            [ -x "$gdir/$cand" ] || chmod +x "$gdir/$cand" 2>/dev/null || true
             echo "$cand"
             return 0
         fi
@@ -1032,7 +1035,7 @@ unpack_steamstub_pe() {
         return 1
     fi
 
-    echo "  ${UI_CYAN}[INFO] Invoking Steamless CLI: $steamless_bin on $gbin...${UI_RST}"
+    echo "  ${UI_CYAN:-}[INFO] Invoking Steamless CLI: $steamless_bin on $gbin...${UI_RST:-}"
     local unpack_rc=0
     if [ -x "$steamless_bin" ] && ! echo "$steamless_bin" | grep -qi '\.exe$'; then
         "$steamless_bin" "$target_exe" >/dev/null 2>&1 || unpack_rc=$?
@@ -1050,6 +1053,217 @@ unpack_steamstub_pe() {
 
     # Check if unpacked binary was produced
     if resolve_unpacked_binary "$gdir" "$gbin" >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+# Unpack Linux ELF SteamStub binary (.bind section) via native Python unpacker
+unpack_steamstub_elf() {
+    local target_bin="$1"
+    [ -f "$target_bin" ] || return 1
+
+    local gdir
+    gdir="$(dirname "$target_bin")"
+    local gbin
+    gbin="$(basename "$target_bin")"
+
+    # If already unpacked, nothing to do
+    if resolve_unpacked_binary "$gdir" "$gbin" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "  ${UI_AMBER:-}[WARN] python3 not available. Cannot unpack Linux SteamStub binary.${UI_RST:-}" >&2
+        return 1
+    fi
+
+    echo "  ${UI_CYAN:-}[INFO] Unpacking Linux ELF SteamStub DRM (.bind) on $gbin...${UI_RST:-}"
+
+    local out_bin="$gdir/${gbin}.unpacked"
+    local py_rc=0
+    python3 - "$target_bin" "$out_bin" << 'EOF_UNPACK_PY' || py_rc=$?
+import sys, os, struct, subprocess
+
+def decrypt_aes(key, iv, data):
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        ecb = Cipher(algorithms.AES(key), modes.ECB()).decryptor()
+        new_iv = ecb.update(iv) + ecb.finalize()
+        cbc = Cipher(algorithms.AES(key), modes.CBC(new_iv)).decryptor()
+        return cbc.update(data) + cbc.finalize()
+    except Exception:
+        pass
+    try:
+        key_hex = key.hex()
+        p1 = subprocess.run(['openssl', 'enc', '-d', '-aes-256-ecb', '-K', key_hex, '-nopad'],
+                            input=iv, capture_output=True, check=True)
+        new_iv_hex = p1.stdout.hex()
+        p2 = subprocess.run(['openssl', 'enc', '-d', '-aes-256-cbc', '-K', key_hex, '-iv', new_iv_hex, '-nopad'],
+                            input=data, capture_output=True, check=True)
+        return p2.stdout
+    except Exception as e:
+        sys.stderr.write(f"[ERROR] AES decryption failed: {e}\n")
+        return None
+
+def unpack(target_path, output_path):
+    with open(target_path, 'rb') as f:
+        magic = f.read(4)
+        if magic != b'\x7fELF':
+            sys.stderr.write("[ERROR] Not an ELF binary.\n")
+            return 1
+        ei_class = f.read(1)[0]
+        ei_data = f.read(1)[0]
+        endian = '<' if ei_data == 1 else '>'
+        if ei_class not in (1, 2) or ei_data not in (1, 2):
+            sys.stderr.write("[ERROR] Unsupported ELF encoding.\n")
+            return 1
+
+        f.seek(0x18)
+        if ei_class == 1:
+            entrypoint = struct.unpack(endian + 'I', f.read(4))[0]
+            f.seek(0x20)
+            shoff = struct.unpack(endian + 'I', f.read(4))[0]
+            f.seek(0x2e)
+            shentsize, shnum, shstrndx = struct.unpack(endian + 'HHH', f.read(6))
+        else:
+            entrypoint = struct.unpack(endian + 'Q', f.read(8))[0]
+            f.seek(0x28)
+            shoff = struct.unpack(endian + 'Q', f.read(8))[0]
+            f.seek(0x3a)
+            shentsize, shnum, shstrndx = struct.unpack(endian + 'HHH', f.read(6))
+
+        f.seek(shoff + shstrndx * shentsize)
+        if ei_class == 1:
+            _, _, _, _, str_offset, str_size, _, _, _, _ = struct.unpack(endian + 'IIIIIIIIII', f.read(40))
+        else:
+            _, _, _, _, str_offset, str_size, _, _, _, _ = struct.unpack(endian + 'IIQQQQIIQQ', f.read(64))
+
+        f.seek(str_offset)
+        strtab = f.read(str_size)
+
+        sections = []
+        bind_sec = None
+        for i in range(shnum):
+            f.seek(shoff + i * shentsize)
+            if ei_class == 1:
+                name_idx, s_type, s_flags, s_addr, s_offset, s_size, _, _, _, _ = struct.unpack(endian + 'IIIIIIIIII', f.read(40))
+            else:
+                name_idx, s_type, s_flags, s_addr, s_offset, s_size, _, _, _, _ = struct.unpack(endian + 'IIQQQQIIQQ', f.read(64))
+            name_end = strtab.find(b'\x00', name_idx)
+            name = strtab[name_idx:name_end].decode('latin1', errors='replace')
+            sec = {'name': name, 'type': s_type, 'flags': s_flags, 'addr': s_addr, 'offset': s_offset, 'size': s_size}
+            sections.append(sec)
+            if name == '.bind':
+                bind_sec = sec
+
+        if not bind_sec:
+            sys.stderr.write("[ERROR] No .bind section found in ELF binary.\n")
+            return 1
+
+        f.seek(bind_sec['offset'])
+        bind_data = f.read(bind_sec['size'])
+        if len(bind_data) < 0xd4:
+            sys.stderr.write("[ERROR] .bind section too small.\n")
+            return 1
+
+        candidates = []
+        if bind_sec['addr'] <= entrypoint < bind_sec['addr'] + bind_sec['size']:
+            bind_entry = entrypoint - bind_sec['addr']
+            if bind_entry >= 0xd0:
+                candidates.append(bind_entry - 0xd0)
+
+        for off in range(0, min(len(bind_data) - 0xd4, 0x8000), 4):
+            if off not in candidates:
+                candidates.append(off)
+
+        hdr_info = None
+        names = ('signature base drm_entrypoint bind_offset u0 '
+                 'real_entrypoint u1 payload_size u2 u3 appid '
+                 'flags bind_virtual_size u4 code_virtual_addr '
+                 'code_size aes_key aes_iv code_stolen keys u5 '
+                 'u6 u7').split()
+        pattern = '<IQQIIQIIIIIIIIQQ32s16s16s16s32sQI'
+
+        for cand_off in candidates:
+            if cand_off + 0xd4 > len(bind_data):
+                continue
+            key = int.from_bytes(bind_data[cand_off:cand_off+4], byteorder='little')
+            header_bytes = bytearray()
+            h_off = cand_off
+            end_off = cand_off + 0xd0
+            while h_off < end_off:
+                h_off += 4
+                val = int.from_bytes(bind_data[h_off:h_off+4], byteorder='little')
+                header_bytes.extend(int.to_bytes(val ^ key, 4, byteorder='little'))
+                key = val
+
+            if len(header_bytes) >= 208:
+                raw_tuple = struct.unpack(pattern, bytes(header_bytes[:208]))
+                hdr = dict(zip(names, raw_tuple))
+                if hdr['signature'] == 0xc0dec0df:
+                    hdr_info = hdr
+                    break
+
+        if not hdr_info:
+            sys.stderr.write("[ERROR] SteamStub .bind header signature (0xc0dec0df) not found.\n")
+            return 1
+
+        code_sec = None
+        c_addr = hdr_info['code_virtual_addr']
+        for s in sections:
+            if (s['addr'] <= c_addr < s['addr'] + s['size']) or (s['offset'] <= c_addr < s['offset'] + s['size']):
+                code_sec = s
+                break
+
+        if not code_sec:
+            for s in sections:
+                if s['name'] == '.text':
+                    code_sec = s
+                    break
+
+        if not code_sec:
+            sys.stderr.write(f"[ERROR] Could not identify code section for virtual addr 0x{c_addr:x}.\n")
+            return 1
+
+        f.seek(code_sec['offset'])
+        enc_code_from_sec = f.read(min(hdr_info['code_size'], code_sec['size']))
+        code_payload = bytearray(hdr_info['code_stolen'])
+        code_payload.extend(enc_code_from_sec)
+
+        decrypted_code = decrypt_aes(hdr_info['aes_key'], hdr_info['aes_iv'], bytes(code_payload))
+        if not decrypted_code:
+            sys.stderr.write("[ERROR] Decryption of code section failed.\n")
+            return 1
+
+        real_ep = hdr_info['real_entrypoint']
+        if real_ep < code_sec['addr']:
+            real_ep = real_ep + code_sec['addr']
+
+        f.seek(0)
+        file_bytes = bytearray(f.read())
+        write_len = min(len(decrypted_code), code_sec['size'])
+        file_bytes[code_sec['offset'] : code_sec['offset'] + write_len] = decrypted_code[:write_len]
+
+        if ei_class == 1:
+            ep_bytes = struct.pack(endian + 'I', real_ep & 0xffffffff)
+        else:
+            ep_bytes = struct.pack(endian + 'Q', real_ep)
+        file_bytes[0x18 : 0x18 + len(ep_bytes)] = ep_bytes
+
+        with open(output_path, 'wb') as out_f:
+            out_f.write(file_bytes)
+
+        os.chmod(output_path, 0o755)
+        sys.stdout.write(f"[SUCCESS] Unpacked SteamStub ELF (AppID: {hdr_info['appid']}) -> {output_path}\n")
+        return 0
+
+target = sys.argv[1]
+output = sys.argv[2]
+sys.exit(unpack(target, output))
+EOF_UNPACK_PY
+
+    if [ "$py_rc" -eq 0 ] && [ -f "$out_bin" ] && [ -x "$out_bin" ]; then
         return 0
     fi
     return 1
@@ -1133,13 +1347,22 @@ diagnose_steamstub() {
             fi
         elif [ "$stub_type" = "linux_elf" ]; then
             echo "│ DRM Status    : ${UI_AMBER}[DETECTED] Linux ELF SteamStub (.bind section)${UI_RST}"
+            local up_bin
+            up_bin=$(resolve_unpacked_binary "$b_dir" "$b_name" 2>/dev/null || true)
+            if [ -n "$up_bin" ]; then
+                echo "│ Unpack Status : ${UI_GREEN}[READY] Unpacked counterpart found: $up_bin${UI_RST}"
+                echo "│ Remediation   : launch_game will automatically execute $up_bin"
+            else
+                echo "│ Unpack Status : ${UI_AMBER}[PENDING] No unpacked binary found${UI_RST}"
+                echo "│ Action        : Run 'gamectl unpack-stub \"$bin_path\"' to decrypt .bind section"
+            fi
             echo "│ Interceptor   : ${UI_GREEN}[ACTIVE] Sovereign steam.sh trap prevents Steam Client launch${UI_RST}"
             local cand_win
             cand_win=$(find "$b_dir" -maxdepth 2 -iname "*.exe" 2>/dev/null | head -n 1 || true)
             if [ -n "$cand_win" ]; then
                 echo "│ Runner Option : Windows executable found ($(basename "$cand_win")). Can run via Proton with Steamless."
             else
-                echo "│ Runner Option : Pure Linux native. Runs with sovereign interceptor trapping steam.sh calls."
+                echo "│ Runner Option : Pure Linux native. Runs with unpacked binary and sovereign steam.sh trap."
             fi
         else
             echo "│ DRM Status    : ${UI_AMBER}[DETECTED] SteamStub / SteamDRM markers found${UI_RST}"
@@ -1152,7 +1375,7 @@ diagnose_steamstub() {
     [ "$is_stub" = true ] && return 0 || return 1
 }
 
-# CLI subcommand handler for unpacking SteamStub Windows PE binaries
+# CLI subcommand handler for unpacking SteamStub Windows PE or Linux ELF binaries
 cli_unpack_stub() {
     local target="$1"
     if [ ! -f "$target" ]; then
@@ -1165,14 +1388,40 @@ cli_unpack_stub() {
         echo "[VERIFIED] Binary is already unpacked: $up_res"
         return 0
     fi
-    echo "[INFO] Attempting to unpack $target via Steamless CLI..."
-    if unpack_steamstub_pe "$target"; then
-        up_res=$(resolve_unpacked_binary "$(dirname "$target")" "$(basename "$target")" 2>/dev/null || true)
-        echo "[SUCCESS] Binary successfully unpacked: $up_res"
-        return 0
+
+    local stype
+    stype=$(detect_steamstub_type "$target" 2>/dev/null || echo "unknown")
+
+    if [ "$stype" = "linux_elf" ]; then
+        echo "[INFO] Attempting to unpack Linux ELF binary $target..."
+        if unpack_steamstub_elf "$target"; then
+            up_res=$(resolve_unpacked_binary "$(dirname "$target")" "$(basename "$target")" 2>/dev/null || true)
+            echo "[SUCCESS] Binary successfully unpacked: $up_res"
+            return 0
+        else
+            echo "[ERROR] Failed to unpack Linux ELF SteamStub binary." >&2
+            return 1
+        fi
+    elif [ "$stype" = "windows_pe" ]; then
+        echo "[INFO] Attempting to unpack Windows PE binary $target via Steamless CLI..."
+        if unpack_steamstub_pe "$target"; then
+            up_res=$(resolve_unpacked_binary "$(dirname "$target")" "$(basename "$target")" 2>/dev/null || true)
+            echo "[SUCCESS] Binary successfully unpacked: $up_res"
+            return 0
+        else
+            echo "[ERROR] Failed to unpack binary. Ensure Steamless CLI is installed or run under Wine." >&2
+            return 1
+        fi
     else
-        echo "[ERROR] Failed to unpack binary. Ensure Steamless CLI is installed or run under Wine." >&2
-        return 1
+        echo "[INFO] Architecture undetermined. Probing Linux ELF and Windows PE unpackers..."
+        if unpack_steamstub_elf "$target" || unpack_steamstub_pe "$target"; then
+            up_res=$(resolve_unpacked_binary "$(dirname "$target")" "$(basename "$target")" 2>/dev/null || true)
+            echo "[SUCCESS] Binary successfully unpacked: $up_res"
+            return 0
+        else
+            echo "[ERROR] Failed to unpack binary with available unpackers." >&2
+            return 1
+        fi
     fi
 }
 

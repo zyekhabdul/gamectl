@@ -405,8 +405,24 @@ launch_game() {
                 fi
             fi
         elif [ "$stub_type" = "linux_elf" ]; then
-            echo "  ${UI_AMBER}[WARN] SteamStub DRM (.bind section) detected on Linux binary ($gbin).${UI_RST}"
-            echo "  ${UI_CYAN}[INFO] Sovereign steam.sh interceptor active in PATH to trap unsolicited Steam Client calls.${UI_RST}"
+            local unpacked_bin
+            unpacked_bin=$(resolve_unpacked_binary "$gdir" "$gbin" 2>/dev/null || true)
+            if [ -n "$unpacked_bin" ] && [ -f "$gdir/$unpacked_bin" ]; then
+                echo "  ${UI_GREEN}[SUCCESS] SteamStub ELF: Automatically switched to unpacked binary: $unpacked_bin${UI_RST}"
+                gbin="$unpacked_bin"
+            else
+                echo "  ${UI_AMBER}[INFO] SteamStub ELF DRM (.bind) detected on ($gbin). Attempting native unpacking...${UI_RST}"
+                if unpack_steamstub_elf "$gdir/$gbin"; then
+                    unpacked_bin=$(resolve_unpacked_binary "$gdir" "$gbin" 2>/dev/null || true)
+                    if [ -n "$unpacked_bin" ] && [ -f "$gdir/$unpacked_bin" ]; then
+                        echo "  ${UI_GREEN}[SUCCESS] SteamStub ELF: Unpacked binary generated: $unpacked_bin${UI_RST}"
+                        gbin="$unpacked_bin"
+                    fi
+                else
+                    echo "  ${UI_AMBER}[WARN] Linux ELF SteamStub unpacking failed or unsupported stub variant.${UI_RST}"
+                    echo "  ${UI_CYAN}[INFO] Sovereign steam.sh interceptor active in PATH to trap unsolicited Steam Client calls.${UI_RST}"
+                fi
+            fi
         else
             echo "  ${UI_AMBER}[WARN] SteamStub DRM markers detected on binary ($gbin).${UI_RST}"
         fi

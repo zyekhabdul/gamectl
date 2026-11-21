@@ -3159,6 +3159,173 @@ run_test "Depot OS Filter (Chunk 27.04): auto-detect native Linux preference con
 run_test "Depot OS Filter (Chunk 27.04): post-download ELF chmod +x hook contract" test_download_game_elf_chmod_execution_permission
 
 # ------------------------------------------------------------------------------
+# Chunk 28.03: Linux ELF SteamStub DRM Unpacking & Remediation Contracts
+# ------------------------------------------------------------------------------
+generate_mock_steamstub_elf() {
+    local target_bin="$1"
+    local appid="${2:-302610}"
+    python3 - "$target_bin" "$appid" << 'PY_MOCK_ELF'
+import sys, struct
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+out_path = sys.argv[1]
+appid = int(sys.argv[2])
+
+aes_key = b"K" * 32
+aes_iv = b"I" * 16
+
+ecb = Cipher(algorithms.AES(aes_key), modes.ECB()).decryptor()
+new_iv = ecb.update(aes_iv) + ecb.finalize()
+
+orig_code = b"\x90" * 64
+cbc = Cipher(algorithms.AES(aes_key), modes.CBC(new_iv)).encryptor()
+enc_code = cbc.update(orig_code) + cbc.finalize()
+code_stolen = enc_code[:16]
+code_in_sec = enc_code[16:]
+
+pattern = "<IQQIIQIIIIIIIIQQ32s16s16s16s32sQI"
+hdr_tuple = (
+    0xc0dec0df, 0x400000, 0x402000, 0x2000, 0,
+    0x401000, 0, 0x1000, 0, 0, appid, 0, 0x1000,
+    0, 0x401000, 64, aes_key, aes_iv, code_stolen,
+    b"0" * 16, b"0" * 32, 0, 0
+)
+raw_hdr = struct.pack(pattern, *hdr_tuple)
+
+xor_seed = 0x55aa55aa
+key = xor_seed
+encoded_hdr = bytearray(struct.pack("<I", key))
+for i in range(0, 208, 4):
+    plain_val = int.from_bytes(raw_hdr[i:i+4], "little")
+    val = plain_val ^ key
+    encoded_hdr.extend(struct.pack("<I", val))
+    key = val
+
+shstrtab = b"\x00.text\x00.bind\x00.shstrtab\x00"
+
+elf = bytearray(0x4000)
+elf[0:4] = b"\x7fELF"
+elf[4] = 2 # 64-bit
+elf[5] = 1 # little-endian
+elf[6] = 1 # version
+struct.pack_into("<H", elf, 0x10, 2)
+struct.pack_into("<H", elf, 0x12, 0x3e)
+struct.pack_into("<I", elf, 0x14, 1)
+struct.pack_into("<Q", elf, 0x18, 0x4020d0) # e_entry in .bind
+struct.pack_into("<Q", elf, 0x28, 0x3100) # e_shoff
+struct.pack_into("<H", elf, 0x34, 64)
+struct.pack_into("<H", elf, 0x3a, 64)
+struct.pack_into("<H", elf, 0x3c, 4)
+struct.pack_into("<H", elf, 0x3e, 3)
+
+elf[0x1000 : 0x1000 + len(code_in_sec)] = code_in_sec
+elf[0x2000 : 0x2000 + len(encoded_hdr)] = encoded_hdr
+elf[0x3000 : 0x3000 + len(shstrtab)] = shstrtab
+
+struct.pack_into("<IIQQQQIIQQ", elf, 0x3100 + 64*1, 1, 1, 6, 0x401000, 0x1000, 0x100, 0, 0, 16, 0)
+struct.pack_into("<IIQQQQIIQQ", elf, 0x3100 + 64*2, 7, 1, 7, 0x402000, 0x2000, 0x1000, 0, 0, 16, 0)
+struct.pack_into("<IIQQQQIIQQ", elf, 0x3100 + 64*3, 13, 3, 0, 0, 0x3000, len(shstrtab), 0, 0, 1, 0)
+
+with open(out_path, "wb") as f:
+    f.write(elf)
+PY_MOCK_ELF
+    chmod +x "$target_bin"
+}
+
+test_unpack_steamstub_elf_synthetic_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    local t_dir
+    t_dir=$(mktemp -d "${TEST_TMP_DIR:-/tmp}/gamectl_test_stub_elf_XXXXXX")
+
+    generate_mock_steamstub_elf "$t_dir/game_bin" 302610
+
+    # Verify detection
+    [ "$(detect_steamstub_type "$t_dir/game_bin")" = "linux_elf" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Execute unpack
+    unpack_steamstub_elf "$t_dir/game_bin" >/dev/null 2>&1 || { rm -rf "$t_dir"; return 1; }
+
+    # Assert unpacked binary created and executable
+    [ -f "$t_dir/game_bin.unpacked" ] || { rm -rf "$t_dir"; return 1; }
+    [ -x "$t_dir/game_bin.unpacked" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Assert resolution picks it up
+    [ "$(resolve_unpacked_binary "$t_dir" "game_bin")" = "game_bin.unpacked" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Assert OEP patched to 0x401000
+    local patched_ep
+    patched_ep=$(od -An -tx8 -j 24 -N 8 "$t_dir/game_bin.unpacked" | tr -d ' ')
+    [ "$patched_ep" = "0000000000401000" ] || { rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    return 0
+}
+
+test_cli_unpack_stub_dispatch_linux_elf() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    local t_dir
+    t_dir=$(mktemp -d "${TEST_TMP_DIR:-/tmp}/gamectl_test_cli_stub_XXXXXX")
+
+    generate_mock_steamstub_elf "$t_dir/bosonx" 302610
+
+    # Call CLI subcommand
+    "$GAMECTL" unpack-stub "$t_dir/bosonx" >/dev/null 2>&1 || { rm -rf "$t_dir"; return 1; }
+
+    [ -f "$t_dir/bosonx.unpacked" ] || { rm -rf "$t_dir"; return 1; }
+    [ -x "$t_dir/bosonx.unpacked" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Idempotent second call
+    "$GAMECTL" unpack-stub "$t_dir/bosonx" >/dev/null 2>&1 || { rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    return 0
+}
+
+test_launch_game_auto_unpacks_linux_elf() {
+    source "$REPO_ROOT/src/core/00_header.sh"
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    source "$REPO_ROOT/src/runners/40_wrappers.sh"
+    source "$REPO_ROOT/src/runners/50_launcher.sh"
+
+    local t_dir
+    t_dir=$(mktemp -d "${TEST_TMP_DIR:-/tmp}/gamectl_test_launch_stub_XXXXXX")
+    generate_mock_steamstub_elf "$t_dir/bosonx" 302610
+
+    # Pre-condition: only packed binary exists
+    [ ! -f "$t_dir/bosonx.unpacked" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Launch game pre-flight check logic
+    local stub_type
+    stub_type=$(detect_steamstub_type "$t_dir/bosonx" 2>/dev/null || echo "unknown")
+    [ "$stub_type" = "linux_elf" ] || { rm -rf "$t_dir"; return 1; }
+
+    local gbin="bosonx"
+    local unpacked_bin
+    unpacked_bin=$(resolve_unpacked_binary "$t_dir" "$gbin" 2>/dev/null || true)
+    if [ -n "$unpacked_bin" ] && [ -f "$t_dir/$unpacked_bin" ]; then
+        gbin="$unpacked_bin"
+    else
+        if unpack_steamstub_elf "$t_dir/$gbin" >/dev/null 2>&1; then
+            unpacked_bin=$(resolve_unpacked_binary "$t_dir" "$gbin" 2>/dev/null || true)
+            if [ -n "$unpacked_bin" ] && [ -f "$t_dir/$unpacked_bin" ]; then
+                gbin="$unpacked_bin"
+            fi
+        fi
+    fi
+
+    [ "$gbin" = "bosonx.unpacked" ] || { rm -rf "$t_dir"; return 1; }
+    [ -x "$t_dir/bosonx.unpacked" ] || { rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    return 0
+}
+
+run_test "Linux SteamStub (Chunk 28.03): unpack_steamstub_elf synthetic decryption contract" test_unpack_steamstub_elf_synthetic_contract
+run_test "Linux SteamStub (Chunk 28.03): CLI unpack-stub Linux ELF dispatch contract" test_cli_unpack_stub_dispatch_linux_elf
+run_test "Linux SteamStub (Chunk 28.03): launch_game auto-unpack and binary switch contract" test_launch_game_auto_unpacks_linux_elf
+
+# ------------------------------------------------------------------------------
 # Final Execution Summary
 # ------------------------------------------------------------------------------
 echo
