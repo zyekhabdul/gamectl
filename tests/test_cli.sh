@@ -3405,10 +3405,41 @@ PY_MOCK_ELF32
     chmod +x "$target_bin"
 }
 
+test_diagnose_steamstub_remediated_contract() {
+    source "$REPO_ROOT/src/core/00_header.sh"
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    local t_dir
+    t_dir=$(mktemp -d "${TEST_TMP_DIR:-/tmp}/gamectl_test_diag_stub_XXXXXX")
+
+    generate_mock_steamstub_elf "$t_dir/game_bin" 302610
+
+    # 1. Active stub before unpacking
+    local diag_out
+    diag_out=$(diagnose_steamstub "$t_dir/game_bin" 2>/dev/null)
+    echo "$diag_out" | grep -q "Linux ELF SteamStub (.bind section)" || { rm -rf "$t_dir"; return 1; }
+    echo "$diag_out" | grep -q "\[PENDING\] No unpacked binary found" || { rm -rf "$t_dir"; return 1; }
+
+    # 2. Unpack binary
+    unpack_steamstub_elf "$t_dir/game_bin" >/dev/null 2>&1 || { rm -rf "$t_dir"; return 1; }
+
+    # 3. Active stub when counterpart exists
+    diag_out=$(diagnose_steamstub "$t_dir/game_bin" 2>/dev/null)
+    echo "$diag_out" | grep -q "\[READY\] Unpacked counterpart found: game_bin.unpacked" || { rm -rf "$t_dir"; return 1; }
+
+    # 4. Remediated binary check
+    diag_out=$(diagnose_steamstub "$t_dir/game_bin.unpacked" 2>/dev/null)
+    echo "$diag_out" | grep -q "\[REMEDIATED\] Linux ELF SteamStub (.bind inactive / OEP restored)" || { rm -rf "$t_dir"; return 1; }
+    echo "$diag_out" | grep -q "\[ACTIVE\] Executable entry point points to original code" || { rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    return 0
+}
+
 run_test "Linux SteamStub (Chunk 28.03): unpack_steamstub_elf synthetic decryption contract" test_unpack_steamstub_elf_synthetic_contract
 run_test "Linux SteamStub (Chunk 28.03): unpack_steamstub_elf 32-bit x86 decryption contract" test_unpack_steamstub_elf32_synthetic_contract
 run_test "Linux SteamStub (Chunk 28.03): CLI unpack-stub Linux ELF dispatch contract" test_cli_unpack_stub_dispatch_linux_elf
 run_test "Linux SteamStub (Chunk 28.03): launch_game auto-unpack and binary switch contract" test_launch_game_auto_unpacks_linux_elf
+run_test "Linux SteamStub (Chunk 28.03): diagnose_steamstub active and remediated diagnostics contract" test_diagnose_steamstub_remediated_contract
 
 # ------------------------------------------------------------------------------
 # Final Execution Summary

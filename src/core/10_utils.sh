@@ -970,6 +970,25 @@ detect_steamstub_type() {
     return 0
 }
 
+# Check if a Linux ELF SteamStub (.bind) is actively protecting the binary
+# (entry point resides inside the .bind section) or has been remediated
+is_steamstub_elf_active() {
+    local bin_path="$1"
+    [ -f "$bin_path" ] || return 1
+    if command -v readelf >/dev/null 2>&1; then
+        local ep_hex b_addr_hex b_size_hex
+        ep_hex=$(readelf -h "$bin_path" 2>/dev/null | awk '/Entry point address:/ { print $4 }')
+        read -r b_addr_hex b_size_hex < <(readelf -S -W "$bin_path" 2>/dev/null | awk '$2 == ".bind" { print "0x"$4, "0x"$6 }')
+        if [ -n "$ep_hex" ] && [ -n "$b_addr_hex" ] && [ -n "$b_size_hex" ]; then
+            local ep=$((ep_hex)) b_start=$((b_addr_hex)) b_end=$((b_addr_hex + b_size_hex))
+            if [ "$ep" -lt "$b_start" ] || [ "$ep" -ge "$b_end" ]; then
+                return 1
+            fi
+        fi
+    fi
+    return 0
+}
+
 # Resolve candidate unpacked binary for Windows PE SteamStub
 resolve_unpacked_binary() {
     local gdir="$1"
@@ -1361,36 +1380,51 @@ diagnose_steamstub() {
 
     if [ "$is_stub" = true ]; then
         if [ "$stub_type" = "windows_pe" ]; then
-            echo "│ DRM Status    : ${UI_AMBER}[DETECTED] Windows PE SteamStub DRM${UI_RST}"
             local up_bin
             up_bin=$(resolve_unpacked_binary "$b_dir" "$b_name" 2>/dev/null || true)
-            if [ -n "$up_bin" ]; then
-                echo "│ Unpack Status : ${UI_GREEN}[READY] Unpacked counterpart found: $up_bin${UI_RST}"
+            if [ "$b_name" = "$up_bin" ] || case "$b_name" in *.unpacked.exe|*_unpacked.exe|*-unpacked.exe) true ;; *) false ;; esac; then
+                echo "│ DRM Status    : ${UI_GREEN:-}[REMEDIATED] Windows PE SteamStub (unpacked / DRM cleared)${UI_RST:-}"
+                echo "│ Unpack Status : ${UI_GREEN:-}[ACTIVE] Executable DRM wrapper removed${UI_RST:-}"
+                echo "│ Remediation   : Binary is unpacked and ready for Proton/Wine execution"
+            elif [ -n "$up_bin" ]; then
+                echo "│ DRM Status    : ${UI_AMBER:-}[DETECTED] Windows PE SteamStub DRM${UI_RST:-}"
+                echo "│ Unpack Status : ${UI_GREEN:-}[READY] Unpacked counterpart found: $up_bin${UI_RST:-}"
                 echo "│ Remediation   : launch_game will automatically execute $up_bin"
             else
-                echo "│ Unpack Status : ${UI_AMBER}[PENDING] No unpacked binary found${UI_RST}"
+                echo "│ DRM Status    : ${UI_AMBER:-}[DETECTED] Windows PE SteamStub DRM${UI_RST:-}"
+                echo "│ Unpack Status : ${UI_AMBER:-}[PENDING] No unpacked binary found${UI_RST:-}"
                 local s_cli
                 s_cli=$(find_steamless_cli 2>/dev/null || true)
                 if [ -n "$s_cli" ]; then
-                    echo "│ Steamless CLI : ${UI_GREEN}[AVAILABLE] $s_cli${UI_RST}"
+                    echo "│ Steamless CLI : ${UI_GREEN:-}[AVAILABLE] $s_cli${UI_RST:-}"
                     echo "│ Action        : Run 'gamectl unpack-stub \"$bin_path\"'"
                 else
-                    echo "│ Steamless CLI : ${UI_AMBER}[NOT FOUND] Place Steamless in ~/.local/share/steamless/${UI_RST}"
+                    echo "│ Steamless CLI : ${UI_AMBER:-}[NOT FOUND] Place Steamless in ~/.local/share/steamless/${UI_RST:-}"
                     echo "│ Remediation   : Unpack $b_name with Steamless or provide ${b_name%.*}.unpacked.exe"
                 fi
             fi
         elif [ "$stub_type" = "linux_elf" ]; then
-            echo "│ DRM Status    : ${UI_AMBER}[DETECTED] Linux ELF SteamStub (.bind section)${UI_RST}"
+            local is_active=true
+            if ! is_steamstub_elf_active "$bin_path"; then
+                is_active=false
+            fi
+
             local up_bin
             up_bin=$(resolve_unpacked_binary "$b_dir" "$b_name" 2>/dev/null || true)
-            if [ -n "$up_bin" ]; then
-                echo "│ Unpack Status : ${UI_GREEN}[READY] Unpacked counterpart found: $up_bin${UI_RST}"
+            if [ "$is_active" = false ] || [ "$b_name" = "$up_bin" ]; then
+                echo "│ DRM Status    : ${UI_GREEN:-}[REMEDIATED] Linux ELF SteamStub (.bind inactive / OEP restored)${UI_RST:-}"
+                echo "│ Unpack Status : ${UI_GREEN:-}[ACTIVE] Executable entry point points to original code${UI_RST:-}"
+                echo "│ Remediation   : Binary is unpacked and ready for direct execution"
+            elif [ -n "$up_bin" ]; then
+                echo "│ DRM Status    : ${UI_AMBER:-}[DETECTED] Linux ELF SteamStub (.bind section)${UI_RST:-}"
+                echo "│ Unpack Status : ${UI_GREEN:-}[READY] Unpacked counterpart found: $up_bin${UI_RST:-}"
                 echo "│ Remediation   : launch_game will automatically execute $up_bin"
             else
-                echo "│ Unpack Status : ${UI_AMBER}[PENDING] No unpacked binary found${UI_RST}"
+                echo "│ DRM Status    : ${UI_AMBER:-}[DETECTED] Linux ELF SteamStub (.bind section)${UI_RST:-}"
+                echo "│ Unpack Status : ${UI_AMBER:-}[PENDING] No unpacked binary found${UI_RST:-}"
                 echo "│ Action        : Run 'gamectl unpack-stub \"$bin_path\"' to decrypt .bind section"
             fi
-            echo "│ Interceptor   : ${UI_GREEN}[ACTIVE] Sovereign steam.sh trap prevents Steam Client launch${UI_RST}"
+            echo "│ Interceptor   : ${UI_GREEN:-}[ACTIVE] Sovereign steam.sh trap prevents Steam Client launch${UI_RST:-}"
             local cand_win
             cand_win=$(find "$b_dir" -maxdepth 2 -iname "*.exe" 2>/dev/null | head -n 1 || true)
             if [ -n "$cand_win" ]; then
@@ -1399,10 +1433,10 @@ diagnose_steamstub() {
                 echo "│ Runner Option : Pure Linux native. Runs with unpacked binary and sovereign steam.sh trap."
             fi
         else
-            echo "│ DRM Status    : ${UI_AMBER}[DETECTED] SteamStub / SteamDRM markers found${UI_RST}"
+            echo "│ DRM Status    : ${UI_AMBER:-}[DETECTED] SteamStub / SteamDRM markers found${UI_RST:-}"
         fi
     else
-        echo "│ DRM Status    : ${UI_GREEN}[CLEAN] No SteamStub DRM markers detected${UI_RST}"
+        echo "│ DRM Status    : ${UI_GREEN:-}[CLEAN] No SteamStub DRM markers detected${UI_RST:-}"
     fi
     echo "╰─────────────────────────────────────────────────────────────╯"
 

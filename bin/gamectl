@@ -1029,6 +1029,25 @@ detect_steamstub_type() {
     return 0
 }
 
+# Check if a Linux ELF SteamStub (.bind) is actively protecting the binary
+# (entry point resides inside the .bind section) or has been remediated
+is_steamstub_elf_active() {
+    local bin_path="$1"
+    [ -f "$bin_path" ] || return 1
+    if command -v readelf >/dev/null 2>&1; then
+        local ep_hex b_addr_hex b_size_hex
+        ep_hex=$(readelf -h "$bin_path" 2>/dev/null | awk '/Entry point address:/ { print $4 }')
+        read -r b_addr_hex b_size_hex < <(readelf -S -W "$bin_path" 2>/dev/null | awk '$2 == ".bind" { print "0x"$4, "0x"$6 }')
+        if [ -n "$ep_hex" ] && [ -n "$b_addr_hex" ] && [ -n "$b_size_hex" ]; then
+            local ep=$((ep_hex)) b_start=$((b_addr_hex)) b_end=$((b_addr_hex + b_size_hex))
+            if [ "$ep" -lt "$b_start" ] || [ "$ep" -ge "$b_end" ]; then
+                return 1
+            fi
+        fi
+    fi
+    return 0
+}
+
 # Resolve candidate unpacked binary for Windows PE SteamStub
 resolve_unpacked_binary() {
     local gdir="$1"
@@ -1419,36 +1438,51 @@ diagnose_steamstub() {
 
     if [ "$is_stub" = true ]; then
         if [ "$stub_type" = "windows_pe" ]; then
-            echo "│ DRM Status    : ${UI_AMBER}[DETECTED] Windows PE SteamStub DRM${UI_RST}"
             local up_bin
             up_bin=$(resolve_unpacked_binary "$b_dir" "$b_name" 2>/dev/null || true)
-            if [ -n "$up_bin" ]; then
-                echo "│ Unpack Status : ${UI_GREEN}[READY] Unpacked counterpart found: $up_bin${UI_RST}"
+            if [ "$b_name" = "$up_bin" ] || case "$b_name" in *.unpacked.exe|*_unpacked.exe|*-unpacked.exe) true ;; *) false ;; esac; then
+                echo "│ DRM Status    : ${UI_GREEN:-}[REMEDIATED] Windows PE SteamStub (unpacked / DRM cleared)${UI_RST:-}"
+                echo "│ Unpack Status : ${UI_GREEN:-}[ACTIVE] Executable DRM wrapper removed${UI_RST:-}"
+                echo "│ Remediation   : Binary is unpacked and ready for Proton/Wine execution"
+            elif [ -n "$up_bin" ]; then
+                echo "│ DRM Status    : ${UI_AMBER:-}[DETECTED] Windows PE SteamStub DRM${UI_RST:-}"
+                echo "│ Unpack Status : ${UI_GREEN:-}[READY] Unpacked counterpart found: $up_bin${UI_RST:-}"
                 echo "│ Remediation   : launch_game will automatically execute $up_bin"
             else
-                echo "│ Unpack Status : ${UI_AMBER}[PENDING] No unpacked binary found${UI_RST}"
+                echo "│ DRM Status    : ${UI_AMBER:-}[DETECTED] Windows PE SteamStub DRM${UI_RST:-}"
+                echo "│ Unpack Status : ${UI_AMBER:-}[PENDING] No unpacked binary found${UI_RST:-}"
                 local s_cli
                 s_cli=$(find_steamless_cli 2>/dev/null || true)
                 if [ -n "$s_cli" ]; then
-                    echo "│ Steamless CLI : ${UI_GREEN}[AVAILABLE] $s_cli${UI_RST}"
+                    echo "│ Steamless CLI : ${UI_GREEN:-}[AVAILABLE] $s_cli${UI_RST:-}"
                     echo "│ Action        : Run 'gamectl unpack-stub \"$bin_path\"'"
                 else
-                    echo "│ Steamless CLI : ${UI_AMBER}[NOT FOUND] Place Steamless in ~/.local/share/steamless/${UI_RST}"
+                    echo "│ Steamless CLI : ${UI_AMBER:-}[NOT FOUND] Place Steamless in ~/.local/share/steamless/${UI_RST:-}"
                     echo "│ Remediation   : Unpack $b_name with Steamless or provide ${b_name%.*}.unpacked.exe"
                 fi
             fi
         elif [ "$stub_type" = "linux_elf" ]; then
-            echo "│ DRM Status    : ${UI_AMBER}[DETECTED] Linux ELF SteamStub (.bind section)${UI_RST}"
+            local is_active=true
+            if ! is_steamstub_elf_active "$bin_path"; then
+                is_active=false
+            fi
+
             local up_bin
             up_bin=$(resolve_unpacked_binary "$b_dir" "$b_name" 2>/dev/null || true)
-            if [ -n "$up_bin" ]; then
-                echo "│ Unpack Status : ${UI_GREEN}[READY] Unpacked counterpart found: $up_bin${UI_RST}"
+            if [ "$is_active" = false ] || [ "$b_name" = "$up_bin" ]; then
+                echo "│ DRM Status    : ${UI_GREEN:-}[REMEDIATED] Linux ELF SteamStub (.bind inactive / OEP restored)${UI_RST:-}"
+                echo "│ Unpack Status : ${UI_GREEN:-}[ACTIVE] Executable entry point points to original code${UI_RST:-}"
+                echo "│ Remediation   : Binary is unpacked and ready for direct execution"
+            elif [ -n "$up_bin" ]; then
+                echo "│ DRM Status    : ${UI_AMBER:-}[DETECTED] Linux ELF SteamStub (.bind section)${UI_RST:-}"
+                echo "│ Unpack Status : ${UI_GREEN:-}[READY] Unpacked counterpart found: $up_bin${UI_RST:-}"
                 echo "│ Remediation   : launch_game will automatically execute $up_bin"
             else
-                echo "│ Unpack Status : ${UI_AMBER}[PENDING] No unpacked binary found${UI_RST}"
+                echo "│ DRM Status    : ${UI_AMBER:-}[DETECTED] Linux ELF SteamStub (.bind section)${UI_RST:-}"
+                echo "│ Unpack Status : ${UI_AMBER:-}[PENDING] No unpacked binary found${UI_RST:-}"
                 echo "│ Action        : Run 'gamectl unpack-stub \"$bin_path\"' to decrypt .bind section"
             fi
-            echo "│ Interceptor   : ${UI_GREEN}[ACTIVE] Sovereign steam.sh trap prevents Steam Client launch${UI_RST}"
+            echo "│ Interceptor   : ${UI_GREEN:-}[ACTIVE] Sovereign steam.sh trap prevents Steam Client launch${UI_RST:-}"
             local cand_win
             cand_win=$(find "$b_dir" -maxdepth 2 -iname "*.exe" 2>/dev/null | head -n 1 || true)
             if [ -n "$cand_win" ]; then
@@ -1457,10 +1491,10 @@ diagnose_steamstub() {
                 echo "│ Runner Option : Pure Linux native. Runs with unpacked binary and sovereign steam.sh trap."
             fi
         else
-            echo "│ DRM Status    : ${UI_AMBER}[DETECTED] SteamStub / SteamDRM markers found${UI_RST}"
+            echo "│ DRM Status    : ${UI_AMBER:-}[DETECTED] SteamStub / SteamDRM markers found${UI_RST:-}"
         fi
     else
-        echo "│ DRM Status    : ${UI_GREEN}[CLEAN] No SteamStub DRM markers detected${UI_RST}"
+        echo "│ DRM Status    : ${UI_GREEN:-}[CLEAN] No SteamStub DRM markers detected${UI_RST:-}"
     fi
     echo "╰─────────────────────────────────────────────────────────────╯"
 
@@ -8518,8 +8552,10 @@ launch_game() {
             local unpacked_bin
             unpacked_bin=$(resolve_unpacked_binary "$gdir" "$gbin" 2>/dev/null || true)
             if [ -n "$unpacked_bin" ] && [ -f "$gdir/$unpacked_bin" ]; then
-                echo "  ${UI_GREEN}[SUCCESS] SteamStub PE: Automatically switched to unpacked binary: $unpacked_bin${UI_RST}"
-                gbin="$unpacked_bin"
+                if [ "$gbin" != "$unpacked_bin" ]; then
+                    echo "  ${UI_GREEN}[SUCCESS] SteamStub PE: Automatically switched to unpacked binary: $unpacked_bin${UI_RST}"
+                    gbin="$unpacked_bin"
+                fi
             else
                 echo "  ${UI_AMBER}[INFO] SteamStub PE DRM detected on ($gbin). Attempting Steamless unpacking...${UI_RST}"
                 if unpack_steamstub_pe "$gdir/$gbin" "${runner_bin:-}" "${pfx_dir:-}"; then
@@ -8537,19 +8573,29 @@ launch_game() {
             local unpacked_bin
             unpacked_bin=$(resolve_unpacked_binary "$gdir" "$gbin" 2>/dev/null || true)
             if [ -n "$unpacked_bin" ] && [ -f "$gdir/$unpacked_bin" ]; then
-                echo "  ${UI_GREEN}[SUCCESS] SteamStub ELF: Automatically switched to unpacked binary: $unpacked_bin${UI_RST}"
-                gbin="$unpacked_bin"
+                if [ "$gbin" != "$unpacked_bin" ]; then
+                    echo "  ${UI_GREEN}[SUCCESS] SteamStub ELF: Automatically switched to unpacked binary: $unpacked_bin${UI_RST}"
+                    gbin="$unpacked_bin"
+                fi
             else
-                echo "  ${UI_AMBER}[INFO] SteamStub ELF DRM (.bind) detected on ($gbin). Attempting native unpacking...${UI_RST}"
-                if unpack_steamstub_elf "$gdir/$gbin"; then
-                    unpacked_bin=$(resolve_unpacked_binary "$gdir" "$gbin" 2>/dev/null || true)
-                    if [ -n "$unpacked_bin" ] && [ -f "$gdir/$unpacked_bin" ]; then
-                        echo "  ${UI_GREEN}[SUCCESS] SteamStub ELF: Unpacked binary generated: $unpacked_bin${UI_RST}"
-                        gbin="$unpacked_bin"
-                    fi
+                local is_active=true
+                if ! is_steamstub_elf_active "$gdir/$gbin"; then
+                    is_active=false
+                fi
+                if [ "$is_active" = false ]; then
+                    :
                 else
-                    echo "  ${UI_AMBER}[WARN] Linux ELF SteamStub unpacking failed or unsupported stub variant.${UI_RST}"
-                    echo "  ${UI_CYAN}[INFO] Sovereign steam.sh interceptor active in PATH to trap unsolicited Steam Client calls.${UI_RST}"
+                    echo "  ${UI_AMBER}[INFO] SteamStub ELF DRM (.bind) detected on ($gbin). Attempting native unpacking...${UI_RST}"
+                    if unpack_steamstub_elf "$gdir/$gbin"; then
+                        unpacked_bin=$(resolve_unpacked_binary "$gdir" "$gbin" 2>/dev/null || true)
+                        if [ -n "$unpacked_bin" ] && [ -f "$gdir/$unpacked_bin" ]; then
+                            echo "  ${UI_GREEN}[SUCCESS] SteamStub ELF: Unpacked binary generated: $unpacked_bin${UI_RST}"
+                            gbin="$unpacked_bin"
+                        fi
+                    else
+                        echo "  ${UI_AMBER}[WARN] Linux ELF SteamStub unpacking failed or unsupported stub variant.${UI_RST}"
+                        echo "  ${UI_CYAN}[INFO] Sovereign steam.sh interceptor active in PATH to trap unsolicited Steam Client calls.${UI_RST}"
+                    fi
                 fi
             fi
         else
@@ -11242,7 +11288,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game parse_depot_os_map ensure_linux_binaries_executable ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe unpack_steamstub_elf setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive preview_search_game preview_download get_depot_dl_progress preview_log_entry preview_process_log preview_adopt_candidate manage_game_fixes_interactive preview_fix_entry
+export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game parse_depot_os_map ensure_linux_binaries_executable ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type is_steamstub_elf_active resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe unpack_steamstub_elf setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive preview_search_game preview_download get_depot_dl_progress preview_log_entry preview_process_log preview_adopt_candidate manage_game_fixes_interactive preview_fix_entry
 
 export -f require_tui check_fzf_status validate_tui_fields store_search_items tui_exec_action login_luatools_interactive
 export -f is_gbe_library install_gbe_library get_config_value set_config_value get_hubcap_api_key
@@ -11474,7 +11520,7 @@ case "${1:-}" in
         if [ -n "${2:-}" ]; then
             cli_unpack_stub "$2"
         else
-            echo "Usage: gamectl unpack-stub <binary.exe>"
+            echo "Usage: gamectl unpack-stub <binary>"
             exit 2
         fi
         ;;
@@ -11743,8 +11789,8 @@ Usage:
   gamectl list-formatted  Print formatted games list with ANSI badges
   gamectl detect-steamstub <bin>
                       Audit SteamStub (.bind ELF & PE markers) and print forensic diagnostics
-  gamectl unpack-stub <bin.exe>
-                      Unpack Windows PE SteamStub DRM binary via Steamless CLI
+  gamectl unpack-stub <bin>
+                      Unpack SteamStub DRM binary (Linux ELF .bind or Windows PE)
   gamectl --sync <dir> [title] [host]   Push saves to remote companion host (alias: sync)
   gamectl sync-pull <dir> [title] [host] Pull saves from remote companion host (alias: --sync-pull)
   gamectl backup <dir>        Create manual savegame backup snapshot (alias: --backup)
