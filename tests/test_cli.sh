@@ -3321,7 +3321,92 @@ test_launch_game_auto_unpacks_linux_elf() {
     return 0
 }
 
+test_unpack_steamstub_elf32_synthetic_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    local t_dir
+    t_dir=$(mktemp -d "${TEST_TMP_DIR:-/tmp}/gamectl_test_stub_elf32_XXXXXX")
+
+    generate_mock_steamstub_elf32 "$t_dir/game_bin32" 302610
+
+    # Verify detection
+    [ "$(detect_steamstub_type "$t_dir/game_bin32")" = "linux_elf" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Execute unpack
+    unpack_steamstub_elf "$t_dir/game_bin32" >/dev/null 2>&1 || { rm -rf "$t_dir"; return 1; }
+
+    # Assert unpacked binary created and executable
+    [ -f "$t_dir/game_bin32.unpacked" ] || { rm -rf "$t_dir"; return 1; }
+    [ -x "$t_dir/game_bin32.unpacked" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Assert OEP patched to 0x8048000 + 0xdd68 = 0x8055d68
+    local patched_ep
+    patched_ep=$(od -An -tx4 -j 24 -N 4 "$t_dir/game_bin32.unpacked" | tr -d ' ')
+    [ "$patched_ep" = "08055d68" ] || { rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    return 0
+}
+
+generate_mock_steamstub_elf32() {
+    local target_bin="$1"
+    local appid="${2:-302610}"
+    python3 - "$target_bin" "$appid" << 'PY_MOCK_ELF32'
+import sys, struct
+
+out_path = sys.argv[1]
+appid = int(sys.argv[2])
+
+pattern = "<IQIIIIIIIIIIIIII32s16s16s16s"
+hdr_tuple = (
+    0xc0dec0de, 0x8048000, 0x28e190, 0x190, 0x22ce,
+    0xdd68, 0, 0, 0x2460, 0x1000, appid, 6, 0x2000,
+    0, 0x8049000, 0x1000, b"K"*32, b"I"*16, b"S"*16, b"E"*16
+)
+raw_hdr = struct.pack(pattern, *hdr_tuple)
+
+xor_seed = 0x55aa55aa
+key = xor_seed
+encoded_hdr = bytearray(struct.pack("<I", key))
+for i in range(0, 0xc0 - 4, 4):
+    if i < len(raw_hdr):
+        plain_val = int.from_bytes(raw_hdr[i:i+4], "little")
+    else:
+        plain_val = 0
+    val = plain_val ^ key
+    encoded_hdr.extend(struct.pack("<I", val))
+    key = val
+
+shstrtab = b"\x00.text\x00.bind\x00.shstrtab\x00"
+
+elf = bytearray(0x4000)
+elf[0:4] = b"\x7fELF"
+elf[4] = 1 # 32-bit
+elf[5] = 1 # little-endian
+elf[6] = 1 # version
+struct.pack_into("<H", elf, 0x10, 2)
+struct.pack_into("<H", elf, 0x12, 3) # i386
+struct.pack_into("<I", elf, 0x14, 1)
+struct.pack_into("<I", elf, 0x18, 0x804a190)
+struct.pack_into("<I", elf, 0x20, 0x3100)
+struct.pack_into("<H", elf, 0x2e, 40)
+struct.pack_into("<H", elf, 0x30, 4)
+struct.pack_into("<H", elf, 0x32, 3)
+
+elf[0x2000 + 0xd0 : 0x2000 + 0xd0 + len(encoded_hdr)] = encoded_hdr
+elf[0x3000 : 0x3000 + len(shstrtab)] = shstrtab
+
+struct.pack_into("<IIIIIIIIII", elf, 0x3100 + 40*1, 1, 1, 6, 0x8049000, 0x1000, 0x100, 0, 0, 16, 0)
+struct.pack_into("<IIIIIIIIII", elf, 0x3100 + 40*2, 7, 1, 7, 0x804a000, 0x2000, 0x1000, 0, 0, 16, 0)
+struct.pack_into("<IIIIIIIIII", elf, 0x3100 + 40*3, 13, 3, 0, 0, 0x3000, len(shstrtab), 0, 0, 1, 0)
+
+with open(out_path, "wb") as f:
+    f.write(elf)
+PY_MOCK_ELF32
+    chmod +x "$target_bin"
+}
+
 run_test "Linux SteamStub (Chunk 28.03): unpack_steamstub_elf synthetic decryption contract" test_unpack_steamstub_elf_synthetic_contract
+run_test "Linux SteamStub (Chunk 28.03): unpack_steamstub_elf 32-bit x86 decryption contract" test_unpack_steamstub_elf32_synthetic_contract
 run_test "Linux SteamStub (Chunk 28.03): CLI unpack-stub Linux ELF dispatch contract" test_cli_unpack_stub_dispatch_linux_elf
 run_test "Linux SteamStub (Chunk 28.03): launch_game auto-unpack and binary switch contract" test_launch_game_auto_unpacks_linux_elf
 

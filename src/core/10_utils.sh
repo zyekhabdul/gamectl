@@ -1163,99 +1163,133 @@ def unpack(target_path, output_path):
 
         f.seek(bind_sec['offset'])
         bind_data = f.read(bind_sec['size'])
-        if len(bind_data) < 0xd4:
+        if len(bind_data) < 0xb0:
             sys.stderr.write("[ERROR] .bind section too small.\n")
             return 1
 
         candidates = []
+        seen_cand = set()
         if bind_sec['addr'] <= entrypoint < bind_sec['addr'] + bind_sec['size']:
             bind_entry = entrypoint - bind_sec['addr']
-            if bind_entry >= 0xd0:
-                candidates.append(bind_entry - 0xd0)
+            for h_sz in (0xc0, 0xd0, 0xb0):
+                if bind_entry >= h_sz:
+                    item = (bind_entry - h_sz, h_sz)
+                    candidates.append(item)
+                    seen_cand.add(item)
 
-        for off in range(0, min(len(bind_data) - 0xd4, 0x8000), 4):
-            if off not in candidates:
-                candidates.append(off)
+        for off in range(0, min(len(bind_data) - 0xb4, 0x8000), 4):
+            for h_sz in (0xc0, 0xd0, 0xb0):
+                item = (off, h_sz)
+                if item not in seen_cand:
+                    candidates.append(item)
+                    seen_cand.add(item)
+
+        pattern_64 = '<IQQIIQIIIIIIIIQQ32s16s16s16s32sQI'
+        names_64 = ('signature base drm_entrypoint bind_offset u0 '
+                    'real_entrypoint u1 payload_size u2 u3 appid '
+                    'flags bind_virtual_size u4 code_virtual_addr '
+                    'code_size aes_key aes_iv code_stolen keys u5 '
+                    'u6 u7').split()
+
+        pattern_32 = '<IQIIIIIIIIIIIIII32s16s16s16s'
+        names_32 = ('signature base drm_entrypoint bind_offset u0 '
+                    'real_entrypoint u1 payload_size drmp_offset drmp_size '
+                    'appid flags bind_virtual_size u2 code_virtual_addr code_size '
+                    'aes_key aes_iv code_stolen enc_keys').split()
 
         hdr_info = None
-        names = ('signature base drm_entrypoint bind_offset u0 '
-                 'real_entrypoint u1 payload_size u2 u3 appid '
-                 'flags bind_virtual_size u4 code_virtual_addr '
-                 'code_size aes_key aes_iv code_stolen keys u5 '
-                 'u6 u7').split()
-        pattern = '<IQQIIQIIIIIIIIQQ32s16s16s16s32sQI'
+        arch = None
 
-        for cand_off in candidates:
-            if cand_off + 0xd4 > len(bind_data):
+        for cand_off, h_sz in candidates:
+            if cand_off + h_sz + 4 > len(bind_data):
                 continue
             key = int.from_bytes(bind_data[cand_off:cand_off+4], byteorder='little')
             header_bytes = bytearray()
             h_off = cand_off
-            end_off = cand_off + 0xd0
+            end_off = cand_off + h_sz
             while h_off < end_off:
                 h_off += 4
                 val = int.from_bytes(bind_data[h_off:h_off+4], byteorder='little')
                 header_bytes.extend(int.to_bytes(val ^ key, 4, byteorder='little'))
                 key = val
 
-            if len(header_bytes) >= 208:
-                raw_tuple = struct.unpack(pattern, bytes(header_bytes[:208]))
-                hdr = dict(zip(names, raw_tuple))
-                if hdr['signature'] == 0xc0dec0df:
-                    hdr_info = hdr
+            if len(header_bytes) >= 4:
+                sig = int.from_bytes(header_bytes[0:4], byteorder='little')
+                if sig == 0xc0dec0df and len(header_bytes) >= struct.calcsize(pattern_64):
+                    raw_tuple = struct.unpack(pattern_64, bytes(header_bytes[:struct.calcsize(pattern_64)]))
+                    hdr_info = dict(zip(names_64, raw_tuple))
+                    arch = 'x64'
+                    break
+                elif sig == 0xc0dec0de and len(header_bytes) >= struct.calcsize(pattern_32):
+                    raw_tuple = struct.unpack(pattern_32, bytes(header_bytes[:struct.calcsize(pattern_32)]))
+                    hdr_info = dict(zip(names_32, raw_tuple))
+                    arch = 'x86'
                     break
 
         if not hdr_info:
-            sys.stderr.write("[ERROR] SteamStub .bind header signature (0xc0dec0df) not found.\n")
+            sys.stderr.write("[ERROR] SteamStub .bind header signature (0xc0dec0df / 0xc0dec0de) not found.\n")
             return 1
 
-        code_sec = None
-        c_addr = hdr_info['code_virtual_addr']
-        for s in sections:
-            if (s['addr'] <= c_addr < s['addr'] + s['size']) or (s['offset'] <= c_addr < s['offset'] + s['size']):
-                code_sec = s
-                break
-
-        if not code_sec:
-            for s in sections:
-                if s['name'] == '.text':
-                    code_sec = s
-                    break
-
-        if not code_sec:
-            sys.stderr.write(f"[ERROR] Could not identify code section for virtual addr 0x{c_addr:x}.\n")
-            return 1
-
-        f.seek(code_sec['offset'])
-        enc_code_from_sec = f.read(min(hdr_info['code_size'], code_sec['size']))
-        code_payload = bytearray(hdr_info['code_stolen'])
-        code_payload.extend(enc_code_from_sec)
-
-        decrypted_code = decrypt_aes(hdr_info['aes_key'], hdr_info['aes_iv'], bytes(code_payload))
-        if not decrypted_code:
-            sys.stderr.write("[ERROR] Decryption of code section failed.\n")
-            return 1
-
-        real_ep = hdr_info['real_entrypoint']
-        if real_ep < code_sec['addr']:
-            real_ep = real_ep + code_sec['addr']
+        flags = hdr_info.get('flags', 0)
+        is_encrypted = not bool(flags & 0x04)
 
         f.seek(0)
         file_bytes = bytearray(f.read())
-        write_len = min(len(decrypted_code), code_sec['size'])
-        file_bytes[code_sec['offset'] : code_sec['offset'] + write_len] = decrypted_code[:write_len]
 
-        if ei_class == 1:
+        if is_encrypted:
+            code_sec = None
+            c_addr = hdr_info['code_virtual_addr']
+            for s in sections:
+                if (s['addr'] <= c_addr < s['addr'] + s['size']) or (s['offset'] <= c_addr < s['offset'] + s['size']):
+                    code_sec = s
+                    break
+
+            if not code_sec:
+                for s in sections:
+                    if s['name'] == '.text':
+                        code_sec = s
+                        break
+
+            if not code_sec:
+                sys.stderr.write(f"[ERROR] Could not identify code section for virtual addr 0x{c_addr:x}.\n")
+                return 1
+
+            f.seek(code_sec['offset'])
+            enc_code_from_sec = f.read(min(hdr_info['code_size'], code_sec['size']))
+            code_payload = bytearray(hdr_info['code_stolen'])
+            code_payload.extend(enc_code_from_sec)
+
+            decrypted_code = decrypt_aes(hdr_info['aes_key'], hdr_info['aes_iv'], bytes(code_payload))
+            if not decrypted_code:
+                sys.stderr.write("[ERROR] Decryption of code section failed.\n")
+                return 1
+
+            write_len = min(len(decrypted_code), code_sec['size'])
+            file_bytes[code_sec['offset'] : code_sec['offset'] + write_len] = decrypted_code[:write_len]
+
+        real_ep = hdr_info['real_entrypoint']
+        base_addr = hdr_info.get('base', 0)
+        if arch == 'x86':
+            if real_ep < base_addr:
+                real_ep = real_ep + base_addr
             ep_bytes = struct.pack(endian + 'I', real_ep & 0xffffffff)
         else:
+            code_sec_addr = 0
+            for s in sections:
+                if s['name'] == '.text':
+                    code_sec_addr = s['addr']
+                    break
+            if real_ep < code_sec_addr:
+                real_ep = real_ep + code_sec_addr
             ep_bytes = struct.pack(endian + 'Q', real_ep)
+
         file_bytes[0x18 : 0x18 + len(ep_bytes)] = ep_bytes
 
         with open(output_path, 'wb') as out_f:
             out_f.write(file_bytes)
 
         os.chmod(output_path, 0o755)
-        sys.stdout.write(f"[SUCCESS] Unpacked SteamStub ELF (AppID: {hdr_info['appid']}) -> {output_path}\n")
+        sys.stdout.write(f"[SUCCESS] Unpacked SteamStub ELF ({arch}, AppID: {hdr_info['appid']}) -> {output_path}\n")
         return 0
 
 target = sys.argv[1]
