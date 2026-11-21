@@ -55,12 +55,28 @@ impl CdnClient {
         let count = self.servers.len();
         let start = self.cursor.fetch_add(1, Ordering::Relaxed) % count;
         let mut last_error: Option<Error> = None;
+        let mut consecutive_errors: u32 = 0;
 
-        for index in 0..count {
+        // Allow multiple passes across known CDN edge servers (min 8, max 32 attempts)
+        let max_attempts = (count * 3).clamp(8, 32);
+
+        for attempt in 0..max_attempts {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
-            let server = &self.servers[(start + index) % count];
+
+            // Exponential backoff after repeated errors: 250ms, 500ms, 1s, 2s, 4s max
+            if consecutive_errors >= 2 {
+                let shift = (consecutive_errors - 2).min(4);
+                let backoff_ms = (250u64 * (1 << shift)).min(4000);
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => return Err(Error::Cancelled),
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)) => {}
+                }
+            }
+
+            let server = &self.servers[(start + attempt) % count];
             let url = server.chunk_url(depot_id, chunk_id_hex);
 
             match self.get(&url).await {
@@ -75,12 +91,14 @@ impl CdnClient {
                                 bytes.len()
                             ),
                         });
+                        consecutive_errors += 1;
                         continue;
                     }
                     return Ok(bytes);
                 }
                 Err(error) if error.rotates_cdn_server() => {
                     last_error = Some(error);
+                    consecutive_errors += 1;
                     continue;
                 }
                 Err(fatal) => return Err(fatal),

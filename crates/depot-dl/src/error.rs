@@ -88,7 +88,7 @@ impl Error {
     /// tokens - supply a manifest file key material that works).
     pub(crate) fn rotates_cdn_server(&self) -> bool {
         match self {
-            Error::Http(e) => e.is_timeout() || e.is_connect(),
+            Error::Http(_) => true,
             Error::HttpStatus { status, .. } => {
                 matches!(status, 408 | 425 | 429 | 500..=599)
             }
