@@ -1115,19 +1115,35 @@ trigger_steam_install() {
     return 0
 }
 
+# Parse depot ID to oslist mapping from manifest JSON in staging directory
+parse_depot_os_map() {
+    local stage_dir="$1"
+    [ -d "$stage_dir" ] || return 0
+
+    shopt -s nullglob globstar
+    local json_files=("$stage_dir"/**/*.json "$stage_dir"/*.json)
+    shopt -u nullglob globstar
+
+    for jf in "${json_files[@]}"; do
+        [ -f "$jf" ] || continue
+        jq -r '.depot | to_entries[] | select(.value | type == "object") | select(.value.config.oslist != null) | "\(.key)=\(.value.config.oslist)"' "$jf" 2>/dev/null || true
+    done
+}
+
 # Steam Native Game Downloader & Provisioner (Standalone CDN Engine)
 download_game() {
     local appid="${1:-}"
     # Strip ANSI escape sequences & non-digits
     appid=$(strip_ansi "$appid" | tr -dc "0-9")
     if [ -z "$appid" ]; then
-        echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|manifesthub|ryuu|sushi|luatools>] [--raw|--inject-only|--all|--standalone|--sls]" >&2
+        echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|manifesthub|ryuu|sushi|luatools>] [--os <linux|windows|macos|all>] [--raw|--inject-only|--all|--standalone|--sls]" >&2
         return 1
     fi
     shift
 
     local target_dir=""
     local title=""
+    local target_os=""
     local action="all"          # "all", "inject", "raw"
     local source="auto"         # "auto", "ryuu", "sushi", "luatools"
     local engine="standalone"   # Default to Pure Standalone CDN engine (Zero Steam Client)
@@ -1194,8 +1210,12 @@ download_game() {
             --foreground|-f|foreground|--background|-b|background)
                 # Preserved for CLI flag backwards-compatibility
                 ;;
-            --os|--os=*)
-                [ "$1" = "--os" ] && shift
+            --os)
+                shift
+                target_os="${1:-}"
+                ;;
+            --os=*)
+                target_os="${1#--os=}"
                 ;;
             *)
                 if [ -z "$target_dir" ]; then
@@ -1207,6 +1227,19 @@ download_game() {
         esac
         shift
     done
+
+    if [ -n "$target_os" ]; then
+        target_os="${target_os,,}"
+        case "$target_os" in
+            linux|windows|macos|osx|all)
+                [ "$target_os" = "osx" ] && target_os="macos"
+                ;;
+            *)
+                echo "[ERROR] Invalid target OS '$target_os'. Valid options: linux, windows, macos, all." >&2
+                return 1
+                ;;
+        esac
+    fi
 
     if [ -z "$title" ]; then
         title=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" "steam_basic_${appid}" 3600 2>/dev/null | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
@@ -1288,10 +1321,48 @@ download_game() {
             done < "$clua"
         done
 
+        # Parse depot OS mappings from manifest JSON
+        declare -A depot_os_map=()
+        while IFS='=' read -r did osval || [ -n "$did" ]; do
+            [ -n "$did" ] && [ -n "$osval" ] && depot_os_map["$did"]="${osval,,}"
+        done < <(parse_depot_os_map "$stage_dir")
+
+        # Determine effective target OS if not explicitly supplied
+        local effective_os="$target_os"
+        if [ -z "$effective_os" ]; then
+            if [ "${#depot_os_map[@]}" -eq 0 ]; then
+                effective_os="all"
+            else
+                local has_linux=0
+                local has_windows=0
+                for d_os in "${depot_os_map[@]}"; do
+                    [[ "$d_os" =~ linux ]] && has_linux=1
+                    [[ "$d_os" =~ windows ]] && has_windows=1
+                done
+
+                local host_os
+                host_os="$(uname -s)"
+                if [ "$host_os" = "Linux" ]; then
+                    if [ "$has_linux" -eq 1 ]; then
+                        effective_os="linux"
+                        echo "[INFO] Native Linux depot detected. Auto-selecting target OS: linux" >&2
+                    elif [ "$has_windows" -eq 1 ]; then
+                        effective_os="windows"
+                        echo "[INFO] No native Linux depot found. Targeting Windows depot for Proton/Wine runner." >&2
+                    else
+                        effective_os="all"
+                    fi
+                else
+                    effective_os="all"
+                fi
+            fi
+        fi
+
         local depot_args=()
         shopt -s nullglob globstar
         local mf_files=("$stage_dir"/**/*.manifest "$stage_dir"/*.manifest)
         declare -A seen_mf=()
+        local skipped_os_count=0
         for mf in "${mf_files[@]}"; do
             [ -f "$mf" ] || continue
             local mf_name="$(basename "$mf")"
@@ -1302,6 +1373,24 @@ download_game() {
                 if [[ "$mf_name" =~ ^([0-9]+)_([0-9]+)\.manifest$ ]]; then
                     local did="${BASH_REMATCH[1]}"
                     local key="${depot_keys["$did"]:-}"
+
+                    # OS filter check
+                    if [ "$effective_os" != "all" ] && [ -n "${depot_os_map["$did"]:-}" ]; then
+                        local d_os="${depot_os_map["$did"]}"
+                        local match=0
+                        if [ "$effective_os" = "macos" ]; then
+                            [[ "$d_os" =~ (macos|osx) ]] && match=1
+                        else
+                            [[ "$d_os" =~ $effective_os ]] && match=1
+                        fi
+
+                        if [ "$match" -eq 0 ]; then
+                            echo "[INFO] Skipping depot $did (oslist: $d_os != target: $effective_os)" >&2
+                            skipped_os_count=$((skipped_os_count + 1))
+                            continue
+                        fi
+                    fi
+
                     if [ -n "$key" ]; then
                         depot_args+=(--depot "$mf:$key")
                     else
@@ -1313,6 +1402,12 @@ download_game() {
         shopt -u nullglob globstar
 
         if [ "${#depot_args[@]}" -eq 0 ]; then
+            if [ "$skipped_os_count" -gt 0 ] && [ "$effective_os" != "all" ]; then
+                echo "[ERROR] All candidate depots were filtered out by target OS '$effective_os' ($skipped_os_count skipped)." >&2
+                echo "[ERROR] Target AppID $appid may not have depots for '$effective_os'. Try '--os windows' or '--os all'." >&2
+                log_msg "ERROR" "DOWNLOAD" "Depot OS filter ($effective_os) rejected all depots for AppID $appid"
+                return 1
+            fi
             if [ "$is_strict_standalone" = true ]; then
                 echo "[ERROR] Strict standalone mode: No encrypted manifests with valid AES keys found for AppID $appid." >&2
                 echo "[ERROR] Cannot fallback to Steam Client/SLSsteam in standalone mode (ADR-022)." >&2
@@ -1333,6 +1428,7 @@ download_game() {
             echo " AppID      : $appid"
             echo " Title      : $title"
             echo " Target Dir : $target_dir"
+            echo " Target OS  : $effective_os"
             echo " Depots     : $(( ${#depot_args[@]} / 2 ))"
             echo " Engine     : Native Rust Standalone (Zero Steam Client)"
             echo "=========================================="
@@ -1342,6 +1438,7 @@ download_game() {
 APPID=$appid
 TITLE=$title
 TARGET_DIR=$target_dir
+TARGET_OS=$effective_os
 PID=$cur_pid
 START_TIME=$(date +%s)
 LOG_FILE=$stage_dir/download.log

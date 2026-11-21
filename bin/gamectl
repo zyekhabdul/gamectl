@@ -3723,19 +3723,35 @@ trigger_steam_install() {
     return 0
 }
 
+# Parse depot ID to oslist mapping from manifest JSON in staging directory
+parse_depot_os_map() {
+    local stage_dir="$1"
+    [ -d "$stage_dir" ] || return 0
+
+    shopt -s nullglob globstar
+    local json_files=("$stage_dir"/**/*.json "$stage_dir"/*.json)
+    shopt -u nullglob globstar
+
+    for jf in "${json_files[@]}"; do
+        [ -f "$jf" ] || continue
+        jq -r '.depot | to_entries[] | select(.value | type == "object") | select(.value.config.oslist != null) | "\(.key)=\(.value.config.oslist)"' "$jf" 2>/dev/null || true
+    done
+}
+
 # Steam Native Game Downloader & Provisioner (Standalone CDN Engine)
 download_game() {
     local appid="${1:-}"
     # Strip ANSI escape sequences & non-digits
     appid=$(strip_ansi "$appid" | tr -dc "0-9")
     if [ -z "$appid" ]; then
-        echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|manifesthub|ryuu|sushi|luatools>] [--raw|--inject-only|--all|--standalone|--sls]" >&2
+        echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|manifesthub|ryuu|sushi|luatools>] [--os <linux|windows|macos|all>] [--raw|--inject-only|--all|--standalone|--sls]" >&2
         return 1
     fi
     shift
 
     local target_dir=""
     local title=""
+    local target_os=""
     local action="all"          # "all", "inject", "raw"
     local source="auto"         # "auto", "ryuu", "sushi", "luatools"
     local engine="standalone"   # Default to Pure Standalone CDN engine (Zero Steam Client)
@@ -3802,8 +3818,12 @@ download_game() {
             --foreground|-f|foreground|--background|-b|background)
                 # Preserved for CLI flag backwards-compatibility
                 ;;
-            --os|--os=*)
-                [ "$1" = "--os" ] && shift
+            --os)
+                shift
+                target_os="${1:-}"
+                ;;
+            --os=*)
+                target_os="${1#--os=}"
                 ;;
             *)
                 if [ -z "$target_dir" ]; then
@@ -3815,6 +3835,19 @@ download_game() {
         esac
         shift
     done
+
+    if [ -n "$target_os" ]; then
+        target_os="${target_os,,}"
+        case "$target_os" in
+            linux|windows|macos|osx|all)
+                [ "$target_os" = "osx" ] && target_os="macos"
+                ;;
+            *)
+                echo "[ERROR] Invalid target OS '$target_os'. Valid options: linux, windows, macos, all." >&2
+                return 1
+                ;;
+        esac
+    fi
 
     if [ -z "$title" ]; then
         title=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" "steam_basic_${appid}" 3600 2>/dev/null | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
@@ -3896,10 +3929,48 @@ download_game() {
             done < "$clua"
         done
 
+        # Parse depot OS mappings from manifest JSON
+        declare -A depot_os_map=()
+        while IFS='=' read -r did osval || [ -n "$did" ]; do
+            [ -n "$did" ] && [ -n "$osval" ] && depot_os_map["$did"]="${osval,,}"
+        done < <(parse_depot_os_map "$stage_dir")
+
+        # Determine effective target OS if not explicitly supplied
+        local effective_os="$target_os"
+        if [ -z "$effective_os" ]; then
+            if [ "${#depot_os_map[@]}" -eq 0 ]; then
+                effective_os="all"
+            else
+                local has_linux=0
+                local has_windows=0
+                for d_os in "${depot_os_map[@]}"; do
+                    [[ "$d_os" =~ linux ]] && has_linux=1
+                    [[ "$d_os" =~ windows ]] && has_windows=1
+                done
+
+                local host_os
+                host_os="$(uname -s)"
+                if [ "$host_os" = "Linux" ]; then
+                    if [ "$has_linux" -eq 1 ]; then
+                        effective_os="linux"
+                        echo "[INFO] Native Linux depot detected. Auto-selecting target OS: linux" >&2
+                    elif [ "$has_windows" -eq 1 ]; then
+                        effective_os="windows"
+                        echo "[INFO] No native Linux depot found. Targeting Windows depot for Proton/Wine runner." >&2
+                    else
+                        effective_os="all"
+                    fi
+                else
+                    effective_os="all"
+                fi
+            fi
+        fi
+
         local depot_args=()
         shopt -s nullglob globstar
         local mf_files=("$stage_dir"/**/*.manifest "$stage_dir"/*.manifest)
         declare -A seen_mf=()
+        local skipped_os_count=0
         for mf in "${mf_files[@]}"; do
             [ -f "$mf" ] || continue
             local mf_name="$(basename "$mf")"
@@ -3910,6 +3981,24 @@ download_game() {
                 if [[ "$mf_name" =~ ^([0-9]+)_([0-9]+)\.manifest$ ]]; then
                     local did="${BASH_REMATCH[1]}"
                     local key="${depot_keys["$did"]:-}"
+
+                    # OS filter check
+                    if [ "$effective_os" != "all" ] && [ -n "${depot_os_map["$did"]:-}" ]; then
+                        local d_os="${depot_os_map["$did"]}"
+                        local match=0
+                        if [ "$effective_os" = "macos" ]; then
+                            [[ "$d_os" =~ (macos|osx) ]] && match=1
+                        else
+                            [[ "$d_os" =~ $effective_os ]] && match=1
+                        fi
+
+                        if [ "$match" -eq 0 ]; then
+                            echo "[INFO] Skipping depot $did (oslist: $d_os != target: $effective_os)" >&2
+                            skipped_os_count=$((skipped_os_count + 1))
+                            continue
+                        fi
+                    fi
+
                     if [ -n "$key" ]; then
                         depot_args+=(--depot "$mf:$key")
                     else
@@ -3921,6 +4010,12 @@ download_game() {
         shopt -u nullglob globstar
 
         if [ "${#depot_args[@]}" -eq 0 ]; then
+            if [ "$skipped_os_count" -gt 0 ] && [ "$effective_os" != "all" ]; then
+                echo "[ERROR] All candidate depots were filtered out by target OS '$effective_os' ($skipped_os_count skipped)." >&2
+                echo "[ERROR] Target AppID $appid may not have depots for '$effective_os'. Try '--os windows' or '--os all'." >&2
+                log_msg "ERROR" "DOWNLOAD" "Depot OS filter ($effective_os) rejected all depots for AppID $appid"
+                return 1
+            fi
             if [ "$is_strict_standalone" = true ]; then
                 echo "[ERROR] Strict standalone mode: No encrypted manifests with valid AES keys found for AppID $appid." >&2
                 echo "[ERROR] Cannot fallback to Steam Client/SLSsteam in standalone mode (ADR-022)." >&2
@@ -3941,6 +4036,7 @@ download_game() {
             echo " AppID      : $appid"
             echo " Title      : $title"
             echo " Target Dir : $target_dir"
+            echo " Target OS  : $effective_os"
             echo " Depots     : $(( ${#depot_args[@]} / 2 ))"
             echo " Engine     : Native Rust Standalone (Zero Steam Client)"
             echo "=========================================="
@@ -3950,6 +4046,7 @@ download_game() {
 APPID=$appid
 TITLE=$title
 TARGET_DIR=$target_dir
+TARGET_OS=$effective_os
 PID=$cur_pid
 START_TIME=$(date +%s)
 LOG_FILE=$stage_dir/download.log
@@ -10805,7 +10902,7 @@ EOF
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
-export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive preview_search_game preview_download get_depot_dl_progress preview_log_entry preview_process_log preview_adopt_candidate manage_game_fixes_interactive preview_fix_entry
+export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game parse_depot_os_map ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive preview_search_game preview_download get_depot_dl_progress preview_log_entry preview_process_log preview_adopt_candidate manage_game_fixes_interactive preview_fix_entry
 
 export -f require_tui check_fzf_status validate_tui_fields store_search_items tui_exec_action login_luatools_interactive
 export -f is_gbe_library install_gbe_library get_config_value set_config_value get_hubcap_api_key
@@ -11094,7 +11191,7 @@ case "${1:-}" in
         if [ -n "${2:-}" ]; then
             download_game "$2" "${@:3}"
         else
-            echo "Usage: gamectl download <appid> [dir] [title] [--source <auto|...>] [--raw|--inject-only|--all|--standalone|--sls]"
+            echo "Usage: gamectl download <appid> [dir] [title] [--source <auto|...>] [--os <linux|windows|macos|all>] [--raw|--inject-only|--all|--standalone|--sls]"
             exit 1
         fi
         ;;
