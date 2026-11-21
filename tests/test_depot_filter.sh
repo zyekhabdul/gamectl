@@ -140,6 +140,99 @@ JSON
     return 0
 }
 
+test_ensure_linux_binaries_executable_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_test_elf_XXXXXX")
+    mkdir -p "$t_dir/bin" "$t_dir/assets"
+
+    # 1. Non-executable Linux ELF binaries
+    printf "\x7f\x45\x4c\x46dummy_elf_x64" > "$t_dir/game.x86_64"
+    chmod 644 "$t_dir/game.x86_64"
+    printf "\x7f\x45\x4c\x46dummy_helper" > "$t_dir/bin/helper"
+    chmod 644 "$t_dir/bin/helper"
+
+    # 2. Excluded data files and non-ELF files
+    printf "\x7f\x45\x4c\x46dummy_pak" > "$t_dir/assets/data.pak"
+    chmod 644 "$t_dir/assets/data.pak"
+    echo "regular text file" > "$t_dir/readme.txt"
+    chmod 644 "$t_dir/readme.txt"
+
+    ensure_linux_binaries_executable "$t_dir"
+
+    [ -x "$t_dir/game.x86_64" ] || { echo "[FAIL] game.x86_64 was not made executable" >&2; rm -rf "$t_dir"; return 1; }
+    [ -x "$t_dir/bin/helper" ] || { echo "[FAIL] bin/helper was not made executable" >&2; rm -rf "$t_dir"; return 1; }
+    [ ! -x "$t_dir/assets/data.pak" ] || { echo "[FAIL] data.pak was unexpectedly made executable" >&2; rm -rf "$t_dir"; return 1; }
+    [ ! -x "$t_dir/readme.txt" ] || { echo "[FAIL] readme.txt was unexpectedly made executable" >&2; rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    echo "[PASS] ensure_linux_binaries_executable correctly sets chmod +x only on ELF binaries."
+    return 0
+}
+
+test_download_game_elf_chmod_hook_contract() {
+    local t_root
+    t_root=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_dl_elf_hook_XXXXXX")
+    local t_cfg="$t_root/config"
+    local t_cache="$t_root/cache"
+    local t_target="$t_root/games/ELFHookTitle"
+    mkdir -p "$t_cfg/SLSsteam" "$t_cache/gamectl/manifests" "$t_target"
+    echo "AppIds: []" > "$t_cfg/SLSsteam/config.yaml"
+
+    export XDG_CONFIG_HOME="$t_cfg"
+    export XDG_CACHE_HOME="$t_cache"
+
+    local mock_zip="$t_cache/gamectl/manifests/88883.zip"
+    local stage_dir="$t_root/stage"
+    mkdir -p "$stage_dir"
+    printf "\xd0\x17\xf6\x71test_payload_102" > "$stage_dir/102_2.manifest"
+    cat <<'LUA' > "$stage_dir/88883.lua"
+addappid(102, 1, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+LUA
+    cat <<'JSON' > "$stage_dir/88883.json"
+{
+    "depot": {
+        "102": { "config": { "oslist": "linux" } }
+    }
+}
+JSON
+    (cd "$stage_dir" && zip -q "$mock_zip" 102_2.manifest 88883.lua 88883.json)
+
+    # Mock runner that simulates writing an unshielded non-executable ELF binary
+    local mock_bin="$t_root/mock-depot-dl"
+    cat <<'MOCK' > "$mock_bin"
+#!/usr/bin/env bash
+for arg in "$@"; do
+    if [ "$arg" = "--dir" ]; then
+        shift
+        target="$1"
+        mkdir -p "$target"
+        printf "\x7f\x45\x4c\x46native_game_elf" > "$target/game_native"
+        chmod 644 "$target/game_native"
+        break
+    fi
+    shift
+done
+exit 0
+MOCK
+    chmod +x "$mock_bin"
+    export GAMECTL_DEPOT_DL_BIN="$mock_bin"
+
+    inject_game() { return 0; }
+
+    local out
+    out=$(download_game "88883" "$t_target" "ELFHookTitle" --engine standalone --os linux)
+    local rc=$?
+    [ "$rc" -eq 0 ] || { echo "[FAIL] download_game failed with $rc" >&2; rm -rf "$t_root"; return 1; }
+    [ -x "$t_target/game_native" ] || { echo "[FAIL] Downloaded ELF binary game_native is not executable (+x)" >&2; rm -rf "$t_root"; return 1; }
+
+    rm -rf "$t_root"
+    unset XDG_CONFIG_HOME XDG_CACHE_HOME GAMECTL_DEPOT_DL_BIN
+    echo "[PASS] download_game post-download hook automatically grants chmod +x to Linux ELF binaries."
+    return 0
+}
+
 test_parse_depot_os_map_contract
 test_download_game_os_filter_contracts
-echo "=== [PASS] All Chunk 27.01 contract tests passed successfully with Exit 0. ==="
+test_ensure_linux_binaries_executable_contract
+test_download_game_elf_chmod_hook_contract
+echo "=== [PASS] All Chunk 27.01 & Chunk 27.02 contract tests passed successfully with Exit 0. ==="

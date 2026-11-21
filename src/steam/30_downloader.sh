@@ -1130,6 +1130,30 @@ parse_depot_os_map() {
     done
 }
 
+# Ensure Linux ELF binaries in target directory have executable permission (+x)
+ensure_linux_binaries_executable() {
+    local target_dir="$1"
+    [ -d "$target_dir" ] || return 0
+
+    local elf_count=0
+    while IFS= read -r f_cand; do
+        [ -f "$f_cand" ] || continue
+        local sig
+        sig=$(od -An -tx1 -N4 "$f_cand" 2>/dev/null | tr -d " \n" || true)
+        if [ "$sig" = "7f454c46" ]; then
+            if [ ! -x "$f_cand" ]; then
+                chmod +x "$f_cand" 2>/dev/null || true
+                elf_count=$((elf_count + 1))
+            fi
+        fi
+    done < <(find "$target_dir" -maxdepth 4 -type f ! -path '*/.*' ! -name '*.pak' ! -name '*.vpk' ! -name '*.dat' ! -name '*.assets' ! -name '*.bundle' ! -name '*.txt' ! -name '*.json' ! -name '*.png' ! -name '*.jpg' ! -name '*.ogg' ! -name '*.wav' ! -name '*.mp3' 2>/dev/null || true)
+
+    if [ "$elf_count" -gt 0 ]; then
+        echo "[INFO] Granted executable permission (chmod +x) to $elf_count Linux ELF binary(s)." >&2
+    fi
+    return 0
+}
+
 # Steam Native Game Downloader & Provisioner (Standalone CDN Engine)
 download_game() {
     local appid="${1:-}"
@@ -1453,6 +1477,11 @@ EOF
                 echo "STATUS=FAILED" >> "$stage_dir/status.info"
                 echo "[ERROR] Standalone CDN download failed (exit code $dl_rc)." >&2
                 return 1
+            fi
+
+            # Post-download Linux ELF permission hook (Chunk 27.02)
+            if [ "$effective_os" = "linux" ] || [ "$effective_os" = "all" ]; then
+                ensure_linux_binaries_executable "$target_dir"
             fi
 
             # Preserve staged lua manifests in target_dir for offline DLC discovery
