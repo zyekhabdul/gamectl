@@ -3435,11 +3435,110 @@ test_diagnose_steamstub_remediated_contract() {
     return 0
 }
 
+test_scanner_symlink_deduplication_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    local t_dir
+    t_dir=$(mktemp -d "${TEST_TMP_DIR:-/tmp}/gamectl_test_symlink_XXXXXX")
+    local t_steam="$t_dir/steam/steamapps"
+    local t_custom="$t_dir/custom_games"
+    mkdir -p "$t_steam/common" "$t_custom/GameSym"
+
+    # Real game directory in custom_games
+    touch "$t_custom/GameSym/game.bin"
+    chmod +x "$t_custom/GameSym/game.bin"
+    echo "99991" > "$t_custom/GameSym/steam_appid.txt"
+
+    # Symlink in steamapps/common pointing to custom_games/GameSym
+    ln -s "$t_custom/GameSym" "$t_steam/common/GameSym"
+    cat <<EOF > "$t_steam/appmanifest_99991.acf"
+"AppState"
+{
+    "appid" "99991"
+    "name" "GameSym"
+    "installdir" "GameSym"
+}
+EOF
+
+    local r_uid="${UID:-$(id -u)}"
+    local c_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$r_uid}"
+    rm -f "$c_dir/scancache.tab" "$c_dir/scancache.tab.tmp"
+
+    local scan_out
+    scan_out=$(STEAM_ROOT="$t_dir/steam" GAMECTL_LIBRARY_DIRS="$t_custom" scan_installed_games true 2>/dev/null)
+    local count
+    count=$(echo "$scan_out" | grep -c "GameSym" || true)
+
+    rm -rf "$t_dir"
+    [ "$count" -eq 1 ] || return 1
+    return 0
+}
+
+test_scanner_appid_collision_deduplication_contract() {
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    local t_dir
+    t_dir=$(mktemp -d "${TEST_TMP_DIR:-/tmp}/gamectl_test_appid_XXXXXX")
+    local t_steam="$t_dir/steam/steamapps"
+    local t_custom="$t_dir/custom_games"
+    mkdir -p "$t_steam/common/GamePhysical1" "$t_custom/GamePhysical2"
+
+    # Steam physical game
+    touch "$t_steam/common/GamePhysical1/game.bin"
+    chmod +x "$t_steam/common/GamePhysical1/game.bin"
+    cat <<EOF > "$t_steam/appmanifest_99992.acf"
+"AppState"
+{
+    "appid" "99992"
+    "name" "GamePhysical"
+    "installdir" "GamePhysical1"
+}
+EOF
+
+    # Separate physical game in custom directory with the same appid
+    touch "$t_custom/GamePhysical2/game.bin"
+    chmod +x "$t_custom/GamePhysical2/game.bin"
+    echo "99992" > "$t_custom/GamePhysical2/steam_appid.txt"
+
+    local r_uid="${UID:-$(id -u)}"
+    local c_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$r_uid}"
+    rm -f "$c_dir/scancache.tab" "$c_dir/scancache.tab.tmp"
+
+    local scan_out
+    scan_out=$(STEAM_ROOT="$t_dir/steam" GAMECTL_LIBRARY_DIRS="$t_custom" scan_installed_games true 2>/dev/null)
+    local count
+    count=$(echo "$scan_out" | grep -c "99992" || true)
+
+    rm -rf "$t_dir"
+    [ "$count" -eq 1 ] || return 1
+    return 0
+}
+
+test_preview_game_gbe_artifact_detection_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_preview_gbe_XXXXXX")
+    local t_game="$t_dir/MyGame"
+    mkdir -p "$t_game"
+
+    # Small libsteam_api.so (under 7MB) BUT with steam_settings directory present -> must be GBE_FORK
+    head -c 500000 /dev/zero > "$t_game/libsteam_api.so"
+    mkdir -p "$t_game/steam_settings"
+    local out
+    out=$("$GAMECTL" --preview "12345" "MyGame" "STANDALONE" "$t_game" "game.bin")
+    grep -q "\[GBE_FORK\]" <<< "$out" || { rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    return 0
+}
+
 run_test "Linux SteamStub (Chunk 28.03): unpack_steamstub_elf synthetic decryption contract" test_unpack_steamstub_elf_synthetic_contract
 run_test "Linux SteamStub (Chunk 28.03): unpack_steamstub_elf 32-bit x86 decryption contract" test_unpack_steamstub_elf32_synthetic_contract
 run_test "Linux SteamStub (Chunk 28.03): CLI unpack-stub Linux ELF dispatch contract" test_cli_unpack_stub_dispatch_linux_elf
 run_test "Linux SteamStub (Chunk 28.03): launch_game auto-unpack and binary switch contract" test_launch_game_auto_unpacks_linux_elf
 run_test "Linux SteamStub (Chunk 28.03): diagnose_steamstub active and remediated diagnostics contract" test_diagnose_steamstub_remediated_contract
+run_test "Discovery (Chunk 29.04): scanner symlink canonicalization deduplication contract" test_scanner_symlink_deduplication_contract
+run_test "Discovery (Chunk 29.04): scanner AppID collision multi-library deduplication contract" test_scanner_appid_collision_deduplication_contract
+run_test "Discovery (Chunk 29.04): preview_game multi-dimensional GBE artifact detection contract" test_preview_game_gbe_artifact_detection_contract
 
 # ------------------------------------------------------------------------------
 # Final Execution Summary

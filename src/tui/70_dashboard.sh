@@ -25,7 +25,16 @@ preview_game() {
         if [ -n "$live_api" ] && [ -f "$live_api" ]; then
             local live_sz
             live_sz=$(stat -c%s "$live_api" 2>/dev/null || echo 0)
+            local is_gbe=false
             if [ "$live_sz" -gt 7000000 ]; then
+                is_gbe=true
+            elif [ -f "$gdir/libsteam_api.so.orig" ] || [ -f "$gdir/lib64/libsteam_api.so.orig" ] || \
+                 [ -f "$gdir/steam_api64.dll.orig" ] || [ -f "$gdir/steam_api.dll.orig" ] || \
+                 [ -d "$gdir/steam_settings" ] || [ -f "$gdir/local_save.txt" ]; then
+                is_gbe=true
+            fi
+
+            if [ "$is_gbe" = true ]; then
                 status="GBE_FORK"
             else
                 case "$live_api" in
@@ -1085,7 +1094,7 @@ library_menu() {
             --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x \
             --border-label="  ╢ gamectl :: Game Library ╟  " \
             --border-label-pos=2 \
-            --header="Enter: Launch │ Ctrl-I: Inject GBE │ Ctrl-F: Search │ Esc: Dashboard" \
+            --header="Enter: Launch │ Ctrl-I: Inject GBE │ Ctrl-D: Make Desktop │ Ctrl-F: Search │ Esc: Dashboard" \
             --prompt="Library > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview {1} {2} {3} {4} {5}' \
             --preview-window=right:55%:border-rounded:wrap \
@@ -1109,13 +1118,11 @@ library_menu() {
         elif [ "$trigger_key" = "ctrl-f" ]; then
             search_steam "" false || hk_rc=$?
             invalidate_scan_cache
-        elif [ "$trigger_key" = "ctrl-d" ]; then
-            list_downloads_interactive || hk_rc=$?
         fi
         if [ "$hk_rc" -ne 0 ] && [ "$hk_rc" -ne 1 ] && [ "$hk_rc" -ne 130 ]; then
             return "$hk_rc"
         fi
-        if [ "$trigger_key" = "ctrl-l" ] || [ "$trigger_key" = "ctrl-f" ] || [ "$trigger_key" = "ctrl-d" ]; then
+        if [ "$trigger_key" = "ctrl-l" ] || [ "$trigger_key" = "ctrl-f" ]; then
             continue
         fi
 
@@ -1129,6 +1136,14 @@ library_menu() {
         sel_bin=$(echo "$selection" | awk -F'\t' '{print $5}')
 
         case "$trigger_key" in
+            ctrl-d)
+                if create_desktop_entry "$sel_dir" "$sel_title"; then
+                    tui_modal_notice "Desktop Shortcut Created" "Created application launcher for:\n${sel_title:-$sel_dir}\nSaved to ~/.local/share/applications/" || return $?
+                else
+                    tui_modal_notice "Desktop Shortcut Failed" "Failed to create desktop shortcut for:\n${sel_title:-$sel_dir}" || return $?
+                fi
+                continue
+                ;;
             ctrl-o)
                 configure_wrappers "$sel_dir" "$sel_title" || return $?
                 invalidate_scan_cache

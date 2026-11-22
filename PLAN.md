@@ -1,50 +1,53 @@
-# WORK PACKET 28: NATIVE LINUX ELF STEAMSTUB DRM UNPACKING & REMEDIATION ARCHITECTURE
+# WORK PACKET 29: SCANNER DEDUPLICATION, MULTI-STORE PRECEDENCE & TUI SHORTCUT INTEGRATION
 
-- Track: Maintenance / DRM Remediation / Linux Native Independence / Zero-Bloat
-- **Status**: COMPLETED & RATIFIED [4/4 CHUNKS EXECUTED]
-- **Tujuan**: Mengimplementasikan unpacking otomatis DRM Valve Linux SteamStub (.bind) pada biner native Linux ELF (64-bit dan 32-bit seperti Boson X) agar game dapat langsung dimainkan secara offline dan standalone tanpa crash/tergantung pada Steam Client.
-
----
-
-## 1. Implementasi Minimalis (YAGNI)
-
-### [x] Chunk 28.01: Core Linux ELF SteamStub Unpacker Engine (`src/core/10_utils.sh`) [VERIFIED]
-- Implementasi `unpack_steamstub_elf()` menggunakan Python 3 inline (zero-bloat, pure `struct` ELF32/ELF64 dual-architecture parser).
-- Ekstraksi header rolling XOR pada seksi `.bind` (validasi signature 64-bit `0xc0dec0df` dan 32-bit `0xc0dec0de`).
-- Dukungan bit flag `0x04` (`NoEncryption`): bypass dekripsi AES jika seksi kode sudah berupa plaintext untuk mencegah korupsi biner.
-- Dekripsi seksi `.text` menggunakan AES-256-CBC (via library `cryptography` dengan graceful fallback ke CLI `openssl enc`).
-- Pemulihan Original Entry Point (OEP) pada `e_entry` (offset `0x18`) untuk ELF32 dan ELF64 dan pembuatan biner `<binary>.unpacked` dengan bit eksekusi `0755`.
-- Perluas `resolve_unpacked_binary()` untuk mengenali pola `${base_no_ext}.unpacked` dan `${gbin}.unpacked`.
-
-### [x] Chunk 28.02: Launcher Pre-Flight Auto-Unpack & CLI Subcommand Integration (`src/runners/50_launcher.sh`, `src/core/10_utils.sh`, `src/main.sh`) [VERIFIED]
-- Pada `launch_game()`, saat `stub_type == "linux_elf"`:
-  - Cek ketersediaan biner unpacked via `resolve_unpacked_binary`.
-  - Cek apakah biner in-place sudah diremediasi (entry point di luar `.bind`).
-  - Jika belum ada, jalankan `unpack_steamstub_elf` secara otomatis sebelum eksekusi.
-  - Alihkan `gbin` secara otomatis ke biner hasil unpack (`gbin="$unpacked_bin"`).
-- Pada `cli_unpack_stub()`, tambahkan inspeksi arsitektur: dispatch ke `unpack_steamstub_pe` untuk Windows PE, dan `unpack_steamstub_elf` untuk Linux ELF.
-- Perbarui `diagnose_steamstub()` agar menampilkan status DRM cerdas: membedakan active stub vs remediated binary (`.bind` inactive / OEP restored).
-- Export `unpack_steamstub_elf` pada `src/main.sh`.
-
-### [x] Chunk 28.03: Deterministic Machine Test Contracts (`tests/test_cli.sh`) [VERIFIED]
-- Tambahkan 5 test contracts deterministik:
-  1. `test_unpack_steamstub_elf_synthetic_contract`: Validasi parsing, dekripsi rolling XOR, AES-256-CBC, dan pemulihan OEP pada biner ELF64 sintetis.
-  2. `test_unpack_steamstub_elf32_synthetic_contract`: Validasi parsing, rolling XOR, bypass NoEncryption, dan pemulihan OEP pada biner ELF32 sintetis.
-  3. `test_cli_unpack_stub_dispatch_linux_elf`: Validasi bahwa CLI subcommand `gamectl unpack-stub` mendispatch Linux ELF dengan benar.
-  4. `test_launch_game_auto_unpacks_linux_elf`: Validasi bahwa `launch_game` secara transparan mengeksekusi biner unpacked saat mendeteksi Linux ELF SteamStub.
-  5. `test_diagnose_steamstub_remediated_contract`: Validasi status forensik active vs remediated binary pada `diagnose_steamstub`.
-
-### [x] Chunk 28.04: Kompilasi & Verifikasi Machine Harness [VERIFIED]
-- Kompilasi `bin/gamectl` via `./scripts/build.sh`.
-- Jalankan `make lint`, `./scripts/build.sh --check`, `tests/test_cli.sh` (144/144 contracts pass, exit 0), dan `python3 -m unittest discover -s tests` (42/42 tests pass, exit 0).
+- Track: Core Scanner / Discovery Robustness / UI Ergonomics / Zero-Bloat
+- **Status**: COMPLETED & RATIFIED [5/5 CHUNKS EXECUTED]
+- **Tujuan**: Mengeliminasi duplikasi entri game pada scanner (penanganan symlink & AppID collision antar-library), memperkuat heuristik deteksi status GBE, dan mengintegrasikan pembuatan shortcut FreeDesktop (.desktop) langsung dari TUI Dashboard.
 
 ---
 
-## 2. Kriteria Selesai (DoD)
-- [x] Biner Linux ELF (32-bit dan 64-bit) yang memiliki seksi `.bind` dapat di-unpack secara otomatis menghasilkan `<binary>.unpacked`.
-- [x] Biner dengan flag `NoEncryption` (seperti Boson X) tidak rusak oleh dekripsi AES yang tidak semestinya.
-- [x] `gamectl unpack-stub <elf_binary>` menghasilkan exit code 0 dan biner `0755`.
-- [x] `gamectl launch` secara transparan memilih biner `<binary>.unpacked` tanpa memicu crash DRM atau membuka Steam Client.
-- [x] `gamectl detect-steamstub` secara akurat mengidentifikasi status aktif vs status biner yang sudah diremediasi.
-- [x] Biner tetap portabel dan zero-bloat tanpa dependensi package Python eksternal wajib (mendukung `cryptography` dan fallback `openssl`).
-- [x] Seluruh machine test harness lolos dengan exit code 0 (144/144 contracts pass).
+## 1. Rencana Eksekusi & Quality Gate (Machine Verification)
+
+### [x] Chunk 29.01: Modular Source Patching (`src/steam/20_discovery.sh`, `src/tui/70_dashboard.sh`) [VERIFIED]
+- **Scanner Symlink Canonicalization (`src/steam/20_discovery.sh`)**:
+  - Terapkan `realpath -e` pada variabel `$gdir` sebelum validasi `seen_dirs` di Loop 1 (Steam common) dan Loop 2 (Custom search dirs).
+  - Pastikan symlink (seperti `steamapps/common/RustedWarfare -> ~/Games/RustedWarfare`) tidak terdaftar dua kali.
+- **AppID Collision Precedence (`src/steam/20_discovery.sh`)**:
+  - Inisialisasi tabel hash `seen_appids=()`.
+  - Catat seluruh AppID numerik valid pada Loop 1 (Steam libraries).
+  - Pada Loop 2 (Custom search dirs), lewati direktori dengan AppID numerik yang sudah terdaftar di `seen_appids` untuk mencegah duplikasi game fisik ganda.
+- **Heuristik Deteksi GBE Multi-Dimensi (`src/steam/20_discovery.sh`)**:
+  - Perluas evaluasi status `GBE_FORK` tidak hanya berdasarkan ukuran statis (`> 7 MB`), tetapi juga kehadiran artefak GBE: `.orig` backup binary, direktori `steam_settings/`, atau file `local_save.txt`.
+- **Integrasi FreeDesktop Shortcut ke TUI (`src/tui/70_dashboard.sh`)**:
+  - Perbarui header TUI library: tambahkan instruksi `Ctrl-D: Make Desktop`.
+  - Petakan event handler `ctrl-d` untuk memanggil `create_desktop_entry "$sel_dir" "$sel_title"` dengan modal notice konfirmasi keberhasilan/kegagalan.
+
+### [x] Chunk 29.02: Deterministic Compilation (`scripts/build.sh`) [VERIFIED]
+- Jalankan `./scripts/build.sh` atau `make build` untuk mengompilasi modular source ke biner mandiri `bin/gamectl`.
+- Verifikasi biner terbangun utuh dengan bit eksekusi `0755`.
+
+### [x] Chunk 29.03: Syntax & Lint Gate (`make lint`) [VERIFIED]
+- Jalankan `make lint` (`bash -n` ke seluruh modul shell di `src/`, `bin/`, `scripts/`, `packaging/`, dan `tests/`).
+- Pastikan: 0 syntax error dan exit code 0.
+
+### [x] Chunk 29.04: Regression & Integrity Test Suite (`tests/test_cli.sh`) [VERIFIED]
+- Tambahkan test contract deterministik untuk symlink resolving dan AppID deduplication di `tests/test_cli.sh`.
+- Jalankan `make test` (`./tests/test_cli.sh`).
+- Pastikan seluruh test contracts lolos (exit code 0, 0 failures; 147/147 contracts pass).
+
+### [x] Chunk 29.05: Empirical Install & Runtime Cache Purge [VERIFIED]
+- Salin biner hasil kompilasi ke biner sistem lokal: `cp bin/gamectl ~/.local/bin/gamectl` (tervalidasi symlink SSOT).
+- Bersihkan file cache usang: `rm -f /run/user/1000/scancache.tab`.
+- Jalankan `gamectl list-formatted --refresh` dan verifikasi empiris terminal:
+  - Terraria hanya muncul 1 entri: `105600 Terraria [GBE_FORK]`.
+  - Rusted Warfare hanya muncul 1 entri: `647960 RustedWarfare [GBE_FORK]`.
+
+---
+
+## 2. Kriteria Selesai (Definition of Done)
+- [x] Symlink game antar-library Steam dan `~/Games` tidak menghasilkan duplikat pada scanner.
+- [x] Game dengan AppID sama pada multi-library terdeduplikasi dengan rapi (1 entri per game).
+- [x] Deteksi status `[GBE_FORK]` akurat mengenali injeksi Goldberg tanpa false negative.
+- [x] Shortcut `.desktop` dapat dibuat langsung dari antarmuka TUI via tombol `Ctrl-D`.
+- [x] `make lint` dan `make test` menghasilkan exit code 0 (147/147 passed).
+- [x] Menu TUI `gamectl` bersih tanpa entri duplikat.

@@ -154,6 +154,7 @@ scan_installed_games() {
     if [ "$use_cached" = false ]; then
         printf '%s\n' '# gamectl scanner v2' > "$cache_file.tmp"
         declare -A seen_dirs=()
+        declare -A seen_appids=()
 
         # 1. Scan Steam Libraries
         local steam_lib
@@ -185,8 +186,14 @@ scan_installed_games() {
                 local gdir="$steam_lib/common/$installdir"
                 validate_tui_fields "$appid" "$name" "$gdir" || continue
                 [ -d "$gdir" ] || continue
+
+                local canon_gdir
+                canon_gdir=$(realpath -e "$gdir" 2>/dev/null || echo "$gdir")
+                [[ -v seen_dirs["$canon_gdir"] ]] && continue
                 [[ -v seen_dirs["$gdir"] ]] && continue
+                seen_dirs["$canon_gdir"]=1
                 seen_dirs["$gdir"]=1
+                [ -n "$appid" ] && [ "$appid" != "STANDALONE" ] && seen_appids["$appid"]=1
 
                 local gbin
                 gbin=$(find_game_binary "$gdir") || continue
@@ -225,17 +232,29 @@ scan_installed_games() {
                     fi
                 fi
 
+                local is_gbe=false
                 if [ -n "$api_file" ]; then
                     local sz
                     sz=$(stat -c%s "$api_file" 2>/dev/null || echo 0)
                     if [ "$sz" -gt 7000000 ]; then
-                        status="GBE_FORK"
-                    else
-                        case "$api_file" in
-                            *.dll) status="VALVE_DLL" ;;
-                            *)     status="VALVE_SO" ;;
-                        esac
+                        is_gbe=true
                     fi
+                fi
+                if [ "$is_gbe" = false ]; then
+                    if [ -f "$gdir/libsteam_api.so.orig" ] || [ -f "$gdir/lib64/libsteam_api.so.orig" ] || \
+                       [ -f "$gdir/steam_api64.dll.orig" ] || [ -f "$gdir/steam_api.dll.orig" ] || \
+                       [ -d "$gdir/steam_settings" ] || [ -f "$gdir/local_save.txt" ]; then
+                        is_gbe=true
+                    fi
+                fi
+
+                if [ "$is_gbe" = true ]; then
+                    status="GBE_FORK"
+                elif [ -n "$api_file" ]; then
+                    case "$api_file" in
+                        *.dll) status="VALVE_DLL" ;;
+                        *)     status="VALVE_SO" ;;
+                    esac
                 fi
 
                 [ -z "$appid" ] && appid="STANDALONE"
@@ -278,7 +297,12 @@ scan_installed_games() {
             for gdir in "$base_dir"/*; do
                 [ -d "$gdir" ] || continue
                 validate_tui_fields "$gdir" || continue
+
+                local canon_gdir
+                canon_gdir=$(realpath -e "$gdir" 2>/dev/null || echo "$gdir")
+                [[ -v seen_dirs["$canon_gdir"] ]] && continue
                 [[ -v seen_dirs["$gdir"] ]] && continue
+                seen_dirs["$canon_gdir"]=1
                 seen_dirs["$gdir"]=1
 
                 local folder_name="${gdir##*/}"
@@ -300,6 +324,12 @@ scan_installed_games() {
                     appid="${raw_id//[!0-9]/}"
                     [ -z "$appid" ] && appid="STANDALONE"
                 fi
+
+                # AppID collision precedence: skip duplicate if already discovered in Steam library
+                if [ "$appid" != "STANDALONE" ] && [[ -v seen_appids["$appid"] ]]; then
+                    continue
+                fi
+                [ "$appid" != "STANDALONE" ] && seen_appids["$appid"]=1
 
                 local title="$folder_name"
                 if [ -f "$gdir/.gamectl_title" ]; then
@@ -341,17 +371,29 @@ scan_installed_games() {
                     fi
                 fi
 
+                local is_gbe=false
                 if [ -n "$api_file" ]; then
                     local sz
                     sz=$(stat -c%s "$api_file" 2>/dev/null || echo 0)
                     if [ "$sz" -gt 7000000 ]; then
-                        status="GBE_FORK"
-                    else
-                        case "$api_file" in
-                            *.dll) status="VALVE_DLL" ;;
-                            *)     status="VALVE_SO" ;;
-                        esac
+                        is_gbe=true
                     fi
+                fi
+                if [ "$is_gbe" = false ]; then
+                    if [ -f "$gdir/libsteam_api.so.orig" ] || [ -f "$gdir/lib64/libsteam_api.so.orig" ] || \
+                       [ -f "$gdir/steam_api64.dll.orig" ] || [ -f "$gdir/steam_api.dll.orig" ] || \
+                       [ -d "$gdir/steam_settings" ] || [ -f "$gdir/local_save.txt" ]; then
+                        is_gbe=true
+                    fi
+                fi
+
+                if [ "$is_gbe" = true ]; then
+                    status="GBE_FORK"
+                elif [ -n "$api_file" ]; then
+                    case "$api_file" in
+                        *.dll) status="VALVE_DLL" ;;
+                        *)     status="VALVE_SO" ;;
+                    esac
                 fi
 
                 printf "%s\t%s\t%s\t%s\t%s\n" "$appid" "$title" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
