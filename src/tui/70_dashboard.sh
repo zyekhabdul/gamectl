@@ -9,42 +9,7 @@ preview_game() {
 
     # Real-time dynamic live inspection from filesystem
     if [ -n "$gdir" ] && [ -d "$gdir" ]; then
-        local live_api=""
-        if [ -f "$gdir/steam_api64.dll" ]; then
-            live_api="$gdir/steam_api64.dll"
-        elif [ -f "$gdir/steam_api.dll" ]; then
-            live_api="$gdir/steam_api.dll"
-        elif [ -f "$gdir/libsteam_api.so" ]; then
-            live_api="$gdir/libsteam_api.so"
-        elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
-            live_api="$gdir/lib64/libsteam_api.so"
-        else
-            live_api=$(find "$gdir" -maxdepth 3 \( -name "steam_api64.dll" -o -name "steam_api.dll" -o -name "libsteam_api.so" \) 2>/dev/null | head -n 1)
-        fi
-
-        if [ -n "$live_api" ] && [ -f "$live_api" ]; then
-            local live_sz
-            live_sz=$(stat -c%s "$live_api" 2>/dev/null || echo 0)
-            local is_gbe=false
-            if [ "$live_sz" -gt 7000000 ]; then
-                is_gbe=true
-            elif [ -f "$gdir/libsteam_api.so.orig" ] || [ -f "$gdir/lib64/libsteam_api.so.orig" ] || \
-                 [ -f "$gdir/steam_api64.dll.orig" ] || [ -f "$gdir/steam_api.dll.orig" ] || \
-                 [ -d "$gdir/steam_settings" ] || [ -f "$gdir/local_save.txt" ]; then
-                is_gbe=true
-            fi
-
-            if [ "$is_gbe" = true ]; then
-                status="GBE_FORK"
-            else
-                case "$live_api" in
-                    *.dll) status="VALVE_DLL" ;;
-                    *)     status="VALVE_SO" ;;
-                esac
-            fi
-        else
-            status="STANDALONE"
-        fi
+        status=$(resolve_game_drm_status "$gdir" "" "$gbin")
     fi
 
     local status_badge="${UI_CYAN}[${status}]${UI_RST}"

@@ -185,6 +185,58 @@ test_canonical_tui_primitives_contract() {
 }
 run_test "Utils (Chunk 3): canonical FZF dialog primitives and sanitization contract" test_canonical_tui_primitives_contract
 
+test_resolve_game_drm_status_contract() {
+    source "$REPO_ROOT/src/core/00_header.sh"
+    source "$REPO_ROOT/src/core/10_utils.sh"
+
+    local t_dir="/tmp/test_drm_$$"
+    mkdir -p "$t_dir"
+
+    # Test 1: Non-existent directory returns STANDALONE
+    [ "$(resolve_game_drm_status "$t_dir/non_existent")" = "STANDALONE" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Test 2: Clean directory without Steam API returns STANDALONE
+    local g_clean="$t_dir/clean_game"
+    mkdir -p "$g_clean"
+    touch "$g_clean/game.exe"
+    [ "$(resolve_game_drm_status "$g_clean")" = "STANDALONE" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Test 3: Official Valve DLL without emulator artifacts returns VALVE_DLL
+    local g_valvedll="$t_dir/valvedll_game"
+    mkdir -p "$g_valvedll"
+    head -c 100000 /dev/zero > "$g_valvedll/steam_api64.dll"
+    [ "$(resolve_game_drm_status "$g_valvedll")" = "VALVE_DLL" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Test 4: Official Valve SO without emulator artifacts returns VALVE_SO
+    local g_valveso="$t_dir/valveso_game"
+    mkdir -p "$g_valveso"
+    head -c 100000 /dev/zero > "$g_valveso/libsteam_api.so"
+    [ "$(resolve_game_drm_status "$g_valveso")" = "VALVE_SO" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Test 5: Large GBE binary (>7MB) returns GBE_FORK
+    local g_gbe_large="$t_dir/gbe_large_game"
+    mkdir -p "$g_gbe_large"
+    head -c 7500000 /dev/zero > "$g_gbe_large/libsteam_api.so"
+    [ "$(resolve_game_drm_status "$g_gbe_large")" = "GBE_FORK" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Test 6: Small binary with steam_settings directory returns GBE_FORK
+    local g_gbe_settings="$t_dir/gbe_settings_game"
+    mkdir -p "$g_gbe_settings/steam_settings"
+    head -c 100000 /dev/zero > "$g_gbe_settings/steam_api64.dll"
+    [ "$(resolve_game_drm_status "$g_gbe_settings")" = "GBE_FORK" ] || { rm -rf "$t_dir"; return 1; }
+
+    # Test 7: Small binary with .orig backup returns GBE_FORK
+    local g_gbe_orig="$t_dir/gbe_orig_game"
+    mkdir -p "$g_gbe_orig"
+    head -c 100000 /dev/zero > "$g_gbe_orig/steam_api64.dll"
+    head -c 100000 /dev/zero > "$g_gbe_orig/steam_api64.dll.orig"
+    [ "$(resolve_game_drm_status "$g_gbe_orig")" = "GBE_FORK" ] || { rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    return 0
+}
+run_test "Utils (Chunk 4): resolve_game_drm_status canonical SSoT contract" test_resolve_game_drm_status_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"

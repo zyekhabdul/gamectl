@@ -251,13 +251,7 @@ EOF
         echo "           SteamID64   : $steamid"
         echo "           Config File : $ini_file"
         local is_gbe_check=false
-        for api_c in "$target_dir/libsteam_api.so" "$target_dir/lib64/libsteam_api.so" "$target_dir/steam_api64.dll" "$target_dir/steam_api.dll"; do
-            if [ -f "$api_c" ]; then
-                local sz
-                sz=$(stat -c%s "$api_c" 2>/dev/null || echo 0)
-                [ "$sz" -gt 7000000 ] && is_gbe_check=true && break
-            fi
-        done
+        [ "$(resolve_game_drm_status "$target_dir")" = "GBE_FORK" ] && is_gbe_check=true
         if [ "$is_gbe_check" = false ]; then
             echo "           Note        : Game is not injected with GBE Fork yet. Press <CTRL-I> to enable."
         fi
@@ -284,26 +278,7 @@ set_id_interactive() {
     cur_lang=$(echo "$p_info" | cut -d'|' -f3)
 
     local is_gbe=false
-    local api_cand
-    for api_cand in "$target_dir/libsteam_api.so" "$target_dir/lib64/libsteam_api.so" "$target_dir/steam_api64.dll" "$target_dir/steam_api.dll"; do
-        if [ -f "$api_cand" ]; then
-            local sz
-            sz=$(stat -c%s "$api_cand" 2>/dev/null || echo 0)
-            if [ "$sz" -gt 7000000 ]; then
-                is_gbe=true
-                break
-            fi
-        fi
-    done
-    if [ "$is_gbe" = false ]; then
-        local deep_api
-        deep_api=$(find "$target_dir" -maxdepth 3 \( -name "libsteam_api.so" -o -name "steam_api64.dll" -o -name "steam_api.dll" \) 2>/dev/null | head -n 1)
-        if [ -n "$deep_api" ]; then
-            local sz
-            sz=$(stat -c%s "$deep_api" 2>/dev/null || echo 0)
-            [ "$sz" -gt 7000000 ] && is_gbe=true
-        fi
-    fi
+    [ "$(resolve_game_drm_status "$target_dir")" = "GBE_FORK" ] && is_gbe=true
 
     echo
     echo "${UI_BOX}╭─ CONFIGURE LAN IDENTITY & STEAMID (GBE FORK) ───────────────╮${UI_RST}"

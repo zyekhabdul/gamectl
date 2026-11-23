@@ -1031,6 +1031,76 @@ resolve_standalone_library_dir() {
     fi
 }
 
+# Canonical DRM & Emulator Resolution SSoT
+# Resolves: GBE_FORK | VALVE_DLL | VALVE_SO | STANDALONE
+resolve_game_drm_status() {
+    local gdir="$1"
+    local api_file="${2:-}"
+    local bin_file="${3:-}"
+
+    [ -n "$gdir" ] && [ -d "$gdir" ] || { echo "STANDALONE"; return 0; }
+
+    if [ -z "$api_file" ] || [ ! -f "$api_file" ]; then
+        local is_win=false
+        case "$bin_file" in
+            *.exe|*.EXE|*.bat|*.BAT) is_win=true ;;
+        esac
+
+        if [ "$is_win" = true ]; then
+            if [ -f "$gdir/steam_api64.dll" ]; then
+                api_file="$gdir/steam_api64.dll"
+            elif [ -f "$gdir/steam_api.dll" ]; then
+                api_file="$gdir/steam_api.dll"
+            elif [ -f "$gdir/libsteam_api.so" ]; then
+                api_file="$gdir/libsteam_api.so"
+            elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
+                api_file="$gdir/lib64/libsteam_api.so"
+            else
+                api_file=$(find "$gdir" -maxdepth 3 \( -name "steam_api64.dll" -o -name "steam_api.dll" -o -name "libsteam_api.so" \) 2>/dev/null | head -n 1)
+            fi
+        else
+            if [ -f "$gdir/libsteam_api.so" ]; then
+                api_file="$gdir/libsteam_api.so"
+            elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
+                api_file="$gdir/lib64/libsteam_api.so"
+            elif [ -f "$gdir/steam_api64.dll" ]; then
+                api_file="$gdir/steam_api64.dll"
+            elif [ -f "$gdir/steam_api.dll" ]; then
+                api_file="$gdir/steam_api.dll"
+            else
+                api_file=$(find "$gdir" -maxdepth 3 \( -name "libsteam_api.so" -o -name "steam_api64.dll" -o -name "steam_api.dll" \) 2>/dev/null | head -n 1)
+            fi
+        fi
+    fi
+
+    local is_gbe=false
+    if [ -n "$api_file" ] && [ -f "$api_file" ]; then
+        local sz
+        sz=$(stat -c%s "$api_file" 2>/dev/null || echo 0)
+        [ "$sz" -gt 7000000 ] && is_gbe=true
+    fi
+
+    if [ "$is_gbe" = false ]; then
+        if [ -f "$gdir/libsteam_api.so.orig" ] || [ -f "$gdir/lib64/libsteam_api.so.orig" ] || \
+           [ -f "$gdir/steam_api64.dll.orig" ] || [ -f "$gdir/steam_api.dll.orig" ] || \
+           [ -d "$gdir/steam_settings" ] || [ -f "$gdir/local_save.txt" ]; then
+            is_gbe=true
+        fi
+    fi
+
+    if [ "$is_gbe" = true ]; then
+        echo "GBE_FORK"
+    elif [ -n "$api_file" ] && [ -f "$api_file" ]; then
+        case "$api_file" in
+            *.dll) echo "VALVE_DLL" ;;
+            *)     echo "VALVE_SO" ;;
+        esac
+    else
+        echo "STANDALONE"
+    fi
+    return 0
+}
+
 # Detect SteamStub DRM wrapper in Linux ELF (.bind section) or Windows PE
 detect_steamstub_drm() {
     local bin_path="$1"

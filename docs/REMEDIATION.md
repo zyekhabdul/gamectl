@@ -105,18 +105,20 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
   - Tampilan visual dialog konsisten 100% di seluruh aplikasi.
   - [ VERIFIED ] Lulus pengujian unit contract dan TUI Safety harness 151/151 Exit 0.
 
-### [ ] Chunk 4: SSoT DRM & Runtime Architecture Resolution
+### [x] Chunk 4: SSoT DRM & Runtime Architecture Resolution
 - **Target Files**: `src/core/10_utils.sh`, `src/steam/20_discovery.sh`, `src/tui/70_dashboard.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Implementasikan fungsi kanonikal di `src/core/10_utils.sh`:
-     `resolve_game_drm_status <game_dir> [api_file]` yang mengembalikan status terstruktur (`GBE_FORK`, `VALVE_ORIGINAL`, `STANDALONE`).
+     `resolve_game_drm_status <game_dir> [api_file] [bin_file]` yang mengembalikan status terstruktur (`GBE_FORK`, `VALVE_DLL`, `VALVE_SO`, `STANDALONE`).
   2. Konsolidasikan duplikasi evaluasi di:
      - `src/steam/20_discovery.sh` (Loop scan Steam Library)
      - `src/steam/20_discovery.sh` (Loop scan Custom Search Dirs)
      - `src/tui/70_dashboard.sh` (`preview_game`)
+     - `src/steam/25_identity.sh` (`set_id` & `set_id_interactive`)
 - **Definition of Done (DoD)**:
-  - 60+ baris duplikasi kode heuristik DRM tereliminasi.
+  - 100+ baris duplikasi kode heuristik DRM tereliminasi.
   - Perubahan deteksi emulator di masa depan hanya memerlukan modifikasi 1 baris di SSoT.
+  - [ VERIFIED ] Lulus pengujian unit contract dan TUI Safety harness Exit 0.
 
 ### [ ] Chunk 5: Trap Scope Isolation & Terminal State Restoration Guard
 - **Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`

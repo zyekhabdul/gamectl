@@ -199,63 +199,8 @@ scan_installed_games() {
                 gbin=$(find_game_binary "$gdir") || continue
                 [ -z "$gbin" ] && continue
 
-                local is_win_bin=false
-                case "$gbin" in
-                    *.exe|*.EXE) is_win_bin=true ;;
-                esac
-
-                local status="STANDALONE"
-                local api_file=""
-                if [ "$is_win_bin" = true ]; then
-                    if [ -f "$gdir/steam_api64.dll" ]; then
-                        api_file="$gdir/steam_api64.dll"
-                    elif [ -f "$gdir/steam_api.dll" ]; then
-                        api_file="$gdir/steam_api.dll"
-                    elif [ -f "$gdir/libsteam_api.so" ]; then
-                        api_file="$gdir/libsteam_api.so"
-                    elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
-                        api_file="$gdir/lib64/libsteam_api.so"
-                    else
-                        api_file=$(find "$gdir" -maxdepth 3 \( -name "steam_api64.dll" -o -name "steam_api.dll" -o -name "libsteam_api.so" \) 2>/dev/null | head -n 1)
-                    fi
-                else
-                    if [ -f "$gdir/libsteam_api.so" ]; then
-                        api_file="$gdir/libsteam_api.so"
-                    elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
-                        api_file="$gdir/lib64/libsteam_api.so"
-                    elif [ -f "$gdir/steam_api64.dll" ]; then
-                        api_file="$gdir/steam_api64.dll"
-                    elif [ -f "$gdir/steam_api.dll" ]; then
-                        api_file="$gdir/steam_api.dll"
-                    else
-                        api_file=$(find "$gdir" -maxdepth 3 \( -name "libsteam_api.so" -o -name "steam_api64.dll" -o -name "steam_api.dll" \) 2>/dev/null | head -n 1)
-                    fi
-                fi
-
-                local is_gbe=false
-                if [ -n "$api_file" ]; then
-                    local sz
-                    sz=$(stat -c%s "$api_file" 2>/dev/null || echo 0)
-                    if [ "$sz" -gt 7000000 ]; then
-                        is_gbe=true
-                    fi
-                fi
-                if [ "$is_gbe" = false ]; then
-                    if [ -f "$gdir/libsteam_api.so.orig" ] || [ -f "$gdir/lib64/libsteam_api.so.orig" ] || \
-                       [ -f "$gdir/steam_api64.dll.orig" ] || [ -f "$gdir/steam_api.dll.orig" ] || \
-                       [ -d "$gdir/steam_settings" ] || [ -f "$gdir/local_save.txt" ]; then
-                        is_gbe=true
-                    fi
-                fi
-
-                if [ "$is_gbe" = true ]; then
-                    status="GBE_FORK"
-                elif [ -n "$api_file" ]; then
-                    case "$api_file" in
-                        *.dll) status="VALVE_DLL" ;;
-                        *)     status="VALVE_SO" ;;
-                    esac
-                fi
+                local status
+                status=$(resolve_game_drm_status "$gdir" "" "$gbin")
 
                 [ -z "$appid" ] && appid="STANDALONE"
                 printf "%s\t%s\t%s\t%s\t%s\n" "$appid" "$name" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
@@ -338,63 +283,8 @@ scan_installed_games() {
                 [ -n "$title" ] || title="$folder_name"
                 validate_tui_fields "$title" "$gbin" || continue
 
-                local is_win_bin=false
-                case "$gbin" in
-                    *.exe|*.EXE) is_win_bin=true ;;
-                esac
-
-                local status="STANDALONE"
-                local api_file=""
-                if [ "$is_win_bin" = true ]; then
-                    if [ -f "$gdir/steam_api64.dll" ]; then
-                        api_file="$gdir/steam_api64.dll"
-                    elif [ -f "$gdir/steam_api.dll" ]; then
-                        api_file="$gdir/steam_api.dll"
-                    elif [ -f "$gdir/libsteam_api.so" ]; then
-                        api_file="$gdir/libsteam_api.so"
-                    elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
-                        api_file="$gdir/lib64/libsteam_api.so"
-                    else
-                        api_file=$(find "$gdir" -maxdepth 3 \( -name "steam_api64.dll" -o -name "steam_api.dll" -o -name "libsteam_api.so" \) 2>/dev/null | head -n 1)
-                    fi
-                else
-                    if [ -f "$gdir/libsteam_api.so" ]; then
-                        api_file="$gdir/libsteam_api.so"
-                    elif [ -f "$gdir/lib64/libsteam_api.so" ]; then
-                        api_file="$gdir/lib64/libsteam_api.so"
-                    elif [ -f "$gdir/steam_api64.dll" ]; then
-                        api_file="$gdir/steam_api64.dll"
-                    elif [ -f "$gdir/steam_api.dll" ]; then
-                        api_file="$gdir/steam_api.dll"
-                    else
-                        api_file=$(find "$gdir" -maxdepth 3 \( -name "libsteam_api.so" -o -name "steam_api64.dll" -o -name "steam_api.dll" \) 2>/dev/null | head -n 1)
-                    fi
-                fi
-
-                local is_gbe=false
-                if [ -n "$api_file" ]; then
-                    local sz
-                    sz=$(stat -c%s "$api_file" 2>/dev/null || echo 0)
-                    if [ "$sz" -gt 7000000 ]; then
-                        is_gbe=true
-                    fi
-                fi
-                if [ "$is_gbe" = false ]; then
-                    if [ -f "$gdir/libsteam_api.so.orig" ] || [ -f "$gdir/lib64/libsteam_api.so.orig" ] || \
-                       [ -f "$gdir/steam_api64.dll.orig" ] || [ -f "$gdir/steam_api.dll.orig" ] || \
-                       [ -d "$gdir/steam_settings" ] || [ -f "$gdir/local_save.txt" ]; then
-                        is_gbe=true
-                    fi
-                fi
-
-                if [ "$is_gbe" = true ]; then
-                    status="GBE_FORK"
-                elif [ -n "$api_file" ]; then
-                    case "$api_file" in
-                        *.dll) status="VALVE_DLL" ;;
-                        *)     status="VALVE_SO" ;;
-                    esac
-                fi
+                local status
+                status=$(resolve_game_drm_status "$gdir" "" "$gbin")
 
                 printf "%s\t%s\t%s\t%s\t%s\n" "$appid" "$title" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
             done
