@@ -1,7 +1,7 @@
 # WORK PACKET 30: PRODUCTION GRAPHICS NEGOTIATION, PROTON CONTRACT & RUNTIME OBSERVABILITY
 
 - **Track**: Production Hardening / Generalized Hardware Negotiation / TUI Observability
-- **Status**: IN PROGRESS [3/4 PACKETS]
+- **Status**: DONE [4/4 PACKETS]
 - **Basis**: Empiris dari `/run/user/1000/game_Downwellexe.log` (`HRESULT 0x887a0002` / `DXGI_ERROR_NOT_FOUND`, `protonfixes` `IndexError`, multilib PE32, dan audit visual TUI).
 - **Target Files**: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/diagnostics/60_doctor.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `tests/test_remediation.sh`, `bin/gamectl`
 
@@ -68,16 +68,18 @@
   - Panel preview TUI bebas dari redundansi teks shortcut dan wrapping rusak.
   - [ VERIFIED ] `test_doctor_multilib_and_tui_polish_contract`, `test_cli.sh` (147/147), `test_remediation.sh` (13/13), `test_tui_ergonomics.sh` (3/3), `./scripts/build.sh --check`, dan `make lint` lulus Exit 0.
 
-### [ ] Packet D: Regression Contracts, Bundle Sync & Full Verification
-- **Target Files**: `tests/test_remediation.sh`, `bin/gamectl`
+### [x] Packet D: Regression Contracts, Bundle Sync & Full Verification
+- **Target Files**: `tests/test_remediation.sh`, `tests/test_cli.sh`, `src/tui/70_dashboard.sh`, `bin/gamectl`
 - **Langkah Teknis**:
   1. Tambahkan contract tests deterministik di `tests/test_remediation.sh`:
      - `test_graphics_capability_and_renderer_contract`: uji `resolve_graphics_renderer` untuk semua kombinasi (`auto`/`dxvk`/`wined3d` x `VULKAN_READY`/`VULKAN_LEGACY`/`OPENGL_ONLY` x `prime=0/1`) serta CLI flag `--wined3d` / `--dxvk`.
      - `test_proton_env_contract`: uji ekspor `SteamAppId`, `SteamGameId`, `GAMEID`, dan `PROTONFIXES_DISABLE` pada jalur Proton standalone.
      - `test_doctor_multilib_and_tui_polish_contract`: uji output `doctor_audit` melaporkan Vulkan tier & multilib 32-bit, serta `preview_game` menampilkan `Community Fixes` dan info `Renderer`.
-  2. Kompilasi bundle via `./scripts/build.sh`.
-  3. Eksekusi gerbang verifikasi mesin: `make lint && make test` serta `python3 -m unittest tests/test_tui_safety.py tests/test_standalone_safety.py tests/test_save_safety.py`.
+  2. Sinkronkan kontrak `tests/test_cli.sh:2646` ke `Community Fixes` dan hapus komentar workaround di `src/tui/70_dashboard.sh:271`.
+  3. Kompilasi bundle via `./scripts/build.sh`.
+  4. Eksekusi gerbang verifikasi mesin: `make lint && make test` serta `python3 -m unittest tests/test_tui_safety.py tests/test_standalone_safety.py tests/test_save_safety.py`.
 - **Definition of Done (DoD)**:
   - `make lint` Exit Code 0.
   - `make test` (`test_cli.sh`, `test_remediation.sh`, `test_tui_ergonomics.sh`) dan seluruh Python safety suites lulus Exit Code 0 (0 failures).
   - `bin/gamectl` sinkron 100% dengan source (`./scripts/build.sh --check` Exit 0).
+  - [ VERIFIED ] `./scripts/build.sh --check` (`bin/gamectl` 12256 lines), `make lint` (Exit 0), `test_cli.sh` (147/147), `test_remediation.sh` (13/13), `test_tui_ergonomics.sh` (3/3), dan Python safety suites (`test_tui_safety.py`, `test_standalone_safety.py`, `test_save_safety.py`: 42/42 OK in 84.847s) lulus Exit 0.

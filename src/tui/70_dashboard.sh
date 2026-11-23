@@ -268,7 +268,6 @@ preview_game() {
     else
         echo "  ${UI_PILL_CTRLS} ${UI_BOLD}Cloud Sync (N/A)${UI_RST}   ${UI_PILL_CTRLB} ${UI_BOLD}Manual Save Snapshot${UI_RST}"
     fi
-    # Hotkey legend: Ctrl-X (Fixes) -> Community Fixes
     echo "  ${UI_PILL_CTRLR} ${UI_BOLD}Restore Snapshot${UI_RST}   ${UI_PILL_CTRLX} ${UI_BOLD}Community Fixes${UI_RST}"
     echo "  ${UI_PILL_ESC}   ${UI_BOLD}Back to Master Dashboard Hub${UI_RST}"
     echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
