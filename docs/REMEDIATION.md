@@ -120,17 +120,18 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
   - Perubahan deteksi emulator di masa depan hanya memerlukan modifikasi 1 baris di SSoT.
   - [ VERIFIED ] Lulus pengujian unit contract dan TUI Safety harness Exit 0.
 
-### [ ] Chunk 5: Trap Scope Isolation & Terminal State Restoration Guard
-- **Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`
+### [x] Chunk 5: Trap Scope Isolation & Terminal State Restoration Guard
+- **Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`, `src/main.sh`
 - **Runtutan Eksekusi Teknis**:
   1. Di `src/runners/50_launcher.sh`:
-     - Hapus `trap - INT TERM EXIT` di baris 697.
-     - Pastikan cleanup lokal runner tidak menghapus trap pemulihan terminal milik TUI.
-  2. Di `src/core/10_utils.sh`:
-     - Jadikan `enter_tui_screen` dan `exit_tui_screen` sebagai single authoritative owner dari state terminal (termios, alternate screen `\033[?1049h`, kursor).
-     - Lindungi `exit_tui_screen` dengan re-entrant guard agar idempotent saat dipanggil berulang kali.
+     - Cabut penghapusan destruktif bare `trap - INT TERM EXIT` dengan `_disarm_launch_traps` yang ter-scope.
+     - Pastikan cleanup lokal runner tidak menghapus atau menimpa trap pemulihan terminal milik TUI owner PID.
+  2. Di `src/core/10_utils.sh` & `src/main.sh`:
+     - Jadikan `enter_tui_screen`, `exit_tui_screen`, dan `install_tui_screen_traps` sebagai single authoritative owner dari state terminal (saved `stty`, alternate screen `\033[?1049h`, kursor, owner PID).
+     - Lindungi `exit_tui_screen` dengan re-entrant & single-owner guard (`GAMECTL_TUI_EXITING`, `GAMECTL_TUI_OWNER_PID`) serta preservasi exit code asli pada trap `EXIT`.
 - **Definition of Done (DoD)**:
   - Terminal tidak pernah rusak atau tertinggal dalam mode alternate screen saat keluar, error, atau menerima `SIGINT`/`SIGTERM`.
+  - [ VERIFIED ] Lulus seluruh harness (`test_remediation.sh` 6/6, `test_cli.sh` 147/147, `test_tui_safety.py` + `test_standalone_safety.py` 32/32) dengan Exit 0.
 
 ### [ ] Chunk 6: Dual-Mode Runtime Path SSoT Consolidation
 - **Target Files**: `src/runners/40_wrappers.sh`, `src/steam/30_downloader.sh`, `src/core/10_utils.sh`

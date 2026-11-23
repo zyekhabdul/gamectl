@@ -300,25 +300,69 @@ flush_tty_input() {
 
 # Terminal Screen Lifecycle Management (Alternate Screen Buffer)
 export GAMECTL_IN_ALT_SCREEN=0
+GAMECTL_TUI_OWNER_PID=""
+GAMECTL_TUI_EXITING=0
+GAMECTL_SAVED_STTY=""
+
+# Canonical TUI signal trap installer (Single Authoritative Owner)
+install_tui_screen_traps() {
+    if [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 1 ] && [ "${BASHPID:-$$}" = "${GAMECTL_TUI_OWNER_PID:-}" ]; then
+        trap '_gamectl_tui_rc=$?; trap - EXIT INT TERM; exit_tui_screen; exit "$_gamectl_tui_rc"' EXIT
+        trap 'trap - EXIT INT TERM; exit_tui_screen; exit 130' INT
+        trap 'trap - EXIT INT TERM; exit_tui_screen; exit 143' TERM
+    fi
+    return 0
+}
 
 enter_tui_screen() {
     if [ -t 1 ] && [ "${TERM:-}" != "dumb" ] && [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 0 ]; then
+        if [ -t 0 ]; then
+            GAMECTL_SAVED_STTY=$(stty -g 2>/dev/null || echo "")
+        fi
         tput smcup 2>/dev/null || printf '\033[?1049h'
         printf '\033[2J\033[H' 2>/dev/null || true
         export GAMECTL_IN_ALT_SCREEN=1
-        trap 'trap - EXIT INT TERM; exit_tui_screen; exit' EXIT INT TERM
+        GAMECTL_TUI_OWNER_PID="${BASHPID:-$$}"
+        GAMECTL_TUI_EXITING=0
+        install_tui_screen_traps
     fi
     return 0
 }
 
 exit_tui_screen() {
-    if [ -t 1 ] && [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 1 ]; then
+    # Re-entrant & single-owner guard: idempotent under concurrent signals or repeated calls
+    if [ "${GAMECTL_TUI_EXITING:-0}" -eq 1 ]; then
+        return 0
+    fi
+    if [ "${GAMECTL_IN_ALT_SCREEN:-0}" -ne 1 ]; then
+        return 0
+    fi
+    if [ -n "${GAMECTL_TUI_OWNER_PID:-}" ] && [ "${BASHPID:-$$}" != "${GAMECTL_TUI_OWNER_PID}" ]; then
+        return 0
+    fi
+
+    GAMECTL_TUI_EXITING=1
+    export GAMECTL_IN_ALT_SCREEN=0
+
+    if [ -t 1 ]; then
         printf '\033[2J\033[H' 2>/dev/null || true
         tput rmcup 2>/dev/null || printf '\033[?1049l'
         tput cnorm 2>/dev/null || printf '\033[?25h'
-        stty echo icanon 2>/dev/null || true
-        export GAMECTL_IN_ALT_SCREEN=0
     fi
+    if [ -t 0 ]; then
+        if [ -n "${GAMECTL_SAVED_STTY:-}" ]; then
+            stty "$GAMECTL_SAVED_STTY" 2>/dev/null || stty echo icanon 2>/dev/null || true
+            GAMECTL_SAVED_STTY=""
+        else
+            stty echo icanon 2>/dev/null || true
+        fi
+    elif [ -t 1 ]; then
+        stty echo icanon 2>/dev/null || true
+    fi
+
+    trap - EXIT INT TERM 2>/dev/null || true
+    GAMECTL_TUI_OWNER_PID=""
+    GAMECTL_TUI_EXITING=0
     return 0
 }
 
@@ -485,8 +529,8 @@ tui_exec_action() {
     rc="${PIPESTATUS[0]}"
     set -e
 
-    if [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 1 ]; then
-        trap 'trap - EXIT INT TERM; exit_tui_screen; exit' EXIT INT TERM
+    if [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 1 ] && [ "${BASHPID:-$$}" = "${GAMECTL_TUI_OWNER_PID:-}" ]; then
+        install_tui_screen_traps
     else
         trap - INT
     fi

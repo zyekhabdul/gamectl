@@ -382,10 +382,21 @@ launch_game() {
         fi
     fi
 
-    # Local state cleanup helper & signal trap
+    # Local state cleanup helper & signal trap (scoped so TUI owner traps are never clobbered)
     local unit_name=""
+    local _launch_traps_installed=0
+    _disarm_launch_traps() {
+        if [ "${_launch_traps_installed:-0}" -eq 1 ]; then
+            if [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 1 ] && [ "${BASHPID:-$$}" = "${GAMECTL_TUI_OWNER_PID:-}" ] && type install_tui_screen_traps >/dev/null 2>&1; then
+                install_tui_screen_traps
+            else
+                trap - INT TERM EXIT
+            fi
+            _launch_traps_installed=0
+        fi
+    }
     _restore_launch_state() {
-        trap - INT TERM EXIT
+        _disarm_launch_traps
         if [ -n "${unit_name:-}" ]; then
             systemctl --user stop --no-block "$unit_name.scope" 2>/dev/null || true
         fi
@@ -402,9 +413,12 @@ launch_game() {
         [ -n "${prev_path:-}" ] && export PATH="$prev_path"
         type clean_stale_locks >/dev/null 2>&1 && clean_stale_locks || true
     }
-    trap '_restore_launch_state; trap - INT TERM EXIT; return 130 2>/dev/null || exit 130' INT
-    trap '_restore_launch_state; trap - INT TERM EXIT; return 143 2>/dev/null || exit 143' TERM
-    trap '_restore_launch_state' EXIT
+    if [ "${GAMECTL_IN_ALT_SCREEN:-0}" -ne 1 ] || [ "${BASHPID:-$$}" != "${GAMECTL_TUI_OWNER_PID:-}" ]; then
+        _launch_traps_installed=1
+        trap '_restore_launch_state; trap - INT TERM EXIT; return 130 2>/dev/null || exit 130' INT
+        trap '_restore_launch_state; trap - INT TERM EXIT; return 143 2>/dev/null || exit 143' TERM
+        trap '_restore_launch_state' EXIT
+    fi
 
     if [ ${#wrappers[@]} -gt 0 ]; then
         _launch_echo "[INFO] Active wrappers: ${wrappers[*]}"
@@ -696,7 +710,7 @@ EOF
     export GAMECTL_LAST_LOG_FILE="$log_file"
     export GAMECTL_LAST_RUN_TYPE="$run_type"
 
-    trap - INT TERM EXIT
+    _disarm_launch_traps
     export PATH="$prev_path"
     return 0
 }

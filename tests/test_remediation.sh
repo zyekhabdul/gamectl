@@ -237,6 +237,84 @@ test_resolve_game_drm_status_contract() {
 }
 run_test "Utils (Chunk 4): resolve_game_drm_status canonical SSoT contract" test_resolve_game_drm_status_contract
 
+test_trap_scope_isolation_and_tui_guard_contract() {
+    source "$REPO_ROOT/src/core/00_header.sh"
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    source "$REPO_ROOT/src/runners/40_wrappers.sh"
+    source "$REPO_ROOT/src/runners/50_launcher.sh"
+
+    # 1. Static guard: launch_game cleanup path disarms via _disarm_launch_traps, not bare trap -
+    grep -q '_disarm_launch_traps' "$REPO_ROOT/src/runners/50_launcher.sh" || return 1
+    ! grep -B1 -A1 'export PATH="\$prev_path"' "$REPO_ROOT/src/runners/50_launcher.sh" | grep -q 'trap - INT TERM EXIT' || return 1
+
+    # 2. TUI trap preservation across in-process launch_game
+    local trap_check_rc=0
+    (
+        set +e
+        local orig_xdg="${XDG_RUNTIME_DIR:-}"
+        local t_dir="/tmp/test_trap_iso_$$"
+        mkdir -p "$t_dir/runtime"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        cat <<'EOF' > "$t_dir/dummy.sh"
+#!/bin/bash
+sleep 2
+EOF
+        chmod +x "$t_dir/dummy.sh"
+
+        export GAMECTL_IN_ALT_SCREEN=1
+        GAMECTL_TUI_OWNER_PID="${BASHPID:-$$}"
+        install_tui_screen_traps
+
+        launch_game "$t_dir" "dummy.sh" "TrapIsoGame" >/dev/null 2>&1 || true
+
+        local t_exit t_int t_term
+        t_exit=$(trap -p EXIT)
+        t_int=$(trap -p INT)
+        t_term=$(trap -p TERM)
+
+        pkill -f "$t_dir/dummy.sh" 2>/dev/null || true
+        rm -rf "$t_dir"
+        [ -n "$orig_xdg" ] && export XDG_RUNTIME_DIR="$orig_xdg" || unset XDG_RUNTIME_DIR
+        trap - EXIT INT TERM
+
+        [[ "$t_exit" == *exit_tui_screen* ]] || exit 1
+        [[ "$t_int" == *exit_tui_screen* ]] || exit 1
+        [[ "$t_term" == *exit_tui_screen* ]] || exit 1
+        exit 0
+    ) || trap_check_rc=$?
+    [ "$trap_check_rc" -eq 0 ] || return 1
+
+    # 3. Single-owner subshell isolation: subshell cannot reset parent alt-screen state
+    local sub_out="" sub_rc=0
+    export GAMECTL_IN_ALT_SCREEN=1
+    GAMECTL_TUI_OWNER_PID="${BASHPID:-$$}"
+    sub_out=$( ( exit_tui_screen ) ) || sub_rc=$?
+    [ "$sub_rc" -eq 0 ] || return 1
+    [ -z "$sub_out" ] || return 1
+    [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 1 ] || return 1
+
+    # 4. Re-entrant / idempotent teardown on owner shell
+    exit_tui_screen || return 1
+    [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 0 ] || return 1
+    exit_tui_screen || return 1
+    [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 0 ] || return 1
+
+    # 5. Exit code preservation under EXIT trap
+    local code_rc=0
+    (
+        set +e
+        export GAMECTL_IN_ALT_SCREEN=1
+        GAMECTL_TUI_OWNER_PID="${BASHPID:-$$}"
+        install_tui_screen_traps
+        exit 42
+    ) || code_rc=$?
+    [ "$code_rc" -eq 42 ] || return 1
+
+    return 0
+}
+run_test "Lifecycle (Chunk 5): trap scope isolation and re-entrant TUI screen restoration guard" test_trap_scope_isolation_and_tui_guard_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"
