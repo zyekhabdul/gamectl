@@ -1,76 +1,160 @@
-# REMEDIATION WORK PACKET: STANDARDIZATION & MONKEY-PATCH ELIMINATION
+# REMEDIATION WORK PACKET: SYSTEMIC STANDARDIZATION & ARCHITECTURAL DECOUPLING
 
-**Track**: Maintenance / Refactoring & Zero-Bloat  
-**Status**: COMPLETED [VERIFIED]  
-**Max Chunks**: 5 Chunks (Active Packet <= 10)  
-**Target Files**: `src/steam/35_fixes.sh`, `src/runners/40_wrappers.sh`, `src/steam/30_downloader.sh`, `bin/gamectl`
+**Track**: Architecture Decoupling / Universal TUI Harness / SSoT Consolidation  
+**Status**: READY FOR IMPLEMENTATION (AWAITING USER GO-AHEAD)  
+**Max Chunks**: 7 Chunks (Active Packet <= 10)  
+**Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`, `src/tui/70_dashboard.sh`, `src/steam/20_discovery.sh`, `src/runners/40_wrappers.sh`, `src/steam/30_downloader.sh`, `tests/test_cli.sh`, `bin/gamectl`
 
 ---
 
-## 1. Objective & Technical Scope
-Mengeliminasi seluruh sisa kode *monkey-patch*, proses fork non-standar, duplikasi konfigurasi, dan pemotongan nama file berspasi:
-1. **Zip-Slip Hardening**: Mengganti pemotongan parsing tabel `unzip -l | awk '{print $4}'` dengan kanonikal `unzip -Z1` untuk mencegah kegagalan audit pada arsip dengan nama file berspasi.
-2. **Config Parsing Consolidation**: Menyatukan loop parsing `wrappers` yang terduplikasi di `build_wrapper_command()`, mengeliminasi subshell `echo | tr` dan `echo | sed` menjadi native Bash parameter expansion (zero-fork).
-3. **Directory Non-Empty Probing**: Mengganti `ls -A` yang mem-buffer seluruh nama file ke memori Bash dengan short-circuit probing (`find ... | head -n 1`) pada validasi folder game fisik.
-4. **Subshell Fork Elimination**: Mengganti eksekusi binary eksternal `$(seq 1 50)` dengan native Bash brace expansion `{1..50}` pada loop polling shutdown Steam Client.
-5. **Deterministic Verification**: Memastikan bundle `bin/gamectl` terkompilasi ulang dan 110/110 pengujian regresi lulus dengan Exit Code 0.
+## 1. Objective & Architectural Separation (SoC)
+Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan prinsip arsitektur modern (Separation of Concerns: Headless Engine Domain vs TUI Presentation Layer):
+
+1. **Headless Engine Discipline (`launch_game`)**:
+   - Engine bertanggung jawab 100% atas persiapan eksekusi, spawning detached process, dan registrasi state PID.
+   - Engine murni headless: 0 baris teks dekoratif ke stdout saat dipanggil dalam konteks TUI (`GAMECTL_IN_ALT_SCREEN=1`), serta tidak pernah memanggil antarmuka interaktif (`game_controller_hud`) secara mandiri.
+2. **Universal TUI Subshell Execution Harness (`tui_run_engine`)**:
+   - Membungkus pemanggilan fungsi engine dalam subshell terisolasi dengan `stdin < /dev/null`, mengalihkan stdout ke runtime log dan menangkap stderr secara atomik.
+   - Mencegah polusi terminal scrollback, mutasi variabel shell induk, dan rusaknya trap sinyal TUI.
+3. **In-Dashboard Process Management**:
+   - Memindahkan manajemen proses game aktif menjadi fitur kelas satu di TUI:
+     - Di `Library`: Game yang sedang `[RUNNING]` jika ditekan `Enter` membuka palet manajemen (`Stop SIGTERM`, `Force Kill SIGKILL`, `Live Log Stream`, `Return`).
+     - Di `Master Dashboard`: Status cockpit menampilkan ringkasan proses aktif dengan hotkey `<Ctrl-P>` untuk akses langsung ke Process Controller.
+     - Tanpa modal interupsi popup yang menyela saat launch sukses (seamless background start seperti Steam/Lutris).
+4. **Canonical TUI UI Primitives & Input Sanitization**:
+   - Menghapus 12x duplikasi hack `: | fzf --print-query` dan inkonsistensi `--height` sembarang (35%, 40%, 70%, 80%).
+   - Menyediakan fungsi kanonikal terpadu: `tui_prompt_input`, `tui_action_palette`, dan `tui_modal_notice` dengan perlindungan format string (`printf "%s"`).
+5. **SSoT DRM & Runtime Architecture Resolution**:
+   - Menyatukan duplikasi evaluasi artefak emulator Goldberg/DRM di `20_discovery.sh` dan `70_dashboard.sh` ke dalam satu fungsi kanonikal `resolve_game_drm_status` dengan pembedaan jelas antara status heuristik (preview) vs verifikasi biner (launcher).
+6. **Trap Scope Isolation & Dual-Mode Runtime Path SSoT**:
+   - Single ownership pembersihan terminal oleh `exit_tui_screen`. Menghilangkan penghapusan destruktif `trap - INT TERM EXIT` di child launcher.
+   - Memisahkan secara tegas:
+     - `get_desktop_runtime_dir()`: System XDG runtime untuk bind mount socket desktop (Wayland/Audio/D-Bus).
+     - `get_runtime_dir()`: Private application runtime untuk PID, info aktif, dan logs gamectl.
+7. **Deterministic Machine Verification**:
+   - Validasi seluruh test suite (148+ contracts) dengan Exit Code 0, lint bersih, dan bundle sinkron.
 
 ---
 
 ## 2. Granular Technical Execution Plan (Todolist)
 
-### [x] Chunk 1: Standardize Zip-Slip Security Inspection via Canonical `unzip -Z1`
-- **Target File**: `src/steam/35_fixes.sh` (L365)
+### [x] Chunk 1: Headless Engine Stream Discipline & Isolated Execution Harness
+- **Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Buka `src/steam/35_fixes.sh` pada fungsi `install_game_fix()`.
-  2. Ganti `unzip -l "$tmp_zip" | awk '{print $4}' | grep -E ...` dengan `unzip -Z1 "$tmp_zip" 2>/dev/null | grep -E ...`.
-  3. Verifikasi regex path traversal tetap menangkap sequence traversal (`^/`, `^\.\./`, `/\.\./`, `^\.\.\\`, `\\\.\.\\`).
-- **Definition of Done (DoD)**:
-  - File arsip ZIP dengan nama berspasi (`mods/custom fix.dll`) diaudit utuh tanpa pemotongan kata.
-  - Path traversal berbahaya tetap tertolak deterministik dengan exit code 1.
+  1. Di `src/core/10_utils.sh`, buat fungsi kanonikal `tui_run_engine()`:
+     ```bash
+     tui_run_engine() {
+         local action_name="$1"; shift
+         local cmd=("$@")
+         local run_log; run_log="$(get_runtime_log_file)"
+         local err_log; err_log="$(get_runtime_dir)/err_${$}_${RANDOM}.log"
+         : > "$err_log"
 
-### [x] Chunk 2: Eliminate Duplicate Config Parsing in `build_wrapper_command` via Array Loop & Native Expansion
-- **Target File**: `src/runners/40_wrappers.sh` (L1015-L1053)
-- **Runtutan Eksekusi Teknis**:
-  1. Di `build_wrapper_command()`, gabungkan blok parsing `$HOME/.config/gamectl/wrappers` dan `$gdir/.wrappers` ke dalam satu perulangan: `for w_cfg in "$HOME/.config/gamectl/wrappers" "$gdir/.wrappers"; do`.
-  2. Hapus proses fork `echo "$k" | tr -d '[:space:]'` dan `echo "$v" | sed ...`.
-  3. Terapkan pembersihan native parameter expansion:
-     - `k="${k//[[:space:]]/}"`
-     - `v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"`
-     - `v="${v#\"}"; v="${v%\"}"`
-  4. Pertahankan precedence: nilai di `$gdir/.wrappers` menimpa konfigurasi global.
-- **Definition of Done (DoD)**:
-  - Duplikasi 16 baris kode terhapus (-20 baris).
-  - 0 subshell fork pada setiap baris konfigurasi yang dibaca.
-  - Konfigurasi wrapper per-game tetap berfungsi 100%.
+         local rc=0
+         # Eksekusi dalam subshell terisolasi dengan stdin putus (< /dev/null)
+         ( "${cmd[@]}" ) < /dev/null >> "$run_log" 2> "$err_log" || rc=$?
 
-### [x] Chunk 3: Short-Circuit Directory Non-Empty Check (Eliminate `ls -A` Memory Buffer)
-- **Target File**: `src/steam/30_downloader.sh` (L1581, L1583, L1595, L1602, L1775, L1782)
-- **Runtutan Eksekusi Teknis**:
-  1. Di `sync_steam()` dan `unlock_interactive()`, temukan seluruh pemanggilan `[ -n "$(ls -A "$dir" 2>/dev/null)" ]`.
-  2. Ubah menjadi pemeriksaan short-circuit yang berhenti pada file pertama:
-     `[ -n "$(find "$dir" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]`.
-  3. Pastikan penanganan path berspasi tetap aman.
+         if [ "$rc" -ne 0 ]; then
+             local err_summary
+             err_summary=$(tail -n 12 "$err_log" 2>/dev/null || echo "Unknown engine failure.")
+             log_msg "ERROR" "ENGINE" "$action_name failed (exit code $rc)"
+             tui_modal_notice "Engine Failure ($action_name)" "Operation returned Exit Code $rc.\n\nError Traces:\n$err_summary\n\nFull log:\n$run_log"
+         fi
+         rm -f "$err_log" 2>/dev/null || true
+         return "$rc"
+     }
+     ```
+  2. Di `src/runners/50_launcher.sh`:
+     - Pastikan seluruh pre-flight log menggunakan logging yang dialihkan saat `[ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 1 ]`.
+     - Kembalikan exit code 0 saat proses berhasil di-spawn di background, dan exit code 1 saat gagal.
 - **Definition of Done (DoD)**:
-  - Tidak ada alokasi buffer memori untuk ribuan nama file di memori shell.
-  - Logika Ghost ACF Defense tetap aktif: folder kosong tidak akan dianggap sebagai instalasi valid.
+  - 0 baris teks pre-flight bocor ke terminal scrollback saat dipanggil dari TUI.
+  - Subshell terisolasi mencegah kontaminasi state atau variabel shell utama.
 
-### [x] Chunk 4: Native Bash Brace Expansion for Steam Shutdown Polling Loop (`{1..50}`)
-- **Target File**: `src/steam/35_fixes.sh` (L537)
+### [x] Chunk 2: Launcher Decoupling & In-Dashboard Process Management
+- **Target Files**: `src/runners/50_launcher.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Di `restart_steam_client()`, ganti `for _ in $(seq 1 50); do` menjadi `for _ in {1..50}; do`.
-  2. Verifikasi waktu tunggu polling tetap 50 iterasi x 0.2s = 10 detik.
+  1. Di `src/runners/50_launcher.sh`:
+     - Lepaskan pemanggilan `game_controller_hud` dari fungsi `launch_game`.
+     - Jadikan `launch_game` murni headless process launcher.
+  2. Di `src/main.sh`:
+     - Jalankan `game_controller_hud` HANYA jika dipanggil langsung via CLI terminal shell manual (`gamectl launch <dir>`).
+  3. Di `src/tui/70_dashboard.sh`:
+     - Di `library_menu()`:
+       - Panggil launcher via `tui_run_engine "Launch $sel_title" launch_game "$sel_dir" "$sel_bin" "$sel_title"`.
+       - Hilangkan modal notice sukses yang mengganggu; update status game di library menjadi `[RUNNING]` secara seamless.
+       - Bila kursor berada pada game `[RUNNING]` dan pengguna menekan `Enter`, buka palet aksi proses terpadu (`View Live Logs`, `Stop Game (SIGTERM)`, `Force Kill (SIGKILL)`, `Return`).
+     - Di `dashboard_menu()`:
+       - Tambahkan metrik game aktif pada cockpit status overview.
+       - Tambahkan hotkey `<Ctrl-P>` untuk langsung membuka daftar proses aktif tanpa keluar dari Dashboard.
 - **Definition of Done (DoD)**:
-  - 0 eksekusi process fork `/usr/bin/seq`.
-  - Polling graceful shutdown Steam Client tetap berjalan normal.
+  - Game diluncurkan mulus tanpa HUD memotong layar atau meminta konfirmasi ganda.
+  - Manajemen proses game aktif terintegrasi penuh di dalam Library dan Dashboard Hub.
 
-### [x] Chunk 5: Rebuild Standalone Bundle & Regression Verification Harness
-- **Target Files**: `bin/gamectl`, `tests/test_cli.sh`
+### [x] Chunk 3: Canonical TUI UI Primitives & Input Sanitization
+- **Target Files**: `src/core/10_utils.sh`, `src/steam/25_identity.sh`, `src/steam/30_downloader.sh`, `src/runners/40_wrappers.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Jalankan `make lint` untuk memvalidasi kepatuhan sintaks seluruh modul bash.
-  2. Jalankan `make build` untuk mengompilasi bundler modular ke `bin/gamectl`.
-  3. Jalankan `make test` untuk mengeksekusi seluruh 110 skenario pengujian regresi.
+  1. Di `src/core/10_utils.sh`, standarisasikan fungsi dialog kanonikal:
+     - `tui_prompt_input <title> <header_text> [default_val]` (membungkus input prompt dengan border rounded dan cursor handling).
+     - `tui_action_palette <title> <header_text> <options_tsv>` (viewport fullscreen terstandarisasi).
+     - `tui_modal_notice <title> <message>` (menggunakan `printf "%s"` aman untuk mencegah interpretasi escape character liar).
+  2. Refactor 12 pemanggilan ad-hoc `: | fzf` di `25_identity.sh`, `30_downloader.sh`, dan `40_wrappers.sh` ke primitif kanonikal.
+  3. Hilangkan seluruh variasi parameter sembarang `--height=35%`, `--height=40%`, `--height=70%`, `--height=80%`.
 - **Definition of Done (DoD)**:
-  - `make lint` mengembalikan Exit Code 0.
-  - `make build` mensinkronkan `bin/gamectl` dengan modular sources.
-  - `make test` mencatat 110/110 test assertions lulus dengan Exit Code 0.
+  - 0 duplikasi hack `: | fzf --print-query` di seluruh modul sekunder.
+  - Tampilan visual dialog konsisten 100% di seluruh aplikasi.
+  - [ VERIFIED ] Lulus pengujian unit contract dan TUI Safety harness 151/151 Exit 0.
+
+### [ ] Chunk 4: SSoT DRM & Runtime Architecture Resolution
+- **Target Files**: `src/core/10_utils.sh`, `src/steam/20_discovery.sh`, `src/tui/70_dashboard.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Implementasikan fungsi kanonikal di `src/core/10_utils.sh`:
+     `resolve_game_drm_status <game_dir> [api_file]` yang mengembalikan status terstruktur (`GBE_FORK`, `VALVE_ORIGINAL`, `STANDALONE`).
+  2. Konsolidasikan duplikasi evaluasi di:
+     - `src/steam/20_discovery.sh` (Loop scan Steam Library)
+     - `src/steam/20_discovery.sh` (Loop scan Custom Search Dirs)
+     - `src/tui/70_dashboard.sh` (`preview_game`)
+- **Definition of Done (DoD)**:
+  - 60+ baris duplikasi kode heuristik DRM tereliminasi.
+  - Perubahan deteksi emulator di masa depan hanya memerlukan modifikasi 1 baris di SSoT.
+
+### [ ] Chunk 5: Trap Scope Isolation & Terminal State Restoration Guard
+- **Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Di `src/runners/50_launcher.sh`:
+     - Hapus `trap - INT TERM EXIT` di baris 697.
+     - Pastikan cleanup lokal runner tidak menghapus trap pemulihan terminal milik TUI.
+  2. Di `src/core/10_utils.sh`:
+     - Jadikan `enter_tui_screen` dan `exit_tui_screen` sebagai single authoritative owner dari state terminal (termios, alternate screen `\033[?1049h`, kursor).
+     - Lindungi `exit_tui_screen` dengan re-entrant guard agar idempotent saat dipanggil berulang kali.
+- **Definition of Done (DoD)**:
+  - Terminal tidak pernah rusak atau tertinggal dalam mode alternate screen saat keluar, error, atau menerima `SIGINT`/`SIGTERM`.
+
+### [ ] Chunk 6: Dual-Mode Runtime Path SSoT Consolidation
+- **Target Files**: `src/runners/40_wrappers.sh`, `src/steam/30_downloader.sh`, `src/core/10_utils.sh`
+- **Runtutan Eksekusi Teknis**:
+  1. Di `src/core/10_utils.sh`:
+     - Tetapkan `get_desktop_runtime_dir()` untuk kebutuhan socket desktop Wayland/PulseAudio (`${XDG_RUNTIME_DIR:-/run/user/$(id -u)}}`).
+     - Tetapkan `get_runtime_dir()` untuk runtime privat gamectl (PID info, lock files, temporary logs).
+  2. Di `src/runners/40_wrappers.sh`:
+     - Gunakan `get_desktop_runtime_dir` saat melakukan mount bind socket desktop sistem ke bubblewrap sandbox.
+  3. Di `src/steam/30_downloader.sh`:
+     - Gunakan `get_runtime_dir` untuk staging directory manifest dan token sementara.
+- **Definition of Done (DoD)**:
+  - 0 hardcoded path manual `/run/user/` di luar fungsi resolver kanonikal.
+  - Socket Wayland dan audio tetap utuh dan berfungsi normal di dalam sandbox wrapper.
+
+### [ ] Chunk 7: Regression Harness, Contract Tests & Bundle Compilation
+- **Target Files**: `tests/test_cli.sh`, `scripts/build.sh`, `bin/gamectl`
+- **Runtutan Eksekusi Teknis**:
+  1. Tambahkan test contracts di `tests/test_cli.sh`:
+     - Contract: Stream isolation pada `tui_run_engine` (memastikan zero output ke stdout/stderr).
+     - Contract: Headless launch returning correct PID/status tanpa interupsi UI.
+     - Contract: SSoT DRM resolution contract untuk variasi artefak biner.
+     - Contract: Dual-mode runtime path resolution (`get_desktop_runtime_dir` vs `get_runtime_dir`).
+  2. Rebuild standalone executable bundle `bin/gamectl` via `./scripts/build.sh`.
+  3. Jalankan `make lint` dan `make test`.
+- **Definition of Done (DoD)**:
+  - `make lint` lolos dengan Exit Code 0.
+  - Seluruh test contracts lolos dengan Exit Code 0 (0 failed).
+  - Executable `bin/gamectl` sinkron 100% dengan seluruh modular source.

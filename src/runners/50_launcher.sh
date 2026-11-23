@@ -281,11 +281,42 @@ launch_game() {
     local title="$3"
     shift 3 || true
 
-    echo "[INFO] Preparing launch: $title..."
+    local in_tui="${GAMECTL_IN_ALT_SCREEN:-0}"
+    local run_dir
+    run_dir="$(get_runtime_dir)"
+    mkdir -p -m 700 "$run_dir/active_games" 2>/dev/null || true
+    local safe_gbin
+    safe_gbin=$(basename "${gbin:-game}" | tr -cd '[:alnum:]_-')
+    local log_file="$run_dir/game_${safe_gbin}.log"
+    : >> "$log_file" 2>/dev/null || true
+
+    _launch_echo() {
+        if [ "$in_tui" -eq 1 ]; then
+            local clean_text
+            clean_text=$(strip_ansi "$*")
+            [ -n "${log_file:-}" ] && echo "$clean_text" >> "$log_file" 2>/dev/null || true
+            log_msg "INFO" "LAUNCH" "$clean_text"
+        else
+            echo "$@"
+        fi
+    }
+
+    _launch_err() {
+        if [ "$in_tui" -eq 1 ]; then
+            local clean_text
+            clean_text=$(strip_ansi "$*")
+            [ -n "${log_file:-}" ] && echo "$clean_text" >> "$log_file" 2>/dev/null || true
+            log_msg "ERROR" "LAUNCH" "$clean_text"
+        else
+            echo "$@" >&2
+        fi
+    }
+
+    _launch_echo "[INFO] Preparing launch: $title..."
     log_msg "INFO" "LAUNCH" "Preparing launch: $title ($gdir/$gbin)"
     if [ -d "$gdir/saves" ] || [ -L "$gdir/saves" ]; then
         if ! backup_save "$gdir" true; then
-            echo "[WARN] Pre-launch save snapshot backup failed for '$title'. Proceeding with launch." >&2
+            _launch_err "[WARN] Pre-launch save snapshot backup failed for '$title'. Proceeding with launch."
             log_msg "WARN" "LAUNCH" "Pre-launch save snapshot backup failed for $title"
         fi
     fi
@@ -313,15 +344,15 @@ launch_game() {
                 export __NV_PRIME_RENDER_OFFLOAD=1
                 export __GLX_VENDOR_LIBRARY_NAME=nvidia
                 export __VK_LAYER_NV_optimus=NVIDIA_only
-                echo "[INFO] Hybrid Graphics: Injected NVIDIA PRIME offload environment."
+                _launch_echo "[INFO] Hybrid Graphics: Injected NVIDIA PRIME offload environment."
                 ;;
             amd|intel)
                 export DRI_PRIME=1
-                echo "[INFO] Hybrid Graphics: Injected DRI_PRIME=1 offload environment."
+                _launch_echo "[INFO] Hybrid Graphics: Injected DRI_PRIME=1 offload environment."
                 ;;
             *)
                 export DRI_PRIME=1
-                echo "[INFO] Hybrid Graphics: Fallback to DRI_PRIME=1 offload environment."
+                _launch_echo "[INFO] Hybrid Graphics: Fallback to DRI_PRIME=1 offload environment."
                 ;;
         esac
     fi
@@ -376,7 +407,7 @@ launch_game() {
     trap '_restore_launch_state' EXIT
 
     if [ ${#wrappers[@]} -gt 0 ]; then
-        echo "[INFO] Active wrappers: ${wrappers[*]}"
+        _launch_echo "[INFO] Active wrappers: ${wrappers[*]}"
     fi
 
     cd "$gdir"
@@ -390,20 +421,20 @@ launch_game() {
             unpacked_bin=$(resolve_unpacked_binary "$gdir" "$gbin" 2>/dev/null || true)
             if [ -n "$unpacked_bin" ] && [ -f "$gdir/$unpacked_bin" ]; then
                 if [ "$gbin" != "$unpacked_bin" ]; then
-                    echo "  ${UI_GREEN}[SUCCESS] SteamStub PE: Automatically switched to unpacked binary: $unpacked_bin${UI_RST}"
+                    _launch_echo "  ${UI_GREEN}[SUCCESS] SteamStub PE: Automatically switched to unpacked binary: $unpacked_bin${UI_RST}"
                     gbin="$unpacked_bin"
                 fi
             else
-                echo "  ${UI_AMBER}[INFO] SteamStub PE DRM detected on ($gbin). Attempting Steamless unpacking...${UI_RST}"
+                _launch_echo "  ${UI_AMBER}[INFO] SteamStub PE DRM detected on ($gbin). Attempting Steamless unpacking...${UI_RST}"
                 if unpack_steamstub_pe "$gdir/$gbin" "${runner_bin:-}" "${pfx_dir:-}"; then
                     unpacked_bin=$(resolve_unpacked_binary "$gdir" "$gbin" 2>/dev/null || true)
                     if [ -n "$unpacked_bin" ] && [ -f "$gdir/$unpacked_bin" ]; then
-                        echo "  ${UI_GREEN}[SUCCESS] SteamStub PE: Unpacked binary generated: $unpacked_bin${UI_RST}"
+                        _launch_echo "  ${UI_GREEN}[SUCCESS] SteamStub PE: Unpacked binary generated: $unpacked_bin${UI_RST}"
                         gbin="$unpacked_bin"
                     fi
                 else
-                    echo "  ${UI_AMBER}[WARN] SteamStub PE detected on ($gbin) but Steamless CLI not available or unpacking failed.${UI_RST}"
-                    echo "  ${UI_DIM}       If launch fails, unpack $gbin with Steamless (producing ${gbin%.*}.unpacked.exe).${UI_RST}"
+                    _launch_echo "  ${UI_AMBER}[WARN] SteamStub PE detected on ($gbin) but Steamless CLI not available or unpacking failed.${UI_RST}"
+                    _launch_echo "  ${UI_DIM}       If launch fails, unpack $gbin with Steamless (producing ${gbin%.*}.unpacked.exe).${UI_RST}"
                 fi
             fi
         elif [ "$stub_type" = "linux_elf" ]; then
@@ -411,7 +442,7 @@ launch_game() {
             unpacked_bin=$(resolve_unpacked_binary "$gdir" "$gbin" 2>/dev/null || true)
             if [ -n "$unpacked_bin" ] && [ -f "$gdir/$unpacked_bin" ]; then
                 if [ "$gbin" != "$unpacked_bin" ]; then
-                    echo "  ${UI_GREEN}[SUCCESS] SteamStub ELF: Automatically switched to unpacked binary: $unpacked_bin${UI_RST}"
+                    _launch_echo "  ${UI_GREEN}[SUCCESS] SteamStub ELF: Automatically switched to unpacked binary: $unpacked_bin${UI_RST}"
                     gbin="$unpacked_bin"
                 fi
             else
@@ -422,21 +453,21 @@ launch_game() {
                 if [ "$is_active" = false ]; then
                     :
                 else
-                    echo "  ${UI_AMBER}[INFO] SteamStub ELF DRM (.bind) detected on ($gbin). Attempting native unpacking...${UI_RST}"
+                    _launch_echo "  ${UI_AMBER}[INFO] SteamStub ELF DRM (.bind) detected on ($gbin). Attempting native unpacking...${UI_RST}"
                     if unpack_steamstub_elf "$gdir/$gbin"; then
                         unpacked_bin=$(resolve_unpacked_binary "$gdir" "$gbin" 2>/dev/null || true)
                         if [ -n "$unpacked_bin" ] && [ -f "$gdir/$unpacked_bin" ]; then
-                            echo "  ${UI_GREEN}[SUCCESS] SteamStub ELF: Unpacked binary generated: $unpacked_bin${UI_RST}"
+                            _launch_echo "  ${UI_GREEN}[SUCCESS] SteamStub ELF: Unpacked binary generated: $unpacked_bin${UI_RST}"
                             gbin="$unpacked_bin"
                         fi
                     else
-                        echo "  ${UI_AMBER}[WARN] Linux ELF SteamStub unpacking failed or unsupported stub variant.${UI_RST}"
-                        echo "  ${UI_CYAN}[INFO] Sovereign steam.sh interceptor active in PATH to trap unsolicited Steam Client calls.${UI_RST}"
+                        _launch_echo "  ${UI_AMBER}[WARN] Linux ELF SteamStub unpacking failed or unsupported stub variant.${UI_RST}"
+                        _launch_echo "  ${UI_CYAN}[INFO] Sovereign steam.sh interceptor active in PATH to trap unsolicited Steam Client calls.${UI_RST}"
                     fi
                 fi
             fi
         else
-            echo "  ${UI_AMBER}[WARN] SteamStub DRM markers detected on binary ($gbin).${UI_RST}"
+            _launch_echo "  ${UI_AMBER}[WARN] SteamStub DRM markers detected on binary ($gbin).${UI_RST}"
         fi
     fi
 
@@ -470,7 +501,7 @@ launch_game() {
         done
 
         if [ ${#unshielded_candidates[@]} -gt 0 ]; then
-            echo "  ${UI_AMBER}[INFO] Steamworks API detected without emulator shield. Attempting auto-injection...${UI_RST}"
+            _launch_echo "  ${UI_AMBER}[INFO] Steamworks API detected without emulator shield. Attempting auto-injection...${UI_RST}"
             inject_game "$gdir" "" --no-sync 2>/dev/null || true
 
             local still_unshielded=()
@@ -482,24 +513,24 @@ launch_game() {
 
             if [ ${#still_unshielded[@]} -gt 0 ]; then
                 if [ "$allow_unshielded" = "1" ]; then
-                    echo "  ${UI_AMBER}[WARN] Launching unshielded Steamworks binary by user override (--allow-unshielded).${UI_RST}"
+                    _launch_echo "  ${UI_AMBER}[WARN] Launching unshielded Steamworks binary by user override (--allow-unshielded).${UI_RST}"
                 else
-                    echo "  ${UI_RED}================================================================${UI_RST}" >&2
-                    echo "  ${UI_RED}[HARD-STOP] Valve Steamworks API detected without emulator shield!${UI_RST}" >&2
-                    echo "  ${UI_AMBER}Unshielded library: ${still_unshielded[*]}${UI_RST}" >&2
-                    echo "  ${UI_AMBER}Launch halted to prevent Valve DRM from spawning Steam Client ('PURCHASE' prompt).${UI_RST}" >&2
-                    echo "  ${UI_DIM}Remedy: Run 'gamectl setup-gbe' to provision templates or 'gamectl inject \"$gdir\"'.${UI_RST}" >&2
-                    echo "  ${UI_DIM}Bypass: Pass --allow-unshielded to override this sovereign safety gate.${UI_RST}" >&2
-                    echo "  ${UI_RED}================================================================${UI_RST}" >&2
+                    _launch_err "  ${UI_RED}================================================================${UI_RST}"
+                    _launch_err "  ${UI_RED}[HARD-STOP] Valve Steamworks API detected without emulator shield!${UI_RST}"
+                    _launch_err "  ${UI_AMBER}Unshielded library: ${still_unshielded[*]}${UI_RST}"
+                    _launch_err "  ${UI_AMBER}Launch halted to prevent Valve DRM from spawning Steam Client ('PURCHASE' prompt).${UI_RST}"
+                    _launch_err "  ${UI_DIM}Remedy: Run 'gamectl setup-gbe' to provision templates or 'gamectl inject \"$gdir\"'.${UI_RST}"
+                    _launch_err "  ${UI_DIM}Bypass: Pass --allow-unshielded to override this sovereign safety gate.${UI_RST}"
+                    _launch_err "  ${UI_RED}================================================================${UI_RST}"
                     _restore_launch_state
                     return 1
                 fi
             else
                 invalidate_scan_cache
-                echo "  ${UI_GREEN}[VERIFIED] GBE Fork emulator shield successfully engaged.${UI_RST}"
+                _launch_echo "  ${UI_GREEN}[VERIFIED] GBE Fork emulator shield successfully engaged.${UI_RST}"
             fi
         else
-            echo "  ${UI_GREEN}[VERIFIED] GBE Fork emulator shield confirmed active.${UI_RST}"
+            _launch_echo "  ${UI_GREEN}[VERIFIED] GBE Fork emulator shield confirmed active.${UI_RST}"
         fi
     fi
 
@@ -515,13 +546,9 @@ launch_game() {
     fi
 
     # Prepare runtime directory and log stream
-    local run_dir
-    run_dir="$(get_runtime_dir)"
-    mkdir -p -m 700 "$run_dir/active_games"
-    local safe_gbin
     safe_gbin=$(basename "$gbin" | tr -cd '[:alnum:]_-')
-    local log_file="$run_dir/game_${safe_gbin}.log"
-    : > "$log_file"
+    log_file="$run_dir/game_${safe_gbin}.log"
+    : >> "$log_file" 2>/dev/null || true
 
     local game_pid=""
     local run_type="Native Linux"
@@ -538,7 +565,7 @@ launch_game() {
     local -a sandbox_cmd=()
     if [ "${GAMECTL_ACTIVE_SANDBOX:-0}" = "1" ] && [ ${#GAMECTL_SANDBOX_PREFIX[@]} -gt 0 ]; then
         sandbox_cmd=("${GAMECTL_SANDBOX_PREFIX[@]}")
-        echo "[INFO] Security Sandbox: Bubblewrap rootless filesystem isolation active."
+        _launch_echo "[INFO] Security Sandbox: Bubblewrap rootless filesystem isolation active."
     fi
 
     _exec_in_scope() {
@@ -557,14 +584,14 @@ launch_game() {
         detected_overrides=$(detect_dll_overrides "$gdir")
         if [ -n "$detected_overrides" ]; then
             export WINEDLLOVERRIDES="$detected_overrides"
-            echo "[INFO] Active DLL Overrides: $WINEDLLOVERRIDES"
+            _launch_echo "[INFO] Active DLL Overrides: $WINEDLLOVERRIDES"
         fi
 
         local runner_bin
         runner_bin=$(find_runner "$gdir" 2>/dev/null || true)
         if [ -z "$runner_bin" ]; then
-            echo "[ERROR] Windows runner not found (umu-run, Proton, or Wine not installed)." >&2
-            echo "        Install GE-Proton in ~/.local/share/Steam/compatibilitytools.d/ or install wine." >&2
+            _launch_err "[ERROR] Windows runner not found (umu-run, Proton, or Wine not installed)."
+            _launch_err "        Install GE-Proton in ~/.local/share/Steam/compatibilitytools.d/ or install wine."
             _restore_launch_state
             return 1
         fi
@@ -578,9 +605,9 @@ launch_game() {
         [ -z "$appid" ] && appid="0"
 
         run_type="Windows ($(basename "$runner_bin"))"
-        echo "[INFO] Launching Windows game via $(basename "$runner_bin") in background..."
-        echo "[INFO] Isolated Wine Prefix: $pfx_dir"
-        echo "[INFO] Log stream: $log_file"
+        _launch_echo "[INFO] Launching Windows game via $(basename "$runner_bin") in background..."
+        _launch_echo "[INFO] Isolated Wine Prefix: $pfx_dir"
+        _launch_echo "[INFO] Log stream: $log_file"
 
         case "$runner_bin" in
             umu-run)
@@ -610,8 +637,8 @@ launch_game() {
                 ;;
         esac
     else
-        echo "[INFO] Launching $title (Native Linux) in background..."
-        echo "[INFO] Log stream: $log_file"
+        _launch_echo "[INFO] Launching $title (Native Linux) in background..."
+        _launch_echo "[INFO] Log stream: $log_file"
         (
             export LD_LIBRARY_PATH=".:$gdir:${LD_LIBRARY_PATH:-}"
             _exec_in_scope "${wrappers[@]}" ./"$gbin" "${game_args[@]}"
@@ -620,7 +647,7 @@ launch_game() {
     fi
 
     if [ -z "$game_pid" ] || ! kill -0 "$game_pid" 2>/dev/null; then
-        echo "[ERROR] Failed to launch game into background." >&2
+        _launch_err "[ERROR] Failed to launch game into background."
         _restore_launch_state
         return 1
     fi
@@ -661,18 +688,17 @@ EOF
         _restore_launch_state
     ) &
 
-    echo "[VERIFIED] Game '$title' running in background (PID: $game_pid)."
+    _launch_echo "[VERIFIED] Game '$title' running in background (PID: $game_pid)."
     log_msg "INFO" "LAUNCH" "Game '$title' running in background (PID: $game_pid, Log: $log_file)"
 
-    # If running interactively, invoke Game Controller HUD
-    local hud_exit=0
-    if [ -t 0 ]; then
-        game_controller_hud "$game_pid" "$title" "$log_file" "$gdir" "$gbin" "$info_file" "$run_type" || hud_exit=$?
-    fi
+    export GAMECTL_LAST_LAUNCH_PID="$game_pid"
+    export GAMECTL_LAST_INFO_FILE="$info_file"
+    export GAMECTL_LAST_LOG_FILE="$log_file"
+    export GAMECTL_LAST_RUN_TYPE="$run_type"
 
     trap - INT TERM EXIT
     export PATH="$prev_path"
-    return "$hud_exit"
+    return 0
 }
 
 # Sync savegame to remote companion host (Push)
@@ -1162,7 +1188,18 @@ cli_launch() {
     fi
 
     if [ -n "$l_bin" ]; then
-        launch_game "$l_dir" "$l_bin" "$l_title" "${l_flags[@]}"
+        local l_rc=0
+        launch_game "$l_dir" "$l_bin" "$l_title" "${l_flags[@]}" || l_rc=$?
+        if [ "$l_rc" -eq 0 ] && [ -t 0 ] && [ -t 1 ] && [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 0 ]; then
+            local gpid="${GAMECTL_LAST_LAUNCH_PID:-}"
+            local inf="${GAMECTL_LAST_INFO_FILE:-}"
+            local lfile="${GAMECTL_LAST_LOG_FILE:-}"
+            local rtype="${GAMECTL_LAST_RUN_TYPE:-Native Linux}"
+            if [ -n "$gpid" ] && [ -f "$inf" ] && kill -0 "$gpid" 2>/dev/null; then
+                game_controller_hud "$gpid" "$l_title" "$lfile" "$l_dir" "$l_bin" "$inf" "$rtype" || true
+            fi
+        fi
+        return "$l_rc"
     else
         echo "[ERROR] Executable binary not found in: $l_dir" >&2
         return 1

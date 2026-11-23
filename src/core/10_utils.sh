@@ -299,13 +299,13 @@ flush_tty_input() {
 }
 
 # Terminal Screen Lifecycle Management (Alternate Screen Buffer)
-GAMECTL_IN_ALT_SCREEN=0
+export GAMECTL_IN_ALT_SCREEN=0
 
 enter_tui_screen() {
     if [ -t 1 ] && [ "${TERM:-}" != "dumb" ] && [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 0 ]; then
         tput smcup 2>/dev/null || printf '\033[?1049h'
         printf '\033[2J\033[H' 2>/dev/null || true
-        GAMECTL_IN_ALT_SCREEN=1
+        export GAMECTL_IN_ALT_SCREEN=1
         trap 'trap - EXIT INT TERM; exit_tui_screen; exit' EXIT INT TERM
     fi
     return 0
@@ -317,7 +317,7 @@ exit_tui_screen() {
         tput rmcup 2>/dev/null || printf '\033[?1049l'
         tput cnorm 2>/dev/null || printf '\033[?25h'
         stty echo icanon 2>/dev/null || true
-        GAMECTL_IN_ALT_SCREEN=0
+        export GAMECTL_IN_ALT_SCREEN=0
     fi
     return 0
 }
@@ -336,15 +336,119 @@ tui_modal_notice() {
     require_tui "$title" || return $?
 
     local fzf_rc=0
-    printf "%b\n" "$msg" | fzf \
+    printf "%s\n" "$msg" | fzf \
         --border-label="  ╢ $title ╟  " \
         --border-label-pos=2 \
         --header="NOTICE (Enter or Esc: Dismiss)" \
         --prompt="> " \
-        --height="$height" \
         --reverse 2>/dev/null || fzf_rc=$?
     check_fzf_status "$fzf_rc" || return $?
     return 0
+}
+
+# Canonical Free-Text Input Dialog (Zero-Flicker FZF Wrapper)
+tui_prompt_input() {
+    local title="${1:-Input}"
+    local header="${2:-Enter text (Enter: Confirm │ Esc: Cancel)}"
+    local default_val="${3:-}"
+    local prompt_str="${4:-Input > }"
+
+    if [ ! -t 0 ]; then
+        log_msg "INFO" "UI" "[$title] Non-interactive input fallback: '$default_val'"
+        echo "$default_val"
+        return 0
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for $title." >&2
+        return 127
+    fi
+
+    flush_tty_input
+    local input_raw="" fzf_rc=0
+    input_raw=$(: | fzf \
+        --print-query \
+        --query="$default_val" \
+        --border-label="  ╢ $title ╟  " \
+        --border-label-pos=2 \
+        --header="$header" \
+        --prompt="$prompt_str" \
+        --reverse 2>/dev/null) || fzf_rc=$?
+
+    check_fzf_status "$fzf_rc" || return $?
+    [ "$fzf_rc" -eq 130 ] && return 130
+
+    local cleaned
+    cleaned=$(echo "$input_raw" | head -n 1 | tr -d '\r\n')
+    echo "$cleaned"
+    return 0
+}
+
+# Canonical Action Selection Palette (Zero-Flicker FZF Wrapper)
+tui_action_palette() {
+    local title="${1:-Menu}"
+    local header="${2:-Select Option (Enter: Select │ Esc: Cancel)}"
+    local options_tsv="${3:-}"
+    local preview_cmd="${4:-}"
+    local prompt_str="${5:-Select > }"
+
+    if [ ! -t 0 ]; then
+        echo "[ERROR] Interactive palette requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for $title." >&2
+        return 127
+    fi
+
+    flush_tty_input
+    local fzf_cmd=(
+        fzf
+        --delimiter=$'\t'
+        --with-nth=1,2
+        --border-label="  ╢ $title ╟  "
+        --border-label-pos=2
+        --header="$header"
+        --prompt="$prompt_str"
+        --reverse
+    )
+    if [ -n "$preview_cmd" ]; then
+        fzf_cmd+=(--preview="$preview_cmd" --preview-window=down:40%:border-rounded:wrap)
+    fi
+
+    local sel="" fzf_rc=0
+    sel=$(printf "%s" "$options_tsv" | "${fzf_cmd[@]}" 2>/dev/null) || fzf_rc=$?
+
+    check_fzf_status "$fzf_rc" || return $?
+    [ "$fzf_rc" -eq 130 ] && return 130
+
+    echo "$sel"
+    return 0
+}
+
+# Execute headless engine command with isolated subshell and deterministic error capture
+tui_run_engine() {
+    local action_name="$1"
+    shift
+    local cmd=("$@")
+    local run_log
+    run_log="$(get_runtime_log_file)"
+    local err_log
+    err_log="$(get_runtime_dir)/err_${$}_${RANDOM}.log"
+    : > "$err_log"
+
+    local rc=0
+    # Execute inside isolated subshell with stdin disconnected (< /dev/null)
+    # Redirect stdout to runtime log and capture stderr into error buffer
+    ( "${cmd[@]}" ) < /dev/null >> "$run_log" 2> "$err_log" || rc=$?
+
+    if [ "$rc" -ne 0 ]; then
+        local err_summary
+        err_summary=$(tail -n 12 "$err_log" 2>/dev/null || echo "Unknown engine failure.")
+        log_msg "ERROR" "ENGINE" "$action_name failed (exit code $rc)"
+        tui_modal_notice "Engine Failure ($action_name)" "Operation returned Exit Code $rc.\n\nError Traces:\n$err_summary\n\nFull log:\n$run_log"
+    fi
+    rm -f "$err_log" 2>/dev/null || true
+    return "$rc"
 }
 
 # Execute command with live interactive terminal streaming and zero raw leaks

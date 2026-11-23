@@ -1354,37 +1354,19 @@ EOF
 
         case "$cfg_opt" in
             1)
-                flush_tty_input
-                local in_name_raw in_id_raw rc=0
-                in_name_raw=$(: | fzf \
-                    --print-query \
-                    --border-label="  ╢ Configure LAN Persona Name ╟  " \
-                    --border-label-pos=2 \
-                    --header="Enter Player Name (Current: $p_name │ Enter: Confirm │ Esc: Cancel)" \
-                    --prompt="Player Name > " \
-                    --height=20% \
-                    --reverse 2>/dev/null) || rc=$?
-                check_fzf_status "$rc" || return $?
+                local new_name rc=0
+                new_name=$(tui_prompt_input "Configure LAN Persona Name" "Enter Player Name (Current: $p_name │ Enter: Confirm │ Esc: Cancel)" "$p_name" "Player Name > ") || rc=$?
                 [ "$rc" -eq 130 ] && continue
-                local new_name
-                new_name=$(echo "$in_name_raw" | head -n 1 | tr -d '\r\n')
+                [ "$rc" -ne 0 ] && return "$rc"
                 validate_tui_fields "$new_name" || return 1
                 [ -n "$new_name" ] && p_name="$new_name"
 
-                flush_tty_input
-                rc=0
-                in_id_raw=$(: | fzf \
-                    --print-query \
-                    --border-label="  ╢ Configure SteamID64 ╟  " \
-                    --border-label-pos=2 \
-                    --header="Enter 17-digit SteamID64, 'gen' for random ID, or blank for Auto (Current: ${p_id:-Auto})" \
-                    --prompt="SteamID64 > " \
-                    --height=20% \
-                    --reverse 2>/dev/null) || rc=$?
-                check_fzf_status "$rc" || return $?
-                [ "$rc" -eq 130 ] && continue
                 local new_id
-                new_id=$(echo "$in_id_raw" | head -n 1 | tr -d '[:space:]')
+                rc=0
+                new_id=$(tui_prompt_input "Configure SteamID64" "Enter 17-digit SteamID64, 'gen' for random ID, or blank for Auto (Current: ${p_id:-Auto})" "" "SteamID64 > ") || rc=$?
+                [ "$rc" -eq 130 ] && continue
+                [ "$rc" -ne 0 ] && return "$rc"
+                new_id=$(echo "$new_id" | tr -d '[:space:]')
                 if [ "$new_id" = "gen" ]; then
                     p_id=$(generate_steamid64)
                 elif [ -n "$new_id" ]; then
@@ -1443,20 +1425,10 @@ EOF
                     l_action=$(echo "$lib_sel" | cut -f1 | tr -d '[:space:]')
 
                     if [ "$l_action" = "add" ]; then
-                        flush_tty_input
-                        local in_p_raw p_rc=0
-                        in_p_raw=$(: | fzf \
-                            --print-query \
-                            --border-label="  ╢ Add Game Library Directory ╟  " \
-                            --border-label-pos=2 \
-                            --header="Enter directory path (e.g. ~/Games │ Enter: Add │ Esc: Cancel)" \
-                            --prompt="Path > " \
-                            --height=20% \
-                            --reverse 2>/dev/null) || p_rc=$?
-                        check_fzf_status "$p_rc" || return $?
-                        [ "$p_rc" -eq 130 ] && continue
-                        local new_path
-                        new_path=$(echo "$in_p_raw" | head -n 1 | tr -d '\r\n')
+                        local new_path rc=0
+                        new_path=$(tui_prompt_input "Add Game Library Directory" "Enter directory path (e.g. ~/Games │ Enter: Add │ Esc: Cancel)" "" "Path > ") || rc=$?
+                        [ "$rc" -eq 130 ] && continue
+                        [ "$rc" -ne 0 ] && return "$rc"
                         validate_tui_fields "$new_path" || return 1
                         if [ -n "$new_path" ]; then
                             new_path="${new_path/#\~/$HOME}"
@@ -1478,20 +1450,11 @@ EOF
                 done
                 ;;
             4)
-                flush_tty_input
-                local in_host_raw rc=0
-                in_host_raw=$(: | fzf \
-                    --print-query \
-                    --border-label="  ╢ Remote Companion Host ╟  " \
-                    --border-label-pos=2 \
-                    --header="Enter SSH hostname/alias or '-' to clear (Current: $r_host │ Enter: Save │ Esc: Cancel)" \
-                    --prompt="SSH Host > " \
-                    --height=20% \
-                    --reverse 2>/dev/null) || rc=$?
-                check_fzf_status "$rc" || return $?
+                local new_rhost rc=0
+                new_rhost=$(tui_prompt_input "Remote Companion Host" "Enter SSH hostname/alias or '-' to clear (Current: $r_host │ Enter: Save │ Esc: Cancel)" "$r_host" "SSH Host > ") || rc=$?
                 [ "$rc" -eq 130 ] && continue
-                local new_rhost
-                new_rhost=$(echo "$in_host_raw" | head -n 1 | tr -d '[:space:]')
+                [ "$rc" -ne 0 ] && return "$rc"
+                new_rhost=$(echo "$new_rhost" | tr -d '[:space:]')
                 if [ "$new_rhost" = "-" ]; then
                     rm -f "$HOME/.config/gamectl/remote_host"
                     log_msg "INFO" "CONFIG" "Cleared remote companion host"
@@ -1504,20 +1467,11 @@ EOF
                 login_luatools_interactive || return $?
                 ;;
             6)
-                flush_tty_input
-                local in_hc_raw rc=0
-                in_hc_raw=$(: | fzf \
-                    --print-query \
-                    --border-label="  ╢ Hubcap Manifest API Key ╟  " \
-                    --border-label-pos=2 \
-                    --header="Enter Hubcap API key (prefix 'smm_') or '-' to clear (Current: $hc_status │ Enter: Save │ Esc: Cancel)" \
-                    --prompt="Hubcap Key > " \
-                    --height=20% \
-                    --reverse 2>/dev/null) || rc=$?
-                check_fzf_status "$rc" || return $?
+                local new_hckey rc=0
+                new_hckey=$(tui_prompt_input "Hubcap Manifest API Key" "Enter Hubcap API key (prefix 'smm_') or '-' to clear (Current: $hc_status │ Enter: Save │ Esc: Cancel)" "" "Hubcap Key > ") || rc=$?
                 [ "$rc" -eq 130 ] && continue
-                local new_hckey
-                new_hckey=$(echo "$in_hc_raw" | head -n 1 | tr -d '[:space:]')
+                [ "$rc" -ne 0 ] && return "$rc"
+                new_hckey=$(echo "$new_hckey" | tr -d '[:space:]')
                 if [ "$new_hckey" = "-" ]; then
                     set_config_value "hubcap_api_key" ""
                     log_msg "INFO" "CONFIG" "Cleared Hubcap Manifest API key"

@@ -950,6 +950,68 @@ view_logs_interactive() {
     return 0
 }
 
+# In-Dashboard Process Management & Cockpit Controller
+manage_active_processes_interactive() {
+    local run_dir
+    run_dir="$(get_runtime_dir)"
+    if [ ! -d "$run_dir/active_games" ]; then
+        tui_modal_notice "Process Controller" "No games currently running."
+        return 0
+    fi
+
+    local running_list=""
+    local count=0
+    for inf in "$run_dir/active_games"/*.info; do
+        [ -f "$inf" ] || continue
+        local p_pid p_title p_dir p_bin p_log
+        p_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+        p_title=$(grep -E '^TITLE=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+        p_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+        p_bin=$(grep -E '^BIN=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+        p_log=$(grep -E '^LOG=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+        if [ -n "$p_pid" ] && kill -0 "$p_pid" 2>/dev/null; then
+            count=$((count + 1))
+            running_list+="${p_pid}\t${p_title}\t${p_dir}\t${p_bin}\t${p_log}\t${inf}\n"
+        else
+            rm -f "$inf" 2>/dev/null || true
+        fi
+    done
+
+    if [ "$count" -eq 0 ] || [ -z "$running_list" ]; then
+        tui_modal_notice "Process Controller" "No games currently running."
+        return 0
+    fi
+
+    # If only 1 game is running, open its controller HUD directly
+    if [ "$count" -eq 1 ]; then
+        local s_pid s_title s_dir s_bin s_log s_inf
+        s_pid=$(printf '%b' "$running_list" | head -n 1 | cut -f1)
+        s_title=$(printf '%b' "$running_list" | head -n 1 | cut -f2)
+        s_dir=$(printf '%b' "$running_list" | head -n 1 | cut -f3)
+        s_bin=$(printf '%b' "$running_list" | head -n 1 | cut -f4)
+        s_log=$(printf '%b' "$running_list" | head -n 1 | cut -f5)
+        s_inf=$(printf '%b' "$running_list" | head -n 1 | cut -f6)
+        game_controller_hud "$s_pid" "$s_title" "$s_log" "$s_dir" "$s_bin" "$s_inf" "Active Game"
+        return 0
+    fi
+
+    # If multiple games are running, let the user select which one to manage
+    local pick p_rc=0
+    pick=$(tui_action_palette "Running Games ($count Active)" "Select Game Process to Manage (Enter: Select │ Esc: Return)" "$(printf '%b' "$running_list")" "" "Process > ") || p_rc=$?
+    [ "$p_rc" -eq 130 ] && return 0
+    [ "$p_rc" -ne 0 ] && return "$p_rc"
+    [ -z "$pick" ] && return 0
+    local c_pid c_title c_dir c_bin c_log c_inf
+    c_pid=$(echo "$pick" | cut -f1)
+    c_title=$(echo "$pick" | cut -f2)
+    c_dir=$(echo "$pick" | cut -f3)
+    c_bin=$(echo "$pick" | cut -f4)
+    c_log=$(echo "$pick" | cut -f5)
+    c_inf=$(echo "$pick" | cut -f6)
+    game_controller_hud "$c_pid" "$c_title" "$c_log" "$c_dir" "$c_bin" "$c_inf" "Active Game"
+    return 0
+}
+
 # Master Dashboard Hub (Two-Panel Interactive TUI)
 dashboard_menu() {
     if [ ! -t 0 ] || [ ! -t 1 ]; then
@@ -992,10 +1054,10 @@ EOF
         fzf_out=$(echo "$menu_entries" | fzf \
             --delimiter=$'\t' \
             --with-nth=2,3 \
-            --expect=ctrl-l \
+            --expect=ctrl-l,ctrl-p \
             --border-label="  ╢ gamectl :: Master Dashboard Hub ╟  " \
             --border-label-pos=2 \
-            --header="Enter: Open │ 1-7: Quick Select │ Ctrl-L: Logs │ Esc: Exit" \
+            --header="Enter: Open │ 1-7: Quick Select │ Ctrl-P: Process Controller │ Ctrl-L: Logs │ Esc: Exit" \
             --prompt="Dashboard > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview-dashboard {1} "$GAMECTL_GAME_COUNT"' \
             --preview-window=right:55%:border-rounded:wrap \
@@ -1014,6 +1076,9 @@ EOF
 
         if [ "$trigger_key" = "ctrl-l" ]; then
             view_logs_interactive || return $?
+            continue
+        elif [ "$trigger_key" = "ctrl-p" ]; then
+            manage_active_processes_interactive || return $?
             continue
         fi
 
@@ -1094,7 +1159,7 @@ library_menu() {
             --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x \
             --border-label="  ╢ gamectl :: Game Library ╟  " \
             --border-label-pos=2 \
-            --header="Enter: Launch │ Ctrl-I: Inject GBE │ Ctrl-D: Make Desktop │ Ctrl-F: Search │ Esc: Dashboard" \
+            --header="Enter: Launch/Manage │ Ctrl-I: Inject GBE │ Ctrl-D: Make Desktop │ Ctrl-F: Search │ Esc: Dashboard" \
             --prompt="Library > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview {1} {2} {3} {4} {5}' \
             --preview-window=right:55%:border-rounded:wrap \
@@ -1241,12 +1306,43 @@ library_menu() {
                         continue
                     fi
                 fi
-                launch_game "$sel_dir" "$sel_bin" "$sel_title" || launch_rc=$?
-                invalidate_scan_cache
-                if [ "$launch_rc" -eq 10 ]; then
-                    # User selected return directly to Master Dashboard
-                    break
+                # Check if game is already active / running
+                local active_inf="" active_pid=""
+                local run_dir
+                run_dir="$(get_runtime_dir)"
+                if [ -d "$run_dir/active_games" ]; then
+                    for inf in "$run_dir/active_games"/*.info; do
+                        [ -f "$inf" ] || continue
+                        local inf_dir
+                        inf_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+                        if [ "$inf_dir" = "$sel_dir" ]; then
+                            local check_pid
+                            check_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2)
+                            if [ -n "$check_pid" ] && kill -0 "$check_pid" 2>/dev/null; then
+                                active_inf="$inf"
+                                active_pid="$check_pid"
+                                break
+                            fi
+                        fi
+                    done
                 fi
+
+                if [ -n "$active_pid" ]; then
+                    # Game is already running: open In-Dashboard Process Controller
+                    local active_log
+                    active_log=$(grep -E '^LOG=' "$active_inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+                    local hud_rc=0
+                    game_controller_hud "$active_pid" "$sel_title" "$active_log" "$sel_dir" "$sel_bin" "$active_inf" "Running Process" || hud_rc=$?
+                    invalidate_scan_cache
+                    if [ "$hud_rc" -eq 10 ]; then
+                        break
+                    fi
+                    continue
+                fi
+
+                # Launch game via isolated engine harness (zero terminal leaks, seamless background launch)
+                tui_run_engine "Launch $sel_title" launch_game "$sel_dir" "$sel_bin" "$sel_title" || launch_rc=$?
+                invalidate_scan_cache
                 check_fzf_status "$launch_rc" || return $?
                 ;;
         esac
@@ -1272,30 +1368,16 @@ search_steam() {
     [ "$standalone" = "true" ] && enter_tui_screen
     flush_tty_input
     if [ -z "$query" ]; then
-        local query_raw="" fzf_rc=0
-        query_raw=$(: | fzf \
-            --print-query \
-            --border-label="  ╢ gamectl :: Steam Store Search ╟  " \
-            --border-label-pos=2 \
-            --header="Type game title to search (Enter: Search │ Esc: Cancel)" \
-            --prompt="Search Store > " \
-            --height=20% \
-            --reverse 2>/dev/null) || fzf_rc=$?
-
-        # Only abort if user cancelled via ESC or Ctrl-C (exit status 130)
-        if [ "$fzf_rc" -eq 130 ]; then
-            flush_tty_input
+        local fzf_rc=0
+        # Input primitive canonicalized via tui_prompt_input (: | fzf wrapper)
+        query=$(tui_prompt_input "gamectl :: Steam Store Search" "Type game title to search (Enter: Search │ Esc: Cancel)" "" "Search Store > ") || fzf_rc=$?
+        [ "$fzf_rc" -eq 130 ] && return 0
+        if [ "$fzf_rc" -ne 0 ]; then
             [ "$standalone" = "true" ] && exit_tui_screen
-            [ "$fzf_rc" -eq 130 ] && return 0
-        fi
-        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
-            echo "[ERROR] Search query prompt failed (fzf exit code $fzf_rc)." >&2
             return "$fzf_rc"
         fi
-
-        query=$(echo "$query_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        query=$(echo "$query" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         if [ -z "$query" ]; then
-            flush_tty_input
             [ "$standalone" = "true" ] && exit_tui_screen
             return 0
         fi
@@ -1395,21 +1477,15 @@ search_steam() {
         selection=$(echo "$fzf_out" | sed -n '2,$p')
 
         if [ "$trigger_key" = "ctrl-f" ]; then
-            local new_query_raw="" new_fzf_rc=0
-            new_query_raw=$(: | fzf \
-                --print-query \
-                --border-label="  ╢ gamectl :: Steam Store Search ╟  " \
-                --border-label-pos=2 \
-                --header="Type game title to search (Enter: Search │ Esc: Keep Current List)" \
-                --prompt="Search Store > " \
-                --height=20% \
-                --reverse 2>/dev/null) || new_fzf_rc=$?
-
-            if [ "$new_fzf_rc" -eq 130 ]; then
+            local new_q n_rc=0
+            new_q=$(tui_prompt_input "gamectl :: Steam Store Search" "Type game title to search (Enter: Search │ Esc: Keep Current List)" "" "Search Store > ") || n_rc=$?
+            if [ "$n_rc" -eq 130 ]; then
                 continue
             fi
-            local new_q
-            new_q=$(echo "$new_query_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            if [ "$n_rc" -ne 0 ]; then
+                return "$n_rc"
+            fi
+            new_q=$(echo "$new_q" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
             if [ -z "$new_q" ]; then
                 continue
             fi

@@ -320,59 +320,32 @@ set_id_interactive() {
         echo
     fi
 
-    flush_tty_input
-    local in_name_raw rc=0
-    in_name_raw=$(: | fzf \
-        --print-query \
-        --border-label="  ╢ LAN Persona :: Player Name ╟  " \
-        --border-label-pos=2 \
-        --header="Enter Player Name (Current: ${cur_name:-Player} │ Enter: Next │ Esc: Cancel)" \
-        --prompt="Player Name > " \
-        --height=20% \
-        --reverse 2>/dev/null) || rc=$?
+    local in_name rc=0
+    in_name=$(tui_prompt_input "LAN Persona :: Player Name" "Enter Player Name (Current: ${cur_name:-Player} │ Enter: Next │ Esc: Cancel)" "" "Player Name > ") || rc=$?
     [ "$rc" -eq 130 ] && return 0
-    check_fzf_status "$rc" || return $?
-    local in_name
-    in_name=$(echo "$in_name_raw" | head -n 1 | tr -d '\r\n')
+    [ "$rc" -ne 0 ] && return "$rc"
     [ -z "$in_name" ] && in_name="$cur_name"
     [ -z "$in_name" ] && in_name="${USER:-Player}"
 
-    flush_tty_input
     local suggested_id
     suggested_id=$(generate_steamid64)
-    local in_id_raw
-    rc=0
-    in_id_raw=$(: | fzf \
-        --print-query \
-        --border-label="  ╢ LAN Persona :: SteamID64 ╟  " \
-        --border-label-pos=2 \
-        --header="Enter SteamID64, 'gen' for random ID, or leave blank (Current: ${cur_id:-$suggested_id})" \
-        --prompt="SteamID64 > " \
-        --height=20% \
-        --reverse 2>/dev/null) || rc=$?
-    [ "$rc" -eq 130 ] && return 0
-    check_fzf_status "$rc" || return $?
     local in_id
-    in_id=$(echo "$in_id_raw" | head -n 1 | tr -d '[:space:]')
+    rc=0
+    in_id=$(tui_prompt_input "LAN Persona :: SteamID64" "Enter SteamID64, 'gen' for random ID, or leave blank (Current: ${cur_id:-$suggested_id})" "" "SteamID64 > ") || rc=$?
+    [ "$rc" -eq 130 ] && return 0
+    [ "$rc" -ne 0 ] && return "$rc"
+    in_id=$(echo "$in_id" | tr -d '[:space:]')
     [ -z "$in_id" ] && in_id="${cur_id:-$suggested_id}"
     if [ "$in_id" = "random" ] || [ "$in_id" = "auto" ] || [ "$in_id" = "gen" ]; then
         in_id=$(generate_steamid64)
     fi
 
-    flush_tty_input
-    local in_bc_raw
-    rc=0
-    in_bc_raw=$(: | fzf \
-        --print-query \
-        --border-label="  ╢ LAN Custom Broadcast Peer IP (Optional) ╟  " \
-        --border-label-pos=2 \
-        --header="Enter friend's LAN IP (e.g. 192.168.1.50) or leave blank (Enter: Next │ Esc: Skip)" \
-        --prompt="Peer IP > " \
-        --height=20% \
-        --reverse 2>/dev/null) || rc=$?
-    check_fzf_status "$rc" || return $?
     local in_bc
-    in_bc=$(echo "$in_bc_raw" | head -n 1 | tr -d '[:space:]')
+    rc=0
+    in_bc=$(tui_prompt_input "LAN Custom Broadcast Peer IP (Optional)" "Enter friend's LAN IP (e.g. 192.168.1.50) or leave blank (Enter: Next │ Esc: Skip)" "" "Peer IP > ") || rc=$?
+    [ "$rc" -eq 130 ] && in_bc=""
+    [ "$rc" -ne 0 ] && [ "$rc" -ne 130 ] && return "$rc"
+    in_bc=$(echo "$in_bc" | tr -d '[:space:]')
 
     local glob_entries
     glob_entries=$(cat <<EOF
@@ -380,19 +353,11 @@ no	No, apply to this game only	Keep global defaults untouched
 yes	Yes, also save as global persona	Update ~/.config/gamectl/persona
 EOF
 )
-    flush_tty_input
     local glob_sel
     rc=0
-    glob_sel=$(echo "$glob_entries" | fzf \
-        --delimiter=$'\t' \
-        --with-nth=2,3 \
-        --border-label="  ╢ Global Persona Sync ╟  " \
-        --border-label-pos=2 \
-        --header="Also save this persona as global default for future games?" \
-        --prompt="Save Global > " \
-        --height=25% \
-        --reverse 2>/dev/null) || rc=$?
-    check_fzf_status "$rc" || return $?
+    glob_sel=$(tui_action_palette "Global Persona Sync" "Also save this persona as global default for future games?" "$glob_entries" "" "Save Global > ") || rc=$?
+    [ "$rc" -eq 130 ] && return 0
+    [ "$rc" -ne 0 ] && return "$rc"
 
     local extra_args=()
     [ -n "$in_bc" ] && extra_args+=(--broadcast "$in_bc")

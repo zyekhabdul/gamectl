@@ -475,20 +475,11 @@ EOF
 
         case "$opt" in
             1)
-                flush_tty_input
-                local code_raw c_rc=0
-                code_raw=$(: | fzf \
-                    --print-query \
-                    --border-label="  ╢ Discord Bot Login (/login) ╟  " \
-                    --border-label-pos=2 \
-                    --header=$'1. Di server Discord (discord.gg/luatools), ketik: /login di #bot-spam\n2. Masukkan 6-karakter kode bot di bawah (atau ketik "open" untuk buka Discord):' \
-                    --prompt="Code > " \
-                    --height=25% \
-                    --reverse 2>/dev/null) || c_rc=$?
-                check_fzf_status "$c_rc" || return $?
-                [ "$c_rc" -eq 130 ] && continue
-                local code
-                code=$(echo "$code_raw" | head -n 1 | tr -d '[:space:]')
+                local code rc=0
+                code=$(tui_prompt_input "Discord Bot Login (/login)" $'1. Di server Discord (discord.gg/luatools), ketik: /login di #bot-spam\n2. Masukkan 6-karakter kode bot di bawah (atau ketik "open" untuk buka Discord):' "" "Code > ") || rc=$?
+                [ "$rc" -eq 130 ] && continue
+                [ "$rc" -ne 0 ] && return "$rc"
+                code=$(echo "$code" | tr -d '[:space:]')
                 if [ "${code,,}" = "open" ]; then
                     xdg-open "https://discord.gg/luatools" 2>/dev/null || sensible-browser "https://discord.gg/luatools" 2>/dev/null || true
                     continue
@@ -545,36 +536,18 @@ EOF
                 local a_opt
                 a_opt=$(echo "$a_sel" | cut -f1 | tr -d '[:space:]')
                 if [ "$a_opt" = "1" ]; then
-                    flush_tty_input
-                    local tok_raw t_rc=0
-                    tok_raw=$(: | fzf \
-                        --print-query \
-                        --border-label="  ╢ LuaTools Refresh Token ╟  " \
-                        --border-label-pos=2 \
-                        --header="Paste refresh token string (Enter: Submit │ Esc: Cancel)" \
-                        --prompt="Token > " \
-                        --height=20% \
-                        --reverse 2>/dev/null) || t_rc=$?
-                    check_fzf_status "$t_rc" || return $?
-                    [ "$t_rc" -eq 130 ] && continue
-                    local tok
-                    tok=$(echo "$tok_raw" | head -n 1 | tr -d '[:space:]')
+                    local tok rc=0
+                    tok=$(tui_prompt_input "LuaTools Refresh Token" "Paste refresh token string (Enter: Submit │ Esc: Cancel)" "" "Token > ") || rc=$?
+                    [ "$rc" -eq 130 ] && continue
+                    [ "$rc" -ne 0 ] && return "$rc"
+                    tok=$(echo "$tok" | tr -d '[:space:]')
                     [ -n "$tok" ] && tui_exec_action "LuaTools Token Exchange" login_luatools "$tok"
                 elif [ "$a_opt" = "2" ]; then
-                    flush_tty_input
-                    local file_raw f_rc=0
-                    file_raw=$(: | fzf \
-                        --print-query \
-                        --border-label="  ╢ Import session.json File ╟  " \
-                        --border-label-pos=2 \
-                        --header="Enter filesystem path to session.json (Enter: Import │ Esc: Cancel)" \
-                        --prompt="File Path > " \
-                        --height=20% \
-                        --reverse 2>/dev/null) || f_rc=$?
-                    check_fzf_status "$f_rc" || return $?
-                    [ "$f_rc" -eq 130 ] && continue
-                    local fpath
-                    fpath=$(echo "$file_raw" | head -n 1 | tr -d '[:space:]')
+                    local fpath rc=0
+                    fpath=$(tui_prompt_input "Import session.json File" "Enter filesystem path to session.json (Enter: Import │ Esc: Cancel)" "" "File Path > ") || rc=$?
+                    [ "$rc" -eq 130 ] && continue
+                    [ "$rc" -ne 0 ] && return "$rc"
+                    fpath=$(echo "$fpath" | tr -d '[:space:]')
                     [ -n "$fpath" ] && tui_exec_action "Import LuaTools Session" login_luatools "$fpath"
                 fi
                 ;;
@@ -2537,26 +2510,12 @@ unlock_interactive() {
         return 127
     fi
 
-    flush_tty_input
-    local u_input_raw="" fzf_rc=0
-    u_input_raw=$(: | fzf \
-        --print-query \
-        --border-label="  ╢ Steam ACF Adoption & Asset Manager ╟  " \
-        --border-label-pos=2 \
-        --header="Enter game title or numeric AppID (Enter: Adopt │ Esc: Cancel)" \
-        --prompt="Game Title or ID > " \
-        --height=20% \
-        --reverse 2>/dev/null) || fzf_rc=$?
-
-    # Only abort if user cancelled via ESC or Ctrl-C (exit status 130)
+    local u_input fzf_rc=0
+    # Input primitive canonicalized via tui_prompt_input (: | fzf wrapper)
+    u_input=$(tui_prompt_input "Steam ACF Adoption & Asset Manager" "Enter game title or numeric AppID (Enter: Adopt │ Esc: Cancel)" "" "Game Title or ID > ") || fzf_rc=$?
     [ "$fzf_rc" -eq 130 ] && return 0
-    if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
-        echo "[ERROR] Adoption query input failed (fzf exit code $fzf_rc)." >&2
-        return "$fzf_rc"
-    fi
-
-    local u_input
-    u_input=$(echo "$u_input_raw" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [ "$fzf_rc" -ne 0 ] && return "$fzf_rc"
+    u_input=$(echo "$u_input" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     [ -z "$u_input" ] && return 0
 
     local u_appid=""
