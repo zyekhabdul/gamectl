@@ -287,9 +287,8 @@ launch_game() {
     local run_dir
     run_dir="$(get_runtime_dir)"
     mkdir -p -m 700 "$run_dir/active_games" 2>/dev/null || true
-    local safe_gbin
-    safe_gbin=$(basename "${gbin:-game}" | tr -cd '[:alnum:]_-')
-    local log_file="$run_dir/game_${safe_gbin}.log"
+    local log_file
+    log_file="$(get_game_log_file "$gdir" "${gbin:-game}")"
     : >> "$log_file" 2>/dev/null || true
 
     _launch_echo() {
@@ -489,12 +488,10 @@ launch_game() {
 
     # Pre-flight savegame redirection & offline DLC check
     mkdir -p -m 700 "$gdir/saves" 2>/dev/null || true
-    if [ -f "$gdir/steam_appid.txt" ]; then
-        local raw_appid
-        raw_appid=$(tr -dc '0-9' < "$gdir/steam_appid.txt" 2>/dev/null || echo "")
-        if [ -n "$raw_appid" ] && [ ! -f "$gdir/steam_settings/DLC.txt" ]; then
-            fetch_dlc "$gdir" "$raw_appid" 2>/dev/null || true
-        fi
+    local raw_appid
+    raw_appid="$(resolve_game_appid "$gdir")"
+    if [ -n "$raw_appid" ] && [ ! -f "$gdir/steam_settings/DLC.txt" ]; then
+        fetch_dlc "$gdir" "$raw_appid" 2>/dev/null || true
     fi
 
     # Pre-flight GBE auto-injection & Sovereign Hard-Stop Guard
@@ -561,9 +558,8 @@ launch_game() {
         fi
     fi
 
-    # Prepare runtime directory and log stream
-    safe_gbin=$(basename "$gbin" | tr -cd '[:alnum:]_-')
-    log_file="$run_dir/game_${safe_gbin}.log"
+    # Prepare runtime directory and log stream (collision-free SSoT)
+    log_file="$(get_game_log_file "$gdir" "$gbin")"
     : >> "$log_file" 2>/dev/null || true
 
     local game_pid=""
@@ -612,30 +608,20 @@ launch_game() {
             return 1
         fi
 
-        local pfx_dir="$gdir/pfx"
+        local appid
+        appid="$(resolve_game_appid "$gdir" "0")"
+        prepare_windows_runner_env "$runner_bin" "$gdir" "$appid" "${GAMECTL_RENDERER_MODE:-auto}" "${GAMECTL_ACTIVE_PRIME:-0}"
+        local pfx_dir="$GAMECTL_WIN_PFX_DIR"
         mkdir -p "$pfx_dir"
-        local appid=""
-        if [ -f "$gdir/steam_appid.txt" ]; then
-            appid=$(tr -dc '0-9' < "$gdir/steam_appid.txt")
-        fi
-        [ -z "$appid" ] && appid="0"
 
-        local active_renderer="${GAMECTL_ACTIVE_RENDERER:-}"
-        if [ -z "$active_renderer" ]; then
-            if [ -n "${PROTON_USE_WINED3D:-}" ]; then
-                [ "$PROTON_USE_WINED3D" = "1" ] && active_renderer="wined3d" || active_renderer="dxvk"
-            elif type resolve_graphics_renderer >/dev/null 2>&1; then
-                active_renderer="$(resolve_graphics_renderer "${GAMECTL_RENDERER_MODE:-auto}" "${GAMECTL_ACTIVE_PRIME:-0}")"
+        if [ "$GAMECTL_WIN_RUNNER_KIND" = "umu" ] || [ "$GAMECTL_WIN_RUNNER_KIND" = "proton" ]; then
+            if [ "$GAMECTL_WIN_RENDERER" = "wined3d" ]; then
+                _launch_echo "[INFO] Graphics Renderer: WineD3D / OpenGL fallback (PROTON_USE_WINED3D=1)."
             else
-                active_renderer="dxvk"
+                _launch_echo "[INFO] Graphics Renderer: DXVK / Vulkan (PROTON_USE_WINED3D=0)."
             fi
-        fi
-        local proton_wined3d_val="0"
-        if [ "$active_renderer" = "wined3d" ]; then
-            proton_wined3d_val="1"
-            _launch_echo "[INFO] Graphics Renderer: WineD3D / OpenGL fallback (PROTON_USE_WINED3D=1)."
         else
-            _launch_echo "[INFO] Graphics Renderer: DXVK / Vulkan (PROTON_USE_WINED3D=0)."
+            _launch_echo "[INFO] Graphics Renderer: Wine native (WineD3D / OpenGL)."
         fi
 
         run_type="Windows ($(basename "$runner_bin"))"
@@ -643,49 +629,44 @@ launch_game() {
         _launch_echo "[INFO] Isolated Wine Prefix: $pfx_dir"
         _launch_echo "[INFO] Log stream: $log_file"
 
-        local umu_gameid="umu-default"
-        if [ -n "$appid" ] && [ "$appid" != "0" ]; then
-            umu_gameid="umu-${appid}"
-        fi
-
-        case "$runner_bin" in
-            umu-run)
+        case "$GAMECTL_WIN_RUNNER_KIND" in
+            umu)
                 (
-                    export WINEPREFIX="$pfx_dir" \
-                        GAMEID="$umu_gameid" \
-                        STEAM_COMPAT_APP_ID="$appid" \
-                        SteamAppId="$appid" \
-                        SteamGameId="$appid" \
+                    export WINEPREFIX="$GAMECTL_WIN_PFX_DIR" \
+                        GAMEID="$GAMECTL_WIN_UMU_GAMEID" \
+                        STEAM_COMPAT_APP_ID="$GAMECTL_WIN_APPID" \
+                        SteamAppId="$GAMECTL_WIN_APPID" \
+                        SteamGameId="$GAMECTL_WIN_APPID" \
                         WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
-                        PROTON_USE_WINED3D="$proton_wined3d_val"
-                    if [ "$appid" = "0" ] && [ -z "${PROTONFIXES_DISABLE+x}" ]; then
-                        export PROTONFIXES_DISABLE=1
-                    fi
-                    _exec_in_scope "${wrappers[@]}" umu-run "$gdir/$gbin" "${game_args[@]}"
+                        PROTON_USE_WINED3D="$GAMECTL_WIN_PROTON_WINED3D"
+                    [ "$GAMECTL_WIN_DISABLE_PROTONFIXES" = "1" ] && export PROTONFIXES_DISABLE=1
+                    _exec_in_scope "${wrappers[@]}" "$runner_bin" "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
                 ;;
-            *proton*)
+            proton)
                 (
-                    export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_INSTALL_PATH:-$(get_steam_root 2>/dev/null || echo "$HOME/.local/share/Steam")}" \
+                    export STEAM_COMPAT_CLIENT_INSTALL_PATH="$GAMECTL_WIN_STEAM_ROOT" \
                         STEAM_COMPAT_DATA_PATH="$gdir" \
-                        STEAM_COMPAT_APP_ID="$appid" \
-                        SteamAppId="$appid" \
-                        SteamGameId="$appid" \
-                        GAMEID="$umu_gameid" \
-                        WINEPREFIX="$pfx_dir" \
+                        STEAM_COMPAT_APP_ID="$GAMECTL_WIN_APPID" \
+                        SteamAppId="$GAMECTL_WIN_APPID" \
+                        SteamGameId="$GAMECTL_WIN_APPID" \
+                        GAMEID="$GAMECTL_WIN_UMU_GAMEID" \
+                        WINEPREFIX="$GAMECTL_WIN_PFX_DIR" \
                         WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
-                        PROTON_USE_WINED3D="$proton_wined3d_val"
-                    if [ "$appid" = "0" ] && [ -z "${PROTONFIXES_DISABLE+x}" ]; then
-                        export PROTONFIXES_DISABLE=1
-                    fi
+                        PROTON_USE_WINED3D="$GAMECTL_WIN_PROTON_WINED3D"
+                    [ "$GAMECTL_WIN_DISABLE_PROTONFIXES" = "1" ] && export PROTONFIXES_DISABLE=1
                     _exec_in_scope "${wrappers[@]}" "$runner_bin" waitforexitandrun "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
                 ;;
             *)
                 (
-                    export WINEPREFIX="$pfx_dir" WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}"
+                    export WINEPREFIX="$GAMECTL_WIN_PFX_DIR" \
+                        STEAM_COMPAT_APP_ID="$GAMECTL_WIN_APPID" \
+                        SteamAppId="$GAMECTL_WIN_APPID" \
+                        SteamGameId="$GAMECTL_WIN_APPID" \
+                        WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}"
                     _exec_in_scope "${wrappers[@]}" "$runner_bin" "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
@@ -938,9 +919,7 @@ inject_game() {
 
     # Resolve AppID if not provided
     if [ -z "$appid" ]; then
-        if [ -f "$target_dir/steam_appid.txt" ]; then
-            appid=$(tr -dc '0-9' < "$target_dir/steam_appid.txt")
-        fi
+        appid="$(resolve_game_appid "$target_dir")"
         if [ -z "$appid" ]; then
             local parent_dir
             parent_dir="$(dirname "$target_dir")"

@@ -1,7 +1,7 @@
 # WORK PACKET 31: SSoT GENERALIZATION, RUNNER HARDENING & HYGIENE
 
 - **Track**: Cross-Distro Hardware Generalization / SSoT Unification / Environment & Detection Hygiene
-- **Status**: IN PROGRESS [1/4 PACKETS]
+- **Status**: IN PROGRESS [2/4 PACKETS]
 - **Basis**: Forensic audit codebase `src/` pasca-WP30 (`c1dc31b`) — deteksi `llvmpipe`, drift AppID & runner env, tabrakan nama log, duplikasi parser `.wrappers`, magic-size GBE heuristic, dan polusi `export -f`.
 - **Target Files**: `src/core/10_utils.sh`, `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/steam/20_discovery.sh`, `src/steam/30_downloader.sh`, `src/steam/35_fixes.sh`, `src/diagnostics/60_doctor.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `Makefile`, `tests/test_remediation.sh`, `bin/gamectl`
 
@@ -23,7 +23,7 @@
   - `doctor_audit()` mendeteksi runtime OpenGL 32-bit melalui `ldconfig -p` atau path distro standar.
   - [ VERIFIED ] `test_vulkan_per_device_and_multilib_contract`, `test_cli.sh` (147/147), `test_remediation.sh` (14/14), `test_tui_ergonomics.sh` (3/3), `./scripts/build.sh --check` (12309 lines), dan `make lint` lulus Exit 0.
 
-### [ ] Packet 31B: Core SSoT Unification (`AppID`, `Log Path`, `.wrappers`, `Windows Runner Env`)
+### [x] Packet 31B: Core SSoT Unification (`AppID`, `Log Path`, `.wrappers`, `Windows Runner Env`)
 - **Target Files**: `src/core/10_utils.sh`, `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/steam/20_discovery.sh`, `src/steam/30_downloader.sh`, `src/steam/35_fixes.sh`, `src/diagnostics/60_doctor.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `tests/test_remediation.sh`
 - **Langkah Teknis**:
   1. Tambahkan SSoT `resolve_game_appid "$gdir"` di `src/core/10_utils.sh` (prioritas deterministik: `steam_appid.txt` -> `steam_settings/steam_appid.txt` -> `.gamectl_appid` -> `0`) dan gantikan seluruh parser ad-hoc di `launch_game()`, `manage_prefix()`, `20_discovery.sh`, `30_downloader.sh`, `35_fixes.sh`, `60_doctor.sh`, serta `70_dashboard.sh`.
@@ -34,6 +34,7 @@
   - Game standalone yang hanya memiliki `.gamectl_appid` atau `steam_settings/steam_appid.txt` tetap mengekspor AppID yang tepat saat launch.
   - Dua game dengan executable bernama identik (`game.exe`) menghasilkan file log terpisah.
   - `manage_prefix()` menerapkan kontrak env Proton/umu-run dan guard `PROTONFIXES_DISABLE=1` yang identik dengan `launch_game()`.
+  - [ VERIFIED ] `test_ssot_unification_contract`, `test_cli.sh` (147/147), `test_remediation.sh` (15/15), `test_tui_ergonomics.sh` (3/3), `./scripts/build.sh --check` (12334 lines), dan `make lint` lulus Exit 0.
 
 ### [ ] Packet 31C: Detection Integrity, Standalone Runners & Hygiene
 - **Target Files**: `src/core/10_utils.sh`, `src/runners/40_wrappers.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `Makefile`

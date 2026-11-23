@@ -738,15 +738,9 @@ manage_game_fixes_interactive() {
     # 1. Resolve numeric Steam AppID if not directly provided
     if [ -z "$appid" ] || ! [[ "$appid" =~ ^[0-9]+$ ]]; then
         if [ -n "$gdir" ] && [ -d "$gdir" ]; then
-            if [ -f "$gdir/steam_appid.txt" ]; then
-                local detected_id
-                detected_id=$(head -n 1 "$gdir/steam_appid.txt" | tr -dc '0-9')
-                [ -n "$detected_id" ] && appid="$detected_id"
-            elif [ -f "$gdir/.gamectl_appid" ]; then
-                local detected_id
-                detected_id=$(head -n 1 "$gdir/.gamectl_appid" | tr -dc '0-9')
-                [ -n "$detected_id" ] && appid="$detected_id"
-            fi
+            local detected_id
+            detected_id="$(resolve_game_appid "$gdir")"
+            [ -n "$detected_id" ] && appid="$detected_id"
         fi
     fi
 

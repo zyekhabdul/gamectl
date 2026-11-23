@@ -95,9 +95,8 @@ preview_game() {
         else
             echo "  ${UI_CYAN}Runner      ${UI_RST}: ${UI_GREEN}Native Linux${UI_RST} ${UI_DIM}(Direct ELF/Script)${UI_RST}"
         fi
-        local safe_gbin target_log log_hint
-        safe_gbin=$(basename "$gbin" 2>/dev/null | tr -cd '[:alnum:]_-')
-        target_log="${run_log:-$run_dir/game_${safe_gbin}.log}"
+        local target_log log_hint
+        target_log="${run_log:-$(get_game_log_file "$gdir" "$gbin")}"
         log_hint=$(inspect_game_log_hint "$target_log" 2>/dev/null || true)
         [ -n "$log_hint" ] && echo "  ${UI_AMBER}Log Hint    ${UI_RST}: [HINT] $log_hint"
     fi
@@ -145,51 +144,21 @@ preview_game() {
     echo "  ${UI_CYAN}Host Tools  ${UI_RST}: GameMode $w_gm • MangoHud $w_hud • Gamescope $w_scope"
 
     local act_w=()
-    local c_gm=0 c_hud=0 c_scope=0 c_fsr=0 c_glt=0
-    if [ -f "$HOME/.config/gamectl/wrappers" ]; then
-        grep -q "^gamemode=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_gm=1
-        grep -q -E "^(hud|mangohud)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_hud=1
-        grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_scope=1
-        grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_fsr=1
-        grep -q -E "^(glthread|mesa_glthread)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_glt=1
-    fi
-    if [ -f "$gdir/.wrappers" ]; then
-        grep -q "^gamemode=1" "$gdir/.wrappers" 2>/dev/null && c_gm=1
-        grep -q "^gamemode=0" "$gdir/.wrappers" 2>/dev/null && c_gm=0
-        grep -q -E "^(hud|mangohud)=1" "$gdir/.wrappers" 2>/dev/null && c_hud=1
-        grep -q -E "^(hud|mangohud)=0" "$gdir/.wrappers" 2>/dev/null && c_hud=0
-        grep -q "^gamescope=1" "$gdir/.wrappers" 2>/dev/null && c_scope=1
-        grep -q "^gamescope=0" "$gdir/.wrappers" 2>/dev/null && c_scope=0
-        grep -q "^fsr=1" "$gdir/.wrappers" 2>/dev/null && c_fsr=1
-        grep -q "^fsr=0" "$gdir/.wrappers" 2>/dev/null && c_fsr=0
-        grep -q -E "^(glthread|mesa_glthread)=1" "$gdir/.wrappers" 2>/dev/null && c_glt=1
-        grep -q -E "^(glthread|mesa_glthread)=0" "$gdir/.wrappers" 2>/dev/null && c_glt=0
-    fi
-    [ "$c_gm" = 1 ] && act_w+=("GameMode")
-    [ "$c_hud" = 1 ] && act_w+=("MangoHud")
-    [ "$c_scope" = 1 ] && act_w+=("Gamescope")
-    [ "$c_fsr" = 1 ] && act_w+=("FSR")
-    [ "$c_glt" = 1 ] && act_w+=("MesaGL")
+    load_wrapper_config "$gdir" 1
+    [ "$GAMECTL_CFG_GM" = 1 ] && act_w+=("GameMode")
+    [ "$GAMECTL_CFG_HUD" = 1 ] && act_w+=("MangoHud")
+    [ "$GAMECTL_CFG_SCOPE" = 1 ] && act_w+=("Gamescope")
+    [ "$GAMECTL_CFG_FSR" = 1 ] && act_w+=("FSR")
+    [ "$GAMECTL_CFG_GLTHREAD" = 1 ] && act_w+=("MesaGL")
+    [ "$GAMECTL_CFG_PRIME" = 1 ] && act_w+=("PRIME")
+    [ "$GAMECTL_CFG_SANDBOX" = 1 ] && act_w+=("Sandbox")
     if [ ${#act_w[@]} -gt 0 ]; then
         echo "  ${UI_CYAN}Game Profile${UI_RST}: ${UI_BOLD}${act_w[*]}${UI_RST}"
     else
         echo "  ${UI_CYAN}Game Profile${UI_RST}: ${UI_DIM}Clean Native (Zero Wrappers)${UI_RST}"
     fi
-    local c_renderer="auto" c_prime=0 eff_renderer vk_cap_label renderer_label
-    if [ -f "$HOME/.config/gamectl/wrappers" ]; then
-        local g_rend
-        g_rend=$(grep -E "^renderer=" "$HOME/.config/gamectl/wrappers" 2>/dev/null | tail -n 1 | cut -d'=' -f2- || true)
-        [ -n "$g_rend" ] && c_renderer="$g_rend"
-        grep -q "^prime=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_prime=1
-    fi
-    if [ -f "$gdir/.wrappers" ]; then
-        local l_rend
-        l_rend=$(grep -E "^renderer=" "$gdir/.wrappers" 2>/dev/null | tail -n 1 | cut -d'=' -f2- || true)
-        [ -n "$l_rend" ] && c_renderer="$l_rend"
-        grep -q "^prime=1" "$gdir/.wrappers" 2>/dev/null && c_prime=1
-        grep -q "^prime=0" "$gdir/.wrappers" 2>/dev/null && c_prime=0
-    fi
-    eff_renderer=$(resolve_graphics_renderer "$c_renderer" "$c_prime" 2>/dev/null || echo "wined3d")
+    local c_renderer="${GAMECTL_CFG_RENDERER:-auto}" eff_renderer vk_cap_label renderer_label
+    eff_renderer=$(resolve_graphics_renderer "$c_renderer" "$GAMECTL_CFG_PRIME" 2>/dev/null || echo "wined3d")
     if [ "$eff_renderer" = "wined3d" ]; then
         vk_cap_label="WineD3D"
     else
@@ -552,12 +521,8 @@ preview_dashboard() {
                     [[ "$g_base" =~ ^\. ]] && continue
                     total_phys=$((total_phys + 1))
 
-                    local c_aid=""
-                    if [ -f "$g_cand/steam_appid.txt" ]; then
-                        c_aid=$(cat "$g_cand/steam_appid.txt" 2>/dev/null | tr -cd "0-9")
-                    elif [ -f "$g_cand/.gamectl_appid" ]; then
-                        c_aid=$(cat "$g_cand/.gamectl_appid" 2>/dev/null | tr -cd "0-9")
-                    fi
+                    local c_aid
+                    c_aid="$(resolve_game_appid "$g_cand")"
 
                     local has_acf=""
                     [ -n "$c_aid" ] && has_acf=$(find_app_acf "$c_aid" 2>/dev/null || true)
@@ -609,13 +574,14 @@ preview_dashboard() {
             r_host=$(get_remote_host 2>/dev/null || true)
 
             local act_w=()
-            if [ -f "$HOME/.config/gamectl/wrappers" ]; then
-                grep -q "^gamemode=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("GameMode")
-                grep -q -E "^(hud|mangohud)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("MangoHud")
-                grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("Gamescope")
-                grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("FSR")
-                grep -q -E "^(glthread|mesa_glthread)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("MesaGL")
-            fi
+            load_wrapper_config "" 0
+            [ "$GAMECTL_CFG_GM" = 1 ] && act_w+=("GameMode")
+            [ "$GAMECTL_CFG_HUD" = 1 ] && act_w+=("MangoHud")
+            [ "$GAMECTL_CFG_SCOPE" = 1 ] && act_w+=("Gamescope")
+            [ "$GAMECTL_CFG_FSR" = 1 ] && act_w+=("FSR")
+            [ "$GAMECTL_CFG_GLTHREAD" = 1 ] && act_w+=("MesaGL")
+            [ "$GAMECTL_CFG_PRIME" = 1 ] && act_w+=("PRIME")
+            [ "$GAMECTL_CFG_SANDBOX" = 1 ] && act_w+=("Sandbox")
             local wrappers_desc="${UI_DIM}None (Disabled)${UI_RST}"
             [ ${#act_w[@]} -gt 0 ] && wrappers_desc="${UI_GREEN}${act_w[*]}${UI_RST}"
 

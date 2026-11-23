@@ -784,6 +784,103 @@ EOF
 }
 run_test "Hardware Probe (WP31 Packet 31A): per-device vulkaninfo, PCI uevent & ldconfig 32-bit audit" test_vulkan_per_device_and_multilib_contract
 
+# Test 15: WP31 Packet 31B — Core SSoT Unification (AppID, Log Path, Wrappers Config & Runner Env)
+test_ssot_unification_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp31b_XXXXXX")
+    mkdir -p "$t_dir/home/.config/gamectl" "$t_dir/runtime" "$t_dir/bin"
+    mkdir -p "$t_dir/games/GameAlpha/steam_settings" "$t_dir/games/GameBeta" "$t_dir/games/GameGamma"
+    (
+        trap 'pkill -f "$t_dir/bin/proton" 2>/dev/null || true; rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        export GAMECTL_VULKAN_CAPABILITY="VULKAN_LEGACY"
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/runners/40_wrappers.sh"
+        source "$REPO_ROOT/src/runners/50_launcher.sh"
+
+        # 1. resolve_game_appid priority: steam_appid.txt > steam_settings/steam_appid.txt > .gamectl_appid > default
+        [ "$(resolve_game_appid "$t_dir/games/GameAlpha" "0")" = "0" ] || exit 1
+        echo "333333" > "$t_dir/games/GameAlpha/.gamectl_appid"
+        [ "$(resolve_game_appid "$t_dir/games/GameAlpha" "0")" = "333333" ] || exit 1
+        echo "222222" > "$t_dir/games/GameAlpha/steam_settings/steam_appid.txt"
+        [ "$(resolve_game_appid "$t_dir/games/GameAlpha" "0")" = "222222" ] || exit 1
+        echo "111111" > "$t_dir/games/GameAlpha/steam_appid.txt"
+        [ "$(resolve_game_appid "$t_dir/games/GameAlpha" "0")" = "111111" ] || exit 1
+
+        # 2. get_game_log_file collision prevention for identical executable names
+        local log_a log_b
+        log_a="$(get_game_log_file "$t_dir/games/GameAlpha" "game.exe")"
+        log_b="$(get_game_log_file "$t_dir/games/GameBeta" "game.exe")"
+        [ -n "$log_a" ] && [ -n "$log_b" ] && [ "$log_a" != "$log_b" ] || exit 1
+
+        # 3. load_wrapper_config trims quotes/spaces, applies per-game overrides & selective env
+        printf 'gamemode = 1\nhud = "0"\nrenderer = "dxvk"\n' > "$HOME/.config/gamectl/wrappers"
+        printf 'hud = 1\nsandbox = "1"\n' > "$t_dir/games/GameGamma/.wrappers"
+        GAMECTL_RENDERER="wined3d" load_wrapper_config "$t_dir/games/GameGamma" 0
+        [ "$GAMECTL_CFG_GM" = "1" ] && [ "$GAMECTL_CFG_HUD" = "1" ] && [ "$GAMECTL_CFG_SANDBOX" = "1" ] || exit 1
+        [ "$GAMECTL_CFG_RENDERER" = "dxvk" ] || exit 1
+        GAMECTL_RENDERER="wined3d" load_wrapper_config "$t_dir/games/GameGamma" 1
+        [ "$GAMECTL_CFG_RENDERER" = "wined3d" ] || exit 1
+
+        # 4. manage_prefix & launch_game share identical Windows runner env contract (including .gamectl_appid fallback)
+        cat <<EOF > "$t_dir/bin/proton"
+#!/usr/bin/env bash
+cat <<ENVOUT > "$t_dir/pfx_env.out"
+ARGS=\$*
+GAMEID=\${GAMEID:-}
+STEAM_COMPAT_APP_ID=\${STEAM_COMPAT_APP_ID:-}
+SteamAppId=\${SteamAppId:-}
+SteamGameId=\${SteamGameId:-}
+PROTON_USE_WINED3D=\${PROTON_USE_WINED3D:-}
+PROTONFIXES_DISABLE=\${PROTONFIXES_DISABLE-UNSET}
+ENVOUT
+EOF
+        chmod +x "$t_dir/bin/proton"
+        find_runner() { echo "$t_dir/bin/proton"; }
+        backup_save() { :; }
+        clean_stale_locks() { :; }
+        detect_steamstub_drm() { return 1; }
+        check_systemd_scope_support() { return 1; }
+
+        # 4a. manage_prefix with empty AppID -> appid=0, GAMEID=umu-default, PROTONFIXES_DISABLE=1
+        unset PROTONFIXES_DISABLE
+        manage_prefix "$t_dir/games/GameBeta" winecfg >/dev/null 2>&1 || exit 1
+        grep -qx "GAMEID=umu-default" "$t_dir/pfx_env.out" || exit 1
+        grep -qx "SteamAppId=0" "$t_dir/pfx_env.out" || exit 1
+        grep -qx "SteamGameId=0" "$t_dir/pfx_env.out" || exit 1
+        grep -qx "PROTON_USE_WINED3D=1" "$t_dir/pfx_env.out" || exit 1
+        grep -qx "PROTONFIXES_DISABLE=1" "$t_dir/pfx_env.out" || exit 1
+
+        # 4b. manage_prefix with only .gamectl_appid -> GAMEID=umu-444555, PROTONFIXES_DISABLE=UNSET
+        echo "444555" > "$t_dir/games/GameBeta/.gamectl_appid"
+        rm -f "$t_dir/pfx_env.out"
+        manage_prefix "$t_dir/games/GameBeta" cmd >/dev/null 2>&1 || exit 1
+        grep -qx "ARGS=run cmd.exe" "$t_dir/pfx_env.out" || exit 1
+        grep -qx "GAMEID=umu-444555" "$t_dir/pfx_env.out" || exit 1
+        grep -qx "SteamAppId=444555" "$t_dir/pfx_env.out" || exit 1
+        grep -qx "PROTONFIXES_DISABLE=UNSET" "$t_dir/pfx_env.out" || exit 1
+
+        # 4c. launch_game on GameBeta (only .gamectl_appid) propagates 444555 + writes anti-collision log
+        printf 'MZ' > "$t_dir/games/GameBeta/game.exe"
+        printf 'fake_dll' > "$t_dir/games/GameBeta/steam_api64.dll"
+        mkdir -p "$t_dir/games/GameBeta/steam_settings"
+        chmod +x "$t_dir/games/GameBeta/game.exe"
+        rm -f "$t_dir/pfx_env.out"
+        GAMECTL_IN_ALT_SCREEN=1 launch_game "$t_dir/games/GameBeta" "game.exe" "BetaTitle" >/dev/null 2>&1 || exit 1
+        for _ in $(seq 1 40); do
+            [ -s "$t_dir/pfx_env.out" ] && break
+            sleep 0.05
+        done
+        grep -qx "GAMEID=umu-444555" "$t_dir/pfx_env.out" || exit 1
+        grep -qx "SteamAppId=444555" "$t_dir/pfx_env.out" || exit 1
+        [ -f "$log_b" ] || exit 1
+    )
+}
+run_test "SSoT Unification (WP31 Packet 31B): AppID, anti-collision log, wrapper config & runner env" test_ssot_unification_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"

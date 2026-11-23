@@ -547,6 +547,56 @@ proton_remove() {
     return 0
 }
 
+# Canonical Windows runner environment contract shared by launch_game & manage_prefix
+prepare_windows_runner_env() {
+    local runner_bin="${1:-wine}"
+    local gdir="${2:-}"
+    local raw_appid="${3:-0}"
+    local renderer_mode="${4:-auto}"
+    local prime_active="${5:-0}"
+
+    local clean_appid="${raw_appid//[!0-9]/}"
+    [ -z "$clean_appid" ] && clean_appid="0"
+
+    GAMECTL_WIN_PFX_DIR="$gdir/pfx"
+    GAMECTL_WIN_APPID="$clean_appid"
+    if [ "$clean_appid" != "0" ]; then
+        GAMECTL_WIN_UMU_GAMEID="umu-${clean_appid}"
+    else
+        GAMECTL_WIN_UMU_GAMEID="umu-default"
+    fi
+    GAMECTL_WIN_STEAM_ROOT="${STEAM_CLIENT_INSTALL_PATH:-$(get_steam_root 2>/dev/null || echo "$HOME/.local/share/Steam")}"
+
+    case "$runner_bin" in
+        umu-run|*/umu-run) GAMECTL_WIN_RUNNER_KIND="umu" ;;
+        *proton*)          GAMECTL_WIN_RUNNER_KIND="proton" ;;
+        *)                 GAMECTL_WIN_RUNNER_KIND="wine" ;;
+    esac
+
+    local eff_renderer="${GAMECTL_ACTIVE_RENDERER:-}"
+    if [ -z "$eff_renderer" ]; then
+        if [ -n "${PROTON_USE_WINED3D:-}" ]; then
+            [ "$PROTON_USE_WINED3D" = "1" ] && eff_renderer="wined3d" || eff_renderer="dxvk"
+        elif type resolve_graphics_renderer >/dev/null 2>&1; then
+            eff_renderer="$(resolve_graphics_renderer "$renderer_mode" "$prime_active")"
+        else
+            eff_renderer="dxvk"
+        fi
+    fi
+    GAMECTL_WIN_RENDERER="$eff_renderer"
+    if [ "$eff_renderer" = "wined3d" ]; then
+        GAMECTL_WIN_PROTON_WINED3D="1"
+    else
+        GAMECTL_WIN_PROTON_WINED3D="0"
+    fi
+
+    if [ "$clean_appid" = "0" ] && [ -z "${PROTONFIXES_DISABLE+x}" ]; then
+        GAMECTL_WIN_DISABLE_PROTONFIXES="1"
+    else
+        GAMECTL_WIN_DISABLE_PROTONFIXES=""
+    fi
+}
+
 # Wine Prefix Swiss Army Knife & Wineserver Lifecycle Guard (Chunk 4)
 manage_prefix() {
     local game_dir="${1:-}"
@@ -566,12 +616,9 @@ manage_prefix() {
     runner_bin="$(find_runner "$game_dir" 2>/dev/null || true)"
     [ -z "$runner_bin" ] && runner_bin="wine"
 
-    # AppID resolution
-    local appid="0"
-    if [ -f "$game_dir/steam_appid.txt" ]; then
-        appid=$(tr -dc '0-9' < "$game_dir/steam_appid.txt")
-        [ -z "$appid" ] && appid="0"
-    fi
+    # AppID resolution (SSoT)
+    local appid
+    appid="$(resolve_game_appid "$game_dir" "0")"
 
     # Wineserver resolution
     local ws_bin
@@ -723,16 +770,24 @@ EOF
             return 0
             ;;
         shell)
+            prepare_windows_runner_env "$runner_bin" "$game_dir" "$appid" "auto" "0"
             echo "[INFO] Spawning interactive bash subshell inside prefix environment: $pfx_dir"
             echo "[INFO] Active environment: WINEPREFIX=$pfx_dir, RUNNER=$runner_bin"
             echo "[INFO] Type 'exit' to return to gamectl."
             (
-                export WINEPREFIX="$pfx_dir"
-                export GAMECTL_RUNNER="$runner_bin"
-                if [[ "$runner_bin" =~ proton ]]; then
-                    export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_INSTALL_PATH:-$(get_steam_root 2>/dev/null || echo "$HOME/.local/share/Steam")}"
-                    export STEAM_COMPAT_DATA_PATH="$game_dir"
-                    export STEAM_COMPAT_APP_ID="$appid"
+                export WINEPREFIX="$GAMECTL_WIN_PFX_DIR" \
+                    GAMECTL_RUNNER="$runner_bin" \
+                    GAMEID="$GAMECTL_WIN_UMU_GAMEID" \
+                    STEAM_COMPAT_APP_ID="$GAMECTL_WIN_APPID" \
+                    SteamAppId="$GAMECTL_WIN_APPID" \
+                    SteamGameId="$GAMECTL_WIN_APPID"
+                if [ "$GAMECTL_WIN_RUNNER_KIND" = "proton" ] || [ "$GAMECTL_WIN_RUNNER_KIND" = "umu" ]; then
+                    export PROTON_USE_WINED3D="$GAMECTL_WIN_PROTON_WINED3D"
+                    [ "$GAMECTL_WIN_DISABLE_PROTONFIXES" = "1" ] && export PROTONFIXES_DISABLE=1
+                fi
+                if [ "$GAMECTL_WIN_RUNNER_KIND" = "proton" ]; then
+                    export STEAM_COMPAT_CLIENT_INSTALL_PATH="$GAMECTL_WIN_STEAM_ROOT" \
+                        STEAM_COMPAT_DATA_PATH="$game_dir"
                     local p_bin_dir
                     p_bin_dir="$(dirname "$runner_bin")/files/bin"
                     [ -d "$p_bin_dir" ] && export PATH="$p_bin_dir:$PATH"
@@ -744,28 +799,35 @@ EOF
             ;;
         winecfg|regedit|cmd)
             mkdir -p "$pfx_dir"
+            prepare_windows_runner_env "$runner_bin" "$game_dir" "$appid" "auto" "0"
             echo "[INFO] Executing $action inside prefix: $pfx_dir (Runner: $runner_bin)..."
             local target_exec="$action"
             [ "$action" = "cmd" ] && target_exec="cmd.exe"
 
-            local s_root
-            s_root="$(get_steam_root 2>/dev/null || echo "$HOME/.local/share/Steam")"
-
-            case "$runner_bin" in
-                umu-run)
-                    WINEPREFIX="$pfx_dir" GAMEID="$appid" umu-run "$target_exec" "$@"
-                    ;;
-                *proton*)
-                    STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_INSTALL_PATH:-$s_root}" \
-                    STEAM_COMPAT_DATA_PATH="$game_dir" \
-                    STEAM_COMPAT_APP_ID="$appid" \
-                    WINEPREFIX="$pfx_dir" \
-                    "$runner_bin" run "$target_exec" "$@"
-                    ;;
-                *)
-                    WINEPREFIX="$pfx_dir" "$runner_bin" "$target_exec" "$@"
-                    ;;
-            esac
+            (
+                export WINEPREFIX="$GAMECTL_WIN_PFX_DIR" \
+                    GAMEID="$GAMECTL_WIN_UMU_GAMEID" \
+                    STEAM_COMPAT_APP_ID="$GAMECTL_WIN_APPID" \
+                    SteamAppId="$GAMECTL_WIN_APPID" \
+                    SteamGameId="$GAMECTL_WIN_APPID"
+                if [ "$GAMECTL_WIN_RUNNER_KIND" = "proton" ] || [ "$GAMECTL_WIN_RUNNER_KIND" = "umu" ]; then
+                    export PROTON_USE_WINED3D="$GAMECTL_WIN_PROTON_WINED3D"
+                    [ "$GAMECTL_WIN_DISABLE_PROTONFIXES" = "1" ] && export PROTONFIXES_DISABLE=1
+                fi
+                case "$GAMECTL_WIN_RUNNER_KIND" in
+                    umu)
+                        "$runner_bin" "$target_exec" "$@"
+                        ;;
+                    proton)
+                        export STEAM_COMPAT_CLIENT_INSTALL_PATH="$GAMECTL_WIN_STEAM_ROOT" \
+                            STEAM_COMPAT_DATA_PATH="$game_dir"
+                        "$runner_bin" run "$target_exec" "$@"
+                        ;;
+                    *)
+                        "$runner_bin" "$target_exec" "$@"
+                        ;;
+                esac
+            )
             ;;
         winetricks)
             if ! command -v winetricks >/dev/null 2>&1; then
@@ -1164,6 +1226,71 @@ build_sandbox_command() {
     return 0
 }
 
+# Canonical wrapper config & env override loader (SSoT)
+load_wrapper_config() {
+    local gdir="${1:-}"
+    local apply_env="${2:-1}"
+
+    GAMECTL_CFG_GM=0
+    GAMECTL_CFG_HUD=0
+    GAMECTL_CFG_SCOPE=0
+    GAMECTL_CFG_FSR=0
+    GAMECTL_CFG_GLTHREAD=0
+    GAMECTL_CFG_SYSTEMD_SCOPE=""
+    GAMECTL_CFG_PRIME=0
+    GAMECTL_CFG_SANDBOX=0
+    GAMECTL_CFG_RENDERER="auto"
+    GAMECTL_CFG_GAMESCOPE_ARGS=""
+
+    local w_cfgs=("$HOME/.config/gamectl/wrappers")
+    [ -n "$gdir" ] && w_cfgs+=("$gdir/.wrappers")
+    local w_cfg k v
+    for w_cfg in "${w_cfgs[@]}"; do
+        [ -f "$w_cfg" ] || continue
+        while IFS='=' read -r k v || [ -n "$k" ]; do
+            k="${k//[[:space:]]/}"
+            [[ -z "$k" || "$k" =~ ^# ]] && continue
+            v="${v//$'\r'/}"
+            v="${v#"${v%%[![:space:]]*}"}"
+            v="${v%"${v##*[![:space:]]}"}"
+            v="${v#\"}"
+            v="${v%\"}"
+            v="${v#\'}"
+            v="${v%\'}"
+            case "$k" in
+                gamemode) GAMECTL_CFG_GM="$v" ;;
+                hud|mangohud) GAMECTL_CFG_HUD="$v" ;;
+                gamescope) GAMECTL_CFG_SCOPE="$v" ;;
+                fsr) GAMECTL_CFG_FSR="$v" ;;
+                glthread|mesa_glthread) GAMECTL_CFG_GLTHREAD="$v" ;;
+                scope|systemd_scope) GAMECTL_CFG_SYSTEMD_SCOPE="$v" ;;
+                prime|dgpu) GAMECTL_CFG_PRIME="$v" ;;
+                sandbox) GAMECTL_CFG_SANDBOX="$v" ;;
+                renderer) GAMECTL_CFG_RENDERER="$v" ;;
+                gamescope_args) GAMECTL_CFG_GAMESCOPE_ARGS="$v" ;;
+            esac
+        done < "$w_cfg"
+    done
+
+    if [ "$apply_env" = "1" ]; then
+        [ -n "${GAMECTL_GAMEMODE:-}" ] && GAMECTL_CFG_GM="$GAMECTL_GAMEMODE"
+        [ -n "${GAMECTL_HUD:-${GAMECTL_MANGOHUD:-}}" ] && GAMECTL_CFG_HUD="${GAMECTL_HUD:-$GAMECTL_MANGOHUD}"
+        [ -n "${GAMECTL_GAMESCOPE:-}" ] && GAMECTL_CFG_SCOPE="$GAMECTL_GAMESCOPE"
+        [ -n "${GAMECTL_FSR:-}" ] && GAMECTL_CFG_FSR="$GAMECTL_FSR"
+        [ -n "${GAMECTL_GLTHREAD:-}" ] && GAMECTL_CFG_GLTHREAD="$GAMECTL_GLTHREAD"
+        [ -n "${GAMECTL_SCOPE:-${GAMECTL_SYSTEMD_SCOPE:-}}" ] && GAMECTL_CFG_SYSTEMD_SCOPE="${GAMECTL_SCOPE:-$GAMECTL_SYSTEMD_SCOPE}"
+        [ -n "${GAMECTL_PRIME:-}" ] && GAMECTL_CFG_PRIME="$GAMECTL_PRIME"
+        [ -n "${GAMECTL_SANDBOX:-}" ] && GAMECTL_CFG_SANDBOX="$GAMECTL_SANDBOX"
+        if [ -n "${GAMECTL_RENDERER:-}" ]; then
+            GAMECTL_CFG_RENDERER="$GAMECTL_RENDERER"
+        elif [ -n "${PROTON_USE_WINED3D:-}" ]; then
+            [ "$PROTON_USE_WINED3D" = "1" ] && GAMECTL_CFG_RENDERER="wined3d"
+            [ "$PROTON_USE_WINED3D" = "0" ] && GAMECTL_CFG_RENDERER="dxvk"
+        fi
+        [ -n "${GAMECTL_GAMESCOPE_ARGS:-}" ] && GAMECTL_CFG_GAMESCOPE_ARGS="$GAMECTL_GAMESCOPE_ARGS"
+    fi
+}
+
 # Resolve and build wrapper prefix command array (gamemoderun, mangohud, gamescope)
 build_wrapper_command() {
     local gdir="$1"
@@ -1199,56 +1326,19 @@ build_wrapper_command() {
         esac
     done
 
-    # 1. Base defaults
-    local use_gm=0 use_hud=0 use_scope=0 use_fsr=0 use_glthread=0 use_systemd_scope="" use_prime=0 use_sandbox=0 use_renderer="auto"
-    local gscope_args
-    gscope_args=$(get_default_gamescope_args)
-
-    # 2. Config file hierarchy: Global (~/.config/gamectl/wrappers) -> Per-game override ($gdir/.wrappers)
-    local w_cfgs=("$HOME/.config/gamectl/wrappers")
-    [ -n "$gdir" ] && w_cfgs+=("$gdir/.wrappers")
-    local w_cfg
-    for w_cfg in "${w_cfgs[@]}"; do
-        if [ -f "$w_cfg" ]; then
-            while IFS='=' read -r k v || [ -n "$k" ]; do
-                k="${k//[[:space:]]/}"
-                v="${v#"${v%%[![:space:]]*}"}"
-                v="${v%"${v##*[![:space:]]}"}"
-                v="${v#\"}"
-                v="${v%\"}"
-                [[ "$k" =~ ^# ]] && continue
-                case "$k" in
-                    gamemode) use_gm="$v" ;;
-                    hud|mangohud) use_hud="$v" ;;
-                    gamescope) use_scope="$v" ;;
-                    fsr) use_fsr="$v" ;;
-                    glthread|mesa_glthread) use_glthread="$v" ;;
-                    scope|systemd_scope) use_systemd_scope="$v" ;;
-                    prime|dgpu) use_prime="$v" ;;
-                    sandbox) use_sandbox="$v" ;;
-                    renderer) use_renderer="$v" ;;
-                    gamescope_args) gscope_args="$v" ;;
-                esac
-            done < "$w_cfg"
-        fi
-    done
-
-    # 4. Environment variable overrides
-    [ -n "${GAMECTL_GAMEMODE:-}" ] && use_gm="$GAMECTL_GAMEMODE"
-    [ -n "${GAMECTL_HUD:-${GAMECTL_MANGOHUD:-}}" ] && use_hud="${GAMECTL_HUD:-$GAMECTL_MANGOHUD}"
-    [ -n "${GAMECTL_GAMESCOPE:-}" ] && use_scope="$GAMECTL_GAMESCOPE"
-    [ -n "${GAMECTL_FSR:-}" ] && use_fsr="$GAMECTL_FSR"
-    [ -n "${GAMECTL_GLTHREAD:-}" ] && use_glthread="$GAMECTL_GLTHREAD"
-    [ -n "${GAMECTL_SCOPE:-${GAMECTL_SYSTEMD_SCOPE:-}}" ] && use_systemd_scope="${GAMECTL_SCOPE:-$GAMECTL_SYSTEMD_SCOPE}"
-    [ -n "${GAMECTL_PRIME:-}" ] && use_prime="$GAMECTL_PRIME"
-    [ -n "${GAMECTL_SANDBOX:-}" ] && use_sandbox="$GAMECTL_SANDBOX"
-    if [ -n "${GAMECTL_RENDERER:-}" ]; then
-        use_renderer="$GAMECTL_RENDERER"
-    elif [ -n "${PROTON_USE_WINED3D:-}" ]; then
-        [ "$PROTON_USE_WINED3D" = "1" ] && use_renderer="wined3d"
-        [ "$PROTON_USE_WINED3D" = "0" ] && use_renderer="dxvk"
-    fi
-    [ -n "${GAMECTL_GAMESCOPE_ARGS:-}" ] && gscope_args="$GAMECTL_GAMESCOPE_ARGS"
+    # 1. Load config hierarchy + env overrides via SSoT
+    load_wrapper_config "$gdir" 1
+    local use_gm="$GAMECTL_CFG_GM"
+    local use_hud="$GAMECTL_CFG_HUD"
+    local use_scope="$GAMECTL_CFG_SCOPE"
+    local use_fsr="$GAMECTL_CFG_FSR"
+    local use_glthread="$GAMECTL_CFG_GLTHREAD"
+    local use_systemd_scope="$GAMECTL_CFG_SYSTEMD_SCOPE"
+    local use_prime="$GAMECTL_CFG_PRIME"
+    local use_sandbox="$GAMECTL_CFG_SANDBOX"
+    local use_renderer="$GAMECTL_CFG_RENDERER"
+    local gscope_args="${GAMECTL_CFG_GAMESCOPE_ARGS:-}"
+    [ -z "$gscope_args" ] && gscope_args=$(get_default_gamescope_args)
 
     # 5. CLI flag overrides
     [ -n "$opt_gamemode" ] && use_gm="$opt_gamemode"
@@ -1349,40 +1439,11 @@ configure_wrappers() {
         w_file="$HOME/.config/gamectl/wrappers"
     fi
 
-    local gm=0 hud=0 scope=0 fsr=0 glt=0 renderer="auto"
-    local gscope_args
-    gscope_args=$(get_default_gamescope_args)
-    if [ -f "$HOME/.config/gamectl/wrappers" ]; then
-        grep -q "^gamemode=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && gm=1
-        grep -q -E "^(hud|mangohud)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && hud=1
-        grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && scope=1
-        grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && fsr=1
-        grep -q -E "^(glthread|mesa_glthread)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && glt=1
-        local g_rend
-        g_rend=$(grep -E '^[[:space:]]*renderer[[:space:]]*=' "$HOME/.config/gamectl/wrappers" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*renderer[[:space:]]*=[[:space:]]*//' | tr -d '[:space:]\r')
-        [ -n "$g_rend" ] && renderer="$g_rend"
-        local g_custom
-        g_custom=$(grep -E '^[[:space:]]*gamescope_args[[:space:]]*=' "$HOME/.config/gamectl/wrappers" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*gamescope_args[[:space:]]*=[[:space:]]*//' | tr -d '\r')
-        [ -n "$g_custom" ] && gscope_args="$g_custom"
-    fi
-    if [ -f "$w_file" ]; then
-        grep -q "^gamemode=1" "$w_file" 2>/dev/null && gm=1
-        grep -q "^gamemode=0" "$w_file" 2>/dev/null && gm=0
-        grep -q -E "^(hud|mangohud)=1" "$w_file" 2>/dev/null && hud=1
-        grep -q -E "^(hud|mangohud)=0" "$w_file" 2>/dev/null && hud=0
-        grep -q "^gamescope=1" "$w_file" 2>/dev/null && scope=1
-        grep -q "^gamescope=0" "$w_file" 2>/dev/null && scope=0
-        grep -q "^fsr=1" "$w_file" 2>/dev/null && fsr=1
-        grep -q "^fsr=0" "$w_file" 2>/dev/null && fsr=0
-        grep -q -E "^(glthread|mesa_glthread)=1" "$w_file" 2>/dev/null && glt=1
-        grep -q -E "^(glthread|mesa_glthread)=0" "$w_file" 2>/dev/null && glt=0
-        local w_rend
-        w_rend=$(grep -E '^[[:space:]]*renderer[[:space:]]*=' "$w_file" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*renderer[[:space:]]*=[[:space:]]*//' | tr -d '[:space:]\r')
-        [ -n "$w_rend" ] && renderer="$w_rend"
-        local w_custom
-        w_custom=$(grep -E '^[[:space:]]*gamescope_args[[:space:]]*=' "$w_file" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*gamescope_args[[:space:]]*=[[:space:]]*//' | tr -d '\r')
-        [ -n "$w_custom" ] && gscope_args="$w_custom"
-    fi
+    load_wrapper_config "${gdir:-}" 0
+    local gm="$GAMECTL_CFG_GM" hud="$GAMECTL_CFG_HUD" scope="$GAMECTL_CFG_SCOPE"
+    local fsr="$GAMECTL_CFG_FSR" glt="$GAMECTL_CFG_GLTHREAD" renderer="${GAMECTL_CFG_RENDERER:-auto}"
+    local gscope_args="${GAMECTL_CFG_GAMESCOPE_ARGS:-}"
+    [ -z "$gscope_args" ] && gscope_args=$(get_default_gamescope_args)
 
     while true; do
         local b_gm="${UI_DIM}[OFF]${UI_RST}" b_hud="${UI_DIM}[OFF]${UI_RST}"

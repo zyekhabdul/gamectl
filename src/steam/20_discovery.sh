@@ -257,18 +257,8 @@ scan_installed_games() {
                 gbin=$(find_game_binary "$gdir") || continue
                 [ -z "$gbin" ] && continue
 
-                local appid="STANDALONE"
-                if [ -f "$gdir/steam_appid.txt" ]; then
-                    local raw_id=""
-                    read -r raw_id < "$gdir/steam_appid.txt" 2>/dev/null || true
-                    appid="${raw_id//[!0-9]/}"
-                    [ -z "$appid" ] && appid="STANDALONE"
-                elif [ -f "$gdir/.gamectl_appid" ]; then
-                    local raw_id=""
-                    read -r raw_id < "$gdir/.gamectl_appid" 2>/dev/null || true
-                    appid="${raw_id//[!0-9]/}"
-                    [ -z "$appid" ] && appid="STANDALONE"
-                fi
+                local appid
+                appid="$(resolve_game_appid "$gdir" "STANDALONE")"
 
                 # AppID collision precedence: skip duplicate if already discovered in Steam library
                 if [ "$appid" != "STANDALONE" ] && [[ -v seen_appids["$appid"] ]]; then
@@ -472,11 +462,7 @@ fetch_steam_artwork() {
 
     # Resolve AppID from directory if not explicitly provided
     if [ -z "$appid" ] && [ -n "$game_dir" ]; then
-        if [ -f "$game_dir/steam_appid.txt" ]; then
-            appid=$(grep -oE '^[0-9]+' "$game_dir/steam_appid.txt" 2>/dev/null | head -n 1 || true)
-        elif [ -f "$game_dir/steam_settings/steam_appid.txt" ]; then
-            appid=$(grep -oE '^[0-9]+' "$game_dir/steam_settings/steam_appid.txt" 2>/dev/null | head -n 1 || true)
-        fi
+        appid="$(resolve_game_appid "$game_dir")"
     fi
 
     if [ -z "$appid" ]; then

@@ -302,9 +302,7 @@ query_protondb() {
     if [[ "$target" =~ ^[0-9]+$ ]]; then
         appid="$target"
     elif [ -d "$target" ]; then
-        if [ -f "$target/steam_appid.txt" ]; then
-            appid=$(tr -dc '0-9' < "$target/steam_appid.txt")
-        fi
+        appid="$(resolve_game_appid "$target")"
         if [ -z "$appid" ]; then
             local base_dir
             base_dir="$(basename "$target")"

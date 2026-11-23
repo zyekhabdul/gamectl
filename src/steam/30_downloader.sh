@@ -63,9 +63,7 @@ fetch_dlc() {
 
     # Resolve AppID if not provided
     if [ -z "$appid" ]; then
-        if [ -f "$target_dir/steam_appid.txt" ]; then
-            appid=$(tr -dc '0-9' < "$target_dir/steam_appid.txt")
-        fi
+        appid="$(resolve_game_appid "$target_dir")"
     fi
 
     if [ -z "$appid" ] || [ "$appid" = "STANDALONE" ]; then
@@ -2436,9 +2434,8 @@ preview_adopt_candidate() {
     if [ -z "$found_dir" ] && [ -d "$HOME/Games" ]; then
         for cand in "$HOME/Games"/*; do
             [ -d "$cand" ] || continue
-            local c_aid=""
-            [ -f "$cand/steam_appid.txt" ] && c_aid=$(cat "$cand/steam_appid.txt" 2>/dev/null | tr -cd "0-9")
-            [ -z "$c_aid" ] && [ -f "$cand/.gamectl_appid" ] && c_aid=$(cat "$cand/.gamectl_appid" 2>/dev/null | tr -cd "0-9")
+            local c_aid
+            c_aid="$(resolve_game_appid "$cand")"
             if [ -n "$c_aid" ] && [ "$c_aid" = "$appid" ]; then
                 found_dir="$cand"
                 found_source="Physical ~/Games (AppID match)"

@@ -1171,6 +1171,50 @@ inspect_game_log_hint() {
     return 0
 }
 
+# Canonical SSoT AppID resolver across standalone & Steam game directories
+resolve_game_appid() {
+    local gdir="${1:-}"
+    local default_val="${2:-}"
+    if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
+        [ -n "$default_val" ] && echo "$default_val"
+        return 0
+    fi
+
+    local cand line digits
+    for cand in "$gdir/steam_appid.txt" "$gdir/steam_settings/steam_appid.txt" "$gdir/.gamectl_appid"; do
+        [ -f "$cand" ] || continue
+        while IFS= read -r line || [ -n "$line" ]; do
+            digits="${line//[!0-9]/}"
+            if [ -n "$digits" ]; then
+                echo "$digits"
+                return 0
+            fi
+        done < "$cand" 2>/dev/null
+    done
+
+    [ -n "$default_val" ] && echo "$default_val"
+    return 0
+}
+
+# Canonical collision-free runtime log path resolver per game directory + executable
+get_game_log_file() {
+    local gdir="${1:-}"
+    local gbin="${2:-game}"
+    local run_dir safe_gbin
+    run_dir="$(get_runtime_dir)"
+    safe_gbin=$(basename "${gbin:-game}" 2>/dev/null | tr -cd '[:alnum:]_-')
+    [ -z "$safe_gbin" ] && safe_gbin="game"
+
+    if [ -n "$gdir" ]; then
+        local base_slug path_id
+        base_slug=$(basename "$gdir" 2>/dev/null | tr -cd '[:alnum:]_-')
+        path_id=$(printf '%s' "$gdir" | cksum | awk '{print $1}')
+        echo "$run_dir/game_${base_slug:+${base_slug}_}${path_id}_${safe_gbin}.log"
+    else
+        echo "$run_dir/game_${safe_gbin}.log"
+    fi
+}
+
 # Detect SteamStub DRM wrapper in Linux ELF (.bind section) or Windows PE
 detect_steamstub_drm() {
     local bin_path="$1"
