@@ -463,6 +463,49 @@ test_watchdog_fd_and_layer_isolation_contract() {
 }
 run_test "Stability (Audit 2 & 3): watchdog FD isolation & engine vs FZF error decoupling" test_watchdog_fd_and_layer_isolation_contract
 
+test_graphics_capability_and_renderer_contract() {
+    source "$REPO_ROOT/src/core/00_header.sh"
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/runners/40_wrappers.sh"
+
+    # 1. Host capability probe returns valid canonical token
+    local host_cap
+    host_cap="$(detect_vulkan_capability)"
+    case "$host_cap" in
+        VULKAN_READY|VULKAN_LEGACY|OPENGL_ONLY) ;;
+        *) return 1 ;;
+    esac
+
+    # 2. Capability x mode x prime matrix verification
+    [ "$(GAMECTL_VULKAN_CAPABILITY=VULKAN_READY resolve_graphics_renderer auto 0)" = "dxvk" ] || return 1
+    [ "$(GAMECTL_VULKAN_CAPABILITY=VULKAN_LEGACY resolve_graphics_renderer auto 0)" = "wined3d" ] || return 1
+    [ "$(GAMECTL_VULKAN_CAPABILITY=OPENGL_ONLY resolve_graphics_renderer auto 0)" = "wined3d" ] || return 1
+    [ "$(GAMECTL_VULKAN_CAPABILITY=VULKAN_LEGACY resolve_graphics_renderer auto 1)" = "dxvk" ] || return 1
+    [ "$(GAMECTL_VULKAN_CAPABILITY=VULKAN_LEGACY resolve_graphics_renderer dxvk 0)" = "dxvk" ] || return 1
+    [ "$(GAMECTL_VULKAN_CAPABILITY=VULKAN_READY resolve_graphics_renderer wined3d 0)" = "wined3d" ] || return 1
+
+    # 3. build_wrapper_command CLI flags and per-game .wrappers override
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_rend_XXXXXX")
+    printf 'renderer=wined3d\n' > "$t_dir/.wrappers"
+
+    HOME="$t_dir" GAMECTL_VULKAN_CAPABILITY=VULKAN_READY build_wrapper_command "$t_dir"
+    [ "$GAMECTL_ACTIVE_RENDERER" = "wined3d" ] || { rm -rf "$t_dir"; return 1; }
+
+    HOME="$t_dir" GAMECTL_VULKAN_CAPABILITY=VULKAN_READY build_wrapper_command "$t_dir" --dxvk
+    [ "$GAMECTL_ACTIVE_RENDERER" = "dxvk" ] || { rm -rf "$t_dir"; return 1; }
+
+    HOME="$t_dir" GAMECTL_VULKAN_CAPABILITY=VULKAN_READY build_wrapper_command "$t_dir" --wined3d
+    [ "$GAMECTL_ACTIVE_RENDERER" = "wined3d" ] || { rm -rf "$t_dir"; return 1; }
+
+    HOME="$t_dir" GAMECTL_VULKAN_CAPABILITY=VULKAN_READY build_wrapper_command "$t_dir" --renderer=dxvk
+    [ "$GAMECTL_ACTIVE_RENDERER" = "dxvk" ] || { rm -rf "$t_dir"; return 1; }
+
+    rm -rf "$t_dir"
+    return 0
+}
+run_test "Graphics SSoT (WP30 Packet A): detect_vulkan_capability & resolve_graphics_renderer contract" test_graphics_capability_and_renderer_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"

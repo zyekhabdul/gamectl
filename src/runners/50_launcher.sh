@@ -616,6 +616,24 @@ launch_game() {
         fi
         [ -z "$appid" ] && appid="0"
 
+        local active_renderer="${GAMECTL_ACTIVE_RENDERER:-}"
+        if [ -z "$active_renderer" ]; then
+            if [ -n "${PROTON_USE_WINED3D:-}" ]; then
+                [ "$PROTON_USE_WINED3D" = "1" ] && active_renderer="wined3d" || active_renderer="dxvk"
+            elif type resolve_graphics_renderer >/dev/null 2>&1; then
+                active_renderer="$(resolve_graphics_renderer "${GAMECTL_RENDERER_MODE:-auto}" "${GAMECTL_ACTIVE_PRIME:-0}")"
+            else
+                active_renderer="dxvk"
+            fi
+        fi
+        local proton_wined3d_val="0"
+        if [ "$active_renderer" = "wined3d" ]; then
+            proton_wined3d_val="1"
+            _launch_echo "[INFO] Graphics Renderer: WineD3D / OpenGL fallback (PROTON_USE_WINED3D=1)."
+        else
+            _launch_echo "[INFO] Graphics Renderer: DXVK / Vulkan (PROTON_USE_WINED3D=0)."
+        fi
+
         run_type="Windows ($(basename "$runner_bin"))"
         _launch_echo "[INFO] Launching Windows game via $(basename "$runner_bin") in background..."
         _launch_echo "[INFO] Isolated Wine Prefix: $pfx_dir"
@@ -624,7 +642,7 @@ launch_game() {
         case "$runner_bin" in
             umu-run)
                 (
-                    export WINEPREFIX="$pfx_dir" GAMEID="$appid" WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}"
+                    export WINEPREFIX="$pfx_dir" GAMEID="$appid" WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" PROTON_USE_WINED3D="$proton_wined3d_val"
                     _exec_in_scope "${wrappers[@]}" umu-run "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
@@ -635,7 +653,8 @@ launch_game() {
                     STEAM_COMPAT_DATA_PATH="$gdir" \
                     STEAM_COMPAT_APP_ID="$appid" \
                     WINEPREFIX="$pfx_dir" \
-                    WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}"
+                    WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
+                    PROTON_USE_WINED3D="$proton_wined3d_val"
                     _exec_in_scope "${wrappers[@]}" "$runner_bin" waitforexitandrun "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!

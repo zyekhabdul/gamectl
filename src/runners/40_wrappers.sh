@@ -800,6 +800,145 @@ is_haswell_gpu() {
     return 1
 }
 
+# Canonical 2-tier host Vulkan capability probe (zero hardcode vendor dependency)
+# Outputs: VULKAN_READY | VULKAN_LEGACY | OPENGL_ONLY
+detect_vulkan_capability() {
+    if [ -n "${GAMECTL_VULKAN_CAPABILITY:-}" ]; then
+        echo "$GAMECTL_VULKAN_CAPABILITY"
+        return 0
+    fi
+
+    # Tier 1: Runtime probe via vulkaninfo --summary when available
+    if command -v vulkaninfo >/dev/null 2>&1; then
+        local v_sum
+        v_sum=$(vulkaninfo --summary 2>/dev/null || true)
+        if [ -n "$v_sum" ]; then
+            if ! echo "$v_sum" | grep -q -E "PHYSICAL_DEVICE_TYPE_(DISCRETE|INTEGRATED)_GPU"; then
+                echo "OPENGL_ONLY"
+                return 0
+            fi
+            local max_ver="0.0" line
+            while IFS= read -r line; do
+                if [[ "$line" =~ ([0-9]+)\.([0-9]+)\.[0-9]+ ]]; then
+                    local cand="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+                    local cur_maj="${max_ver%%.*}" cur_min="${max_ver#*.}"
+                    local new_maj="${BASH_REMATCH[1]}" new_min="${BASH_REMATCH[2]}"
+                    if [ "$new_maj" -gt "$cur_maj" ] || { [ "$new_maj" -eq "$cur_maj" ] && [ "$new_min" -gt "$cur_min" ]; }; then
+                        max_ver="$cand"
+                    fi
+                fi
+            done <<< "$(echo "$v_sum" | grep "apiVersion" || true)"
+
+            local maj="${max_ver%%.*}" min="${max_ver#*.}"
+            if [ "$maj" -gt 1 ] || { [ "$maj" -eq 1 ] && [ "$min" -ge 3 ]; }; then
+                if is_haswell_gpu && [ "$(detect_dgpu_vendor 2>/dev/null || echo none)" = "none" ]; then
+                    echo "VULKAN_LEGACY"
+                else
+                    echo "VULKAN_READY"
+                fi
+                return 0
+            elif [ "$maj" -eq 1 ] && [ "$min" -ge 1 ]; then
+                echo "VULKAN_LEGACY"
+                return 0
+            else
+                echo "OPENGL_ONLY"
+                return 0
+            fi
+        fi
+    fi
+
+    # Tier 2: Kernel DRM driver & Vulkan ICD manifest inspection
+    local icd_files=() icd
+    for icd in /usr/share/vulkan/icd.d/*.json /etc/vulkan/icd.d/*.json; do
+        [ -f "$icd" ] && icd_files+=("$icd")
+    done
+    if [ ${#icd_files[@]} -eq 0 ]; then
+        echo "OPENGL_ONLY"
+        return 0
+    fi
+
+    local has_hw_icd=0 has_modern_icd=0
+    for icd in "${icd_files[@]}"; do
+        local bname
+        bname="$(basename "$icd")"
+        case "$bname" in
+            *lvp*|*swiftshader*|*virtio*) ;;
+            *hasvk*) has_hw_icd=1 ;;
+            *) has_hw_icd=1; has_modern_icd=1 ;;
+        esac
+    done
+    if [ "$has_hw_icd" -eq 0 ]; then
+        echo "OPENGL_ONLY"
+        return 0
+    fi
+
+    local dgpu_vend="none"
+    type detect_dgpu_vendor >/dev/null 2>&1 && dgpu_vend="$(detect_dgpu_vendor 2>/dev/null || echo none)"
+    if [ "$dgpu_vend" = "none" ]; then
+        if is_haswell_gpu; then
+            echo "VULKAN_LEGACY"
+            return 0
+        fi
+        local pci_vga=""
+        command -v lspci >/dev/null 2>&1 && pci_vga=$(lspci 2>/dev/null | grep -E "VGA|3D" || true)
+        if echo "$pci_vga" | grep -qi -E "Ivy Bridge|3rd Gen Core|HD Graphics 2500|HD Graphics 4000"; then
+            echo "VULKAN_LEGACY"
+            return 0
+        fi
+        local has_modern_drv=0 has_legacy_drv=0 drv_link drv_name
+        for drv_link in /sys/class/drm/card[0-9]*/device/driver; do
+            [ -L "$drv_link" ] || continue
+            drv_name="$(basename "$(readlink -f "$drv_link" 2>/dev/null)" 2>/dev/null || true)"
+            case "$drv_name" in
+                amdgpu|nvidia|xe|i915) has_modern_drv=1 ;;
+                radeon|nouveau|vmwgfx|virtio-pci|bochs-drm|qxl|vboxvideo) has_legacy_drv=1 ;;
+            esac
+        done
+        if [ "$has_modern_drv" -eq 0 ] && [ "$has_legacy_drv" -eq 1 ]; then
+            echo "VULKAN_LEGACY"
+            return 0
+        fi
+    fi
+
+    if [ "$has_modern_icd" -eq 1 ]; then
+        echo "VULKAN_READY"
+    else
+        echo "VULKAN_LEGACY"
+    fi
+    return 0
+}
+
+# Resolve effective graphics renderer (dxvk | wined3d) from mode + host capability
+resolve_graphics_renderer() {
+    local mode="${1:-auto}"
+    local prime_active="${2:-0}"
+    mode="${mode,,}"
+
+    case "$mode" in
+        wined3d|opengl|gl)
+            echo "wined3d"
+            ;;
+        dxvk|vulkan|vk)
+            echo "dxvk"
+            ;;
+        auto|"")
+            if [ "$prime_active" = "1" ]; then
+                echo "dxvk"
+            else
+                local cap
+                cap="$(detect_vulkan_capability)"
+                case "$cap" in
+                    VULKAN_READY) echo "dxvk" ;;
+                    *)            echo "wined3d" ;;
+                esac
+            fi
+            ;;
+        *)
+            echo "dxvk"
+            ;;
+    esac
+}
+
 # Dynamically detect host native display resolution via DRM / Wayland / X11
 get_native_resolution() {
     local res=""
@@ -988,7 +1127,7 @@ build_sandbox_command() {
 build_wrapper_command() {
     local gdir="$1"
     shift || true
-    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr="" opt_systemd_scope="" opt_prime="" opt_sandbox="" opt_allow_unshielded=""
+    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr="" opt_systemd_scope="" opt_prime="" opt_sandbox="" opt_allow_unshielded="" opt_renderer=""
     local remaining_args=()
 
     while [ $# -gt 0 ]; do
@@ -1009,6 +1148,10 @@ build_wrapper_command() {
             --no-prime) opt_prime=0; shift ;;
             --sandbox) opt_sandbox=1; shift ;;
             --no-sandbox) opt_sandbox=0; shift ;;
+            --wined3d|--opengl) opt_renderer="wined3d"; shift ;;
+            --dxvk|--vulkan) opt_renderer="dxvk"; shift ;;
+            --renderer) opt_renderer="${2:-auto}"; shift 2 ;;
+            --renderer=*) opt_renderer="${1#*=}"; shift ;;
             --allow-unshielded) opt_allow_unshielded=1; shift ;;
             --) shift; remaining_args+=("$@"); break ;;
             *) remaining_args+=("$1"); shift ;;
@@ -1016,7 +1159,7 @@ build_wrapper_command() {
     done
 
     # 1. Base defaults
-    local use_gm=0 use_hud=0 use_scope=0 use_fsr=0 use_glthread=0 use_systemd_scope="" use_prime=0 use_sandbox=0
+    local use_gm=0 use_hud=0 use_scope=0 use_fsr=0 use_glthread=0 use_systemd_scope="" use_prime=0 use_sandbox=0 use_renderer="auto"
     local gscope_args
     gscope_args=$(get_default_gamescope_args)
 
@@ -1042,6 +1185,7 @@ build_wrapper_command() {
                     scope|systemd_scope) use_systemd_scope="$v" ;;
                     prime|dgpu) use_prime="$v" ;;
                     sandbox) use_sandbox="$v" ;;
+                    renderer) use_renderer="$v" ;;
                     gamescope_args) gscope_args="$v" ;;
                 esac
             done < "$w_cfg"
@@ -1057,6 +1201,12 @@ build_wrapper_command() {
     [ -n "${GAMECTL_SCOPE:-${GAMECTL_SYSTEMD_SCOPE:-}}" ] && use_systemd_scope="${GAMECTL_SCOPE:-$GAMECTL_SYSTEMD_SCOPE}"
     [ -n "${GAMECTL_PRIME:-}" ] && use_prime="$GAMECTL_PRIME"
     [ -n "${GAMECTL_SANDBOX:-}" ] && use_sandbox="$GAMECTL_SANDBOX"
+    if [ -n "${GAMECTL_RENDERER:-}" ]; then
+        use_renderer="$GAMECTL_RENDERER"
+    elif [ -n "${PROTON_USE_WINED3D:-}" ]; then
+        [ "$PROTON_USE_WINED3D" = "1" ] && use_renderer="wined3d"
+        [ "$PROTON_USE_WINED3D" = "0" ] && use_renderer="dxvk"
+    fi
     [ -n "${GAMECTL_GAMESCOPE_ARGS:-}" ] && gscope_args="$GAMECTL_GAMESCOPE_ARGS"
 
     # 5. CLI flag overrides
@@ -1068,6 +1218,7 @@ build_wrapper_command() {
     [ -n "${opt_systemd_scope:-}" ] && use_systemd_scope="$opt_systemd_scope"
     [ -n "$opt_prime" ] && use_prime="$opt_prime"
     [ -n "$opt_sandbox" ] && use_sandbox="$opt_sandbox"
+    [ -n "$opt_renderer" ] && use_renderer="$opt_renderer"
 
     if [ -z "${use_systemd_scope:-}" ]; then
         if check_systemd_scope_support; then
@@ -1090,6 +1241,10 @@ build_wrapper_command() {
         build_sandbox_command "$gdir" || use_sandbox=0
     fi
 
+    local resolved_renderer
+    resolved_renderer="$(resolve_graphics_renderer "$use_renderer" "$use_prime")"
+    GAMECTL_RENDERER_MODE="$use_renderer"
+    GAMECTL_ACTIVE_RENDERER="$resolved_renderer"
     GAMECTL_ACTIVE_GLTHREAD="$use_glthread"
     GAMECTL_ACTIVE_SYSTEMD_SCOPE="$use_systemd_scope"
     GAMECTL_ACTIVE_PRIME="$use_prime"
@@ -1153,7 +1308,7 @@ configure_wrappers() {
         w_file="$HOME/.config/gamectl/wrappers"
     fi
 
-    local gm=0 hud=0 scope=0 fsr=0 glt=0
+    local gm=0 hud=0 scope=0 fsr=0 glt=0 renderer="auto"
     local gscope_args
     gscope_args=$(get_default_gamescope_args)
     if [ -f "$HOME/.config/gamectl/wrappers" ]; then
@@ -1162,6 +1317,9 @@ configure_wrappers() {
         grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && scope=1
         grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && fsr=1
         grep -q -E "^(glthread|mesa_glthread)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && glt=1
+        local g_rend
+        g_rend=$(grep -E '^[[:space:]]*renderer[[:space:]]*=' "$HOME/.config/gamectl/wrappers" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*renderer[[:space:]]*=[[:space:]]*//' | tr -d '[:space:]\r')
+        [ -n "$g_rend" ] && renderer="$g_rend"
         local g_custom
         g_custom=$(grep -E '^[[:space:]]*gamescope_args[[:space:]]*=' "$HOME/.config/gamectl/wrappers" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*gamescope_args[[:space:]]*=[[:space:]]*//' | tr -d '\r')
         [ -n "$g_custom" ] && gscope_args="$g_custom"
@@ -1177,6 +1335,9 @@ configure_wrappers() {
         grep -q "^fsr=0" "$w_file" 2>/dev/null && fsr=0
         grep -q -E "^(glthread|mesa_glthread)=1" "$w_file" 2>/dev/null && glt=1
         grep -q -E "^(glthread|mesa_glthread)=0" "$w_file" 2>/dev/null && glt=0
+        local w_rend
+        w_rend=$(grep -E '^[[:space:]]*renderer[[:space:]]*=' "$w_file" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*renderer[[:space:]]*=[[:space:]]*//' | tr -d '[:space:]\r')
+        [ -n "$w_rend" ] && renderer="$w_rend"
         local w_custom
         w_custom=$(grep -E '^[[:space:]]*gamescope_args[[:space:]]*=' "$w_file" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*gamescope_args[[:space:]]*=[[:space:]]*//' | tr -d '\r')
         [ -n "$w_custom" ] && gscope_args="$w_custom"
@@ -1190,6 +1351,14 @@ configure_wrappers() {
         [ "$scope" = 1 ] && b_scope="${UI_GREEN}[ACTIVE]${UI_RST}"
         [ "$fsr" = 1 ] && b_fsr="${UI_GREEN}[ACTIVE]${UI_RST}"
         [ "$glt" = 1 ] && b_glt="${UI_GREEN}[ACTIVE]${UI_RST}"
+
+        local eff_rend b_rend
+        eff_rend="$(resolve_graphics_renderer "$renderer" 0)"
+        case "$renderer" in
+            wined3d) b_rend="${UI_AMBER}[WINED3D]${UI_RST}" ;;
+            dxvk)    b_rend="${UI_CYAN}[DXVK]${UI_RST}" ;;
+            *)       b_rend="${UI_GREEN}[AUTO -> ${eff_rend^^}]${UI_RST}" ;;
+        esac
 
         local h_gm="${UI_DIM}[N/A]${UI_RST}" h_hud="${UI_DIM}[N/A]${UI_RST}" h_scope="${UI_DIM}[N/A]${UI_RST}"
         command -v gamemoderun >/dev/null 2>&1 && h_gm="${UI_GREEN}[READY]${UI_RST}"
@@ -1206,9 +1375,10 @@ configure_wrappers() {
 3	Gamescope (Isolated Window)	$b_scope
 4	Gamescope FSR Upscaling	$b_fsr
 5	Mesa GL Threading (mesa_gl)	$b_glt $glt_hint
+r	Graphics Renderer (DXVK/WineD3D)	$b_rend
 6	Preset: Balanced Performance	GameMode + MangoHud
 7	Preset: Handheld / FSR	GameMode + MangoHud + Gamescope FSR
-8	Reset: Safe Defaults	All Disabled
+8	Reset: Safe Defaults	All Disabled (Renderer: Auto)
 9	Save & Return	Save configuration
 0	Cancel / Discard Changes	Discard changes and return
 EOF
@@ -1241,9 +1411,16 @@ EOF
             3) scope=$((1 - scope)) ;;
             4) fsr=$((1 - fsr)); [ "$fsr" = 1 ] && scope=1 ;;
             5) glt=$((1 - glt)) ;;
+            r|R)
+                case "$renderer" in
+                    auto|"") renderer="wined3d" ;;
+                    wined3d) renderer="dxvk" ;;
+                    *)       renderer="auto" ;;
+                esac
+                ;;
             6) gm=1; hud=1; scope=0; fsr=0; glt=0 ;;
             7) gm=1; hud=1; scope=1; fsr=1; glt=0 ;;
-            8) gm=0; hud=0; scope=0; fsr=0; glt=0 ;;
+            8) gm=0; hud=0; scope=0; fsr=0; glt=0; renderer="auto" ;;
             9)
                 cat <<EOF > "$w_file"
 # Runtime wrappers for $title
@@ -1252,9 +1429,10 @@ hud=$hud
 gamescope=$scope
 fsr=$fsr
 glthread=$glt
+renderer=$renderer
 gamescope_args=$gscope_args
 EOF
-                log_msg "INFO" "WRAPPERS" "Saved wrapper configuration for $title -> $w_file (gm=$gm,hud=$hud,scope=$scope,fsr=$fsr,glt=$glt)"
+                log_msg "INFO" "WRAPPERS" "Saved wrapper configuration for $title -> $w_file (gm=$gm,hud=$hud,scope=$scope,fsr=$fsr,glt=$glt,renderer=$renderer)"
                 break
                 ;;
             0|q|Q|cancel)
