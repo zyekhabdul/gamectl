@@ -677,6 +677,113 @@ EOF
 }
 run_test "Diagnostics & TUI Contract (WP30 Packet C): Vulkan/multilib doctor, log hints & TUI polish" test_doctor_multilib_and_tui_polish_contract
 
+# Test 14: WP31 Packet 31A — Per-Device Vulkan Probe, PCI Uevent Fallback & ldconfig 32-bit Audit
+test_vulkan_per_device_and_multilib_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp31a_XXXXXX")
+    mkdir -p "$t_dir/bin" "$t_dir/pci/dev0" "$t_dir/pci/dev1" "$t_dir/pci/dev2" "$t_dir/home" "$t_dir/runtime"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        export PATH="$t_dir/bin:$PATH"
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/runners/40_wrappers.sh"
+        source "$REPO_ROOT/src/diagnostics/60_doctor.sh"
+
+        unset GAMECTL_VULKAN_CAPABILITY
+
+        # Case 1: llvmpipe Vulkan 1.3 + Hardware GPU Vulkan 1.2 -> VULKAN_LEGACY
+        cat <<'EOF' > "$t_dir/bin/vulkaninfo"
+#!/usr/bin/env bash
+cat <<'OUT'
+Devices:
+========
+GPU0:
+	apiVersion         = 1.2.289 (4202785)
+	deviceType         = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+	deviceName         = Intel(R) HD Graphics 4000
+GPU1:
+	apiVersion         = 1.3.289 (4206881)
+	deviceType         = PHYSICAL_DEVICE_TYPE_CPU
+	deviceName         = llvmpipe (LLVM 18.1.8, 256 bits)
+OUT
+EOF
+        chmod +x "$t_dir/bin/vulkaninfo"
+        [ "$(detect_vulkan_capability)" = "VULKAN_LEGACY" ] || exit 1
+
+        # Case 2: stderr incomplete warning + single integrated GPU 1.3 -> VULKAN_LEGACY
+        cat <<'EOF' > "$t_dir/bin/vulkaninfo"
+#!/usr/bin/env bash
+echo "MESA-INTEL: warning: Haswell Vulkan support is incomplete" >&2
+cat <<'OUT'
+GPU0:
+	apiVersion         = 1.3.255
+	deviceType         = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+	deviceName         = Intel(R) HD Graphics 4600 (HSW GT2)
+OUT
+EOF
+        chmod +x "$t_dir/bin/vulkaninfo"
+        [ "$(detect_vulkan_capability)" = "VULKAN_LEGACY" ] || exit 1
+
+        # Case 3: stderr incomplete on iGPU + discrete GPU 1.3 -> VULKAN_READY
+        cat <<'EOF' > "$t_dir/bin/vulkaninfo"
+#!/usr/bin/env bash
+echo "MESA-INTEL: warning: Haswell Vulkan support is incomplete" >&2
+cat <<'OUT'
+GPU0:
+	apiVersion         = 1.2.289
+	deviceType         = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+	deviceName         = Intel(R) HD Graphics 4600 (HSW GT2)
+GPU1:
+	apiVersion         = 1.3.289
+	deviceType         = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+	deviceName         = AMD Radeon RX 6600
+OUT
+EOF
+        chmod +x "$t_dir/bin/vulkaninfo"
+        [ "$(detect_vulkan_capability)" = "VULKAN_READY" ] || exit 1
+
+        # Case 4: CPU-only Vulkan 1.3 -> OPENGL_ONLY
+        cat <<'EOF' > "$t_dir/bin/vulkaninfo"
+#!/usr/bin/env bash
+cat <<'OUT'
+GPU0:
+	apiVersion         = 1.3.289
+	deviceType         = PHYSICAL_DEVICE_TYPE_CPU
+	deviceName         = llvmpipe
+OUT
+EOF
+        chmod +x "$t_dir/bin/vulkaninfo"
+        [ "$(detect_vulkan_capability)" = "OPENGL_ONLY" ] || exit 1
+
+        # Case 5: is_haswell_gpu via PCI uevent fallback
+        printf 'PCI_CLASS=60000\nPCI_ID=8086:0C04\n' > "$t_dir/pci/dev0/uevent"
+        printf 'PCI_CLASS=30000\nPCI_ID=10DE:2484\n' > "$t_dir/pci/dev1/uevent"
+        ! GAMECTL_PCI_UEVENT_DIR="$t_dir/pci" is_haswell_gpu || exit 1
+        printf 'PCI_CLASS=30000\nPCI_ID=8086:0416\n' > "$t_dir/pci/dev2/uevent"
+        GAMECTL_PCI_UEVENT_DIR="$t_dir/pci" is_haswell_gpu || exit 1
+
+        # Case 6: doctor_audit 32-bit multilib detection via ldconfig -p
+        cat <<'EOF' > "$t_dir/bin/ldconfig"
+#!/usr/bin/env bash
+cat <<'OUT'
+	libGL.so.1 (libc6,x86-64) => /usr/lib/libGL.so.1
+	libGL.so.1 (libc6) => /opt/custom32/libGL.so.1
+OUT
+EOF
+        chmod +x "$t_dir/bin/ldconfig"
+        local doc_out
+        doc_out=$(doctor_audit 2>&1 || true)
+        echo "$doc_out" | grep -q "Multilib 32-bit" || exit 1
+        echo "$doc_out" | grep -q "Multilib 32-bit:.*\[READY\]" || exit 1
+        echo "$doc_out" | grep -q "/opt/custom32/libGL.so.1" || exit 1
+    )
+}
+run_test "Hardware Probe (WP31 Packet 31A): per-device vulkaninfo, PCI uevent & ldconfig 32-bit audit" test_vulkan_per_device_and_multilib_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"

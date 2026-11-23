@@ -787,15 +787,21 @@ EOF
 
 # Check if host GPU is Intel Haswell / 4th Gen Core (prone to Mesa GL threaded asset decompression crashes)
 is_haswell_gpu() {
-    local gpu_info=""
-    if command -v lspci >/dev/null 2>&1; then
+    local pci_dir="${GAMECTL_PCI_UEVENT_DIR:-/sys/bus/pci/devices}"
+    if [ -z "${GAMECTL_PCI_UEVENT_DIR:-}" ] && command -v lspci >/dev/null 2>&1; then
+        local gpu_info
         gpu_info=$(lspci 2>/dev/null | grep -E "VGA|3D" || true)
+        if echo "$gpu_info" | grep -qi -E "Haswell|4th Gen Core"; then
+            return 0
+        fi
     fi
-    if [ -z "$gpu_info" ] && [ -d /sys/bus/pci/devices ]; then
-        gpu_info=$(cat /sys/bus/pci/devices/*/uevent 2>/dev/null | grep -E "PCI_ID=" || true)
-    fi
-    if echo "$gpu_info" | grep -qi -E "Haswell|4th Gen Core"; then
-        return 0
+    if [ -d "$pci_dir" ]; then
+        local uev
+        for uev in "$pci_dir"/*/uevent; do
+            [ -f "$uev" ] || continue
+            grep -qiE '^PCI_CLASS=0?3(00|02|80)00' "$uev" 2>/dev/null || continue
+            grep -qiE '^PCI_ID=8086:(04|0a|0d)[0-9a-f]{2}$' "$uev" 2>/dev/null && return 0
+        done
     fi
     return 1
 }
@@ -808,42 +814,77 @@ detect_vulkan_capability() {
         return 0
     fi
 
-    # Tier 1: Runtime probe via vulkaninfo --summary when available
+    # Tier 1: Runtime per-device probe via vulkaninfo --summary when available
     if command -v vulkaninfo >/dev/null 2>&1; then
         local v_sum
-        v_sum=$(vulkaninfo --summary 2>/dev/null || true)
-        if [ -n "$v_sum" ]; then
-            if ! echo "$v_sum" | grep -q -E "PHYSICAL_DEVICE_TYPE_(DISCRETE|INTEGRATED)_GPU"; then
-                echo "OPENGL_ONLY"
+        v_sum=$(vulkaninfo --summary 2>&1 || true)
+        if echo "$v_sum" | grep -q -E '(^|[[:space:]])GPU[0-9]+:|PHYSICAL_DEVICE_TYPE_'; then
+            local vk_tier
+            vk_tier=$(printf '%s\n' "$v_sum" | awk '
+                function flush_gpu(    ver_str, p, maj, min, score) {
+                    if (in_gpu != 1) return
+                    if (cur_type !~ /PHYSICAL_DEVICE_TYPE_(DISCRETE|INTEGRATED)_GPU/) return
+                    if (tolower(cur_name) ~ /(llvmpipe|swiftshader)/) return
+                    hw_count++
+                    if (match(cur_ver, /[0-9]+\.[0-9]+\.[0-9]+/)) {
+                        ver_str = substr(cur_ver, RSTART, RLENGTH)
+                        split(ver_str, p, ".")
+                        maj = p[1] + 0
+                        min = p[2] + 0
+                        score = maj * 1000 + min
+                        if (score > max_score) {
+                            max_score = score
+                            max_maj = maj
+                            max_min = min
+                        }
+                        if (cur_type ~ /PHYSICAL_DEVICE_TYPE_DISCRETE_GPU/ && (maj > 1 || (maj == 1 && min >= 3))) {
+                            has_modern_dgpu = 1
+                        }
+                    }
+                }
+                BEGIN {
+                    in_gpu = 0; hw_count = 0; max_score = -1; max_maj = 0; max_min = 0;
+                    has_modern_dgpu = 0; incomplete_warn = 0;
+                    cur_ver = ""; cur_type = ""; cur_name = "";
+                }
+                {
+                    if (tolower($0) ~ /vulkan support is incomplete|non-conformant/) {
+                        incomplete_warn = 1
+                    }
+                }
+                /^[[:space:]]*GPU[0-9]+:/ {
+                    flush_gpu()
+                    in_gpu = 1
+                    cur_ver = ""; cur_type = ""; cur_name = ""
+                    next
+                }
+                in_gpu == 1 && /apiVersion[[:space:]]*=/ { cur_ver = $0; next }
+                in_gpu == 1 && /deviceType[[:space:]]*=/ { cur_type = $0; next }
+                in_gpu == 1 && /deviceName[[:space:]]*=/ { cur_name = $0; next }
+                END {
+                    flush_gpu()
+                    if (hw_count == 0) {
+                        print "OPENGL_ONLY"
+                    } else if (max_maj > 1 || (max_maj == 1 && max_min >= 3)) {
+                        if (incomplete_warn == 1 && has_modern_dgpu == 0) {
+                            print "VULKAN_LEGACY"
+                        } else {
+                            print "VULKAN_READY"
+                        }
+                    } else if (max_maj == 1 && max_min >= 1) {
+                        print "VULKAN_LEGACY"
+                    } else {
+                        print "OPENGL_ONLY"
+                    }
+                }
+            ')
+            if [ -n "$vk_tier" ]; then
+                echo "$vk_tier"
                 return 0
             fi
-            local max_ver="0.0" line
-            while IFS= read -r line; do
-                if [[ "$line" =~ ([0-9]+)\.([0-9]+)\.[0-9]+ ]]; then
-                    local cand="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
-                    local cur_maj="${max_ver%%.*}" cur_min="${max_ver#*.}"
-                    local new_maj="${BASH_REMATCH[1]}" new_min="${BASH_REMATCH[2]}"
-                    if [ "$new_maj" -gt "$cur_maj" ] || { [ "$new_maj" -eq "$cur_maj" ] && [ "$new_min" -gt "$cur_min" ]; }; then
-                        max_ver="$cand"
-                    fi
-                fi
-            done <<< "$(echo "$v_sum" | grep "apiVersion" || true)"
-
-            local maj="${max_ver%%.*}" min="${max_ver#*.}"
-            if [ "$maj" -gt 1 ] || { [ "$maj" -eq 1 ] && [ "$min" -ge 3 ]; }; then
-                if is_haswell_gpu && [ "$(detect_dgpu_vendor 2>/dev/null || echo none)" = "none" ]; then
-                    echo "VULKAN_LEGACY"
-                else
-                    echo "VULKAN_READY"
-                fi
-                return 0
-            elif [ "$maj" -eq 1 ] && [ "$min" -ge 1 ]; then
-                echo "VULKAN_LEGACY"
-                return 0
-            else
-                echo "OPENGL_ONLY"
-                return 0
-            fi
+        elif echo "$v_sum" | grep -qiE 'Cannot create Vulkan instance|ERROR_INCOMPATIBLE_DRIVER'; then
+            echo "OPENGL_ONLY"
+            return 0
         fi
     fi
 

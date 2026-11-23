@@ -237,13 +237,25 @@ doctor_audit() {
         echo "    • Driver Safety  : ${UI_ICE}Mesa GL Threading is disabled by default on Haswell to prevent FNA/XNA asset decompression crashes.${UI_RST}"
     fi
 
-    local lib32_gl=""
-    if [ -e "/usr/lib32/libGL.so.1" ]; then
-        lib32_gl="/usr/lib32/libGL.so.1"
-    elif [ -e "/usr/lib/i386-linux-gnu/libGL.so.1" ]; then
-        lib32_gl="/usr/lib/i386-linux-gnu/libGL.so.1"
-    elif [ -e "/usr/lib/libGL.so.1" ] && file -L "/usr/lib/libGL.so.1" 2>/dev/null | grep -q "32-bit"; then
-        lib32_gl="/usr/lib/libGL.so.1 (32-bit)"
+    local lib32_gl="" ldconfig_bin=""
+    if command -v ldconfig >/dev/null 2>&1; then
+        ldconfig_bin=$(command -v ldconfig)
+    elif [ -x /sbin/ldconfig ]; then
+        ldconfig_bin="/sbin/ldconfig"
+    elif [ -x /usr/sbin/ldconfig ]; then
+        ldconfig_bin="/usr/sbin/ldconfig"
+    fi
+    if [ -n "$ldconfig_bin" ]; then
+        lib32_gl=$("$ldconfig_bin" -p 2>/dev/null | awk '/^[[:space:]]*libGL\.so\.1[[:space:]]*\(libc6/ && !/x86-64|AArch64|64bit/ { sub(/^.*=>[[:space:]]*/, ""); print; exit }' || true)
+    fi
+    if [ -z "$lib32_gl" ]; then
+        if [ -e "/usr/lib32/libGL.so.1" ]; then
+            lib32_gl="/usr/lib32/libGL.so.1"
+        elif [ -e "/usr/lib/i386-linux-gnu/libGL.so.1" ]; then
+            lib32_gl="/usr/lib/i386-linux-gnu/libGL.so.1"
+        elif [ -e "/usr/lib/libGL.so.1" ] && file -L "/usr/lib/libGL.so.1" 2>/dev/null | grep -q "32-bit"; then
+            lib32_gl="/usr/lib/libGL.so.1 (32-bit)"
+        fi
     fi
     if [ -n "$lib32_gl" ]; then
         echo "    • Multilib 32-bit: ${UI_GREEN}[READY]${UI_RST} 32-bit OpenGL runtime detected ($lib32_gl)."
