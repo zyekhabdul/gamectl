@@ -1211,6 +1211,25 @@ resolve_game_drm_status() {
     return 0
 }
 
+# Extract an actionable 1-line diagnostic hint from a game's recent launch log
+inspect_game_log_hint() {
+    local log_file="${1:-}"
+    [ -n "$log_file" ] && [ -f "$log_file" ] || return 0
+
+    local tail_log
+    tail_log=$(tail -n 60 "$log_file" 2>/dev/null || true)
+    [ -n "$tail_log" ] || return 0
+
+    if echo "$tail_log" | grep -qiE '0x887a0002|DXGI_ERROR|Vulkan support is incomplete|dxvk.*(failed|error|unable)|vkCreateInstance'; then
+        echo "Graphics API error detected -> switch Renderer to WineD3D (<CTRL-O> or --wined3d)"
+    elif echo "$tail_log" | grep -qiE 'err:module:import_dll|cannot open shared object file|error while loading shared libraries|libGL\.so\.1'; then
+        echo "Missing runtime DLL/library -> run Community Fixes (<CTRL-X>) or install 32-bit multilib"
+    elif echo "$tail_log" | grep -qiE 'SteamStub|Application load error|steamclient.*fail'; then
+        echo "SteamStub/DRM signature detected -> run unpack-stub or Inject GBE (<CTRL-I>)"
+    fi
+    return 0
+}
+
 # Detect SteamStub DRM wrapper in Linux ELF (.bind section) or Windows PE
 detect_steamstub_drm() {
     local bin_path="$1"
@@ -8427,15 +8446,19 @@ EOF
 )
         fi
 
+        local log_hint
+        log_hint=$(inspect_game_log_hint "$log_file" 2>/dev/null || true)
+
         export GAMECTL_HUD_TITLE="$title"
         export GAMECTL_HUD_PID="$game_pid"
         export GAMECTL_HUD_RUN_TYPE="$run_type"
         export GAMECTL_HUD_COLOR="$status_color"
         export GAMECTL_HUD_BADGE="$status_badge"
         export GAMECTL_HUD_LOG="$log_file"
+        export GAMECTL_HUD_HINT="$log_hint"
 
         local preview_cmd
-        preview_cmd='printf "\033[38;5;60m╭─ PROCESS STATUS ────────────────────────────────────╮\033[0m\n  Target Game : \033[1m%s\033[0m\n  Process PID : \033[1m%s\033[0m (%s)\n  Status      : %b%s\033[0m\n  Log File    : %s\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n\033[38;5;60m╭─ RECENT LOG TAIL (Last 15 lines) ──────────────────╮\033[0m\n" "$GAMECTL_HUD_TITLE" "$GAMECTL_HUD_PID" "$GAMECTL_HUD_RUN_TYPE" "$GAMECTL_HUD_COLOR" "$GAMECTL_HUD_BADGE" "$GAMECTL_HUD_LOG"; if [ -n "$GAMECTL_HUD_LOG" ] && [ -f "$GAMECTL_HUD_LOG" ]; then tail -n 15 "$GAMECTL_HUD_LOG" 2>/dev/null; else echo "  (No logs recorded)"; fi'
+        preview_cmd='printf "\033[38;5;60m╭─ PROCESS STATUS ────────────────────────────────────╮\033[0m\n  Target Game : \033[1m%s\033[0m\n  Process PID : \033[1m%s\033[0m (%s)\n  Status      : %b%s\033[0m\n  Log File    : %s\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n" "$GAMECTL_HUD_TITLE" "$GAMECTL_HUD_PID" "$GAMECTL_HUD_RUN_TYPE" "$GAMECTL_HUD_COLOR" "$GAMECTL_HUD_BADGE" "$GAMECTL_HUD_LOG"; if [ -n "$GAMECTL_HUD_HINT" ]; then printf "  \033[38;5;214m[HINT]\033[0m %s\n" "$GAMECTL_HUD_HINT"; fi; printf "\033[38;5;60m╭─ RECENT LOG TAIL (Last 15 lines) ──────────────────╮\033[0m\n"; if [ -n "$GAMECTL_HUD_LOG" ] && [ -f "$GAMECTL_HUD_LOG" ]; then tail -n 15 "$GAMECTL_HUD_LOG" 2>/dev/null; else echo "  (No logs recorded)"; fi'
 
         local hud_sel fzf_rc=0
         hud_sel=$(echo "$hud_palette" | fzf \
@@ -9823,13 +9846,48 @@ doctor_audit() {
     gpu_line=$(lspci 2>/dev/null | grep -E "VGA|3D" | head -n 1 | sed -E 's/^[0-9a-f:.]+ (VGA compatible controller|3D controller): //' || true)
     [ -z "$gpu_line" ] && gpu_line="Not detected via lspci"
     echo "    • GPU Controller : ${UI_BOLD}$gpu_line${UI_RST}"
-    if is_haswell_gpu; then
-        echo "    • Mesa Driver    : ${UI_AMBER}[WARN]${UI_RST} Intel Haswell has incomplete Vulkan (hasvk)."
-        echo "    • Driver Safety  : ${UI_ICE}Mesa GL Threading is disabled by default to prevent FNA/XNA asset decompression crashes.${UI_RST}"
-        warn_cnt=$((warn_cnt + 1))
+    local vk_cap eff_renderer eff_label
+    vk_cap="$(detect_vulkan_capability 2>/dev/null || echo "OPENGL_ONLY")"
+    eff_renderer="$(resolve_graphics_renderer "auto" "0" 2>/dev/null || echo "wined3d")"
+    if [ "$eff_renderer" = "dxvk" ]; then
+        eff_label="DXVK (Vulkan)"
     else
-        echo "    • Driver Status  : ${UI_GREEN}[READY]${UI_RST} GPU supported by standard Mesa driver stack."
+        eff_label="WineD3D (OpenGL)"
+    fi
+
+    case "$vk_cap" in
+        VULKAN_READY)
+            echo "    • Vulkan Stack   : ${UI_GREEN}[READY]${UI_RST} Full Vulkan ICD ($vk_cap) -> Auto Renderer: $eff_label."
+            pass_cnt=$((pass_cnt + 1))
+            ;;
+        VULKAN_LEGACY)
+            echo "    • Vulkan Stack   : ${UI_AMBER}[LEGACY]${UI_RST} Incomplete/legacy Vulkan ICD ($vk_cap) -> Auto Renderer: $eff_label."
+            warn_cnt=$((warn_cnt + 1))
+            ;;
+        *)
+            echo "    • Vulkan Stack   : ${UI_AMBER}[OPENGL_ONLY]${UI_RST} No usable Vulkan ICD ($vk_cap) -> Auto Renderer: $eff_label."
+            warn_cnt=$((warn_cnt + 1))
+            ;;
+    esac
+
+    if is_haswell_gpu; then
+        echo "    • Driver Safety  : ${UI_ICE}Mesa GL Threading is disabled by default on Haswell to prevent FNA/XNA asset decompression crashes.${UI_RST}"
+    fi
+
+    local lib32_gl=""
+    if [ -e "/usr/lib32/libGL.so.1" ]; then
+        lib32_gl="/usr/lib32/libGL.so.1"
+    elif [ -e "/usr/lib/i386-linux-gnu/libGL.so.1" ]; then
+        lib32_gl="/usr/lib/i386-linux-gnu/libGL.so.1"
+    elif [ -e "/usr/lib/libGL.so.1" ] && file -L "/usr/lib/libGL.so.1" 2>/dev/null | grep -q "32-bit"; then
+        lib32_gl="/usr/lib/libGL.so.1 (32-bit)"
+    fi
+    if [ -n "$lib32_gl" ]; then
+        echo "    • Multilib 32-bit: ${UI_GREEN}[READY]${UI_RST} 32-bit OpenGL runtime detected ($lib32_gl)."
         pass_cnt=$((pass_cnt + 1))
+    else
+        echo "    • Multilib 32-bit: ${UI_AMBER}[WARN]${UI_RST} 32-bit libGL.so.1 missing; PE32/32-bit Windows games may fail silently."
+        warn_cnt=$((warn_cnt + 1))
     fi
 
     local dgpu_vend
@@ -10000,6 +10058,7 @@ preview_game() {
     run_dir="$(get_runtime_dir)"
     local is_running=false
     local run_pid=""
+    local run_log=""
     if [ -d "$run_dir/active_games" ]; then
         for inf in "$run_dir/active_games"/*.info; do
             [ -f "$inf" ] || continue
@@ -10011,6 +10070,7 @@ preview_game() {
                 if [ -n "$check_pid" ] && kill -0 "$check_pid" 2>/dev/null; then
                     is_running=true
                     run_pid="$check_pid"
+                    run_log=$(grep -E '^LOG=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)
                     break
                 fi
             fi
@@ -10018,7 +10078,7 @@ preview_game() {
     fi
     if [ "$is_running" = true ]; then
         status_badge="${UI_GREEN}[RUNNING PID:$run_pid]${UI_RST}"
-        status_desc="${UI_DIM}(Game window active in background)${UI_RST}"
+        status_desc="${UI_DIM}(Active in background)${UI_RST}"
     fi
 
     echo "${UI_BOX}╭─ GAME INFORMATION ───────────────────────────────────╮${UI_RST}"
@@ -10044,7 +10104,11 @@ preview_game() {
             local r_path
             r_path=$(find_runner "$gdir" 2>/dev/null || true)
             if [ -n "$r_path" ]; then
-                echo "  ${UI_CYAN}Runner      ${UI_RST}: ${UI_PURPLE}$(basename "$r_path")${UI_RST} ${UI_DIM}($r_path)${UI_RST}"
+                local r_label r_short
+                r_label=$(basename "$r_path")
+                [ "$r_label" = "proton" ] && r_label=$(basename "$(dirname "$r_path")")
+                r_short="${r_path/#$HOME/~}"
+                echo "  ${UI_CYAN}Runner      ${UI_RST}: ${UI_PURPLE}$r_label${UI_RST} ${UI_DIM}($r_short)${UI_RST}"
             else
                 echo "  ${UI_CYAN}Runner      ${UI_RST}: ${UI_RED}[MISSING] No Windows runner found (umu-run/Proton/wine)${UI_RST}"
             fi
@@ -10052,6 +10116,11 @@ preview_game() {
         else
             echo "  ${UI_CYAN}Runner      ${UI_RST}: ${UI_GREEN}Native Linux${UI_RST} ${UI_DIM}(Direct ELF/Script)${UI_RST}"
         fi
+        local safe_gbin target_log log_hint
+        safe_gbin=$(basename "$gbin" 2>/dev/null | tr -cd '[:alnum:]_-')
+        target_log="${run_log:-$run_dir/game_${safe_gbin}.log}"
+        log_hint=$(inspect_game_log_hint "$target_log" 2>/dev/null || true)
+        [ -n "$log_hint" ] && echo "  ${UI_AMBER}Log Hint    ${UI_RST}: [HINT] $log_hint"
     fi
 
     echo
@@ -10127,6 +10196,32 @@ preview_game() {
     else
         echo "  ${UI_CYAN}Game Profile${UI_RST}: ${UI_DIM}Clean Native (Zero Wrappers)${UI_RST}"
     fi
+    local c_renderer="auto" c_prime=0 eff_renderer vk_cap_label renderer_label
+    if [ -f "$HOME/.config/gamectl/wrappers" ]; then
+        local g_rend
+        g_rend=$(grep -E "^renderer=" "$HOME/.config/gamectl/wrappers" 2>/dev/null | tail -n 1 | cut -d'=' -f2- || true)
+        [ -n "$g_rend" ] && c_renderer="$g_rend"
+        grep -q "^prime=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_prime=1
+    fi
+    if [ -f "$gdir/.wrappers" ]; then
+        local l_rend
+        l_rend=$(grep -E "^renderer=" "$gdir/.wrappers" 2>/dev/null | tail -n 1 | cut -d'=' -f2- || true)
+        [ -n "$l_rend" ] && c_renderer="$l_rend"
+        grep -q "^prime=1" "$gdir/.wrappers" 2>/dev/null && c_prime=1
+        grep -q "^prime=0" "$gdir/.wrappers" 2>/dev/null && c_prime=0
+    fi
+    eff_renderer=$(resolve_graphics_renderer "$c_renderer" "$c_prime" 2>/dev/null || echo "wined3d")
+    if [ "$eff_renderer" = "wined3d" ]; then
+        vk_cap_label="WineD3D"
+    else
+        vk_cap_label="DXVK"
+    fi
+    if [ "$c_renderer" = "auto" ]; then
+        renderer_label="${UI_ICE}Auto ($vk_cap_label)${UI_RST}"
+    else
+        renderer_label="${UI_BOLD}${vk_cap_label}${UI_RST} ${UI_DIM}(forced: $c_renderer)${UI_RST}"
+    fi
+    echo "  ${UI_CYAN}Renderer    ${UI_RST}: $renderer_label"
     echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
 
     echo
@@ -10194,7 +10289,8 @@ preview_game() {
     else
         echo "  ${UI_PILL_CTRLS} ${UI_BOLD}Cloud Sync (N/A)${UI_RST}   ${UI_PILL_CTRLB} ${UI_BOLD}Manual Save Snapshot${UI_RST}"
     fi
-    echo "  ${UI_PILL_CTRLR} ${UI_BOLD}Restore Snapshot${UI_RST}   ${UI_PILL_CTRLX} ${UI_BOLD}Ctrl-X (Fixes)${UI_RST}"
+    # Hotkey legend: Ctrl-X (Fixes) -> Community Fixes
+    echo "  ${UI_PILL_CTRLR} ${UI_BOLD}Restore Snapshot${UI_RST}   ${UI_PILL_CTRLX} ${UI_BOLD}Community Fixes${UI_RST}"
     echo "  ${UI_PILL_ESC}   ${UI_BOLD}Back to Master Dashboard Hub${UI_RST}"
     echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
     echo "========================================================"
@@ -11621,7 +11717,7 @@ EOF
 # Export functions for subshells in fzf
 export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game parse_depot_os_map ensure_linux_binaries_executable ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type is_steamstub_elf_active resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe unpack_steamstub_elf setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive preview_search_game preview_download get_depot_dl_progress preview_log_entry preview_process_log preview_adopt_candidate manage_game_fixes_interactive preview_fix_entry
 
-export -f require_tui check_fzf_status validate_tui_fields store_search_items tui_exec_action tui_run_engine tui_prompt_input tui_action_palette manage_active_processes_interactive login_luatools_interactive resolve_game_drm_status install_tui_screen_traps get_desktop_runtime_dir detect_vulkan_capability resolve_graphics_renderer
+export -f require_tui check_fzf_status validate_tui_fields store_search_items tui_exec_action tui_run_engine tui_prompt_input tui_action_palette manage_active_processes_interactive login_luatools_interactive resolve_game_drm_status install_tui_screen_traps get_desktop_runtime_dir detect_vulkan_capability resolve_graphics_renderer inspect_game_log_hint
 export -f is_gbe_library install_gbe_library get_config_value set_config_value get_hubcap_api_key
 
 # Top-level Menu

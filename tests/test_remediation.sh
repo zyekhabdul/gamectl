@@ -603,6 +603,80 @@ EOF
 }
 run_test "Proton Contract (WP30 Packet B): Proton/umu-run env normalization & protonfixes guard" test_proton_env_contract
 
+# Test 13: WP30 Packet C — Doctor Vulkan/Multilib Audit, Crash Telemetry Hint & TUI Polish
+test_doctor_multilib_and_tui_polish_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_doc_tui_XXXXXX")
+    mkdir -p "$t_dir/.config/gamectl" "$t_dir/game" "$t_dir/pfx" "$t_dir/runtime"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        export GAMECTL_TEST_LIB="$t_dir/game"
+        export GAMECTL_VULKAN_CAPABILITY="VULKAN_LEGACY"
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/steam/25_identity.sh"
+        source "$REPO_ROOT/src/steam/30_downloader.sh"
+        source "$REPO_ROOT/src/steam/35_fixes.sh"
+        source "$REPO_ROOT/src/runners/40_wrappers.sh"
+        source "$REPO_ROOT/src/runners/50_launcher.sh"
+        source "$REPO_ROOT/src/diagnostics/60_doctor.sh"
+        source "$REPO_ROOT/src/tui/70_dashboard.sh"
+
+        # 1. Verify doctor_audit outputs generalized Vulkan Stack + Multilib 32-bit
+        local doc_out
+        doc_out=$(doctor_audit 2>&1 || true)
+        echo "$doc_out" | grep -q "Vulkan Stack" || exit 1
+        echo "$doc_out" | grep -q "VULKAN_LEGACY" || exit 1
+        echo "$doc_out" | grep -q "WineD3D" || exit 1
+        echo "$doc_out" | grep -q "Multilib 32-bit" || exit 1
+
+        # 2. Verify inspect_game_log_hint detects DXGI/Vulkan & missing DLL hints
+        local dx_log="$t_dir/runtime/game_gameexe.log"
+        printf 'warn: MESA-INTEL: Haswell Vulkan support is incomplete\nWin32 function failed: HRESULT: 0x887a0002\n' > "$dx_log"
+        local hint_dx
+        hint_dx=$(inspect_game_log_hint "$dx_log")
+        echo "$hint_dx" | grep -q "WineD3D" || exit 1
+
+        local dll_log="$t_dir/runtime/dll.log"
+        printf '0024:err:module:import_dll Library foo.dll not found\n' > "$dll_log"
+        local hint_dll
+        hint_dll=$(inspect_game_log_hint "$dll_log")
+        echo "$hint_dll" | grep -q "Community Fixes" || exit 1
+
+        # 3. Verify preview_game TUI polish: Community Fixes, Renderer, shortened Runner, active status, Log Hint
+        printf '\x4d\x5a\x90\x00' > "$t_dir/game/game.exe"
+        mkdir -p "$t_dir/.local/share/Steam/compatibilitytools.d/GE-Proton7-55"
+        printf '#!/bin/sh\nexit 0\n' > "$t_dir/.local/share/Steam/compatibilitytools.d/GE-Proton7-55/proton"
+        chmod +x "$t_dir/.local/share/Steam/compatibilitytools.d/GE-Proton7-55/proton"
+
+        local active_dir
+        active_dir="$(get_runtime_dir)/active_games"
+        mkdir -p "$active_dir"
+        cat <<EOF > "$active_dir/test.info"
+PID=$$
+DIR=$t_dir/game
+LOG=$dx_log
+EOF
+
+        local prev_out
+        prev_out=$(preview_game "360740" "DownwellTest" "[GBE_FORK]" "$t_dir/game" "game.exe" 2>&1)
+        echo "$prev_out" | grep -q "Community Fixes" || exit 1
+        if echo "$prev_out" | grep -qF "Ctrl-X (Fixes)"; then
+            exit 1
+        fi
+        echo "$prev_out" | grep -q "(Active in background)" || exit 1
+        echo "$prev_out" | grep -q "GE-Proton7-55" || exit 1
+        echo "$prev_out" | grep -q "Renderer" || exit 1
+        echo "$prev_out" | grep -q "Auto (WineD3D)" || exit 1
+        echo "$prev_out" | grep -q "\[HINT\]" || exit 1
+        echo "$prev_out" | grep -q "WineD3D" || exit 1
+    )
+}
+run_test "Diagnostics & TUI Contract (WP30 Packet C): Vulkan/multilib doctor, log hints & TUI polish" test_doctor_multilib_and_tui_polish_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"

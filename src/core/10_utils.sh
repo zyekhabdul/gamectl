@@ -1152,6 +1152,25 @@ resolve_game_drm_status() {
     return 0
 }
 
+# Extract an actionable 1-line diagnostic hint from a game's recent launch log
+inspect_game_log_hint() {
+    local log_file="${1:-}"
+    [ -n "$log_file" ] && [ -f "$log_file" ] || return 0
+
+    local tail_log
+    tail_log=$(tail -n 60 "$log_file" 2>/dev/null || true)
+    [ -n "$tail_log" ] || return 0
+
+    if echo "$tail_log" | grep -qiE '0x887a0002|DXGI_ERROR|Vulkan support is incomplete|dxvk.*(failed|error|unable)|vkCreateInstance'; then
+        echo "Graphics API error detected -> switch Renderer to WineD3D (<CTRL-O> or --wined3d)"
+    elif echo "$tail_log" | grep -qiE 'err:module:import_dll|cannot open shared object file|error while loading shared libraries|libGL\.so\.1'; then
+        echo "Missing runtime DLL/library -> run Community Fixes (<CTRL-X>) or install 32-bit multilib"
+    elif echo "$tail_log" | grep -qiE 'SteamStub|Application load error|steamclient.*fail'; then
+        echo "SteamStub/DRM signature detected -> run unpack-stub or Inject GBE (<CTRL-I>)"
+    fi
+    return 0
+}
+
 # Detect SteamStub DRM wrapper in Linux ELF (.bind section) or Windows PE
 detect_steamstub_drm() {
     local bin_path="$1"

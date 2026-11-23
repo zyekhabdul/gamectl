@@ -37,6 +37,7 @@ preview_game() {
     run_dir="$(get_runtime_dir)"
     local is_running=false
     local run_pid=""
+    local run_log=""
     if [ -d "$run_dir/active_games" ]; then
         for inf in "$run_dir/active_games"/*.info; do
             [ -f "$inf" ] || continue
@@ -48,6 +49,7 @@ preview_game() {
                 if [ -n "$check_pid" ] && kill -0 "$check_pid" 2>/dev/null; then
                     is_running=true
                     run_pid="$check_pid"
+                    run_log=$(grep -E '^LOG=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)
                     break
                 fi
             fi
@@ -55,7 +57,7 @@ preview_game() {
     fi
     if [ "$is_running" = true ]; then
         status_badge="${UI_GREEN}[RUNNING PID:$run_pid]${UI_RST}"
-        status_desc="${UI_DIM}(Game window active in background)${UI_RST}"
+        status_desc="${UI_DIM}(Active in background)${UI_RST}"
     fi
 
     echo "${UI_BOX}╭─ GAME INFORMATION ───────────────────────────────────╮${UI_RST}"
@@ -81,7 +83,11 @@ preview_game() {
             local r_path
             r_path=$(find_runner "$gdir" 2>/dev/null || true)
             if [ -n "$r_path" ]; then
-                echo "  ${UI_CYAN}Runner      ${UI_RST}: ${UI_PURPLE}$(basename "$r_path")${UI_RST} ${UI_DIM}($r_path)${UI_RST}"
+                local r_label r_short
+                r_label=$(basename "$r_path")
+                [ "$r_label" = "proton" ] && r_label=$(basename "$(dirname "$r_path")")
+                r_short="${r_path/#$HOME/~}"
+                echo "  ${UI_CYAN}Runner      ${UI_RST}: ${UI_PURPLE}$r_label${UI_RST} ${UI_DIM}($r_short)${UI_RST}"
             else
                 echo "  ${UI_CYAN}Runner      ${UI_RST}: ${UI_RED}[MISSING] No Windows runner found (umu-run/Proton/wine)${UI_RST}"
             fi
@@ -89,6 +95,11 @@ preview_game() {
         else
             echo "  ${UI_CYAN}Runner      ${UI_RST}: ${UI_GREEN}Native Linux${UI_RST} ${UI_DIM}(Direct ELF/Script)${UI_RST}"
         fi
+        local safe_gbin target_log log_hint
+        safe_gbin=$(basename "$gbin" 2>/dev/null | tr -cd '[:alnum:]_-')
+        target_log="${run_log:-$run_dir/game_${safe_gbin}.log}"
+        log_hint=$(inspect_game_log_hint "$target_log" 2>/dev/null || true)
+        [ -n "$log_hint" ] && echo "  ${UI_AMBER}Log Hint    ${UI_RST}: [HINT] $log_hint"
     fi
 
     echo
@@ -164,6 +175,32 @@ preview_game() {
     else
         echo "  ${UI_CYAN}Game Profile${UI_RST}: ${UI_DIM}Clean Native (Zero Wrappers)${UI_RST}"
     fi
+    local c_renderer="auto" c_prime=0 eff_renderer vk_cap_label renderer_label
+    if [ -f "$HOME/.config/gamectl/wrappers" ]; then
+        local g_rend
+        g_rend=$(grep -E "^renderer=" "$HOME/.config/gamectl/wrappers" 2>/dev/null | tail -n 1 | cut -d'=' -f2- || true)
+        [ -n "$g_rend" ] && c_renderer="$g_rend"
+        grep -q "^prime=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && c_prime=1
+    fi
+    if [ -f "$gdir/.wrappers" ]; then
+        local l_rend
+        l_rend=$(grep -E "^renderer=" "$gdir/.wrappers" 2>/dev/null | tail -n 1 | cut -d'=' -f2- || true)
+        [ -n "$l_rend" ] && c_renderer="$l_rend"
+        grep -q "^prime=1" "$gdir/.wrappers" 2>/dev/null && c_prime=1
+        grep -q "^prime=0" "$gdir/.wrappers" 2>/dev/null && c_prime=0
+    fi
+    eff_renderer=$(resolve_graphics_renderer "$c_renderer" "$c_prime" 2>/dev/null || echo "wined3d")
+    if [ "$eff_renderer" = "wined3d" ]; then
+        vk_cap_label="WineD3D"
+    else
+        vk_cap_label="DXVK"
+    fi
+    if [ "$c_renderer" = "auto" ]; then
+        renderer_label="${UI_ICE}Auto ($vk_cap_label)${UI_RST}"
+    else
+        renderer_label="${UI_BOLD}${vk_cap_label}${UI_RST} ${UI_DIM}(forced: $c_renderer)${UI_RST}"
+    fi
+    echo "  ${UI_CYAN}Renderer    ${UI_RST}: $renderer_label"
     echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
 
     echo
@@ -231,7 +268,8 @@ preview_game() {
     else
         echo "  ${UI_PILL_CTRLS} ${UI_BOLD}Cloud Sync (N/A)${UI_RST}   ${UI_PILL_CTRLB} ${UI_BOLD}Manual Save Snapshot${UI_RST}"
     fi
-    echo "  ${UI_PILL_CTRLR} ${UI_BOLD}Restore Snapshot${UI_RST}   ${UI_PILL_CTRLX} ${UI_BOLD}Ctrl-X (Fixes)${UI_RST}"
+    # Hotkey legend: Ctrl-X (Fixes) -> Community Fixes
+    echo "  ${UI_PILL_CTRLR} ${UI_BOLD}Restore Snapshot${UI_RST}   ${UI_PILL_CTRLX} ${UI_BOLD}Community Fixes${UI_RST}"
     echo "  ${UI_PILL_ESC}   ${UI_BOLD}Back to Master Dashboard Hub${UI_RST}"
     echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
     echo "========================================================"

@@ -209,13 +209,48 @@ doctor_audit() {
     gpu_line=$(lspci 2>/dev/null | grep -E "VGA|3D" | head -n 1 | sed -E 's/^[0-9a-f:.]+ (VGA compatible controller|3D controller): //' || true)
     [ -z "$gpu_line" ] && gpu_line="Not detected via lspci"
     echo "    • GPU Controller : ${UI_BOLD}$gpu_line${UI_RST}"
-    if is_haswell_gpu; then
-        echo "    • Mesa Driver    : ${UI_AMBER}[WARN]${UI_RST} Intel Haswell has incomplete Vulkan (hasvk)."
-        echo "    • Driver Safety  : ${UI_ICE}Mesa GL Threading is disabled by default to prevent FNA/XNA asset decompression crashes.${UI_RST}"
-        warn_cnt=$((warn_cnt + 1))
+    local vk_cap eff_renderer eff_label
+    vk_cap="$(detect_vulkan_capability 2>/dev/null || echo "OPENGL_ONLY")"
+    eff_renderer="$(resolve_graphics_renderer "auto" "0" 2>/dev/null || echo "wined3d")"
+    if [ "$eff_renderer" = "dxvk" ]; then
+        eff_label="DXVK (Vulkan)"
     else
-        echo "    • Driver Status  : ${UI_GREEN}[READY]${UI_RST} GPU supported by standard Mesa driver stack."
+        eff_label="WineD3D (OpenGL)"
+    fi
+
+    case "$vk_cap" in
+        VULKAN_READY)
+            echo "    • Vulkan Stack   : ${UI_GREEN}[READY]${UI_RST} Full Vulkan ICD ($vk_cap) -> Auto Renderer: $eff_label."
+            pass_cnt=$((pass_cnt + 1))
+            ;;
+        VULKAN_LEGACY)
+            echo "    • Vulkan Stack   : ${UI_AMBER}[LEGACY]${UI_RST} Incomplete/legacy Vulkan ICD ($vk_cap) -> Auto Renderer: $eff_label."
+            warn_cnt=$((warn_cnt + 1))
+            ;;
+        *)
+            echo "    • Vulkan Stack   : ${UI_AMBER}[OPENGL_ONLY]${UI_RST} No usable Vulkan ICD ($vk_cap) -> Auto Renderer: $eff_label."
+            warn_cnt=$((warn_cnt + 1))
+            ;;
+    esac
+
+    if is_haswell_gpu; then
+        echo "    • Driver Safety  : ${UI_ICE}Mesa GL Threading is disabled by default on Haswell to prevent FNA/XNA asset decompression crashes.${UI_RST}"
+    fi
+
+    local lib32_gl=""
+    if [ -e "/usr/lib32/libGL.so.1" ]; then
+        lib32_gl="/usr/lib32/libGL.so.1"
+    elif [ -e "/usr/lib/i386-linux-gnu/libGL.so.1" ]; then
+        lib32_gl="/usr/lib/i386-linux-gnu/libGL.so.1"
+    elif [ -e "/usr/lib/libGL.so.1" ] && file -L "/usr/lib/libGL.so.1" 2>/dev/null | grep -q "32-bit"; then
+        lib32_gl="/usr/lib/libGL.so.1 (32-bit)"
+    fi
+    if [ -n "$lib32_gl" ]; then
+        echo "    • Multilib 32-bit: ${UI_GREEN}[READY]${UI_RST} 32-bit OpenGL runtime detected ($lib32_gl)."
         pass_cnt=$((pass_cnt + 1))
+    else
+        echo "    • Multilib 32-bit: ${UI_AMBER}[WARN]${UI_RST} 32-bit libGL.so.1 missing; PE32/32-bit Windows games may fail silently."
+        warn_cnt=$((warn_cnt + 1))
     fi
 
     local dgpu_vend

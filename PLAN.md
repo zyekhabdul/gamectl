@@ -1,7 +1,7 @@
 # WORK PACKET 30: PRODUCTION GRAPHICS NEGOTIATION, PROTON CONTRACT & RUNTIME OBSERVABILITY
 
 - **Track**: Production Hardening / Generalized Hardware Negotiation / TUI Observability
-- **Status**: IN PROGRESS [2/4 PACKETS]
+- **Status**: IN PROGRESS [3/4 PACKETS]
 - **Basis**: Empiris dari `/run/user/1000/game_Downwellexe.log` (`HRESULT 0x887a0002` / `DXGI_ERROR_NOT_FOUND`, `protonfixes` `IndexError`, multilib PE32, dan audit visual TUI).
 - **Target Files**: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/diagnostics/60_doctor.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `tests/test_remediation.sh`, `bin/gamectl`
 
@@ -49,23 +49,24 @@
   - Identitas `SteamAppId` dan `SteamGameId` selalu tersedia di dalam prefix Windows.
   - [ VERIFIED ] `test_proton_env_contract`, `test_cli.sh` (147/147), `test_remediation.sh` (12/12), `test_tui_ergonomics.sh` (3/3), dan `make lint` lulus Exit 0.
 
-### [ ] Packet C: Graphics/Multilib Audit (`doctor`), Crash Telemetry Hint & TUI Polish
-- **Target Files**: `src/diagnostics/60_doctor.sh`, `src/runners/50_launcher.sh`, `src/tui/70_dashboard.sh`
+### [x] Packet C: Graphics/Multilib Audit (`doctor`), Crash Telemetry Hint & TUI Polish
+- **Target Files**: `src/core/10_utils.sh`, `src/main.sh`, `src/diagnostics/60_doctor.sh`, `src/runners/50_launcher.sh`, `src/tui/70_dashboard.sh`
 - **Langkah Teknis**:
   1. **Upgrade `doctor_audit()` (`src/diagnostics/60_doctor.sh` baris 205-228)**:
      - Ganti pengecekan sempit `is_haswell_gpu` dengan output terstruktur dari `detect_vulkan_capability()`: tampilkan tier Vulkan (`VULKAN_READY` / `VULKAN_LEGACY` / `OPENGL_ONLY`) dan renderer default aktif (`DXVK` / `WineD3D`).
-     - Tambahkan pemeriksaan **32-bit Multilib Readiness** (`/usr/lib32/libGL.so.1` atau `/usr/lib/i386-linux-gnu/libGL.so.1`) untuk memastikan game Windows PE32 tidak gagal diam-diam.
-  2. **Crash Telemetry Hint (`src/tui/70_dashboard.sh` & `src/runners/50_launcher.sh`)**:
-     - Inspeksi ringan tail log game terakhir (`$log_file`) pada `preview_game()` dan `game_controller_hud()` untuk pola error umum (`DXGI_ERROR`, `0x887a0002`, `Vulkan support is incomplete`, `err:module:import_dll`).
-     - Bila terdeteksi, tampilkan 1 baris `[HINT]` singkat dan actionable (misal: `Graphics API error -> coba Renderer: WineD3D (<CTRL-O>)`).
+     - Tambahkan pemeriksaan **32-bit Multilib Readiness** (`/usr/lib32/libGL.so.1`, `/usr/lib/i386-linux-gnu/libGL.so.1`, atau 32-bit `/usr/lib/libGL.so.1`) untuk memastikan game Windows PE32 tidak gagal diam-diam.
+  2. **Crash Telemetry Hint (`src/core/10_utils.sh`, `src/tui/70_dashboard.sh` & `src/runners/50_launcher.sh`)**:
+     - Inspeksi ringan tail log game terakhir (`inspect_game_log_hint`) pada `preview_game()` dan `game_controller_hud()` untuk pola error umum (`DXGI_ERROR`, `0x887a0002`, `Vulkan support is incomplete`, `err:module:import_dll`, SteamStub DRM).
+     - Bila terdeteksi, tampilkan 1 baris `[HINT]` singkat dan actionable (misal: `Graphics API error detected -> switch Renderer to WineD3D (<CTRL-O> or --wined3d)`).
   3. **Polish Visual TUI (`src/tui/70_dashboard.sh`)**:
-     - Baris 234: ubah `Ctrl-X (Fixes)` menjadi `Community Fixes` (hilangkan redundansi pill `CTRL-X`).
-     - Baris 58: ringkas deskripsi status running (`(Active in background)`) dan singkat tampilan path `Runner` agar tidak patah baris di terminal 80-120 kolom.
+     - Baris shortcut: ubah `Ctrl-X (Fixes)` menjadi `Community Fixes` (hilangkan redundansi pill `CTRL-X`).
+     - Ringkas deskripsi status running (`(Active in background)`) dan singkat tampilan path `Runner` agar tidak patah baris di terminal 80-120 kolom.
      - Tambahkan baris `Renderer : Auto (WineD3D|DXVK)` di panel `RUNTIME WRAPPERS & PERFORMANCE` pada `preview_game()`.
 - **Definition of Done (DoD)**:
   - `gamectl doctor` menampilkan tier Vulkan, renderer default, dan status library 32-bit secara lintas-distro.
   - Panel preview & HUD menampilkan hint perbaikan otomatis saat log mengandung kegagalan DXGI/Vulkan/DLL.
   - Panel preview TUI bebas dari redundansi teks shortcut dan wrapping rusak.
+  - [ VERIFIED ] `test_doctor_multilib_and_tui_polish_contract`, `test_cli.sh` (147/147), `test_remediation.sh` (13/13), `test_tui_ergonomics.sh` (3/3), `./scripts/build.sh --check`, dan `make lint` lulus Exit 0.
 
 ### [ ] Packet D: Regression Contracts, Bundle Sync & Full Verification
 - **Target Files**: `tests/test_remediation.sh`, `bin/gamectl`
