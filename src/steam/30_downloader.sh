@@ -463,7 +463,6 @@ EOF
             --border-label-pos=2 \
             --header="LUATOOLS DISCORD AUTH (Enter: Select │ Esc: Return)" \
             --prompt="LuaTools > " \
-            --height=45% \
             --reverse 2>/dev/null) || rc=$?
 
         check_fzf_status "$rc" || return $?
@@ -529,7 +528,6 @@ EOF
                     --border-label-pos=2 \
                     --header="MANUAL AUTH (Enter: Select │ Esc: Return)" \
                     --prompt="Manual > " \
-                    --height=30% \
                     --reverse 2>/dev/null) || a_rc=$?
                 check_fzf_status "$a_rc" || return $?
                 [ "$a_rc" -eq 130 ] && continue
@@ -2069,7 +2067,6 @@ EOF
             --border-label-pos=2 \
             --header="DOWNLOAD ACTIONS (Enter: Execute │ Esc: Return)" \
             --prompt="Action > " \
-            --height=35% \
             --reverse 2>/dev/null) || act_rc=$?
 
         check_fzf_status "$act_rc" || return $?
@@ -2555,7 +2552,6 @@ unlock_interactive() {
             --prompt="Adopt Game > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview-adopt {1} {2}' \
             --preview-window=down:45%:border-rounded \
-            --height=55% \
             --reverse 2>/dev/null) || fzf_sel_rc=$?
 
         if [ "$fzf_sel_rc" -eq 130 ]; then
@@ -2620,7 +2616,6 @@ EOF
         --border-label-pos=2 \
         --header="PHYSICAL FILES NOT FOUND (Enter: Select │ Esc: Return)" \
         --prompt="Action > " \
-        --height=35% \
         --reverse 2>/dev/null) || b_rc=$?
 
     check_fzf_status "$b_rc" || return $?

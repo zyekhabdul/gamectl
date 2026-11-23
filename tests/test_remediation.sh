@@ -315,6 +315,154 @@ EOF
 }
 run_test "Lifecycle (Chunk 5): trap scope isolation and re-entrant TUI screen restoration guard" test_trap_scope_isolation_and_tui_guard_contract
 
+test_dual_mode_runtime_paths_contract() {
+    source "$REPO_ROOT/src/core/00_header.sh"
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/runners/40_wrappers.sh"
+
+    local orig_xdg="${XDG_RUNTIME_DIR:-}"
+    local exp_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
+
+    # 1. Verify unset XDG_RUNTIME_DIR divergence: desktop -> /run/user/<uid>, app -> /tmp/gamectl-<uid>
+    local d_unset a_unset
+    d_unset=$(unset XDG_RUNTIME_DIR; get_desktop_runtime_dir)
+    a_unset=$(unset XDG_RUNTIME_DIR; get_runtime_dir)
+    [ "$d_unset" = "/run/user/$exp_uid" ] || return 1
+    [ "$a_unset" = "/tmp/gamectl-$exp_uid" ] || return 1
+
+    # 2. Verify custom XDG_RUNTIME_DIR propagation
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_rt_contract_XXXXXX")
+    export XDG_RUNTIME_DIR="$t_dir/custom_xdg"
+    local d_set a_set
+    d_set=$(get_desktop_runtime_dir)
+    a_set=$(get_runtime_dir)
+    if [ "$d_set" != "$t_dir/custom_xdg" ] || [ "$a_set" != "$t_dir/custom_xdg" ] || [ ! -d "$t_dir/custom_xdg" ]; then
+        rm -rf "$t_dir"
+        [ -n "$orig_xdg" ] && export XDG_RUNTIME_DIR="$orig_xdg" || unset XDG_RUNTIME_DIR
+        return 1
+    fi
+
+    # 3. Verify zero hardcoded /run/user/ outside canonical resolver get_desktop_runtime_dir
+    if grep -rn "/run/user/" "$REPO_ROOT/src/runners/40_wrappers.sh" "$REPO_ROOT/src/steam/30_downloader.sh" | grep -q .; then
+        rm -rf "$t_dir"
+        [ -n "$orig_xdg" ] && export XDG_RUNTIME_DIR="$orig_xdg" || unset XDG_RUNTIME_DIR
+        return 1
+    fi
+
+    # 4. Verify build_sandbox_command consumes desktop & app runtime resolvers cleanly
+    mkdir -p "$t_dir/bin" "$t_dir/game"
+    printf '#!/bin/sh\nexit 0\n' > "$t_dir/bin/bwrap"
+    chmod +x "$t_dir/bin/bwrap"
+    local sb_ok=0
+    if PATH="$t_dir/bin:$PATH" build_sandbox_command "$t_dir/game"; then
+        printf '%s\n' "${GAMECTL_SANDBOX_PREFIX[@]}" | grep -q -- "$t_dir/custom_xdg/pipewire-0" && sb_ok=1
+    fi
+
+    rm -rf "$t_dir"
+    [ -n "$orig_xdg" ] && export XDG_RUNTIME_DIR="$orig_xdg" || unset XDG_RUNTIME_DIR
+    [ "$sb_ok" -eq 1 ] || return 1
+    return 0
+}
+run_test "Runtime SSoT (Chunk 6): dual-mode get_desktop_runtime_dir vs get_runtime_dir contract" test_dual_mode_runtime_paths_contract
+
+test_tui_exec_action_preserves_errexit_contract() {
+    # Verify inside real PTY (which exercises lines 526-531 interactive tee path) AND non-TTY fast-path
+    python3 - "$REPO_ROOT" <<'PYEOF'
+import errno, os, pty, select, subprocess, sys, time
+
+repo_root = sys.argv[1]
+
+def run_in_pty(cmd_str):
+    pid, fd = pty.fork()
+    if pid == 0:
+        env = dict(os.environ, TERM="xterm-256color")
+        os.execvpe("bash", ["bash", "-c", cmd_str], env)
+    out = bytearray()
+    deadline = time.monotonic() + 8
+    status = None
+    sent_enter = False
+    while time.monotonic() < deadline:
+        if select.select([fd], [], [], 0.05)[0]:
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError as e:
+                if e.errno != errno.EIO:
+                    raise
+                chunk = b""
+            out.extend(chunk)
+        if b"Press Enter or Esc" in out and not sent_enter:
+            time.sleep(0.12)
+            os.write(fd, b"\n")
+            sent_enter = True
+        done, st = os.waitpid(pid, os.WNOHANG)
+        if done:
+            status = st
+            break
+    os.close(fd)
+    if status is None:
+        os.kill(pid, 9)
+        os.waitpid(pid, 0)
+        return 124, out.decode(errors="replace")
+    rc = os.waitstatus_to_exitcode(status)
+    return rc, out.decode(errors="replace")
+
+# Case 1: set +e before tui_exec_action must remain set +e afterwards (even after false runs)
+c1 = f'''set +e
+source "{repo_root}/src/core/00_header.sh"
+source "{repo_root}/src/core/10_utils.sh"
+set +e
+tui_exec_action "TestAction" true
+[[ $- == *e* ]] && exit 99
+false
+true
+exit 0
+'''
+rc1, out1 = run_in_pty(c1)
+if rc1 != 0:
+    sys.stderr.write(f"Case 1 failed (rc={rc1}): {out1}\n")
+    sys.exit(1)
+
+# Case 2: set -e before tui_exec_action must remain set -e afterwards
+c2 = f'''set -e
+source "{repo_root}/src/core/00_header.sh"
+source "{repo_root}/src/core/10_utils.sh"
+set -e
+tui_exec_action "TestAction2" true
+[[ $- == *e* ]] || exit 98
+exit 0
+'''
+rc2, out2 = run_in_pty(c2)
+if rc2 != 0:
+    sys.stderr.write(f"Case 2 failed (rc={rc2}): {out2}\n")
+    sys.exit(1)
+sys.exit(0)
+PYEOF
+}
+run_test "Stability (Audit 1): tui_exec_action preserves caller errexit state under PTY" test_tui_exec_action_preserves_errexit_contract
+
+test_zero_arbitrary_fzf_heights_contract() {
+    local hits
+    hits=$(grep -rn -- '--height=' "$REPO_ROOT/src/core/" "$REPO_ROOT/src/steam/" "$REPO_ROOT/src/runners/" "$REPO_ROOT/src/tui/" || true)
+    if [ -n "$hits" ]; then
+        echo "Found remaining --height= flags:" >&2
+        echo "$hits" >&2
+        return 1
+    fi
+    return 0
+}
+run_test "UI Consistency (Audit 4): zero arbitrary --height flags across FZF views" test_zero_arbitrary_fzf_heights_contract
+
+test_watchdog_fd_and_layer_isolation_contract() {
+    # 1. Watchdog in launch_game redirects stdin/stdout/stderr to /dev/null
+    grep -q ') </dev/null >/dev/null 2>&1 &' "$REPO_ROOT/src/runners/50_launcher.sh" || return 1
+
+    # 2. library_menu does not pass launch_rc from tui_run_engine into check_fzf_status
+    ! grep -A3 'tui_run_engine "Launch \$sel_title"' "$REPO_ROOT/src/tui/70_dashboard.sh" | grep -q 'check_fzf_status "\$launch_rc"' || return 1
+    return 0
+}
+run_test "Stability (Audit 2 & 3): watchdog FD isolation & engine vs FZF error decoupling" test_watchdog_fd_and_layer_isolation_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"

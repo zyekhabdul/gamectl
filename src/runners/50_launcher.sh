@@ -99,7 +99,6 @@ EOF
             --prompt="HUD > " \
             --preview="$preview_cmd" \
             --preview-window=down:55%:border-rounded:wrap \
-            --height=70% \
             --reverse 2>/dev/null) || fzf_rc=$?
 
         if [ "$fzf_rc" -eq 130 ]; then
@@ -135,7 +134,6 @@ EOF
                         --prompt="Log > " \
                         --preview='"$GAMECTL_PREVIEW_BIN" --preview-process-log "$GAMECTL_LOG_FILE" {1}' \
                         --preview-window=down:35%:border-rounded:wrap \
-                        --height=80% \
                         --reverse 2>/dev/null || log_fzf_rc=$?
 
                     if [ "$log_fzf_rc" -ne 0 ] && [ "$log_fzf_rc" -ne 1 ] && [ "$log_fzf_rc" -ne 130 ]; then
@@ -682,7 +680,7 @@ SCOPE_UNIT=$unit_name
 EOF
 
     # Detached background watchdog to restore CPU governor and cleanup when process exits
-    (
+    _run_launch_watchdog() {
         # This watchdog is a sibling of the game, so shell wait cannot reap it.
         if ! tail --pid="$game_pid" --sleep-interval=0.2 -f /dev/null >/dev/null 2>&1; then
             log_msg "ERROR" "LAUNCH" "Unable to monitor game process $game_pid"
@@ -700,7 +698,12 @@ EOF
         rm -f "$info_file" 2>/dev/null || true
         log_msg "INFO" "LAUNCH" "Game '$title' (PID: $game_pid) exited"
         _restore_launch_state
-    ) &
+    }
+    if [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 1 ] || [ "${GAMECTL_ENGINE_ISOLATED:-0}" -eq 1 ]; then
+        ( _run_launch_watchdog ) </dev/null >/dev/null 2>&1 &
+    else
+        ( _run_launch_watchdog ) </dev/null &
+    fi
 
     _launch_echo "[VERIFIED] Game '$title' running in background (PID: $game_pid)."
     log_msg "INFO" "LAUNCH" "Game '$title' running in background (PID: $game_pid, Log: $log_file)"

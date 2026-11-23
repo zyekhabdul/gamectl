@@ -626,7 +626,6 @@ EOF
                     --prompt="Prefix > " \
                     --preview="$preview_cmd" \
                     --preview-window=down:50%:border-rounded:wrap \
-                    --height=70% \
                     --reverse 2>/dev/null) || fzf_rc=$?
 
                 if [ "$fzf_rc" -eq 130 ]; then
@@ -942,8 +941,9 @@ build_sandbox_command() {
         return 1
     fi
 
-    local run_uid="${UID:-$(id -u)}"
-    local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$run_uid}"
+    local desktop_runtime_dir app_runtime_dir
+    desktop_runtime_dir="$(get_desktop_runtime_dir)"
+    app_runtime_dir="$(get_runtime_dir)"
     local wayland_socket="${WAYLAND_DISPLAY:-wayland-0}"
     local xauth_file="${XAUTHORITY:-$HOME/.Xauthority}"
 
@@ -961,12 +961,12 @@ build_sandbox_command() {
         --tmpfs /tmp
         --ro-bind-try /tmp/.X11-unix /tmp/.X11-unix
         --tmpfs /run
-        --tmpfs "/run/user/$run_uid"
-        --ro-bind-try "$runtime_dir/wayland-0" "$runtime_dir/wayland-0"
-        --ro-bind-try "$runtime_dir/$wayland_socket" "$runtime_dir/$wayland_socket"
-        --bind-try "$runtime_dir/pipewire-0" "$runtime_dir/pipewire-0"
-        --bind-try "$runtime_dir/pulse" "$runtime_dir/pulse"
-        --bind-try "$runtime_dir/gamectl-$run_uid" "$runtime_dir/gamectl-$run_uid"
+        --tmpfs "$desktop_runtime_dir"
+        --bind-try "$desktop_runtime_dir/wayland-0" "$desktop_runtime_dir/wayland-0"
+        --bind-try "$desktop_runtime_dir/$wayland_socket" "$desktop_runtime_dir/$wayland_socket"
+        --bind-try "$desktop_runtime_dir/pipewire-0" "$desktop_runtime_dir/pipewire-0"
+        --bind-try "$desktop_runtime_dir/pulse" "$desktop_runtime_dir/pulse"
+        --bind-try "$app_runtime_dir" "$app_runtime_dir"
         --tmpfs "$HOME"
         --ro-bind-try "$xauth_file" "$xauth_file"
         --bind-try "$HOME/.config/gamectl" "$HOME/.config/gamectl"
@@ -1223,7 +1223,6 @@ EOF
             --border-label-pos=2 \
             --header="Enter: Toggle/Select │ Esc: Save & Return" \
             --prompt="Wrappers > " \
-            --height=45% \
             --reverse 2>/dev/null) || fzf_rc=$?
 
         check_fzf_status "$fzf_rc" || return $?
@@ -1342,7 +1341,6 @@ EOF
             --border-label-pos=2 \
             --header="GLOBAL SETTINGS (Enter: Configure │ Esc: Return to Dashboard)" \
             --prompt="Settings > " \
-            --height=40% \
             --reverse 2>/dev/null) || fzf_rc=$?
 
         check_fzf_status "$fzf_rc" || return $?
@@ -1414,7 +1412,6 @@ EOF
                         --border-label-pos=2 \
                         --header="CUSTOM LIBRARIES (Enter: Select │ Esc: Return)" \
                         --prompt="Libraries > " \
-                        --height=40% \
                         --reverse 2>/dev/null) || l_rc=$?
 
                     check_fzf_status "$l_rc" || return $?

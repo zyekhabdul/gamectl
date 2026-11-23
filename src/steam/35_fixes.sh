@@ -901,7 +901,6 @@ EOF
                 --border-label-pos=2 \
                 --header="RESTORE CONFIRMATION (Enter: Execute │ Esc: Cancel)" \
                 --prompt="Confirm > " \
-                --height=30% \
                 --reverse 2>/dev/null) || fzf_r_rc=$?
 
             if [ "$fzf_r_rc" -eq 130 ]; then
@@ -952,7 +951,6 @@ EOF
                 --border-label-pos=2 \
                 --header="FIX DEPLOYMENT (Enter: Select │ Esc: Return)" \
                 --prompt="Action > " \
-                --height=35% \
                 --reverse 2>/dev/null) || fzf_f_rc=$?
 
             if [ "$fzf_f_rc" -eq 130 ]; then

@@ -24,7 +24,9 @@ build-depot-dl:
 	./scripts/build-depot-dl.sh
 
 test:
-	./tests/test_cli.sh
+	./tests/test_cli.sh < /dev/null
+	./tests/test_remediation.sh
+	./tests/test_tui_ergonomics.sh
 
 lint:
 	@set -e; for file in src/*.sh src/*/*.sh bin/gamectl install.sh scripts/*.sh packaging/debian/*.sh packaging/scripts/*.sh tests/*.sh completions/*.bash; do \

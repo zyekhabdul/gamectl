@@ -1,7 +1,7 @@
 # REMEDIATION WORK PACKET: SYSTEMIC STANDARDIZATION & ARCHITECTURAL DECOUPLING
 
 **Track**: Architecture Decoupling / Universal TUI Harness / SSoT Consolidation  
-**Status**: READY FOR IMPLEMENTATION (AWAITING USER GO-AHEAD)  
+**Status**: [ COMPLETED & VERIFIED ] (All 7 Chunks + Critical Stability Audit Fixes Verified)  
 **Max Chunks**: 7 Chunks (Active Packet <= 10)  
 **Target Files**: `src/core/10_utils.sh`, `src/runners/50_launcher.sh`, `src/tui/70_dashboard.sh`, `src/steam/20_discovery.sh`, `src/runners/40_wrappers.sh`, `src/steam/30_downloader.sh`, `tests/test_cli.sh`, `bin/gamectl`
 
@@ -133,31 +133,31 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
   - Terminal tidak pernah rusak atau tertinggal dalam mode alternate screen saat keluar, error, atau menerima `SIGINT`/`SIGTERM`.
   - [ VERIFIED ] Lulus seluruh harness (`test_remediation.sh` 6/6, `test_cli.sh` 147/147, `test_tui_safety.py` + `test_standalone_safety.py` 32/32) dengan Exit 0.
 
-### [ ] Chunk 6: Dual-Mode Runtime Path SSoT Consolidation
-- **Target Files**: `src/runners/40_wrappers.sh`, `src/steam/30_downloader.sh`, `src/core/10_utils.sh`
+### [x] Chunk 6: Dual-Mode Runtime Path SSoT Consolidation
+- **Target Files**: `src/runners/40_wrappers.sh`, `src/steam/30_downloader.sh`, `src/core/10_utils.sh`, `src/main.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Di `src/core/10_utils.sh`:
-     - Tetapkan `get_desktop_runtime_dir()` untuk kebutuhan socket desktop Wayland/PulseAudio (`${XDG_RUNTIME_DIR:-/run/user/$(id -u)}}`).
+  1. Di `src/core/10_utils.sh` & `src/main.sh`:
+     - Tetapkan & ekspor `get_desktop_runtime_dir()` untuk kebutuhan socket desktop Wayland/PipeWire/Pulse (`${XDG_RUNTIME_DIR:-/run/user/$run_uid}`).
      - Tetapkan `get_runtime_dir()` untuk runtime privat gamectl (PID info, lock files, temporary logs).
   2. Di `src/runners/40_wrappers.sh`:
-     - Gunakan `get_desktop_runtime_dir` saat melakukan mount bind socket desktop sistem ke bubblewrap sandbox.
-  3. Di `src/steam/30_downloader.sh`:
-     - Gunakan `get_runtime_dir` untuk staging directory manifest dan token sementara.
+     - Gunakan `get_desktop_runtime_dir` dan `get_runtime_dir` saat melakukan mount bind socket desktop sistem ke bubblewrap sandbox (`--bind-try` rw untuk Wayland/audio socket, `--tmpfs "$desktop_runtime_dir"`).
+  3. Pertahankan fallback terisolasi `src/steam/30_downloader.sh` agar tetap kompatibel saat modul disource mandiri.
 - **Definition of Done (DoD)**:
-  - 0 hardcoded path manual `/run/user/` di luar fungsi resolver kanonikal.
-  - Socket Wayland dan audio tetap utuh dan berfungsi normal di dalam sandbox wrapper.
+  - 0 hardcoded path manual `/run/user/` di luar fungsi resolver kanonikal `get_desktop_runtime_dir`.
+  - [ VERIFIED ] Lulus contract `test_dual_mode_runtime_paths_contract`.
 
-### [ ] Chunk 7: Regression Harness, Contract Tests & Bundle Compilation
-- **Target Files**: `tests/test_cli.sh`, `scripts/build.sh`, `bin/gamectl`
+### [x] Chunk 7: Regression Harness, Critical Stability Audit Fixes & Bundle Compilation
+- **Target Files**: `tests/test_remediation.sh`, `Makefile`, `scripts/build.sh`, `bin/gamectl`, `src/core/10_utils.sh`, `src/runners/50_launcher.sh`, `src/tui/70_dashboard.sh`, `src/steam/30_downloader.sh`, `src/steam/35_fixes.sh`, `src/runners/40_wrappers.sh`
 - **Runtutan Eksekusi Teknis**:
-  1. Tambahkan test contracts di `tests/test_cli.sh`:
-     - Contract: Stream isolation pada `tui_run_engine` (memastikan zero output ke stdout/stderr).
-     - Contract: Headless launch returning correct PID/status tanpa interupsi UI.
-     - Contract: SSoT DRM resolution contract untuk variasi artefak biner.
-     - Contract: Dual-mode runtime path resolution (`get_desktop_runtime_dir` vs `get_runtime_dir`).
-  2. Rebuild standalone executable bundle `bin/gamectl` via `./scripts/build.sh`.
-  3. Jalankan `make lint` dan `make test`.
+  1. Perbaikan 4 temuan kritis stabilitas:
+     - Preserve caller `errexit` di `tui_exec_action()` (tidak memaksa `set -e` aktif permanen pada shell TUI induk).
+     - Hapus layer violation `check_fzf_status "$launch_rc"` di `library_menu()`.
+     - Tutup inherited FD pada background watchdog `launch_game` (`</dev/null >/dev/null 2>&1 &`).
+     - Eliminasi seluruh 17 flag `--height=...%` acak di seluruh tampilan FZF.
+  2. Tambahkan test contracts di `tests/test_remediation.sh` dan integrasikan `test_remediation.sh` + `test_tui_ergonomics.sh` ke `Makefile` target `test:`.
+  3. Rebuild standalone executable bundle `bin/gamectl` via `./scripts/build.sh`.
+  4. Jalankan `make lint`, `make test`, dan seluruh Python safety suite (`test_tui_safety.py`, `test_standalone_safety.py`, `test_save_safety.py`).
 - **Definition of Done (DoD)**:
   - `make lint` lolos dengan Exit Code 0.
-  - Seluruh test contracts lolos dengan Exit Code 0 (0 failed).
+  - Seluruh test contracts (`test_cli.sh`, `test_remediation.sh`, `test_tui_ergonomics.sh`, Python safety suites) lolos dengan Exit Code 0 (0 failed).
   - Executable `bin/gamectl` sinkron 100% dengan seluruh modular source.

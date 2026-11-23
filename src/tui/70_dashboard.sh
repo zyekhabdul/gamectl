@@ -901,7 +901,6 @@ view_logs_interactive() {
         --preview='"$GAMECTL_PREVIEW_BIN" --preview-log {}' \
         --preview-window=down:35%:border-rounded:wrap \
         --bind='ctrl-x:execute(: > "$GAMECTL_LOG_FILE")+reload(command -v tac >/dev/null 2>&1 && tac "$GAMECTL_LOG_FILE" 2>/dev/null || sed -e "1!G;h;\$!d" "$GAMECTL_LOG_FILE" 2>/dev/null)' \
-        --height=85% \
         --reverse 2>/dev/null || fzf_rc=$?
 
     flush_tty_input
@@ -1232,7 +1231,6 @@ library_menu() {
                                 --border-label-pos=2 \
                                 --header="Select Recovery Slot to Restore (Enter: Restore │ Esc: Cancel)" \
                                 --prompt="Restore Slot > " \
-                                --height=30% \
                                 --reverse 2>/dev/null) || p_rc=$?
                             check_fzf_status "$p_rc" || return $?
                             [ "$p_rc" -eq 130 ] || [ -z "$pick" ] && continue
@@ -1306,9 +1304,10 @@ library_menu() {
                 fi
 
                 # Launch game via isolated engine harness (zero terminal leaks, seamless background launch)
+                # Engine failures are already logged and surfaced via tui_run_engine modal; do not conflate with fzf status
                 tui_run_engine "Launch $sel_title" launch_game "$sel_dir" "$sel_bin" "$sel_title" || launch_rc=$?
                 invalidate_scan_cache
-                check_fzf_status "$launch_rc" || return $?
+                [ "$launch_rc" -ne 0 ] && log_msg "WARN" "LIBRARY" "Launch returned exit code $launch_rc for $sel_title"
                 ;;
         esac
     done
@@ -1566,7 +1565,6 @@ EOF
                     --border-label-pos=2 \
                     --header="ACTION PALETTE (Enter: Execute │ Esc: Return)" \
                     --prompt="Action > " \
-                    --height=40% \
                     --reverse 2>/dev/null) || action_rc=$?
                 check_fzf_status "$action_rc" || return $?
                 [ "$action_rc" -eq 130 ] && continue
@@ -1623,7 +1621,6 @@ EOF
                     --border-label-pos=2 \
                     --header="PACKAGE SELECTION (Enter: Execute │ Esc: Return)" \
                     --prompt="Package > " \
-                    --height=40% \
                     --reverse 2>/dev/null) || pkg_rc=$?
                 check_fzf_status "$pkg_rc" || return $?
                 [ "$pkg_rc" -eq 130 ] && continue

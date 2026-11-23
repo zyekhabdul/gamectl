@@ -483,7 +483,7 @@ tui_run_engine() {
     local rc=0
     # Execute inside isolated subshell with stdin disconnected (< /dev/null)
     # Redirect stdout to runtime log and capture stderr into error buffer
-    ( "${cmd[@]}" ) < /dev/null >> "$run_log" 2> "$err_log" || rc=$?
+    ( export GAMECTL_ENGINE_ISOLATED=1; "${cmd[@]}" ) < /dev/null >> "$run_log" 2> "$err_log" || rc=$?
 
     if [ "$rc" -ne 0 ]; then
         local err_summary
@@ -523,11 +523,12 @@ tui_exec_action() {
     # Shield parent shell from SIGINT termination so child process handles abort cleanly
     trap '' INT
 
-    local rc=0
+    local rc=0 _had_errexit=0
+    [[ $- == *e* ]] && _had_errexit=1
     set +e
     "${cmd[@]}" 2>&1 | tee -a "$tmp_log"
     rc="${PIPESTATUS[0]}"
-    set -e
+    [ "$_had_errexit" -eq 1 ] && set -e
 
     if [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 1 ] && [ "${BASHPID:-$$}" = "${GAMECTL_TUI_OWNER_PID:-}" ]; then
         install_tui_screen_traps
@@ -592,6 +593,12 @@ store_search_items() {
     jq -r 'if any(.items[]?; (.id | tostring | test("[\\t\\r\\n]")) or (.name | test("[\\t\\r\\n]")))
         then error("TUI catalog contains TAB, CR or newline")
         else .items[]? | "\(.id)\t\(.name)" end'
+}
+
+# Canonical desktop session runtime directory (Wayland/PipeWire/Pulse/D-Bus sockets)
+get_desktop_runtime_dir() {
+    local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
+    echo "${XDG_RUNTIME_DIR:-/run/user/$run_uid}"
 }
 
 # Canonical user-isolated runtime directory (0700 permissions)
