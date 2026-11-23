@@ -639,10 +639,24 @@ launch_game() {
         _launch_echo "[INFO] Isolated Wine Prefix: $pfx_dir"
         _launch_echo "[INFO] Log stream: $log_file"
 
+        local umu_gameid="umu-default"
+        if [ -n "$appid" ] && [ "$appid" != "0" ]; then
+            umu_gameid="umu-${appid}"
+        fi
+
         case "$runner_bin" in
             umu-run)
                 (
-                    export WINEPREFIX="$pfx_dir" GAMEID="$appid" WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" PROTON_USE_WINED3D="$proton_wined3d_val"
+                    export WINEPREFIX="$pfx_dir" \
+                        GAMEID="$umu_gameid" \
+                        STEAM_COMPAT_APP_ID="$appid" \
+                        SteamAppId="$appid" \
+                        SteamGameId="$appid" \
+                        WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
+                        PROTON_USE_WINED3D="$proton_wined3d_val"
+                    if [ "$appid" = "0" ] && [ -z "${PROTONFIXES_DISABLE+x}" ]; then
+                        export PROTONFIXES_DISABLE=1
+                    fi
                     _exec_in_scope "${wrappers[@]}" umu-run "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
@@ -650,11 +664,17 @@ launch_game() {
             *proton*)
                 (
                     export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_INSTALL_PATH:-$(get_steam_root 2>/dev/null || echo "$HOME/.local/share/Steam")}" \
-                    STEAM_COMPAT_DATA_PATH="$gdir" \
-                    STEAM_COMPAT_APP_ID="$appid" \
-                    WINEPREFIX="$pfx_dir" \
-                    WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
-                    PROTON_USE_WINED3D="$proton_wined3d_val"
+                        STEAM_COMPAT_DATA_PATH="$gdir" \
+                        STEAM_COMPAT_APP_ID="$appid" \
+                        SteamAppId="$appid" \
+                        SteamGameId="$appid" \
+                        GAMEID="$umu_gameid" \
+                        WINEPREFIX="$pfx_dir" \
+                        WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
+                        PROTON_USE_WINED3D="$proton_wined3d_val"
+                    if [ "$appid" = "0" ] && [ -z "${PROTONFIXES_DISABLE+x}" ]; then
+                        export PROTONFIXES_DISABLE=1
+                    fi
                     _exec_in_scope "${wrappers[@]}" "$runner_bin" waitforexitandrun "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!

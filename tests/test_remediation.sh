@@ -506,6 +506,103 @@ test_graphics_capability_and_renderer_contract() {
 }
 run_test "Graphics SSoT (WP30 Packet A): detect_vulkan_capability & resolve_graphics_renderer contract" test_graphics_capability_and_renderer_contract
 
+test_proton_env_contract() {
+    source "$REPO_ROOT/src/core/00_header.sh"
+    source "$REPO_ROOT/src/core/10_utils.sh"
+    source "$REPO_ROOT/src/steam/20_discovery.sh"
+    source "$REPO_ROOT/src/runners/40_wrappers.sh"
+    source "$REPO_ROOT/src/runners/50_launcher.sh"
+
+    local orig_xdg="${XDG_RUNTIME_DIR:-}"
+    local orig_pfd_set=0 orig_pfd=""
+    if [ -n "${PROTONFIXES_DISABLE+x}" ]; then
+        orig_pfd_set=1
+        orig_pfd="$PROTONFIXES_DISABLE"
+    fi
+    unset PROTONFIXES_DISABLE
+
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_proton_env_XXXXXX")
+    local g_dir="$t_dir/StandaloneWinGame"
+    mkdir -p "$t_dir/runtime" "$g_dir/steam_settings"
+    export XDG_RUNTIME_DIR="$t_dir/runtime"
+
+    # Dummy PE executable + GBE shield marker
+    printf 'MZ' > "$g_dir/game.exe"
+    printf 'fake_dll' > "$g_dir/steam_api64.dll"
+    chmod +x "$g_dir/game.exe"
+
+    cat <<EOF > "$t_dir/mock-proton"
+#!/usr/bin/env bash
+cat <<ENVEOF > "$t_dir/env.out"
+STEAM_COMPAT_APP_ID=\${STEAM_COMPAT_APP_ID:-}
+SteamAppId=\${SteamAppId:-}
+SteamGameId=\${SteamGameId:-}
+GAMEID=\${GAMEID:-}
+PROTON_USE_WINED3D=\${PROTON_USE_WINED3D:-}
+PROTONFIXES_DISABLE=\${PROTONFIXES_DISABLE-UNSET}
+ENVEOF
+sleep 0.2
+EOF
+    chmod +x "$t_dir/mock-proton"
+
+    find_runner() { echo "$t_dir/mock-proton"; }
+    backup_save() { :; }
+    clean_stale_locks() { :; }
+    detect_steamstub_drm() { return 1; }
+    check_systemd_scope_support() { return 1; }
+
+    _restore_proton_env_test() {
+        pkill -f "$t_dir/mock-proton" 2>/dev/null || true
+        rm -rf "$t_dir"
+        [ -n "$orig_xdg" ] && export XDG_RUNTIME_DIR="$orig_xdg" || unset XDG_RUNTIME_DIR
+        if [ "$orig_pfd_set" -eq 1 ]; then
+            export PROTONFIXES_DISABLE="$orig_pfd"
+        else
+            unset PROTONFIXES_DISABLE
+        fi
+    }
+
+    # Case 1: Valid AppID in steam_appid.txt + VULKAN_LEGACY -> AppID propagated, PROTON_USE_WINED3D=1, PROTONFIXES_DISABLE unset
+    echo "360740" > "$g_dir/steam_appid.txt"
+    rm -f "$t_dir/env.out"
+    HOME="$t_dir" GAMECTL_IN_ALT_SCREEN=1 GAMECTL_VULKAN_CAPABILITY=VULKAN_LEGACY \
+        launch_game "$g_dir" "game.exe" "DownwellTest" >/dev/null 2>&1 || { _restore_proton_env_test; return 1; }
+    for _ in $(seq 1 40); do
+        [ -s "$t_dir/env.out" ] && break
+        sleep 0.05
+    done
+    [ -s "$t_dir/env.out" ] || { _restore_proton_env_test; return 1; }
+    grep -qx "STEAM_COMPAT_APP_ID=360740" "$t_dir/env.out" || { _restore_proton_env_test; return 1; }
+    grep -qx "SteamAppId=360740" "$t_dir/env.out" || { _restore_proton_env_test; return 1; }
+    grep -qx "SteamGameId=360740" "$t_dir/env.out" || { _restore_proton_env_test; return 1; }
+    grep -qx "GAMEID=umu-360740" "$t_dir/env.out" || { _restore_proton_env_test; return 1; }
+    grep -qx "PROTON_USE_WINED3D=1" "$t_dir/env.out" || { _restore_proton_env_test; return 1; }
+    grep -qx "PROTONFIXES_DISABLE=UNSET" "$t_dir/env.out" || { _restore_proton_env_test; return 1; }
+    wait "${GAMECTL_LAST_LAUNCH_PID:-}" 2>/dev/null || true
+
+    # Case 2: No steam_appid.txt (appid=0) + VULKAN_READY -> umu-default, PROTON_USE_WINED3D=0, PROTONFIXES_DISABLE=1
+    rm -f "$g_dir/steam_appid.txt" "$t_dir/env.out"
+    HOME="$t_dir" GAMECTL_IN_ALT_SCREEN=1 GAMECTL_VULKAN_CAPABILITY=VULKAN_READY \
+        launch_game "$g_dir" "game.exe" "NoAppIdTest" >/dev/null 2>&1 || { _restore_proton_env_test; return 1; }
+    for _ in $(seq 1 40); do
+        [ -s "$t_dir/env.out" ] && break
+        sleep 0.05
+    done
+    [ -s "$t_dir/env.out" ] || { _restore_proton_env_test; return 1; }
+    grep -qx "STEAM_COMPAT_APP_ID=0" "$t_dir/env.out" || { _restore_proton_env_test; return 1; }
+    grep -qx "SteamAppId=0" "$t_dir/env.out" || { _restore_proton_env_test; return 1; }
+    grep -qx "SteamGameId=0" "$t_dir/env.out" || { _restore_proton_env_test; return 1; }
+    grep -qx "GAMEID=umu-default" "$t_dir/env.out" || { _restore_proton_env_test; return 1; }
+    grep -qx "PROTON_USE_WINED3D=0" "$t_dir/env.out" || { _restore_proton_env_test; return 1; }
+    grep -qx "PROTONFIXES_DISABLE=1" "$t_dir/env.out" || { _restore_proton_env_test; return 1; }
+    wait "${GAMECTL_LAST_LAUNCH_PID:-}" 2>/dev/null || true
+
+    _restore_proton_env_test
+    return 0
+}
+run_test "Proton Contract (WP30 Packet B): Proton/umu-run env normalization & protonfixes guard" test_proton_env_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"

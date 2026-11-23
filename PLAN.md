@@ -1,7 +1,7 @@
 # WORK PACKET 30: PRODUCTION GRAPHICS NEGOTIATION, PROTON CONTRACT & RUNTIME OBSERVABILITY
 
 - **Track**: Production Hardening / Generalized Hardware Negotiation / TUI Observability
-- **Status**: IN PROGRESS [1/4 PACKETS]
+- **Status**: IN PROGRESS [2/4 PACKETS]
 - **Basis**: Empiris dari `/run/user/1000/game_Downwellexe.log` (`HRESULT 0x887a0002` / `DXGI_ERROR_NOT_FOUND`, `protonfixes` `IndexError`, multilib PE32, dan audit visual TUI).
 - **Target Files**: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/diagnostics/60_doctor.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `tests/test_remediation.sh`, `bin/gamectl`
 
@@ -33,7 +33,7 @@
   - User dapat menimpa renderer lewat CLI (`--wined3d`/`--dxvk`), env, atau menu `<CTRL-O>`.
   - [ VERIFIED ] `make lint` & `make test` (`test_cli.sh` 147/147, `test_remediation.sh` 11/11, `test_tui_ergonomics.sh` 3/3) lulus Exit 0.
 
-### [ ] Packet B: Normalisasi Kontrak Environment Proton & `umu-run`
+### [x] Packet B: Normalisasi Kontrak Environment Proton & `umu-run`
 - **Target Files**: `src/runners/50_launcher.sh`
 - **Langkah Teknis**:
   1. Di blok launch `*proton*` dan `umu-run` (`src/runners/50_launcher.sh` baris 624-650):
@@ -47,6 +47,7 @@
 - **Definition of Done (DoD)**:
   - Peluncuran game standalone lewat GE-Proton bebas dari Python traceback `protonfixes` `IndexError` pada log runtime.
   - Identitas `SteamAppId` dan `SteamGameId` selalu tersedia di dalam prefix Windows.
+  - [ VERIFIED ] `test_proton_env_contract`, `test_cli.sh` (147/147), `test_remediation.sh` (12/12), `test_tui_ergonomics.sh` (3/3), dan `make lint` lulus Exit 0.
 
 ### [ ] Packet C: Graphics/Multilib Audit (`doctor`), Crash Telemetry Hint & TUI Polish
 - **Target Files**: `src/diagnostics/60_doctor.sh`, `src/runners/50_launcher.sh`, `src/tui/70_dashboard.sh`
