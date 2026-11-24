@@ -32,6 +32,7 @@ jobs:
             zip \
             unzip \
             p7zip-full \
+            shellcheck \
             bubblewrap
 
       - name: Set up Rust toolchain
@@ -51,7 +52,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Validate Bash syntax (make lint)
-        run: make lint
+        run: STRICT_LINT=1 make lint
 
       - name: Verify source-to-bundle synchronization
         run: ./scripts/build.sh --check
@@ -60,7 +61,14 @@ jobs:
         run: cargo test --manifest-path crates/depot-dl/Cargo.toml --verbose
 
       - name: Compile native depot downloader binary
-        run: ./scripts/build-depot-dl.sh
+        run: |
+          ./scripts/build-depot-dl.sh
+          ./scripts/build-depot-dl.sh --check
 
       - name: Execute CLI regression and integrity harness
-        run: ./tests/test_cli.sh
+        run: ./tests/test_cli.sh < /dev/null
+
+      - name: Execute remediation & TUI ergonomics suites
+        run: |
+          ./tests/test_remediation.sh
+          ./tests/test_tui_ergonomics.sh
