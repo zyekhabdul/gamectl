@@ -1861,15 +1861,24 @@ EOF
                 ;;
             4)
                 local new_rhost rc=0
-                new_rhost=$(tui_prompt_input "Remote Companion Host" "Enter SSH hostname/alias or '-' to clear (Current: $r_host │ Enter: Save │ Esc: Cancel)" "$r_host" "SSH Host > ") || rc=$?
+                new_rhost=$(tui_prompt_input "Remote Companion Host" "Enter SSH host (serv, host:~/path), rclone (gdrive:path), or '-' to clear (Current: $r_host │ Enter: Save │ Esc: Cancel)" "$r_host" "Remote Target > ") || rc=$?
                 [ "$rc" -eq 130 ] && continue
                 [ "$rc" -ne 0 ] && return "$rc"
-                new_rhost=$(echo "$new_rhost" | tr -d '[:space:]')
+                new_rhost=$(printf '%s' "$new_rhost" | tr -d '[:space:]')
                 if [ "$new_rhost" = "-" ]; then
                     rm -f "$HOME/.config/gamectl/remote_host"
                     log_msg "INFO" "CONFIG" "Cleared remote companion host"
+                elif [[ "$new_rhost" == -* ]]; then
+                    tui_modal_notice "Invalid Remote Host" "Remote host cannot start with '-':\n$new_rhost" || return $?
+                    continue
                 elif [ -n "$new_rhost" ]; then
-                    echo "$new_rhost" > "$HOME/.config/gamectl/remote_host"
+                    local parse_err=""
+                    if ! parse_err=$(parse_remote_sync_target "$new_rhost" 2>&1); then
+                        tui_modal_notice "Invalid Remote Target" "$parse_err" || return $?
+                        continue
+                    fi
+                    mkdir -p "$HOME/.config/gamectl" || return 1
+                    printf '%s\n' "$new_rhost" > "$HOME/.config/gamectl/remote_host"
                     log_msg "INFO" "CONFIG" "Saved remote companion host: $new_rhost"
                 fi
                 ;;

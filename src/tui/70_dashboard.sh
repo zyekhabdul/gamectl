@@ -1113,7 +1113,7 @@ remote_sync_interactive() {
         host_display="${rhost:-Not configured}"
 
         local sync_entries
-        sync_entries=$(printf 'push\tPush Saves - Send local saves to %s\npull\tPull Saves - Download remote saves from %s (auto pre-pull backup)\npull-dry\tPull Dry-Run - Simulate remote pull without modifying local files\nconfig\tConfigure Remote Host - Set or clear SSH host (Current: %s)\n' \
+        sync_entries=$(printf 'push\tPush Saves - Send local saves to %s\npull\tPull Saves - Download remote saves from %s (auto pre-pull backup)\npull-dry\tPull Dry-Run - Simulate remote pull without modifying local files\nconfig\tConfigure Remote Host - Set SSH host (serv, host:~/path) or rclone (gdrive:path) (Current: %s)\n' \
             "$host_display" "$host_display" "$host_display")
 
         local pal_rc=0 sel=""
@@ -1146,7 +1146,7 @@ remote_sync_interactive() {
                 ;;
             config)
                 local new_rhost="" cfg_rc=0
-                new_rhost=$(tui_prompt_input "Remote Companion Host" "Enter SSH hostname/alias or '-' to clear (Current: $host_display │ Enter: Save │ Esc: Cancel)" "$rhost" "SSH Host > ") || cfg_rc=$?
+                new_rhost=$(tui_prompt_input "Remote Companion Host" "Enter SSH host (serv, host:~/path), rclone (gdrive:path), or '-' to clear (Current: $host_display │ Enter: Save │ Esc: Cancel)" "$rhost" "Remote Target > ") || cfg_rc=$?
                 [ "$cfg_rc" -eq 130 ] && continue
                 [ "$cfg_rc" -ne 0 ] && return "$cfg_rc"
                 new_rhost=$(printf '%s' "$new_rhost" | tr -d '[:space:]')
@@ -1164,6 +1164,11 @@ remote_sync_interactive() {
                     tui_modal_notice "Invalid Remote Host" "Remote host cannot start with '-':\n$new_rhost" || return $?
                     continue
                 elif [ -n "$new_rhost" ]; then
+                    local parse_err=""
+                    if ! parse_err=$(parse_remote_sync_target "$new_rhost" 2>&1); then
+                        tui_modal_notice "Invalid Remote Target" "$parse_err" || return $?
+                        continue
+                    fi
                     mkdir -p "$HOME/.config/gamectl" || return 1
                     printf '%s\n' "$new_rhost" > "$HOME/.config/gamectl/remote_host"
                     log_msg "INFO" "CONFIG" "Saved remote companion host: $new_rhost"
