@@ -70,13 +70,19 @@ if [[ "$TARGET_TRIPLE" =~ (windows|mingw|msvc) ]]; then
 fi
 
 if [ "$CHECK_ONLY" = true ]; then
-    if [ -f "$OUTPUT_DIR/$OUTPUT_NAME" ] && [ -x "$OUTPUT_DIR/$OUTPUT_NAME" ]; then
-        echo "[PASS] $OUTPUT_NAME is present and executable at $OUTPUT_DIR/$OUTPUT_NAME"
-        exit 0
-    else
+    if [ ! -f "$OUTPUT_DIR/$OUTPUT_NAME" ] || [ ! -x "$OUTPUT_DIR/$OUTPUT_NAME" ]; then
         echo "[FAIL] $OUTPUT_NAME missing or not executable at $OUTPUT_DIR/$OUTPUT_NAME" >&2
         exit 1
     fi
+    if [ -d "$CRATE_DIR" ]; then
+        stale_file=$(find "$CRATE_DIR/Cargo.toml" "$CRATE_DIR/Cargo.lock" "$CRATE_DIR/src" -type f -newer "$OUTPUT_DIR/$OUTPUT_NAME" 2>/dev/null | head -n 1 || true)
+        if [ -n "$stale_file" ]; then
+            echo "[FAIL] $OUTPUT_NAME is stale (newer source: $stale_file). Run ./scripts/build-depot-dl.sh" >&2
+            exit 1
+        fi
+    fi
+    echo "[PASS] $OUTPUT_NAME is present, executable, and up-to-date at $OUTPUT_DIR/$OUTPUT_NAME"
+    exit 0
 fi
 
 if ! command -v "$CARGO_BIN" >/dev/null 2>&1; then
@@ -157,18 +163,8 @@ mkdir -p "$OUTPUT_DIR"
 cp -f "$TARGET_BIN" "$OUTPUT_DIR/$OUTPUT_NAME"
 chmod +x "$OUTPUT_DIR/$OUTPUT_NAME" 2>/dev/null || true
 
-# Mirror to runner bundle if present
-RUNNER_BIN_DIR="$REPO_ROOT/src/gamectl_runner/bin"
-if [ -d "$RUNNER_BIN_DIR" ]; then
-    cp -f "$TARGET_BIN" "$RUNNER_BIN_DIR/$OUTPUT_NAME"
-    chmod +x "$RUNNER_BIN_DIR/$OUTPUT_NAME" 2>/dev/null || true
-fi
-
 if command -v strip >/dev/null 2>&1; then
     strip "$OUTPUT_DIR/$OUTPUT_NAME" 2>/dev/null || true
-    if [ -f "$RUNNER_BIN_DIR/$OUTPUT_NAME" ]; then
-        strip "$RUNNER_BIN_DIR/$OUTPUT_NAME" 2>/dev/null || true
-    fi
 fi
 
 file_size=$(stat -c%s "$OUTPUT_DIR/$OUTPUT_NAME" 2>/dev/null || stat -f%z "$OUTPUT_DIR/$OUTPUT_NAME" 2>/dev/null || echo "0")

@@ -84,13 +84,11 @@ cp "$TMP_OUT" "$DEST_TMP"
 chmod +x "$DEST_TMP"
 mv -f "$DEST_TMP" "$OUTPUT_BIN"
 
-# Synchronize python runner bundled binary if package directory exists
+# Synchronize python runner bundled binary (pure script only; never bundle native ELF)
 if [ -d "$REPO_ROOT/src/gamectl_runner" ]; then
     mkdir -p "$REPO_ROOT/src/gamectl_runner/bin"
     cp -p "$OUTPUT_BIN" "$REPO_ROOT/src/gamectl_runner/bin/gamectl"
-    if [ -f "$REPO_ROOT/bin/gamectl-depot-dl" ]; then
-        cp -p "$REPO_ROOT/bin/gamectl-depot-dl" "$REPO_ROOT/src/gamectl_runner/bin/gamectl-depot-dl"
-    fi
+    rm -f "$REPO_ROOT/src/gamectl_runner/bin/gamectl-depot-dl"
 fi
 
 line_count=$(wc -l < "$OUTPUT_BIN" | tr -d ' ')
