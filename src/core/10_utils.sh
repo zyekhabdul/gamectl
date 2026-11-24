@@ -263,6 +263,106 @@ get_remote_host() {
     echo "$host"
 }
 
+# Parse remote sync target into REMOTE_TARGET_BACKEND (ssh|rclone), REMOTE_TARGET_ENDPOINT, REMOTE_TARGET_BASE
+parse_remote_sync_target() {
+    local raw="${1:-}"
+    REMOTE_TARGET_BACKEND=""
+    REMOTE_TARGET_ENDPOINT=""
+    REMOTE_TARGET_BASE=""
+
+    if [ -z "$raw" ]; then
+        echo "[WARN] Target remote host not configured." >&2
+        echo "       Define target in ~/.config/gamectl/remote_host or GAMECTL_REMOTE_HOST variable." >&2
+        return 1
+    fi
+    if [[ "$raw" == *$'\n'* || "$raw" == *$'\r'* ]] || [[ "$raw" == -* ]]; then
+        echo "[ERROR] Invalid remote sync target '$raw': cannot start with '-' or contain newlines." >&2
+        return 1
+    fi
+
+    if [[ "$raw" == rclone:* ]]; then
+        local rest="${raw#rclone:}"
+        local r_name="${rest%%:*}"
+        local r_base="${rest#*:}"
+        if [[ "$rest" != *:* ]] || [ -z "$r_name" ]; then
+            echo "[ERROR] Invalid rclone target '$raw'. Expected format: rclone:<remote>:[path]." >&2
+            return 1
+        fi
+        if ! command -v rclone >/dev/null 2>&1; then
+            echo "[ERROR] Remote target '$raw' requires rclone, which is not installed in PATH." >&2
+            return 1
+        fi
+        if ! rclone listremotes 2>/dev/null | grep -Fqx "${r_name}:"; then
+            echo "[ERROR] rclone remote '${r_name}:' not found (check 'rclone listremotes')." >&2
+            return 1
+        fi
+        while [[ "$r_base" == /* ]]; do r_base="${r_base#/}"; done
+        while [[ "$r_base" == */ ]]; do r_base="${r_base%/}"; done
+        REMOTE_TARGET_BACKEND="rclone"
+        REMOTE_TARGET_ENDPOINT="${r_name}:"
+        REMOTE_TARGET_BASE="$r_base"
+    elif [[ "$raw" == \[* ]]; then
+        if [[ "$raw" =~ ^(\[[^]]+\])(:(.*))?$ ]]; then
+            REMOTE_TARGET_BACKEND="ssh"
+            REMOTE_TARGET_ENDPOINT="${BASH_REMATCH[1]}"
+            REMOTE_TARGET_BASE="${BASH_REMATCH[3]:-}"
+        else
+            echo "[ERROR] Invalid IPv6 remote sync target: $raw" >&2
+            return 1
+        fi
+    elif [[ "$raw" == *:* ]]; then
+        local lhs="${raw%%:*}"
+        local rhs="${raw#*:}"
+        if [ -z "$lhs" ]; then
+            echo "[ERROR] Invalid remote sync target '$raw': missing host or remote name." >&2
+            return 1
+        fi
+        if [[ "$lhs" == *@* ]] || [[ "$lhs" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            if [ -z "$rhs" ]; then
+                echo "[ERROR] SSH target '$raw' has empty path after ':'. Omit ':' or specify a path (e.g. ${lhs}:~/gamectl-saves)." >&2
+                return 1
+            fi
+            REMOTE_TARGET_BACKEND="ssh"
+            REMOTE_TARGET_ENDPOINT="$lhs"
+            REMOTE_TARGET_BASE="$rhs"
+        elif command -v rclone >/dev/null 2>&1 && rclone listremotes 2>/dev/null | grep -Fqx "${lhs}:"; then
+            while [[ "$rhs" == /* ]]; do rhs="${rhs#/}"; done
+            while [[ "$rhs" == */ ]]; do rhs="${rhs%/}"; done
+            REMOTE_TARGET_BACKEND="rclone"
+            REMOTE_TARGET_ENDPOINT="${lhs}:"
+            REMOTE_TARGET_BASE="$rhs"
+        elif [ -z "$rhs" ]; then
+            if ! command -v rclone >/dev/null 2>&1; then
+                echo "[ERROR] Remote target '$raw' requires rclone, which is not installed in PATH." >&2
+            else
+                echo "[ERROR] Remote '${lhs}:' not found in 'rclone listremotes'. For SSH, omit ':' or append a path (e.g. ${lhs}:~/gamectl-saves)." >&2
+            fi
+            return 1
+        else
+            REMOTE_TARGET_BACKEND="ssh"
+            REMOTE_TARGET_ENDPOINT="$lhs"
+            REMOTE_TARGET_BASE="$rhs"
+        fi
+    else
+        REMOTE_TARGET_BACKEND="ssh"
+        REMOTE_TARGET_ENDPOINT="$raw"
+        REMOTE_TARGET_BASE=""
+    fi
+
+    if [ -n "$REMOTE_TARGET_BASE" ]; then
+        if [[ "$REMOTE_TARGET_BASE" == ".." || "$REMOTE_TARGET_BASE" == "../"* || "$REMOTE_TARGET_BASE" == *"/.." || "$REMOTE_TARGET_BASE" == *"/../"* ]]; then
+            echo "[ERROR] Invalid remote path traversal in '$REMOTE_TARGET_BASE'." >&2
+            return 1
+        fi
+        if [ "$REMOTE_TARGET_BACKEND" = "rclone" ] && [[ "$REMOTE_TARGET_BASE" == "~" || "$REMOTE_TARGET_BASE" == "~/"* ]]; then
+            echo "[ERROR] rclone remote path cannot start with '~' ('$REMOTE_TARGET_BASE'). Use e.g. ${REMOTE_TARGET_ENDPOINT}gamectl-saves." >&2
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
 # Pre-flight cleanup of orphaned sockets, locks, and stale download staging directories
 clean_stale_locks() {
     local run_dir
