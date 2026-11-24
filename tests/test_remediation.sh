@@ -1535,6 +1535,556 @@ test_standalone_compat_dir_and_lint_gate_contract() {
 }
 run_test "Standalone Runner & Lint (WP33 Packet 33C): XDG get_compat_dir fallback & STRICT_LINT gate" test_standalone_compat_dir_and_lint_gate_contract
 
+# Test 24: WP34 Packet 34A — Multiline & Read-Only tui_modal_notice (Real PTY) + 3-Tier tui_run_engine Capture
+test_wp34a_tui_primitives_and_engine_capture_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp34a_XXXXXX")
+    mkdir -p "$t_dir/runtime"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+
+        # 1. Non-TTY tui_modal_notice expands literal \n and preserves %s/%n and -e/-n verbatim
+        local non_tty_out
+        non_tty_out=$(tui_modal_notice "Alert" 'Line 1\nLine %s %n\n-e -n done' < /dev/null 2>/dev/null) || exit 1
+        [ "$(printf '%s\n' "$non_tty_out" | wc -l)" -eq 4 ] || exit 1
+        printf '%s\n' "$non_tty_out" | grep -Fq 'Line %s %n' || exit 1
+        printf '%s\n' "$non_tty_out" | grep -Fq -- '-e -n done' || exit 1
+        ! printf '%s\n' "$non_tty_out" | grep -Fq '\n' || exit 1
+        local log_file
+        log_file="$(get_runtime_log_file)"
+        [ "$(grep -c '\[UI[ ]*\].*\[Alert\]' "$log_file")" -eq 1 ] || exit 1
+        grep -q '\[Alert\] Line 1 | Line %s %n | -e -n done' "$log_file" || exit 1
+
+        # 2. Real PTY + real fzf render verifies multiline layout without literal \n
+        python3 - "$REPO_ROOT" "$t_dir/runtime" <<'PY' || exit 1
+import errno, fcntl, os, pty, re, select, signal, struct, termios, time, sys
+
+repo_root, runtime_dir = sys.argv[1], sys.argv[2]
+pid, fd = pty.fork()
+if pid == 0:
+    os.environ["XDG_RUNTIME_DIR"] = runtime_dir
+    os.environ["TERM"] = "xterm-256color"
+    os.execvp("bash", [
+        "bash", "-c",
+        'source "$1/src/core/00_header.sh"; source "$1/src/core/10_utils.sh"; '
+        'tui_modal_notice "Sync Test" "Line Alpha\\nLine Beta %s\\nLine Gamma"',
+        "_", repo_root,
+    ])
+
+fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+output = bytearray()
+sent_enter = False
+status = None
+try:
+    deadline = time.monotonic() + 8.0
+    while time.monotonic() < deadline:
+        if select.select([fd], [], [], 0.05)[0]:
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError as err:
+                if err.errno != errno.EIO:
+                    raise
+                chunk = b""
+            output.extend(chunk)
+            if b"\x1b[6n" in chunk:
+                os.write(fd, b"\x1b[1;1R")
+            if not sent_enter and b"Line Alpha" in output:
+                os.write(fd, b"\r")
+                sent_enter = True
+        done, status_now = os.waitpid(pid, os.WNOHANG)
+        if done:
+            status = status_now
+            while select.select([fd], [], [], 0)[0]:
+                try:
+                    chunk = os.read(fd, 65536)
+                except OSError as err:
+                    if err.errno != errno.EIO:
+                        raise
+                    break
+                if not chunk:
+                    break
+                output.extend(chunk)
+            break
+finally:
+    if status is None:
+        os.killpg(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+    os.close(fd)
+
+assert status is not None, f"tui_modal_notice timed out in PTY: {bytes(output)!r}"
+rc = os.waitstatus_to_exitcode(status)
+text = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", bytes(output).decode("utf-8", errors="replace"))
+assert rc == 0, f"fzf rc={rc}, output={text!r}"
+assert sent_enter, f"fzf did not render Line Alpha before exit: {text!r}"
+assert "Line Alpha" in text, f"missing Line Alpha in {text!r}"
+assert "Line Beta %s" in text, f"missing Line Beta %s in {text!r}"
+assert "Line Gamma" in text, f"missing Line Gamma in {text!r}"
+assert "\\n" not in text, f"literal \\n leaked in {text!r}"
+PY
+
+        # 3. tui_run_engine 3-tier error capture (stderr -> stdout fallback -> silent sentinel)
+        local captured_msg=""
+        tui_modal_notice() { captured_msg="$2"; return 0; }
+
+        fail_stderr() { echo "STDERR_TRACE_LINE" >&2; echo "STDOUT_BACKGROUND_INFO"; return 11; }
+        captured_msg=""
+        ! tui_run_engine "ErrTask" fail_stderr >/dev/null 2>&1 || exit 1
+        printf '%s\n' "$captured_msg" | grep -Fq 'STDERR_TRACE_LINE' || exit 1
+        grep -Fq 'STDOUT_BACKGROUND_INFO' "$log_file" || exit 1
+
+        fail_stdout_only() { echo "STDOUT_ONLY_REASON"; return 12; }
+        captured_msg=""
+        ! tui_run_engine "OutTask" fail_stdout_only >/dev/null 2>&1 || exit 1
+        printf '%s\n' "$captured_msg" | grep -Fq 'STDOUT_ONLY_REASON' || exit 1
+        grep -Fq 'STDOUT_ONLY_REASON' "$log_file" || exit 1
+
+        fail_silent() { return 13; }
+        captured_msg=""
+        ! tui_run_engine "SilentTask" fail_silent >/dev/null 2>&1 || exit 1
+        printf '%s\n' "$captured_msg" | grep -Fq 'No diagnostic output emitted.' || exit 1
+    )
+}
+run_test "TUI Primitives (WP34 Packet 34A): real PTY multiline tui_modal_notice & 3-tier tui_run_engine capture" test_wp34a_tui_primitives_and_engine_capture_contract
+
+# Test 25: WP34 Packet 34B — Engine Failure/Warning Stream Discipline (stderr >&2)
+test_wp34b_engine_stderr_stream_discipline_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp34b_XXXXXX")
+    mkdir -p "$t_dir/home" "$t_dir/runtime" "$t_dir/no_saves_game" "$t_dir/game/saves"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        unset GAMECTL_REMOTE_HOST GAMECTL_COMPANION_HOST GAMECTL_SYNC_HOST GAMECTL_TUF_HOST
+
+        # 1. Zero echo [ERROR] lines without >&2 across src/
+        if grep -rn 'echo.*\[ERROR\]' "$REPO_ROOT/src/" | grep -v '>&2' | grep -q .; then
+            echo "Found echo [ERROR] without >&2 in src/" >&2
+            exit 1
+        fi
+
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/runners/50_launcher.sh"
+
+        local out_f="$t_dir/stdout.txt" err_f="$t_dir/stderr.txt" rc=0
+
+        # 2a. sync_save_remote missing saves/ emits [ERROR] to stderr only
+        sync_save_remote "$t_dir/no_saves_game" "TestTitle" >"$out_f" 2>"$err_f" && rc=0 || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+        grep -Fq '[ERROR] Portable saves directory not found' "$err_f" || exit 1
+        ! grep -qE '\[(ERROR|WARN)\]' "$out_f" || exit 1
+
+        # 2b. sync_save_remote unconfigured host emits [WARN] to stderr only
+        sync_save_remote "$t_dir/game" "TestTitle" >"$out_f" 2>"$err_f" && rc=0 || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+        grep -Fq '[WARN] Target remote host not configured.' "$err_f" || exit 1
+        grep -Fq 'remote_host' "$err_f" || exit 1
+        ! grep -qE '\[(ERROR|WARN)\]' "$out_f" || exit 1
+
+        # 2c. sync_save_remote unreachable host emits [WARN] to stderr only
+        ssh() { return 255; }
+        sync_save_remote "$t_dir/game" "TestTitle" "unreachable_host" >"$out_f" 2>"$err_f" && rc=0 || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+        grep -q '\[WARN\] Remote host .* offline or unreachable' "$err_f" || exit 1
+        ! grep -qE '\[(ERROR|WARN)\]' "$out_f" || exit 1
+        unset -f ssh
+
+        # 3. tui_run_engine surfaces sync_save_remote stderr directly into modal
+        local modal_body=""
+        tui_modal_notice() { modal_body="$2"; return 0; }
+        ! tui_run_engine "Remote Sync" sync_save_remote "$t_dir/game" "TestTitle" >/dev/null 2>&1 || exit 1
+        printf '%s\n' "$modal_body" | grep -Fq 'Target remote host not configured.' || exit 1
+    )
+}
+run_test "Engine Stream Discipline (WP34 Packet 34B): stderr routing on sync_save_remote & fixes" test_wp34b_engine_stderr_stream_discipline_contract
+
+# Test 26: WP34 Packet 34C — TUI Engine Routing Unification (9 Call Sites -> tui_run_engine)
+test_wp34c_tui_engine_routing_unification_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp34c_XXXXXX")
+    mkdir -p "$t_dir/home" "$t_dir/runtime" "$t_dir/game/saves" "$t_dir/mock_bin"
+    touch "$t_dir/game/game.exe"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+
+        # 1. Static invariants: zero naked engine calls or launch_rc check_fzf_status violations in TUI
+        if grep -nE 'if (create_desktop_entry|inject_game|sync_save_remote|pull_save_remote|backup_save|restore_save) ' "$REPO_ROOT/src/tui/70_dashboard.sh" | grep -q .; then
+            echo "Found unrouted engine call in 70_dashboard.sh" >&2
+            exit 1
+        fi
+        if grep -n 'launch_game ' "$REPO_ROOT/src/tui/70_dashboard.sh" | grep -v 'tui_run_engine' | grep -q .; then
+            echo "Found bare launch_game call in 70_dashboard.sh" >&2
+            exit 1
+        fi
+        if grep -n 'check_fzf_status "\$launch_rc"' "$REPO_ROOT/src/tui/70_dashboard.sh" | grep -q .; then
+            echo "Found launch_rc check_fzf_status layer violation in 70_dashboard.sh" >&2
+            exit 1
+        fi
+        if grep -nE 'if (revert_game_fix|install_game_fix) ' "$REPO_ROOT/src/steam/35_fixes.sh" | grep -q .; then
+            echo "Found unrouted fix engine call in 35_fixes.sh" >&2
+            exit 1
+        fi
+
+        # 2. Behavioral end-to-end: library_menu Ctrl-S routes through remote_sync_interactive -> tui_run_engine & surfaces real remote_host trace
+        cat <<'EOF' > "$t_dir/mock_bin/fzf"
+#!/usr/bin/env bash
+cat >/dev/null
+cnt_file="$HOME/fzf_cnt"
+idx=0
+[ -f "$cnt_file" ] && idx=$(cat "$cnt_file")
+echo $((idx + 1)) > "$cnt_file"
+if [ "$idx" -eq 0 ]; then
+    printf 'ctrl-s\n%s\n' "$TEST_ROW"
+    exit 0
+elif [ "$idx" -eq 1 ]; then
+    printf 'push\tPush Saves\n'
+    exit 0
+fi
+exit 130
+EOF
+        chmod +x "$t_dir/mock_bin/fzf"
+
+        python3 - "$REPO_ROOT" "$t_dir" <<'PY' || exit 1
+import errno, os, pty, select, signal, sys, time
+
+repo_root, t_dir = sys.argv[1], sys.argv[2]
+row = f"105600\tTerraria\tSTANDALONE\t{t_dir}/game\tgame.exe"
+pid, fd = pty.fork()
+if pid == 0:
+    os.environ["HOME"] = f"{t_dir}/home"
+    os.environ["XDG_RUNTIME_DIR"] = f"{t_dir}/runtime"
+    os.environ["PATH"] = f"{t_dir}/mock_bin:" + os.environ.get("PATH", "")
+    os.environ["TEST_ROW"] = row
+    os.environ["TEST_OUT_DIR"] = t_dir
+    for k in ("GAMECTL_REMOTE_HOST", "GAMECTL_COMPANION_HOST", "GAMECTL_SYNC_HOST", "GAMECTL_TUF_HOST"):
+        os.environ.pop(k, None)
+    script = '''
+source "$1/src/core/00_header.sh"
+source "$1/src/core/10_utils.sh"
+source "$1/src/steam/20_discovery.sh"
+source "$1/src/runners/40_wrappers.sh"
+source "$1/src/runners/50_launcher.sh"
+source "$1/src/tui/70_dashboard.sh"
+clean_stale_locks() { :; }
+invalidate_scan_cache() { :; }
+scan_installed_games() { printf '%s\\n' "$TEST_ROW"; }
+tui_modal_notice() {
+    printf '%s' "$1" > "$TEST_OUT_DIR/notice_title"
+    printf '%s' "$2" > "$TEST_OUT_DIR/notice_body"
+    return 0
+}
+library_menu
+'''
+    os.execvp("bash", ["bash", "-c", script, "_", repo_root])
+
+output = bytearray()
+status = None
+try:
+    deadline = time.monotonic() + 8.0
+    while time.monotonic() < deadline:
+        if select.select([fd], [], [], 0.05)[0]:
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError as err:
+                if err.errno != errno.EIO:
+                    raise
+                chunk = b""
+            output.extend(chunk)
+        done, status_now = os.waitpid(pid, os.WNOHANG)
+        if done:
+            status = status_now
+            break
+finally:
+    if status is None:
+        os.killpg(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+    os.close(fd)
+
+assert status is not None and os.waitstatus_to_exitcode(status) == 0, f"library_menu failed: {bytes(output)!r}"
+assert b"Target remote host not configured." not in output, f"raw stderr leaked to PTY: {bytes(output)!r}"
+PY
+
+        [ "$(cat "$t_dir/notice_title")" = "Remote Sync Error" ] || exit 1
+        grep -Fq 'Target remote host not configured.' "$t_dir/notice_body" || exit 1
+
+        # 3. Behavioral: tui_run_engine --fail-title preserves domain title on revert_game_fix failure
+        export HOME="$t_dir/home"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/35_fixes.sh"
+        tui_modal_notice() {
+            printf '%s' "$1" > "$t_dir/revert_title"
+            printf '%s' "$2" > "$t_dir/revert_body"
+            return 0
+        }
+        ! tui_run_engine --fail-title "Revert Error" "Revert Test" revert_game_fix "$t_dir/game" >/dev/null 2>&1 || exit 1
+        [ "$(cat "$t_dir/revert_title")" = "Revert Error" ] || exit 1
+        grep -Fq 'No backup snapshots found in:' "$t_dir/revert_body" || exit 1
+    )
+}
+run_test "TUI Engine Unification (WP34 Packet 34C): 9 call sites routed through tui_run_engine" test_wp34c_tui_engine_routing_unification_contract
+
+# Test 27: WP34 Packet 34D — Unified Ctrl-S Remote Sync Palette (Push, Pull, Pull Dry-Run, Configure Host)
+test_wp34d_ctrl_s_remote_sync_palette_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp34d_XXXXXX")
+    mkdir -p "$t_dir/home" "$t_dir/runtime" "$t_dir/game/saves" "$t_dir/mock_bin" "$t_dir/captures"
+    touch "$t_dir/game/game.exe"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+
+        # 1. Static invariants: definition, export, ctrl-s routing, and zero bare sync calls in 70_dashboard.sh
+        grep -q '^remote_sync_interactive()' "$REPO_ROOT/src/tui/70_dashboard.sh" || exit 1
+        grep -q 'export -f .*remote_sync_interactive' "$REPO_ROOT/src/main.sh" || exit 1
+        grep -q 'remote_sync_interactive "\$sel_dir" "\$sel_title"' "$REPO_ROOT/src/tui/70_dashboard.sh" || exit 1
+        if grep -nE '(sync_save_remote|pull_save_remote) ' "$REPO_ROOT/src/tui/70_dashboard.sh" | grep -v 'tui_run_engine' | grep -q .; then
+            echo "Found unrouted sync_save_remote/pull_save_remote call in 70_dashboard.sh" >&2
+            exit 1
+        fi
+
+        # Mock fzf scripted per call index using FZF_SCRIPT_FILE
+        cat <<'EOF' > "$t_dir/mock_bin/fzf"
+#!/usr/bin/env bash
+cnt_file="$HOME/fzf_cnt"
+idx=0
+[ -f "$cnt_file" ] && idx=$(cat "$cnt_file")
+echo $((idx + 1)) > "$cnt_file"
+cat > "$TEST_CAP_DIR/stdin_${idx}.txt"
+printf '%s\n' "$*" > "$TEST_CAP_DIR/args_${idx}.txt"
+line=$(sed -n "$((idx + 1))p" "$FZF_SCRIPT_FILE" 2>/dev/null || true)
+[ -z "$line" ] && exit 130
+kind="${line%%|*}"
+payload="${line#*|}"
+case "$kind" in
+    OUT)
+        printf '%b\n' "$payload"
+        exit 0
+        ;;
+    EXIT)
+        exit "${payload:-130}"
+        ;;
+    *)
+        exit 130
+        ;;
+esac
+EOF
+        chmod +x "$t_dir/mock_bin/fzf"
+
+        # 2. Behavioral PTY test A: Palette options + Config flow (save, reject leading dash, Esc cancel, clear with '-')
+        cat <<'EOF' > "$t_dir/script_config.txt"
+OUT|config\tConfigure Remote Host - Set or clear SSH host (Current: Not configured)
+OUT|companion-box
+OUT|config\tConfigure Remote Host - Set or clear SSH host (Current: companion-box)
+OUT|-oProxyCommand=bad
+OUT|config\tConfigure Remote Host - Set or clear SSH host (Current: companion-box)
+EXIT|130
+OUT|config\tConfigure Remote Host - Set or clear SSH host (Current: companion-box)
+OUT|-
+EXIT|130
+EOF
+
+        python3 - "$REPO_ROOT" "$t_dir" <<'PY' || exit 1
+import errno, os, pty, select, signal, sys, time
+
+repo_root, t_dir = sys.argv[1], sys.argv[2]
+pid, fd = pty.fork()
+if pid == 0:
+    os.environ["HOME"] = f"{t_dir}/home"
+    os.environ["XDG_RUNTIME_DIR"] = f"{t_dir}/runtime"
+    os.environ["PATH"] = f"{t_dir}/mock_bin:" + os.environ.get("PATH", "")
+    os.environ["TEST_CAP_DIR"] = f"{t_dir}/captures"
+    os.environ["FZF_SCRIPT_FILE"] = f"{t_dir}/script_config.txt"
+    os.environ["TEST_OUT_DIR"] = t_dir
+    for k in ("GAMECTL_REMOTE_HOST", "GAMECTL_COMPANION_HOST", "GAMECTL_SYNC_HOST", "GAMECTL_TUF_HOST"):
+        os.environ.pop(k, None)
+    script = '''
+source "$1/src/core/00_header.sh"
+source "$1/src/core/10_utils.sh"
+source "$1/src/steam/20_discovery.sh"
+source "$1/src/runners/40_wrappers.sh"
+source "$1/src/runners/50_launcher.sh"
+source "$1/src/tui/70_dashboard.sh"
+tui_modal_notice() {
+    printf '%s|%s\\n' "$1" "$2" >> "$TEST_OUT_DIR/notices.log"
+    return 0
+}
+remote_sync_interactive "$TEST_OUT_DIR/game" "Terraria"
+if [ -f "$HOME/.config/gamectl/remote_host" ]; then
+    echo "STILL_EXISTS" > "$TEST_OUT_DIR/after_clear"
+else
+    echo "CLEARED" > "$TEST_OUT_DIR/after_clear"
+fi
+'''
+    os.execvp("bash", ["bash", "-c", script, "_", repo_root])
+
+output = bytearray()
+status = None
+try:
+    deadline = time.monotonic() + 8.0
+    while time.monotonic() < deadline:
+        if select.select([fd], [], [], 0.05)[0]:
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError as err:
+                if err.errno != errno.EIO:
+                    raise
+                chunk = b""
+            output.extend(chunk)
+        done, status_now = os.waitpid(pid, os.WNOHANG)
+        if done:
+            status = status_now
+            break
+finally:
+    if status is None:
+        os.killpg(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+    os.close(fd)
+
+assert status is not None and os.waitstatus_to_exitcode(status) == 0, f"config flow failed: {bytes(output)!r}"
+with open(f"{t_dir}/captures/stdin_0.txt") as f:
+    pal0 = f.read()
+for label in ("Push Saves", "Pull Saves", "Pull Dry-Run", "Configure Remote Host"):
+    assert label in pal0, f"Missing palette option {label!r} in:\n{pal0}"
+with open(f"{t_dir}/captures/args_2.txt") as f:
+    args2 = f.read()
+assert "Host: companion-box" in args2, f"Expected refreshed host in palette header: {args2!r}"
+with open(f"{t_dir}/notices.log") as f:
+    notices = f.read()
+assert "Remote Companion Host|Saved remote companion host:" in notices, f"Missing save notice: {notices!r}"
+assert "Invalid Remote Host|Remote host cannot start with '-':" in notices, f"Missing invalid-host notice: {notices!r}"
+assert "Remote Companion Host|Cleared remote companion host." in notices, f"Missing clear notice: {notices!r}"
+with open(f"{t_dir}/after_clear") as f:
+    assert f.read().strip() == "CLEARED"
+PY
+
+        # 3. Behavioral PTY test B: push, pull, pull-dry success & failure routing via tui_run_engine
+        rm -rf "$t_dir/captures"/* "$t_dir/notices.log" "$t_dir/home/fzf_cnt"
+        cat <<'EOF' > "$t_dir/script_actions.txt"
+OUT|push\tPush Saves
+OUT|pull\tPull Saves
+OUT|pull-dry\tPull Dry-Run
+OUT|push\tPush Saves
+OUT|pull\tPull Saves
+OUT|pull-dry\tPull Dry-Run
+EXIT|130
+EOF
+
+        python3 - "$REPO_ROOT" "$t_dir" <<'PY' || exit 1
+import errno, os, pty, select, signal, sys, time
+
+repo_root, t_dir = sys.argv[1], sys.argv[2]
+pid, fd = pty.fork()
+if pid == 0:
+    os.environ["HOME"] = f"{t_dir}/home"
+    os.environ["XDG_RUNTIME_DIR"] = f"{t_dir}/runtime"
+    os.environ["PATH"] = f"{t_dir}/mock_bin:" + os.environ.get("PATH", "")
+    os.environ["TEST_CAP_DIR"] = f"{t_dir}/captures"
+    os.environ["FZF_SCRIPT_FILE"] = f"{t_dir}/script_actions.txt"
+    os.environ["TEST_OUT_DIR"] = t_dir
+    os.environ["GAMECTL_REMOTE_HOST"] = "tuf-box"
+    script = '''
+source "$1/src/core/00_header.sh"
+source "$1/src/core/10_utils.sh"
+source "$1/src/steam/20_discovery.sh"
+source "$1/src/runners/40_wrappers.sh"
+source "$1/src/runners/50_launcher.sh"
+source "$1/src/tui/70_dashboard.sh"
+CALL_IDX_FILE="$TEST_OUT_DIR/call_idx"
+sync_save_remote() {
+    local c=0
+    [ -f "$CALL_IDX_FILE" ] && c=$(cat "$CALL_IDX_FILE")
+    echo $((c + 1)) > "$CALL_IDX_FILE"
+    printf 'PUSH|%s|%s|%s\\n' "${GAMECTL_ENGINE_ISOLATED:-0}" "$1" "$2" >> "$TEST_OUT_DIR/calls.log"
+    if [ "$c" -ge 3 ]; then
+        echo "[ERROR] Simulated push failure on stderr" >&2
+        return 1
+    fi
+    echo "[VERIFIED] Push ok"
+    return 0
+}
+pull_save_remote() {
+    local c=0
+    [ -f "$CALL_IDX_FILE" ] && c=$(cat "$CALL_IDX_FILE")
+    echo $((c + 1)) > "$CALL_IDX_FILE"
+    printf 'PULL|%s|%s|%s|%s\\n' "${GAMECTL_ENGINE_ISOLATED:-0}" "$1" "$2" "${3:-}" >> "$TEST_OUT_DIR/calls.log"
+    if [ "$c" -ge 3 ]; then
+        echo "[ERROR] Simulated pull failure ${3:-real} on stderr" >&2
+        return 1
+    fi
+    echo "[VERIFIED] Pull ok"
+    return 0
+}
+tui_modal_notice() {
+    printf 'NOTICE:%s::%s\\n---\\n' "$1" "${2//$'\n'/ | }" >> "$TEST_OUT_DIR/actions_notices.log"
+    return 0
+}
+remote_sync_interactive "$TEST_OUT_DIR/game" "Terraria"
+'''
+    os.execvp("bash", ["bash", "-c", script, "_", repo_root])
+
+output = bytearray()
+status = None
+try:
+    deadline = time.monotonic() + 8.0
+    while time.monotonic() < deadline:
+        if select.select([fd], [], [], 0.05)[0]:
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError as err:
+                if err.errno != errno.EIO:
+                    raise
+                chunk = b""
+            output.extend(chunk)
+        done, status_now = os.waitpid(pid, os.WNOHANG)
+        if done:
+            status = status_now
+            break
+finally:
+    if status is None:
+        os.killpg(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+    os.close(fd)
+
+assert status is not None and os.waitstatus_to_exitcode(status) == 0, f"actions flow failed: {bytes(output)!r}"
+assert b"Simulated push failure on stderr" not in output, f"raw stderr leaked to PTY: {bytes(output)!r}"
+assert b"Simulated pull failure" not in output, f"raw stderr leaked to PTY: {bytes(output)!r}"
+
+with open(f"{t_dir}/calls.log") as f:
+    calls = [line.strip() for line in f if line.strip()]
+expected_calls = [
+    f"PUSH|1|{t_dir}/game|Terraria",
+    f"PULL|1|{t_dir}/game|Terraria|",
+    f"PULL|1|{t_dir}/game|Terraria|--dry-run",
+    f"PUSH|1|{t_dir}/game|Terraria",
+    f"PULL|1|{t_dir}/game|Terraria|",
+    f"PULL|1|{t_dir}/game|Terraria|--dry-run",
+]
+assert calls == expected_calls, f"Unexpected calls: {calls!r}"
+
+with open(f"{t_dir}/actions_notices.log") as f:
+    notices = f.read()
+for expected_notice in (
+    "NOTICE:Remote Sync (Push)::Savegames pushed to tuf-box",
+    "NOTICE:Remote Sync (Pull)::Savegames pulled from tuf-box",
+    "NOTICE:Remote Pull (Dry-Run)::Dry-run pull simulation completed from tuf-box",
+    "NOTICE:Remote Sync Error::Operation returned Exit Code 1.",
+    "Simulated push failure on stderr",
+    "NOTICE:Remote Pull Error::Operation returned Exit Code 1.",
+    "Simulated pull failure real on stderr",
+    "NOTICE:Remote Pull Dry-Run Error::Operation returned Exit Code 1.",
+    "Simulated pull failure --dry-run on stderr",
+):
+    assert expected_notice in notices, f"Missing {expected_notice!r} in:\n{notices}"
+PY
+    )
+}
+run_test "Unified Ctrl-S Remote Sync Palette (WP34 Packet 34D): Push, Pull, Dry-Run & Config routing" test_wp34d_ctrl_s_remote_sync_palette_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"
