@@ -774,7 +774,7 @@ sync_save_remote() {
     [ -z "$rhost" ] && rhost=$(get_remote_host)
 
     if [ -z "$gdir" ] || [ ! -d "$sdir" ]; then
-        echo "[ERROR] Portable saves directory not found in ${gdir:-<empty>}"
+        echo "[ERROR] Portable saves directory not found in ${gdir:-<empty>}" >&2
         return 1
     fi
 
@@ -787,8 +787,8 @@ sync_save_remote() {
     fi
 
     if [ -z "$rhost" ]; then
-        echo "[WARN] Target remote host not configured."
-        echo "       Define host in ~/.config/gamectl/remote_host or GAMECTL_REMOTE_HOST variable."
+        echo "[WARN] Target remote host not configured." >&2
+        echo "       Define host in ~/.config/gamectl/remote_host or GAMECTL_REMOTE_HOST variable." >&2
         return 1
     fi
 
@@ -814,7 +814,7 @@ sync_save_remote() {
     local remote_home
     remote_home=$(ssh -q -o ConnectTimeout=2 -o BatchMode=yes "$rhost" 'printf %s "$HOME"' 2>/dev/null || true)
     if [ -z "$remote_home" ] || [[ "$remote_home" == *$'\n'* || "$remote_home" == *$'\r'* ]]; then
-        echo "[WARN] Remote host '$rhost' offline or unreachable on local network."
+        echo "[WARN] Remote host '$rhost' offline or unreachable on local network." >&2
         return 1
     fi
 

@@ -574,7 +574,7 @@ restart_steam_client() {
 
     # Escalate to SIGKILL if still hanging
     if [ "$terminated" = false ]; then
-        echo "[WARN] Steam did not exit within grace period. Escalating to SIGKILL..."
+        echo "[WARN] Steam did not exit within grace period. Escalating to SIGKILL..." >&2
         pkill -KILL -x steam >/dev/null 2>&1 || true
     fi
 
@@ -588,7 +588,7 @@ restart_steam_client() {
         nohup "$launcher" </dev/null >/dev/null 2>&1 &
         echo "[VERIFIED] Steam client successfully restarted."
     else
-        echo "[WARN] Could not find executable Steam launcher binary to relaunch."
+        echo "[WARN] Could not find executable Steam launcher binary to relaunch." >&2
     fi
 
     return 0
@@ -905,11 +905,9 @@ EOF
             fi
 
             if [ "$(echo "$r_sel" | cut -f1)" = "1" ]; then
-                if revert_game_fix "$gdir"; then
+                if tui_run_engine --fail-title "Revert Error" "Revert Community Fix (${title:-$gdir})" revert_game_fix "$gdir"; then
                     tui_modal_notice "Revert Successful" "Community fix reverted. Pristine files restored for:\n${title:-$gdir}" || return $?
                     invalidate_scan_cache
-                else
-                    tui_modal_notice "Revert Error" "Failed to revert game fix. Check activity logs." || return $?
                 fi
             fi
             continue
@@ -963,11 +961,9 @@ EOF
                         continue
                     fi
                     log_msg "INFO" "FIX" "Installing community fix '$sel_fix_title' ($sel_fix_id) for ${title:-AppID $appid}..."
-                    if install_game_fix "$appid" "$gdir" --fix-id "$sel_fix_id" --yes; then
+                    if tui_run_engine --fail-title "Fix Error" "Install Community Fix ($sel_fix_title)" install_game_fix "$appid" "$gdir" --fix-id "$sel_fix_id" --yes; then
                         tui_modal_notice "Fix Deployed" "Successfully installed community fix: $sel_fix_title\nBackup snapshot created in: .gamectl_fix_backup/" || return $?
                         invalidate_scan_cache
-                    else
-                        tui_modal_notice "Fix Error" "Failed to install fix: $sel_fix_title\nCheck activity logs for detailed failure trace." || return $?
                     fi
                     ;;
                 2)

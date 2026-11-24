@@ -36,7 +36,7 @@ fetch_dlc() {
     fi
 
     if [ -z "$appid" ] || [ "$appid" = "STANDALONE" ]; then
-        echo "[WARN] Numeric AppID not found. Skipping DLC.txt generation."
+        echo "[WARN] Numeric AppID not found. Skipping DLC.txt generation." >&2
         return 0
     fi
 
