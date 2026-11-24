@@ -23,9 +23,14 @@ MODULES=(
     "$REPO_ROOT/src/steam/32_steam_bridge.sh"
     "$REPO_ROOT/src/steam/35_fixes.sh"
     "$REPO_ROOT/src/runners/40_wrappers.sh"
+    "$REPO_ROOT/src/runners/41_proton_prefix.sh"
+    "$REPO_ROOT/src/runners/42_graphics_isolation.sh"
     "$REPO_ROOT/src/runners/50_launcher.sh"
+    "$REPO_ROOT/src/runners/51_remote_sync.sh"
+    "$REPO_ROOT/src/runners/52_inject_runtime.sh"
     "$REPO_ROOT/src/diagnostics/60_doctor.sh"
     "$REPO_ROOT/src/tui/70_dashboard.sh"
+    "$REPO_ROOT/src/tui/71_previews.sh"
     "$REPO_ROOT/src/main.sh"
 )
 
