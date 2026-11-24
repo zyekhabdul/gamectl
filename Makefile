@@ -33,7 +33,7 @@ lint:
 		bash -n "$$file"; \
 	done; \
 	if command -v shellcheck >/dev/null 2>&1; then \
-		shellcheck -S error src/*.sh src/*/*.sh scripts/*.sh; \
+		shellcheck -s bash -S error src/*.sh src/*/*.sh scripts/*.sh; \
 	elif [ "$${STRICT_LINT:-0}" = "1" ]; then \
 		echo "[FAIL] STRICT_LINT=1 requires shellcheck in PATH" >&2; \
 		exit 1; \

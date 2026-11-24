@@ -306,12 +306,10 @@ case "${1:-}" in
         ;;
     processes|running|hud|ps)
         if [ ! -t 0 ] || [ ! -t 1 ]; then
-            local run_dir
             run_dir="$(get_runtime_dir)"
             if [ -d "$run_dir/active_games" ]; then
                 for inf in "$run_dir/active_games"/*.info; do
                     [ -f "$inf" ] || continue
-                    local a_pid a_title a_dir
                     a_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
                     a_title=$(grep -E '^TITLE=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
                     a_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
