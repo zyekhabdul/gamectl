@@ -7281,6 +7281,731 @@ EOF
 }
 
 # --- [MODULE] src/runners/40_wrappers.sh ---
+# Canonical wrapper config & env override loader (SSoT)
+load_wrapper_config() {
+    local gdir="${1:-}"
+    local apply_env="${2:-1}"
+
+    GAMECTL_CFG_GM=0
+    GAMECTL_CFG_HUD=0
+    GAMECTL_CFG_SCOPE=0
+    GAMECTL_CFG_FSR=0
+    GAMECTL_CFG_GLTHREAD=0
+    GAMECTL_CFG_SYSTEMD_SCOPE=""
+    GAMECTL_CFG_PRIME=0
+    GAMECTL_CFG_SANDBOX=0
+    GAMECTL_CFG_RENDERER="auto"
+    GAMECTL_CFG_GAMESCOPE_ARGS=""
+    GAMECTL_CFG_AUTO_LOCATE_SAVES=0
+    GAMECTL_CFG_DEV_WINEDEBUG="0"
+    GAMECTL_CFG_DEV_VK_DEBUG="0"
+    GAMECTL_CFG_DEV_GBE_LOG="0"
+
+    local w_cfgs=("$HOME/.config/gamectl/wrappers")
+    [ -n "$gdir" ] && w_cfgs+=("$gdir/.wrappers")
+    local w_cfg k v
+    for w_cfg in "${w_cfgs[@]}"; do
+        [ -f "$w_cfg" ] || continue
+        while IFS='=' read -r k v || [ -n "$k" ]; do
+            k="${k//[[:space:]]/}"
+            [[ -z "$k" || "$k" =~ ^# ]] && continue
+            v="${v//$'\r'/}"
+            v="${v#"${v%%[![:space:]]*}"}"
+            v="${v%"${v##*[![:space:]]}"}"
+            v="${v#\"}"
+            v="${v%\"}"
+            v="${v#\'}"
+            v="${v%\'}"
+            case "$k" in
+                gamemode) GAMECTL_CFG_GM="$v" ;;
+                hud|mangohud) GAMECTL_CFG_HUD="$v" ;;
+                gamescope) GAMECTL_CFG_SCOPE="$v" ;;
+                fsr) GAMECTL_CFG_FSR="$v" ;;
+                glthread|mesa_glthread) GAMECTL_CFG_GLTHREAD="$v" ;;
+                scope|systemd_scope) GAMECTL_CFG_SYSTEMD_SCOPE="$v" ;;
+                prime|dgpu) GAMECTL_CFG_PRIME="$v" ;;
+                sandbox) GAMECTL_CFG_SANDBOX="$v" ;;
+                renderer) GAMECTL_CFG_RENDERER="$v" ;;
+                gamescope_args) GAMECTL_CFG_GAMESCOPE_ARGS="$v" ;;
+                auto_locate_saves) GAMECTL_CFG_AUTO_LOCATE_SAVES="$v" ;;
+                dev_winedebug) GAMECTL_CFG_DEV_WINEDEBUG="$v" ;;
+                dev_vk_debug) GAMECTL_CFG_DEV_VK_DEBUG="$v" ;;
+                dev_gbe_log) GAMECTL_CFG_DEV_GBE_LOG="$v" ;;
+            esac
+        done < "$w_cfg"
+    done
+
+    if [ "$apply_env" = "1" ]; then
+        [ -n "${GAMECTL_GAMEMODE:-}" ] && GAMECTL_CFG_GM="$GAMECTL_GAMEMODE"
+        [ -n "${GAMECTL_HUD:-${GAMECTL_MANGOHUD:-}}" ] && GAMECTL_CFG_HUD="${GAMECTL_HUD:-$GAMECTL_MANGOHUD}"
+        [ -n "${GAMECTL_GAMESCOPE:-}" ] && GAMECTL_CFG_SCOPE="$GAMECTL_GAMESCOPE"
+        [ -n "${GAMECTL_FSR:-}" ] && GAMECTL_CFG_FSR="$GAMECTL_FSR"
+        [ -n "${GAMECTL_GLTHREAD:-}" ] && GAMECTL_CFG_GLTHREAD="$GAMECTL_GLTHREAD"
+        [ -n "${GAMECTL_SCOPE:-${GAMECTL_SYSTEMD_SCOPE:-}}" ] && GAMECTL_CFG_SYSTEMD_SCOPE="${GAMECTL_SCOPE:-$GAMECTL_SYSTEMD_SCOPE}"
+        [ -n "${GAMECTL_PRIME:-}" ] && GAMECTL_CFG_PRIME="$GAMECTL_PRIME"
+        [ -n "${GAMECTL_SANDBOX:-}" ] && GAMECTL_CFG_SANDBOX="$GAMECTL_SANDBOX"
+        if [ -n "${GAMECTL_RENDERER:-}" ]; then
+            GAMECTL_CFG_RENDERER="$GAMECTL_RENDERER"
+        elif [ -n "${PROTON_USE_WINED3D:-}" ]; then
+            [ "$PROTON_USE_WINED3D" = "1" ] && GAMECTL_CFG_RENDERER="wined3d"
+            [ "$PROTON_USE_WINED3D" = "0" ] && GAMECTL_CFG_RENDERER="dxvk"
+        fi
+        [ -n "${GAMECTL_GAMESCOPE_ARGS:-}" ] && GAMECTL_CFG_GAMESCOPE_ARGS="$GAMECTL_GAMESCOPE_ARGS"
+        [ -n "${GAMECTL_AUTO_LOCATE_SAVES:-}" ] && GAMECTL_CFG_AUTO_LOCATE_SAVES="$GAMECTL_AUTO_LOCATE_SAVES"
+        [ -n "${GAMECTL_DEV_WINEDEBUG:-}" ] && GAMECTL_CFG_DEV_WINEDEBUG="$GAMECTL_DEV_WINEDEBUG"
+        [ -n "${GAMECTL_DEV_VK_DEBUG:-}" ] && GAMECTL_CFG_DEV_VK_DEBUG="$GAMECTL_DEV_VK_DEBUG"
+        [ -n "${GAMECTL_DEV_GBE_LOG:-}" ] && GAMECTL_CFG_DEV_GBE_LOG="$GAMECTL_DEV_GBE_LOG"
+    fi
+}
+
+# Canonical developer profiler environment resolver (SSoT; zero pollution when OFF)
+resolve_dev_profiler_env() {
+    local gdir="${1:-}"
+    local apply_env="${2:-1}"
+
+    load_wrapper_config "$gdir" "$apply_env"
+
+    GAMECTL_DEV_ACTIVE=0
+    GAMECTL_DEV_RESOLVED_WINEDEBUG=""
+    GAMECTL_DEV_RESOLVED_VK_DEBUG=""
+    GAMECTL_DEV_RESOLVED_GBE_LOG=0
+    GAMECTL_DEV_TRACE_LOG=""
+    GAMECTL_DEV_RESPECTED_USER_WINEDEBUG=0
+    GAMECTL_DEV_RESPECTED_USER_VK_DEBUG=0
+
+    local wd_raw="${GAMECTL_CFG_DEV_WINEDEBUG:-0}"
+    local wd_lc="${wd_raw,,}"
+    local mapped_wd=""
+    case "$wd_lc" in
+        ""|0|off|false) mapped_wd="" ;;
+        basic) mapped_wd="+loaddll,+seh" ;;
+        full)  mapped_wd="+relay,+seh,+loaddll" ;;
+        *)
+            mapped_wd=$(printf '%s' "$wd_raw" | tr -cd 'A-Za-z0-9_+,=-')
+            if [ -z "$mapped_wd" ]; then
+                echo "[WARN] Ignored invalid dev_winedebug setting." >&2
+            fi
+            ;;
+    esac
+
+    if [ -n "$mapped_wd" ]; then
+        GAMECTL_DEV_ACTIVE=1
+        if [ -n "${WINEDEBUG:-}" ]; then
+            GAMECTL_DEV_RESPECTED_USER_WINEDEBUG=1
+        else
+            GAMECTL_DEV_RESOLVED_WINEDEBUG="$mapped_wd"
+        fi
+    fi
+
+    local vk_lc="${GAMECTL_CFG_DEV_VK_DEBUG:-0}"
+    vk_lc="${vk_lc,,}"
+    if [ "$vk_lc" = "1" ] || [ "$vk_lc" = "true" ]; then
+        GAMECTL_DEV_ACTIVE=1
+        if [ -n "${VK_LOADER_DEBUG:-}" ]; then
+            GAMECTL_DEV_RESPECTED_USER_VK_DEBUG=1
+        else
+            GAMECTL_DEV_RESOLVED_VK_DEBUG="all"
+        fi
+    fi
+
+    local gbe_lc="${GAMECTL_CFG_DEV_GBE_LOG:-0}"
+    gbe_lc="${gbe_lc,,}"
+    if [ "$gbe_lc" = "1" ] || [ "$gbe_lc" = "true" ]; then
+        GAMECTL_DEV_ACTIVE=1
+        GAMECTL_DEV_RESOLVED_GBE_LOG=1
+    fi
+
+    if [ "$GAMECTL_DEV_ACTIVE" -eq 1 ]; then
+        local base_slug hash_part
+        base_slug=$(basename "${gdir:-global}" | tr -cd '[:alnum:]_-')
+        [ -z "$base_slug" ] && base_slug="game"
+        hash_part=$(printf '%s' "${gdir:-global}" | cksum | awk '{print $1}')
+        GAMECTL_DEV_TRACE_LOG="$(get_runtime_dir)/dev_traces/${base_slug}_${hash_part}.log"
+    fi
+}
+
+# CLI helper for per-game developer profiler configuration
+configure_dev_profile() {
+    local gdir="${1:-}"
+    local mode="${2:-status}"
+
+    if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
+        echo "[ERROR] Game directory not found: ${gdir:-<empty>}" >&2
+        echo "Usage: gamectl dev-profile <game_dir> [status|basic|full|off]" >&2
+        return 1
+    fi
+
+    local w_file="$gdir/.wrappers"
+    case "$mode" in
+        status)
+            resolve_dev_profiler_env "$gdir" 1
+            echo "dev_winedebug=${GAMECTL_CFG_DEV_WINEDEBUG:-0}"
+            echo "dev_vk_debug=${GAMECTL_CFG_DEV_VK_DEBUG:-0}"
+            echo "dev_gbe_log=${GAMECTL_CFG_DEV_GBE_LOG:-0}"
+            echo "active=$GAMECTL_DEV_ACTIVE"
+            echo "resolved_winedebug=$GAMECTL_DEV_RESOLVED_WINEDEBUG"
+            echo "resolved_vk_debug=$GAMECTL_DEV_RESOLVED_VK_DEBUG"
+            echo "trace_log=$GAMECTL_DEV_TRACE_LOG"
+            ;;
+        basic)
+            atomic_set_kv_file "$w_file" "dev_winedebug" "basic" && \
+            atomic_set_kv_file "$w_file" "dev_vk_debug" "0" && \
+            atomic_set_kv_file "$w_file" "dev_gbe_log" "1" || return 1
+            echo "[VERIFIED] Developer profiler set to 'basic' in $w_file"
+            ;;
+        full)
+            atomic_set_kv_file "$w_file" "dev_winedebug" "full" && \
+            atomic_set_kv_file "$w_file" "dev_vk_debug" "1" && \
+            atomic_set_kv_file "$w_file" "dev_gbe_log" "1" || return 1
+            echo "[VERIFIED] Developer profiler set to 'full' in $w_file"
+            ;;
+        off)
+            atomic_set_kv_file "$w_file" "dev_winedebug" "0" && \
+            atomic_set_kv_file "$w_file" "dev_vk_debug" "0" && \
+            atomic_set_kv_file "$w_file" "dev_gbe_log" "0" || return 1
+            echo "[VERIFIED] Developer profiler disabled in $w_file"
+            ;;
+        *)
+            echo "Usage: gamectl dev-profile <game_dir> [status|basic|full|off]" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Resolve and build wrapper prefix command array (gamemoderun, mangohud, gamescope)
+build_wrapper_command() {
+    local gdir="$1"
+    shift || true
+    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr="" opt_systemd_scope="" opt_prime="" opt_sandbox="" opt_allow_unshielded="" opt_renderer=""
+    local remaining_args=()
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --hud|--mangohud) opt_hud=1; shift ;;
+            --no-hud|--no-mangohud) opt_hud=0; shift ;;
+            --gamemode) opt_gamemode=1; shift ;;
+            --no-gamemode) opt_gamemode=0; shift ;;
+            --gamescope) opt_gamescope=1; shift ;;
+            --no-gamescope) opt_gamescope=0; shift ;;
+            --fsr) opt_fsr=1; opt_gamescope=1; shift ;;
+            --no-fsr) opt_fsr=0; shift ;;
+            --glthread) opt_glthread=1; shift ;;
+            --no-glthread) opt_glthread=0; shift ;;
+            --scope|--systemd-scope) opt_systemd_scope=1; shift ;;
+            --no-scope|--no-systemd-scope) opt_systemd_scope=0; shift ;;
+            --prime) opt_prime=1; shift ;;
+            --no-prime) opt_prime=0; shift ;;
+            --sandbox) opt_sandbox=1; shift ;;
+            --no-sandbox) opt_sandbox=0; shift ;;
+            --wined3d|--opengl) opt_renderer="wined3d"; shift ;;
+            --dxvk|--vulkan) opt_renderer="dxvk"; shift ;;
+            --renderer) opt_renderer="${2:-auto}"; shift 2 ;;
+            --renderer=*) opt_renderer="${1#*=}"; shift ;;
+            --allow-unshielded) opt_allow_unshielded=1; shift ;;
+            --) shift; remaining_args+=("$@"); break ;;
+            *) remaining_args+=("$1"); shift ;;
+        esac
+    done
+
+    # 1. Load config hierarchy + env overrides via SSoT
+    load_wrapper_config "$gdir" 1
+    local use_gm="$GAMECTL_CFG_GM"
+    local use_hud="$GAMECTL_CFG_HUD"
+    local use_scope="$GAMECTL_CFG_SCOPE"
+    local use_fsr="$GAMECTL_CFG_FSR"
+    local use_glthread="$GAMECTL_CFG_GLTHREAD"
+    local use_systemd_scope="$GAMECTL_CFG_SYSTEMD_SCOPE"
+    local use_prime="$GAMECTL_CFG_PRIME"
+    local use_sandbox="$GAMECTL_CFG_SANDBOX"
+    local use_renderer="$GAMECTL_CFG_RENDERER"
+    local gscope_args="${GAMECTL_CFG_GAMESCOPE_ARGS:-}"
+    [ -z "$gscope_args" ] && gscope_args=$(get_default_gamescope_args)
+
+    # 5. CLI flag overrides
+    [ -n "$opt_gamemode" ] && use_gm="$opt_gamemode"
+    [ -n "$opt_hud" ] && use_hud="$opt_hud"
+    [ -n "$opt_gamescope" ] && use_scope="$opt_gamescope"
+    [ -n "$opt_fsr" ] && use_fsr="$opt_fsr"
+    [ -n "${opt_glthread:-}" ] && use_glthread="$opt_glthread"
+    [ -n "${opt_systemd_scope:-}" ] && use_systemd_scope="$opt_systemd_scope"
+    [ -n "$opt_prime" ] && use_prime="$opt_prime"
+    [ -n "$opt_sandbox" ] && use_sandbox="$opt_sandbox"
+    [ -n "$opt_renderer" ] && use_renderer="$opt_renderer"
+
+    if [ -z "${use_systemd_scope:-}" ]; then
+        if check_systemd_scope_support; then
+            use_systemd_scope=1
+        else
+            use_systemd_scope=0
+        fi
+    fi
+
+    local dgpu_vendor="none"
+    if [ "$use_prime" = "1" ]; then
+        dgpu_vendor=$(detect_dgpu_vendor)
+        if [ "$dgpu_vendor" = "none" ]; then
+            echo "[WARN] PRIME offloading requested (--prime) but no secondary dGPU detected." >&2
+        fi
+    fi
+
+    declare -ga GAMECTL_SANDBOX_PREFIX=()
+    if [ "$use_sandbox" = "1" ]; then
+        build_sandbox_command "$gdir" || use_sandbox=0
+    fi
+
+    local resolved_renderer
+    resolved_renderer="$(resolve_graphics_renderer "$use_renderer" "$use_prime")"
+    GAMECTL_RENDERER_MODE="$use_renderer"
+    GAMECTL_ACTIVE_RENDERER="$resolved_renderer"
+    GAMECTL_ACTIVE_GLTHREAD="$use_glthread"
+    GAMECTL_ACTIVE_SYSTEMD_SCOPE="$use_systemd_scope"
+    GAMECTL_ACTIVE_PRIME="$use_prime"
+    GAMECTL_ACTIVE_PRIME_VENDOR="$dgpu_vendor"
+    GAMECTL_ACTIVE_SANDBOX="$use_sandbox"
+    GAMECTL_ACTIVE_ALLOW_UNSHIELDED="${opt_allow_unshielded:-0}"
+    GAMECTL_ACTIVE_AUTO_LOCATE_SAVES="${GAMECTL_CFG_AUTO_LOCATE_SAVES:-0}"
+
+    local prefix=()
+    if [ "$use_gm" = "1" ]; then
+        if command -v gamemoderun >/dev/null 2>&1; then
+            prefix+=("gamemoderun")
+        else
+            echo "[WARN] gamemoderun is enabled but binary not found in PATH." >&2
+        fi
+    fi
+
+    if [ "$use_hud" = "1" ]; then
+        if command -v mangohud >/dev/null 2>&1; then
+            prefix+=("mangohud")
+        else
+            echo "[WARN] mangohud is enabled but binary not found in PATH." >&2
+        fi
+    fi
+
+    if [ "$use_scope" = "1" ] || [ "$use_fsr" = "1" ]; then
+        if command -v gamescope >/dev/null 2>&1; then
+            prefix+=("gamescope")
+            local active_args="$gscope_args"
+            if [ "$use_fsr" = "1" ] && [[ ! "$active_args" =~ (-F|fsr|-U) ]]; then
+                active_args="-F fsr $active_args"
+            elif [ "$use_fsr" = "0" ]; then
+                active_args=$(echo "$active_args" | sed -E 's/-F[[:space:]]+fsr//g' | xargs)
+            fi
+            if [ -n "$active_args" ]; then
+                read -r -a parsed_args <<< "$active_args"
+                prefix+=("${parsed_args[@]}")
+            fi
+            prefix+=("--")
+        else
+            echo "[WARN] gamescope is enabled but binary not found in PATH." >&2
+        fi
+    fi
+
+    GAMECTL_WRAPPER_PREFIX=("${prefix[@]}")
+    GAMECTL_REMAINING_ARGS=("${remaining_args[@]}")
+}
+
+# Interactive wrapper configuration for a game or global defaults
+configure_wrappers() {
+    require_tui "Runtime wrappers" || return $?
+    local gdir="${1:-}"
+    local title="${2:-}"
+    local w_file
+
+    if [ -n "$gdir" ] && [ -d "$gdir" ]; then
+        [ -z "$title" ] && title="$(basename "$gdir")"
+        w_file="$gdir/.wrappers"
+    else
+        title="Global Default Wrappers"
+        mkdir -p "$HOME/.config/gamectl"
+        w_file="$HOME/.config/gamectl/wrappers"
+    fi
+
+    load_wrapper_config "${gdir:-}" 0
+    local gm="$GAMECTL_CFG_GM" hud="$GAMECTL_CFG_HUD" scope="$GAMECTL_CFG_SCOPE"
+    local fsr="$GAMECTL_CFG_FSR" glt="$GAMECTL_CFG_GLTHREAD" renderer="${GAMECTL_CFG_RENDERER:-auto}"
+    local auto_saves="${GAMECTL_CFG_AUTO_LOCATE_SAVES:-0}"
+    local dev_wd="${GAMECTL_CFG_DEV_WINEDEBUG:-0}" dev_vk="${GAMECTL_CFG_DEV_VK_DEBUG:-0}" dev_gbe="${GAMECTL_CFG_DEV_GBE_LOG:-0}"
+    local gscope_args="${GAMECTL_CFG_GAMESCOPE_ARGS:-}"
+    [ -z "$gscope_args" ] && gscope_args=$(get_default_gamescope_args)
+
+    while true; do
+        local b_gm="${UI_DIM}[OFF]${UI_RST}" b_hud="${UI_DIM}[OFF]${UI_RST}"
+        local b_scope="${UI_DIM}[OFF]${UI_RST}" b_fsr="${UI_DIM}[OFF]${UI_RST}" b_glt="${UI_DIM}[OFF]${UI_RST}"
+        local b_autosaves="${UI_DIM}[OFF]${UI_RST}" b_devwd="${UI_DIM}[OFF]${UI_RST}"
+        local b_devvk="${UI_DIM}[OFF]${UI_RST}" b_devgbe="${UI_DIM}[OFF]${UI_RST}"
+        [ "$gm" = 1 ] && b_gm="${UI_GREEN}[ACTIVE]${UI_RST}"
+        [ "$hud" = 1 ] && b_hud="${UI_GREEN}[ACTIVE]${UI_RST}"
+        [ "$scope" = 1 ] && b_scope="${UI_GREEN}[ACTIVE]${UI_RST}"
+        [ "$fsr" = 1 ] && b_fsr="${UI_GREEN}[ACTIVE]${UI_RST}"
+        [ "$glt" = 1 ] && b_glt="${UI_GREEN}[ACTIVE]${UI_RST}"
+        [ "$auto_saves" = 1 ] && b_autosaves="${UI_GREEN}[ACTIVE]${UI_RST}"
+        case "${dev_wd,,}" in
+            ""|0|off|false) ;;
+            basic) b_devwd="${UI_AMBER}[BASIC]${UI_RST}" ;;
+            full)  b_devwd="${UI_RED}[FULL]${UI_RST}" ;;
+            *)     b_devwd="${UI_CYAN}[$dev_wd]${UI_RST}" ;;
+        esac
+        [ "$dev_vk" = 1 ] && b_devvk="${UI_AMBER}[ACTIVE]${UI_RST}"
+        [ "$dev_gbe" = 1 ] && b_devgbe="${UI_AMBER}[ACTIVE]${UI_RST}"
+
+        local eff_rend b_rend
+        eff_rend="$(resolve_graphics_renderer "$renderer" 0)"
+        case "$renderer" in
+            wined3d) b_rend="${UI_AMBER}[WINED3D]${UI_RST}" ;;
+            dxvk)    b_rend="${UI_CYAN}[DXVK]${UI_RST}" ;;
+            *)       b_rend="${UI_GREEN}[AUTO -> ${eff_rend^^}]${UI_RST}" ;;
+        esac
+
+        local h_gm="${UI_DIM}[N/A]${UI_RST}" h_hud="${UI_DIM}[N/A]${UI_RST}" h_scope="${UI_DIM}[N/A]${UI_RST}"
+        command -v gamemoderun >/dev/null 2>&1 && h_gm="${UI_GREEN}[READY]${UI_RST}"
+        command -v mangohud >/dev/null 2>&1 && h_hud="${UI_GREEN}[READY]${UI_RST}"
+        command -v gamescope >/dev/null 2>&1 && h_scope="${UI_GREEN}[READY]${UI_RST}"
+
+        local glt_hint="${UI_DIM}(Opt-in Performance)${UI_RST}"
+        is_haswell_gpu && glt_hint="${UI_AMBER}(Intel Haswell: Keep OFF)${UI_RST}"
+
+        local entries
+        entries=$(cat <<EOF
+1	GameMode (gamemoderun)	$b_gm
+2	MangoHud (FPS & Telemetry)	$b_hud
+3	Gamescope (Isolated Window)	$b_scope
+4	Gamescope FSR Upscaling	$b_fsr
+5	Mesa GL Threading (mesa_gl)	$b_glt $glt_hint
+r	Graphics Renderer (DXVK/WineD3D)	$b_rend
+s	Auto-Locate Wine Prefix Saves	$b_autosaves
+d	Dev Profiler: WINEDEBUG	$b_devwd
+v	Dev Profiler: Vulkan Debug	$b_devvk
+g	Dev Profiler: GBE Callback Log	$b_devgbe
+6	Preset: Balanced Performance	GameMode + MangoHud
+7	Preset: Handheld / FSR	GameMode + MangoHud + Gamescope FSR
+8	Reset: Safe Defaults	All Disabled (Renderer: Auto)
+9	Save & Return	Save configuration
+0	Cancel / Discard Changes	Discard changes and return
+EOF
+)
+
+        flush_tty_input
+        local selection fzf_rc=0
+        selection=$(echo "$entries" | fzf \
+            --delimiter=$'\t' \
+            --with-nth=2,3 \
+            --border-label="  ╢ gamectl :: Wrappers : $title ╟  " \
+            --border-label-pos=2 \
+            --header="Enter: Toggle/Select │ Esc: Save & Return" \
+            --prompt="Wrappers > " \
+            --reverse 2>/dev/null) || fzf_rc=$?
+
+        check_fzf_status "$fzf_rc" || return $?
+        local opt
+        if [ "$fzf_rc" -eq 130 ]; then
+            opt="9"
+        elif [ -z "$selection" ]; then
+            continue
+        else
+            opt=$(echo "$selection" | cut -f1 | tr -d '[:space:]')
+        fi
+
+        case "$opt" in
+            1) gm=$((1 - gm)) ;;
+            2) hud=$((1 - hud)) ;;
+            3) scope=$((1 - scope)) ;;
+            4) fsr=$((1 - fsr)); [ "$fsr" = 1 ] && scope=1 ;;
+            5) glt=$((1 - glt)) ;;
+            r|R)
+                case "$renderer" in
+                    auto|"") renderer="wined3d" ;;
+                    wined3d) renderer="dxvk" ;;
+                    *)       renderer="auto" ;;
+                esac
+                ;;
+            s|S) auto_saves=$((1 - auto_saves)) ;;
+            d|D)
+                case "${dev_wd,,}" in
+                    ""|0|off|false) dev_wd="basic" ;;
+                    basic) dev_wd="full" ;;
+                    *)     dev_wd="0" ;;
+                esac
+                ;;
+            v|V) dev_vk=$((1 - dev_vk)) ;;
+            g|G) dev_gbe=$((1 - dev_gbe)) ;;
+            6) gm=1; hud=1; scope=0; fsr=0; glt=0 ;;
+            7) gm=1; hud=1; scope=1; fsr=1; glt=0 ;;
+            8) gm=0; hud=0; scope=0; fsr=0; glt=0; renderer="auto"; auto_saves=0; dev_wd="0"; dev_vk=0; dev_gbe=0 ;;
+            9)
+                cat <<EOF > "$w_file"
+# Runtime wrappers for $title
+gamemode=$gm
+hud=$hud
+gamescope=$scope
+fsr=$fsr
+glthread=$glt
+renderer=$renderer
+gamescope_args=$gscope_args
+auto_locate_saves=$auto_saves
+dev_winedebug=$dev_wd
+dev_vk_debug=$dev_vk
+dev_gbe_log=$dev_gbe
+EOF
+                log_msg "INFO" "WRAPPERS" "Saved wrapper configuration for $title -> $w_file (gm=$gm,hud=$hud,scope=$scope,fsr=$fsr,glt=$glt,renderer=$renderer,auto_saves=$auto_saves,dev_wd=$dev_wd,dev_vk=$dev_vk,dev_gbe=$dev_gbe)"
+                break
+                ;;
+            0|q|Q|cancel)
+                return 0
+                ;;
+            *)
+                continue
+                ;;
+        esac
+    done
+}
+
+# Global Configuration Manager TUI
+configure_global() {
+    require_tui "Global settings" || return $?
+    mkdir -p "$HOME/.config/gamectl"
+
+    while true; do
+        local p_name="Player" p_id=""
+        if [ -f "$HOME/.config/gamectl/persona" ]; then
+            p_name=$(grep -E '^[[:space:]]*account_name[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_name[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+            p_id=$(grep -E '^[[:space:]]*account_steamid[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_steamid[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+        fi
+        [ -z "$p_name" ] && p_name="${USER:-Player}"
+
+        local w_desc="Default (All Disabled)"
+        if [ -f "$HOME/.config/gamectl/wrappers" ]; then
+            local act_w=()
+            grep -q "^gamemode=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("GameMode")
+            grep -q -E "^(hud|mangohud)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("MangoHud")
+            grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("Gamescope")
+            grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("FSR")
+            grep -q -E "^(glthread|mesa_glthread)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("MesaGL")
+            [ ${#act_w[@]} -gt 0 ] && w_desc="${act_w[*]}"
+        fi
+
+        local lib_count=0
+        [ -f "$HOME/.config/gamectl/libraries" ] && lib_count=$(grep -v -E '^[[:space:]]*(#|$)' "$HOME/.config/gamectl/libraries" 2>/dev/null | wc -l || echo 0)
+
+        local r_host="Not Configured"
+        if [ -f "$HOME/.config/gamectl/remote_host" ]; then
+            r_host=$(head -n 1 "$HOME/.config/gamectl/remote_host" 2>/dev/null | tr -d '[:space:]')
+            [ -z "$r_host" ] && r_host="Not Configured"
+        fi
+
+        local lt_status="Not Configured"
+        local cfg_auth="$HOME/.config/gamectl/lua_tools_auth.json"
+        if [ -f "$cfg_auth" ]; then
+            local u_name
+            u_name=$(jq -r '.user.user_metadata.custom_claims.global_name // .user.user_metadata.full_name // .user.email // "Active"' "$cfg_auth" 2>/dev/null || echo "Active")
+            lt_status="Active ($u_name)"
+        fi
+
+        local hc_status="Not Configured"
+        local hc_key
+        hc_key=$(get_hubcap_api_key 2>/dev/null || true)
+        if [ -n "$hc_key" ]; then
+            if [ ${#hc_key} -gt 8 ]; then
+                hc_status="Active (${hc_key:0:4}...${hc_key: -4})"
+            else
+                hc_status="Active"
+            fi
+        fi
+
+        validate_tui_fields "$p_name" "$p_id" "$r_host" "$lt_status" "$hc_status" || return 1
+        local menu_entries
+        menu_entries=$(cat <<EOF
+1	Global LAN Persona	Name: $p_name | SteamID: ${p_id:-Auto}
+2	Default Runtime Wrappers	$w_desc
+3	Custom Game Libraries	$lib_count paths registered
+4	Remote Companion Host	$r_host
+5	LuaTools Provider Session	$lt_status
+6	Hubcap Manifest API Key	$hc_status
+7	Return to Master Dashboard Hub	Return
+EOF
+)
+
+        flush_tty_input
+        local selection fzf_rc=0
+        selection=$(echo "$menu_entries" | fzf \
+            --delimiter=$'\t' \
+            --with-nth=2,3 \
+            --border-label="  ╢ gamectl :: Global Settings (~/.config/gamectl/) ╟  " \
+            --border-label-pos=2 \
+            --header="GLOBAL SETTINGS (Enter: Configure │ Esc: Return to Dashboard)" \
+            --prompt="Settings > " \
+            --reverse 2>/dev/null) || fzf_rc=$?
+
+        check_fzf_status "$fzf_rc" || return $?
+        [ "$fzf_rc" -eq 130 ] && break
+        [ -z "$selection" ] && continue
+
+        local cfg_opt
+        cfg_opt=$(echo "$selection" | cut -f1 | tr -d '[:space:]')
+
+        case "$cfg_opt" in
+            1)
+                local new_name rc=0
+                new_name=$(tui_prompt_input "Configure LAN Persona Name" "Enter Player Name (Current: $p_name │ Enter: Confirm │ Esc: Cancel)" "$p_name" "Player Name > ") || rc=$?
+                [ "$rc" -eq 130 ] && continue
+                [ "$rc" -ne 0 ] && return "$rc"
+                validate_tui_fields "$new_name" || return 1
+                [ -n "$new_name" ] && p_name="$new_name"
+
+                local new_id
+                rc=0
+                new_id=$(tui_prompt_input "Configure SteamID64" "Enter 17-digit SteamID64, 'gen' for random ID, or blank for Auto (Current: ${p_id:-Auto})" "" "SteamID64 > ") || rc=$?
+                [ "$rc" -eq 130 ] && continue
+                [ "$rc" -ne 0 ] && return "$rc"
+                new_id=$(echo "$new_id" | tr -d '[:space:]')
+                if [ "$new_id" = "gen" ]; then
+                    p_id=$(generate_steamid64)
+                elif [ -n "$new_id" ]; then
+                    p_id="$new_id"
+                fi
+
+                cat <<EOF > "$HOME/.config/gamectl/persona"
+[user::general]
+account_name=$p_name
+account_steamid=$p_id
+language=english
+EOF
+                log_msg "INFO" "CONFIG" "Saved global LAN persona: $p_name | $p_id"
+                ;;
+            2)
+                configure_wrappers "" || return $?
+                ;;
+            3)
+                while true; do
+                    local lib_items=""
+                    local l_idx=1
+                    if [ -f "$HOME/.config/gamectl/libraries" ]; then
+                        while IFS= read -r l_path; do
+                            [ -z "$l_path" ] && continue
+                            [[ "$l_path" =~ ^[[:space:]]*# ]] && continue
+                            validate_tui_fields "$l_path" || return 1
+                            lib_items+="${l_idx}"$'\t'"[REMOVE] $l_path"$'\t'"Select to remove this library path"$'\n'
+                            l_idx=$((l_idx + 1))
+                        done < "$HOME/.config/gamectl/libraries"
+                    fi
+                    local lib_menu
+                    lib_menu=$(cat <<EOF
+add	[+] Register New Library Path	Enter filesystem path (e.g. ~/Games)
+EOF
+)
+                    [ -n "$lib_items" ] && lib_menu="${lib_menu}"$'\n'"${lib_items%$'\n'}"
+                    lib_menu="${lib_menu}"$'\n'"back	[<] Return to Global Settings	Back"
+
+                    flush_tty_input
+                    local lib_sel l_rc=0
+                    lib_sel=$(echo "$lib_menu" | fzf \
+                        --delimiter=$'\t' \
+                        --with-nth=2,3 \
+                        --border-label="  ╢ gamectl :: Custom Game Libraries ╟  " \
+                        --border-label-pos=2 \
+                        --header="CUSTOM LIBRARIES (Enter: Select │ Esc: Return)" \
+                        --prompt="Libraries > " \
+                        --reverse 2>/dev/null) || l_rc=$?
+
+                    check_fzf_status "$l_rc" || return $?
+                    [ "$l_rc" -eq 130 ] && break
+                    [ -z "$lib_sel" ] && continue
+
+                    local l_action
+                    l_action=$(echo "$lib_sel" | cut -f1 | tr -d '[:space:]')
+
+                    if [ "$l_action" = "add" ]; then
+                        local new_path rc=0
+                        new_path=$(tui_prompt_input "Add Game Library Directory" "Enter directory path (e.g. ~/Games │ Enter: Add │ Esc: Cancel)" "" "Path > ") || rc=$?
+                        [ "$rc" -eq 130 ] && continue
+                        [ "$rc" -ne 0 ] && return "$rc"
+                        validate_tui_fields "$new_path" || return 1
+                        if [ -n "$new_path" ]; then
+                            new_path="${new_path/#\~/$HOME}"
+                            echo "$new_path" >> "$HOME/.config/gamectl/libraries"
+                            log_msg "INFO" "CONFIG" "Added custom library: $new_path"
+                            invalidate_scan_cache
+                        fi
+                    elif [ "$l_action" = "back" ]; then
+                        break
+                    else
+                        local target_line
+                        target_line=$(grep -v -E '^[[:space:]]*(#|$)' "$HOME/.config/gamectl/libraries" 2>/dev/null | sed -n "${l_action}p")
+                        if [ -n "$target_line" ]; then
+                            grep -v -F "$target_line" "$HOME/.config/gamectl/libraries" > "$HOME/.config/gamectl/libraries.tmp" 2>/dev/null && mv "$HOME/.config/gamectl/libraries.tmp" "$HOME/.config/gamectl/libraries"
+                            log_msg "INFO" "CONFIG" "Removed custom library: $target_line"
+                            invalidate_scan_cache
+                        fi
+                    fi
+                done
+                ;;
+            4)
+                local new_rhost rc=0
+                new_rhost=$(tui_prompt_input "Remote Companion Host" "Enter SSH host (serv, host:~/path), rclone (gdrive:path), or '-' to clear (Current: $r_host │ Enter: Save │ Esc: Cancel)" "$r_host" "Remote Target > ") || rc=$?
+                [ "$rc" -eq 130 ] && continue
+                [ "$rc" -ne 0 ] && return "$rc"
+                new_rhost=$(printf '%s' "$new_rhost" | tr -d '[:space:]')
+                if [ "$new_rhost" = "-" ]; then
+                    rm -f "$HOME/.config/gamectl/remote_host"
+                    log_msg "INFO" "CONFIG" "Cleared remote companion host"
+                elif [[ "$new_rhost" == -* ]]; then
+                    tui_modal_notice "Invalid Remote Host" "Remote host cannot start with '-':\n$new_rhost" || return $?
+                    continue
+                elif [ -n "$new_rhost" ]; then
+                    local parse_err=""
+                    if ! parse_err=$(parse_remote_sync_target "$new_rhost" 2>&1); then
+                        tui_modal_notice "Invalid Remote Target" "$parse_err" || return $?
+                        continue
+                    fi
+                    mkdir -p "$HOME/.config/gamectl" || return 1
+                    printf '%s\n' "$new_rhost" > "$HOME/.config/gamectl/remote_host"
+                    log_msg "INFO" "CONFIG" "Saved remote companion host: $new_rhost"
+                fi
+                ;;
+            5)
+                login_luatools_interactive || return $?
+                ;;
+            6)
+                local new_hckey rc=0
+                new_hckey=$(tui_prompt_input "Hubcap Manifest API Key" "Enter Hubcap API key (prefix 'smm_') or '-' to clear (Current: $hc_status │ Enter: Save │ Esc: Cancel)" "" "Hubcap Key > ") || rc=$?
+                [ "$rc" -eq 130 ] && continue
+                [ "$rc" -ne 0 ] && return "$rc"
+                new_hckey=$(echo "$new_hckey" | tr -d '[:space:]')
+                if [ "$new_hckey" = "-" ]; then
+                    set_config_value "hubcap_api_key" ""
+                    log_msg "INFO" "CONFIG" "Cleared Hubcap Manifest API key"
+                elif [ -n "$new_hckey" ]; then
+                    set_config_value "hubcap_api_key" "$new_hckey"
+                    log_msg "INFO" "CONFIG" "Saved Hubcap Manifest API key (${new_hckey:0:4}...)"
+                fi
+                ;;
+            7)
+                break
+                ;;
+            0|q|Q|cancel)
+                break
+                ;;
+            *)
+                continue
+                ;;
+        esac
+    done
+}
+
+
+# Standalone-source compatibility: load split runner submodules when sourced directly outside bin/gamectl
+if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
+    _runners_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    for _runners_sub in 41_proton_prefix.sh 42_graphics_isolation.sh; do
+        if [ -f "$_runners_dir/$_runners_sub" ]; then
+            # shellcheck source=/dev/null
+            source "$_runners_dir/$_runners_sub"
+        fi
+    done
+    unset _runners_dir _runners_sub
+fi
+
+# --- [MODULE] src/runners/41_proton_prefix.sh ---
 # Detect P2P multiplayer compatibility hooks, mod loaders, and custom DLL overrides for a game directory
 detect_dll_overrides() {
     local gdir="${1:-}"
@@ -8262,6 +8987,7 @@ EOF
     esac
 }
 
+# --- [MODULE] src/runners/42_graphics_isolation.sh ---
 # Check if host GPU is Intel Haswell / 4th Gen Core (prone to Mesa GL threaded asset decompression crashes)
 is_haswell_gpu() {
     local pci_dir="${GAMECTL_PCI_UEVENT_DIR:-/sys/bus/pci/devices}"
@@ -8642,718 +9368,6 @@ build_sandbox_command() {
     return 0
 }
 
-# Canonical wrapper config & env override loader (SSoT)
-load_wrapper_config() {
-    local gdir="${1:-}"
-    local apply_env="${2:-1}"
-
-    GAMECTL_CFG_GM=0
-    GAMECTL_CFG_HUD=0
-    GAMECTL_CFG_SCOPE=0
-    GAMECTL_CFG_FSR=0
-    GAMECTL_CFG_GLTHREAD=0
-    GAMECTL_CFG_SYSTEMD_SCOPE=""
-    GAMECTL_CFG_PRIME=0
-    GAMECTL_CFG_SANDBOX=0
-    GAMECTL_CFG_RENDERER="auto"
-    GAMECTL_CFG_GAMESCOPE_ARGS=""
-    GAMECTL_CFG_AUTO_LOCATE_SAVES=0
-    GAMECTL_CFG_DEV_WINEDEBUG="0"
-    GAMECTL_CFG_DEV_VK_DEBUG="0"
-    GAMECTL_CFG_DEV_GBE_LOG="0"
-
-    local w_cfgs=("$HOME/.config/gamectl/wrappers")
-    [ -n "$gdir" ] && w_cfgs+=("$gdir/.wrappers")
-    local w_cfg k v
-    for w_cfg in "${w_cfgs[@]}"; do
-        [ -f "$w_cfg" ] || continue
-        while IFS='=' read -r k v || [ -n "$k" ]; do
-            k="${k//[[:space:]]/}"
-            [[ -z "$k" || "$k" =~ ^# ]] && continue
-            v="${v//$'\r'/}"
-            v="${v#"${v%%[![:space:]]*}"}"
-            v="${v%"${v##*[![:space:]]}"}"
-            v="${v#\"}"
-            v="${v%\"}"
-            v="${v#\'}"
-            v="${v%\'}"
-            case "$k" in
-                gamemode) GAMECTL_CFG_GM="$v" ;;
-                hud|mangohud) GAMECTL_CFG_HUD="$v" ;;
-                gamescope) GAMECTL_CFG_SCOPE="$v" ;;
-                fsr) GAMECTL_CFG_FSR="$v" ;;
-                glthread|mesa_glthread) GAMECTL_CFG_GLTHREAD="$v" ;;
-                scope|systemd_scope) GAMECTL_CFG_SYSTEMD_SCOPE="$v" ;;
-                prime|dgpu) GAMECTL_CFG_PRIME="$v" ;;
-                sandbox) GAMECTL_CFG_SANDBOX="$v" ;;
-                renderer) GAMECTL_CFG_RENDERER="$v" ;;
-                gamescope_args) GAMECTL_CFG_GAMESCOPE_ARGS="$v" ;;
-                auto_locate_saves) GAMECTL_CFG_AUTO_LOCATE_SAVES="$v" ;;
-                dev_winedebug) GAMECTL_CFG_DEV_WINEDEBUG="$v" ;;
-                dev_vk_debug) GAMECTL_CFG_DEV_VK_DEBUG="$v" ;;
-                dev_gbe_log) GAMECTL_CFG_DEV_GBE_LOG="$v" ;;
-            esac
-        done < "$w_cfg"
-    done
-
-    if [ "$apply_env" = "1" ]; then
-        [ -n "${GAMECTL_GAMEMODE:-}" ] && GAMECTL_CFG_GM="$GAMECTL_GAMEMODE"
-        [ -n "${GAMECTL_HUD:-${GAMECTL_MANGOHUD:-}}" ] && GAMECTL_CFG_HUD="${GAMECTL_HUD:-$GAMECTL_MANGOHUD}"
-        [ -n "${GAMECTL_GAMESCOPE:-}" ] && GAMECTL_CFG_SCOPE="$GAMECTL_GAMESCOPE"
-        [ -n "${GAMECTL_FSR:-}" ] && GAMECTL_CFG_FSR="$GAMECTL_FSR"
-        [ -n "${GAMECTL_GLTHREAD:-}" ] && GAMECTL_CFG_GLTHREAD="$GAMECTL_GLTHREAD"
-        [ -n "${GAMECTL_SCOPE:-${GAMECTL_SYSTEMD_SCOPE:-}}" ] && GAMECTL_CFG_SYSTEMD_SCOPE="${GAMECTL_SCOPE:-$GAMECTL_SYSTEMD_SCOPE}"
-        [ -n "${GAMECTL_PRIME:-}" ] && GAMECTL_CFG_PRIME="$GAMECTL_PRIME"
-        [ -n "${GAMECTL_SANDBOX:-}" ] && GAMECTL_CFG_SANDBOX="$GAMECTL_SANDBOX"
-        if [ -n "${GAMECTL_RENDERER:-}" ]; then
-            GAMECTL_CFG_RENDERER="$GAMECTL_RENDERER"
-        elif [ -n "${PROTON_USE_WINED3D:-}" ]; then
-            [ "$PROTON_USE_WINED3D" = "1" ] && GAMECTL_CFG_RENDERER="wined3d"
-            [ "$PROTON_USE_WINED3D" = "0" ] && GAMECTL_CFG_RENDERER="dxvk"
-        fi
-        [ -n "${GAMECTL_GAMESCOPE_ARGS:-}" ] && GAMECTL_CFG_GAMESCOPE_ARGS="$GAMECTL_GAMESCOPE_ARGS"
-        [ -n "${GAMECTL_AUTO_LOCATE_SAVES:-}" ] && GAMECTL_CFG_AUTO_LOCATE_SAVES="$GAMECTL_AUTO_LOCATE_SAVES"
-        [ -n "${GAMECTL_DEV_WINEDEBUG:-}" ] && GAMECTL_CFG_DEV_WINEDEBUG="$GAMECTL_DEV_WINEDEBUG"
-        [ -n "${GAMECTL_DEV_VK_DEBUG:-}" ] && GAMECTL_CFG_DEV_VK_DEBUG="$GAMECTL_DEV_VK_DEBUG"
-        [ -n "${GAMECTL_DEV_GBE_LOG:-}" ] && GAMECTL_CFG_DEV_GBE_LOG="$GAMECTL_DEV_GBE_LOG"
-    fi
-}
-
-# Canonical developer profiler environment resolver (SSoT; zero pollution when OFF)
-resolve_dev_profiler_env() {
-    local gdir="${1:-}"
-    local apply_env="${2:-1}"
-
-    load_wrapper_config "$gdir" "$apply_env"
-
-    GAMECTL_DEV_ACTIVE=0
-    GAMECTL_DEV_RESOLVED_WINEDEBUG=""
-    GAMECTL_DEV_RESOLVED_VK_DEBUG=""
-    GAMECTL_DEV_RESOLVED_GBE_LOG=0
-    GAMECTL_DEV_TRACE_LOG=""
-    GAMECTL_DEV_RESPECTED_USER_WINEDEBUG=0
-    GAMECTL_DEV_RESPECTED_USER_VK_DEBUG=0
-
-    local wd_raw="${GAMECTL_CFG_DEV_WINEDEBUG:-0}"
-    local wd_lc="${wd_raw,,}"
-    local mapped_wd=""
-    case "$wd_lc" in
-        ""|0|off|false) mapped_wd="" ;;
-        basic) mapped_wd="+loaddll,+seh" ;;
-        full)  mapped_wd="+relay,+seh,+loaddll" ;;
-        *)
-            mapped_wd=$(printf '%s' "$wd_raw" | tr -cd 'A-Za-z0-9_+,=-')
-            if [ -z "$mapped_wd" ]; then
-                echo "[WARN] Ignored invalid dev_winedebug setting." >&2
-            fi
-            ;;
-    esac
-
-    if [ -n "$mapped_wd" ]; then
-        GAMECTL_DEV_ACTIVE=1
-        if [ -n "${WINEDEBUG:-}" ]; then
-            GAMECTL_DEV_RESPECTED_USER_WINEDEBUG=1
-        else
-            GAMECTL_DEV_RESOLVED_WINEDEBUG="$mapped_wd"
-        fi
-    fi
-
-    local vk_lc="${GAMECTL_CFG_DEV_VK_DEBUG:-0}"
-    vk_lc="${vk_lc,,}"
-    if [ "$vk_lc" = "1" ] || [ "$vk_lc" = "true" ]; then
-        GAMECTL_DEV_ACTIVE=1
-        if [ -n "${VK_LOADER_DEBUG:-}" ]; then
-            GAMECTL_DEV_RESPECTED_USER_VK_DEBUG=1
-        else
-            GAMECTL_DEV_RESOLVED_VK_DEBUG="all"
-        fi
-    fi
-
-    local gbe_lc="${GAMECTL_CFG_DEV_GBE_LOG:-0}"
-    gbe_lc="${gbe_lc,,}"
-    if [ "$gbe_lc" = "1" ] || [ "$gbe_lc" = "true" ]; then
-        GAMECTL_DEV_ACTIVE=1
-        GAMECTL_DEV_RESOLVED_GBE_LOG=1
-    fi
-
-    if [ "$GAMECTL_DEV_ACTIVE" -eq 1 ]; then
-        local base_slug hash_part
-        base_slug=$(basename "${gdir:-global}" | tr -cd '[:alnum:]_-')
-        [ -z "$base_slug" ] && base_slug="game"
-        hash_part=$(printf '%s' "${gdir:-global}" | cksum | awk '{print $1}')
-        GAMECTL_DEV_TRACE_LOG="$(get_runtime_dir)/dev_traces/${base_slug}_${hash_part}.log"
-    fi
-}
-
-# CLI helper for per-game developer profiler configuration
-configure_dev_profile() {
-    local gdir="${1:-}"
-    local mode="${2:-status}"
-
-    if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
-        echo "[ERROR] Game directory not found: ${gdir:-<empty>}" >&2
-        echo "Usage: gamectl dev-profile <game_dir> [status|basic|full|off]" >&2
-        return 1
-    fi
-
-    local w_file="$gdir/.wrappers"
-    case "$mode" in
-        status)
-            resolve_dev_profiler_env "$gdir" 1
-            echo "dev_winedebug=${GAMECTL_CFG_DEV_WINEDEBUG:-0}"
-            echo "dev_vk_debug=${GAMECTL_CFG_DEV_VK_DEBUG:-0}"
-            echo "dev_gbe_log=${GAMECTL_CFG_DEV_GBE_LOG:-0}"
-            echo "active=$GAMECTL_DEV_ACTIVE"
-            echo "resolved_winedebug=$GAMECTL_DEV_RESOLVED_WINEDEBUG"
-            echo "resolved_vk_debug=$GAMECTL_DEV_RESOLVED_VK_DEBUG"
-            echo "trace_log=$GAMECTL_DEV_TRACE_LOG"
-            ;;
-        basic)
-            atomic_set_kv_file "$w_file" "dev_winedebug" "basic" && \
-            atomic_set_kv_file "$w_file" "dev_vk_debug" "0" && \
-            atomic_set_kv_file "$w_file" "dev_gbe_log" "1" || return 1
-            echo "[VERIFIED] Developer profiler set to 'basic' in $w_file"
-            ;;
-        full)
-            atomic_set_kv_file "$w_file" "dev_winedebug" "full" && \
-            atomic_set_kv_file "$w_file" "dev_vk_debug" "1" && \
-            atomic_set_kv_file "$w_file" "dev_gbe_log" "1" || return 1
-            echo "[VERIFIED] Developer profiler set to 'full' in $w_file"
-            ;;
-        off)
-            atomic_set_kv_file "$w_file" "dev_winedebug" "0" && \
-            atomic_set_kv_file "$w_file" "dev_vk_debug" "0" && \
-            atomic_set_kv_file "$w_file" "dev_gbe_log" "0" || return 1
-            echo "[VERIFIED] Developer profiler disabled in $w_file"
-            ;;
-        *)
-            echo "Usage: gamectl dev-profile <game_dir> [status|basic|full|off]" >&2
-            return 1
-            ;;
-    esac
-}
-
-# Resolve and build wrapper prefix command array (gamemoderun, mangohud, gamescope)
-build_wrapper_command() {
-    local gdir="$1"
-    shift || true
-    local opt_gamemode="" opt_hud="" opt_gamescope="" opt_fsr="" opt_systemd_scope="" opt_prime="" opt_sandbox="" opt_allow_unshielded="" opt_renderer=""
-    local remaining_args=()
-
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --hud|--mangohud) opt_hud=1; shift ;;
-            --no-hud|--no-mangohud) opt_hud=0; shift ;;
-            --gamemode) opt_gamemode=1; shift ;;
-            --no-gamemode) opt_gamemode=0; shift ;;
-            --gamescope) opt_gamescope=1; shift ;;
-            --no-gamescope) opt_gamescope=0; shift ;;
-            --fsr) opt_fsr=1; opt_gamescope=1; shift ;;
-            --no-fsr) opt_fsr=0; shift ;;
-            --glthread) opt_glthread=1; shift ;;
-            --no-glthread) opt_glthread=0; shift ;;
-            --scope|--systemd-scope) opt_systemd_scope=1; shift ;;
-            --no-scope|--no-systemd-scope) opt_systemd_scope=0; shift ;;
-            --prime) opt_prime=1; shift ;;
-            --no-prime) opt_prime=0; shift ;;
-            --sandbox) opt_sandbox=1; shift ;;
-            --no-sandbox) opt_sandbox=0; shift ;;
-            --wined3d|--opengl) opt_renderer="wined3d"; shift ;;
-            --dxvk|--vulkan) opt_renderer="dxvk"; shift ;;
-            --renderer) opt_renderer="${2:-auto}"; shift 2 ;;
-            --renderer=*) opt_renderer="${1#*=}"; shift ;;
-            --allow-unshielded) opt_allow_unshielded=1; shift ;;
-            --) shift; remaining_args+=("$@"); break ;;
-            *) remaining_args+=("$1"); shift ;;
-        esac
-    done
-
-    # 1. Load config hierarchy + env overrides via SSoT
-    load_wrapper_config "$gdir" 1
-    local use_gm="$GAMECTL_CFG_GM"
-    local use_hud="$GAMECTL_CFG_HUD"
-    local use_scope="$GAMECTL_CFG_SCOPE"
-    local use_fsr="$GAMECTL_CFG_FSR"
-    local use_glthread="$GAMECTL_CFG_GLTHREAD"
-    local use_systemd_scope="$GAMECTL_CFG_SYSTEMD_SCOPE"
-    local use_prime="$GAMECTL_CFG_PRIME"
-    local use_sandbox="$GAMECTL_CFG_SANDBOX"
-    local use_renderer="$GAMECTL_CFG_RENDERER"
-    local gscope_args="${GAMECTL_CFG_GAMESCOPE_ARGS:-}"
-    [ -z "$gscope_args" ] && gscope_args=$(get_default_gamescope_args)
-
-    # 5. CLI flag overrides
-    [ -n "$opt_gamemode" ] && use_gm="$opt_gamemode"
-    [ -n "$opt_hud" ] && use_hud="$opt_hud"
-    [ -n "$opt_gamescope" ] && use_scope="$opt_gamescope"
-    [ -n "$opt_fsr" ] && use_fsr="$opt_fsr"
-    [ -n "${opt_glthread:-}" ] && use_glthread="$opt_glthread"
-    [ -n "${opt_systemd_scope:-}" ] && use_systemd_scope="$opt_systemd_scope"
-    [ -n "$opt_prime" ] && use_prime="$opt_prime"
-    [ -n "$opt_sandbox" ] && use_sandbox="$opt_sandbox"
-    [ -n "$opt_renderer" ] && use_renderer="$opt_renderer"
-
-    if [ -z "${use_systemd_scope:-}" ]; then
-        if check_systemd_scope_support; then
-            use_systemd_scope=1
-        else
-            use_systemd_scope=0
-        fi
-    fi
-
-    local dgpu_vendor="none"
-    if [ "$use_prime" = "1" ]; then
-        dgpu_vendor=$(detect_dgpu_vendor)
-        if [ "$dgpu_vendor" = "none" ]; then
-            echo "[WARN] PRIME offloading requested (--prime) but no secondary dGPU detected." >&2
-        fi
-    fi
-
-    declare -ga GAMECTL_SANDBOX_PREFIX=()
-    if [ "$use_sandbox" = "1" ]; then
-        build_sandbox_command "$gdir" || use_sandbox=0
-    fi
-
-    local resolved_renderer
-    resolved_renderer="$(resolve_graphics_renderer "$use_renderer" "$use_prime")"
-    GAMECTL_RENDERER_MODE="$use_renderer"
-    GAMECTL_ACTIVE_RENDERER="$resolved_renderer"
-    GAMECTL_ACTIVE_GLTHREAD="$use_glthread"
-    GAMECTL_ACTIVE_SYSTEMD_SCOPE="$use_systemd_scope"
-    GAMECTL_ACTIVE_PRIME="$use_prime"
-    GAMECTL_ACTIVE_PRIME_VENDOR="$dgpu_vendor"
-    GAMECTL_ACTIVE_SANDBOX="$use_sandbox"
-    GAMECTL_ACTIVE_ALLOW_UNSHIELDED="${opt_allow_unshielded:-0}"
-    GAMECTL_ACTIVE_AUTO_LOCATE_SAVES="${GAMECTL_CFG_AUTO_LOCATE_SAVES:-0}"
-
-    local prefix=()
-    if [ "$use_gm" = "1" ]; then
-        if command -v gamemoderun >/dev/null 2>&1; then
-            prefix+=("gamemoderun")
-        else
-            echo "[WARN] gamemoderun is enabled but binary not found in PATH." >&2
-        fi
-    fi
-
-    if [ "$use_hud" = "1" ]; then
-        if command -v mangohud >/dev/null 2>&1; then
-            prefix+=("mangohud")
-        else
-            echo "[WARN] mangohud is enabled but binary not found in PATH." >&2
-        fi
-    fi
-
-    if [ "$use_scope" = "1" ] || [ "$use_fsr" = "1" ]; then
-        if command -v gamescope >/dev/null 2>&1; then
-            prefix+=("gamescope")
-            local active_args="$gscope_args"
-            if [ "$use_fsr" = "1" ] && [[ ! "$active_args" =~ (-F|fsr|-U) ]]; then
-                active_args="-F fsr $active_args"
-            elif [ "$use_fsr" = "0" ]; then
-                active_args=$(echo "$active_args" | sed -E 's/-F[[:space:]]+fsr//g' | xargs)
-            fi
-            if [ -n "$active_args" ]; then
-                read -r -a parsed_args <<< "$active_args"
-                prefix+=("${parsed_args[@]}")
-            fi
-            prefix+=("--")
-        else
-            echo "[WARN] gamescope is enabled but binary not found in PATH." >&2
-        fi
-    fi
-
-    GAMECTL_WRAPPER_PREFIX=("${prefix[@]}")
-    GAMECTL_REMAINING_ARGS=("${remaining_args[@]}")
-}
-
-# Interactive wrapper configuration for a game or global defaults
-configure_wrappers() {
-    require_tui "Runtime wrappers" || return $?
-    local gdir="${1:-}"
-    local title="${2:-}"
-    local w_file
-
-    if [ -n "$gdir" ] && [ -d "$gdir" ]; then
-        [ -z "$title" ] && title="$(basename "$gdir")"
-        w_file="$gdir/.wrappers"
-    else
-        title="Global Default Wrappers"
-        mkdir -p "$HOME/.config/gamectl"
-        w_file="$HOME/.config/gamectl/wrappers"
-    fi
-
-    load_wrapper_config "${gdir:-}" 0
-    local gm="$GAMECTL_CFG_GM" hud="$GAMECTL_CFG_HUD" scope="$GAMECTL_CFG_SCOPE"
-    local fsr="$GAMECTL_CFG_FSR" glt="$GAMECTL_CFG_GLTHREAD" renderer="${GAMECTL_CFG_RENDERER:-auto}"
-    local auto_saves="${GAMECTL_CFG_AUTO_LOCATE_SAVES:-0}"
-    local dev_wd="${GAMECTL_CFG_DEV_WINEDEBUG:-0}" dev_vk="${GAMECTL_CFG_DEV_VK_DEBUG:-0}" dev_gbe="${GAMECTL_CFG_DEV_GBE_LOG:-0}"
-    local gscope_args="${GAMECTL_CFG_GAMESCOPE_ARGS:-}"
-    [ -z "$gscope_args" ] && gscope_args=$(get_default_gamescope_args)
-
-    while true; do
-        local b_gm="${UI_DIM}[OFF]${UI_RST}" b_hud="${UI_DIM}[OFF]${UI_RST}"
-        local b_scope="${UI_DIM}[OFF]${UI_RST}" b_fsr="${UI_DIM}[OFF]${UI_RST}" b_glt="${UI_DIM}[OFF]${UI_RST}"
-        local b_autosaves="${UI_DIM}[OFF]${UI_RST}" b_devwd="${UI_DIM}[OFF]${UI_RST}"
-        local b_devvk="${UI_DIM}[OFF]${UI_RST}" b_devgbe="${UI_DIM}[OFF]${UI_RST}"
-        [ "$gm" = 1 ] && b_gm="${UI_GREEN}[ACTIVE]${UI_RST}"
-        [ "$hud" = 1 ] && b_hud="${UI_GREEN}[ACTIVE]${UI_RST}"
-        [ "$scope" = 1 ] && b_scope="${UI_GREEN}[ACTIVE]${UI_RST}"
-        [ "$fsr" = 1 ] && b_fsr="${UI_GREEN}[ACTIVE]${UI_RST}"
-        [ "$glt" = 1 ] && b_glt="${UI_GREEN}[ACTIVE]${UI_RST}"
-        [ "$auto_saves" = 1 ] && b_autosaves="${UI_GREEN}[ACTIVE]${UI_RST}"
-        case "${dev_wd,,}" in
-            ""|0|off|false) ;;
-            basic) b_devwd="${UI_AMBER}[BASIC]${UI_RST}" ;;
-            full)  b_devwd="${UI_RED}[FULL]${UI_RST}" ;;
-            *)     b_devwd="${UI_CYAN}[$dev_wd]${UI_RST}" ;;
-        esac
-        [ "$dev_vk" = 1 ] && b_devvk="${UI_AMBER}[ACTIVE]${UI_RST}"
-        [ "$dev_gbe" = 1 ] && b_devgbe="${UI_AMBER}[ACTIVE]${UI_RST}"
-
-        local eff_rend b_rend
-        eff_rend="$(resolve_graphics_renderer "$renderer" 0)"
-        case "$renderer" in
-            wined3d) b_rend="${UI_AMBER}[WINED3D]${UI_RST}" ;;
-            dxvk)    b_rend="${UI_CYAN}[DXVK]${UI_RST}" ;;
-            *)       b_rend="${UI_GREEN}[AUTO -> ${eff_rend^^}]${UI_RST}" ;;
-        esac
-
-        local h_gm="${UI_DIM}[N/A]${UI_RST}" h_hud="${UI_DIM}[N/A]${UI_RST}" h_scope="${UI_DIM}[N/A]${UI_RST}"
-        command -v gamemoderun >/dev/null 2>&1 && h_gm="${UI_GREEN}[READY]${UI_RST}"
-        command -v mangohud >/dev/null 2>&1 && h_hud="${UI_GREEN}[READY]${UI_RST}"
-        command -v gamescope >/dev/null 2>&1 && h_scope="${UI_GREEN}[READY]${UI_RST}"
-
-        local glt_hint="${UI_DIM}(Opt-in Performance)${UI_RST}"
-        is_haswell_gpu && glt_hint="${UI_AMBER}(Intel Haswell: Keep OFF)${UI_RST}"
-
-        local entries
-        entries=$(cat <<EOF
-1	GameMode (gamemoderun)	$b_gm
-2	MangoHud (FPS & Telemetry)	$b_hud
-3	Gamescope (Isolated Window)	$b_scope
-4	Gamescope FSR Upscaling	$b_fsr
-5	Mesa GL Threading (mesa_gl)	$b_glt $glt_hint
-r	Graphics Renderer (DXVK/WineD3D)	$b_rend
-s	Auto-Locate Wine Prefix Saves	$b_autosaves
-d	Dev Profiler: WINEDEBUG	$b_devwd
-v	Dev Profiler: Vulkan Debug	$b_devvk
-g	Dev Profiler: GBE Callback Log	$b_devgbe
-6	Preset: Balanced Performance	GameMode + MangoHud
-7	Preset: Handheld / FSR	GameMode + MangoHud + Gamescope FSR
-8	Reset: Safe Defaults	All Disabled (Renderer: Auto)
-9	Save & Return	Save configuration
-0	Cancel / Discard Changes	Discard changes and return
-EOF
-)
-
-        flush_tty_input
-        local selection fzf_rc=0
-        selection=$(echo "$entries" | fzf \
-            --delimiter=$'\t' \
-            --with-nth=2,3 \
-            --border-label="  ╢ gamectl :: Wrappers : $title ╟  " \
-            --border-label-pos=2 \
-            --header="Enter: Toggle/Select │ Esc: Save & Return" \
-            --prompt="Wrappers > " \
-            --reverse 2>/dev/null) || fzf_rc=$?
-
-        check_fzf_status "$fzf_rc" || return $?
-        local opt
-        if [ "$fzf_rc" -eq 130 ]; then
-            opt="9"
-        elif [ -z "$selection" ]; then
-            continue
-        else
-            opt=$(echo "$selection" | cut -f1 | tr -d '[:space:]')
-        fi
-
-        case "$opt" in
-            1) gm=$((1 - gm)) ;;
-            2) hud=$((1 - hud)) ;;
-            3) scope=$((1 - scope)) ;;
-            4) fsr=$((1 - fsr)); [ "$fsr" = 1 ] && scope=1 ;;
-            5) glt=$((1 - glt)) ;;
-            r|R)
-                case "$renderer" in
-                    auto|"") renderer="wined3d" ;;
-                    wined3d) renderer="dxvk" ;;
-                    *)       renderer="auto" ;;
-                esac
-                ;;
-            s|S) auto_saves=$((1 - auto_saves)) ;;
-            d|D)
-                case "${dev_wd,,}" in
-                    ""|0|off|false) dev_wd="basic" ;;
-                    basic) dev_wd="full" ;;
-                    *)     dev_wd="0" ;;
-                esac
-                ;;
-            v|V) dev_vk=$((1 - dev_vk)) ;;
-            g|G) dev_gbe=$((1 - dev_gbe)) ;;
-            6) gm=1; hud=1; scope=0; fsr=0; glt=0 ;;
-            7) gm=1; hud=1; scope=1; fsr=1; glt=0 ;;
-            8) gm=0; hud=0; scope=0; fsr=0; glt=0; renderer="auto"; auto_saves=0; dev_wd="0"; dev_vk=0; dev_gbe=0 ;;
-            9)
-                cat <<EOF > "$w_file"
-# Runtime wrappers for $title
-gamemode=$gm
-hud=$hud
-gamescope=$scope
-fsr=$fsr
-glthread=$glt
-renderer=$renderer
-gamescope_args=$gscope_args
-auto_locate_saves=$auto_saves
-dev_winedebug=$dev_wd
-dev_vk_debug=$dev_vk
-dev_gbe_log=$dev_gbe
-EOF
-                log_msg "INFO" "WRAPPERS" "Saved wrapper configuration for $title -> $w_file (gm=$gm,hud=$hud,scope=$scope,fsr=$fsr,glt=$glt,renderer=$renderer,auto_saves=$auto_saves,dev_wd=$dev_wd,dev_vk=$dev_vk,dev_gbe=$dev_gbe)"
-                break
-                ;;
-            0|q|Q|cancel)
-                return 0
-                ;;
-            *)
-                continue
-                ;;
-        esac
-    done
-}
-
-# Global Configuration Manager TUI
-configure_global() {
-    require_tui "Global settings" || return $?
-    mkdir -p "$HOME/.config/gamectl"
-
-    while true; do
-        local p_name="Player" p_id=""
-        if [ -f "$HOME/.config/gamectl/persona" ]; then
-            p_name=$(grep -E '^[[:space:]]*account_name[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_name[[:space:]]*=[[:space:]]*//' | tr -d '\r')
-            p_id=$(grep -E '^[[:space:]]*account_steamid[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_steamid[[:space:]]*=[[:space:]]*//' | tr -d '\r')
-        fi
-        [ -z "$p_name" ] && p_name="${USER:-Player}"
-
-        local w_desc="Default (All Disabled)"
-        if [ -f "$HOME/.config/gamectl/wrappers" ]; then
-            local act_w=()
-            grep -q "^gamemode=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("GameMode")
-            grep -q -E "^(hud|mangohud)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("MangoHud")
-            grep -q "^gamescope=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("Gamescope")
-            grep -q "^fsr=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("FSR")
-            grep -q -E "^(glthread|mesa_glthread)=1" "$HOME/.config/gamectl/wrappers" 2>/dev/null && act_w+=("MesaGL")
-            [ ${#act_w[@]} -gt 0 ] && w_desc="${act_w[*]}"
-        fi
-
-        local lib_count=0
-        [ -f "$HOME/.config/gamectl/libraries" ] && lib_count=$(grep -v -E '^[[:space:]]*(#|$)' "$HOME/.config/gamectl/libraries" 2>/dev/null | wc -l || echo 0)
-
-        local r_host="Not Configured"
-        if [ -f "$HOME/.config/gamectl/remote_host" ]; then
-            r_host=$(head -n 1 "$HOME/.config/gamectl/remote_host" 2>/dev/null | tr -d '[:space:]')
-            [ -z "$r_host" ] && r_host="Not Configured"
-        fi
-
-        local lt_status="Not Configured"
-        local cfg_auth="$HOME/.config/gamectl/lua_tools_auth.json"
-        if [ -f "$cfg_auth" ]; then
-            local u_name
-            u_name=$(jq -r '.user.user_metadata.custom_claims.global_name // .user.user_metadata.full_name // .user.email // "Active"' "$cfg_auth" 2>/dev/null || echo "Active")
-            lt_status="Active ($u_name)"
-        fi
-
-        local hc_status="Not Configured"
-        local hc_key
-        hc_key=$(get_hubcap_api_key 2>/dev/null || true)
-        if [ -n "$hc_key" ]; then
-            if [ ${#hc_key} -gt 8 ]; then
-                hc_status="Active (${hc_key:0:4}...${hc_key: -4})"
-            else
-                hc_status="Active"
-            fi
-        fi
-
-        validate_tui_fields "$p_name" "$p_id" "$r_host" "$lt_status" "$hc_status" || return 1
-        local menu_entries
-        menu_entries=$(cat <<EOF
-1	Global LAN Persona	Name: $p_name | SteamID: ${p_id:-Auto}
-2	Default Runtime Wrappers	$w_desc
-3	Custom Game Libraries	$lib_count paths registered
-4	Remote Companion Host	$r_host
-5	LuaTools Provider Session	$lt_status
-6	Hubcap Manifest API Key	$hc_status
-7	Return to Master Dashboard Hub	Return
-EOF
-)
-
-        flush_tty_input
-        local selection fzf_rc=0
-        selection=$(echo "$menu_entries" | fzf \
-            --delimiter=$'\t' \
-            --with-nth=2,3 \
-            --border-label="  ╢ gamectl :: Global Settings (~/.config/gamectl/) ╟  " \
-            --border-label-pos=2 \
-            --header="GLOBAL SETTINGS (Enter: Configure │ Esc: Return to Dashboard)" \
-            --prompt="Settings > " \
-            --reverse 2>/dev/null) || fzf_rc=$?
-
-        check_fzf_status "$fzf_rc" || return $?
-        [ "$fzf_rc" -eq 130 ] && break
-        [ -z "$selection" ] && continue
-
-        local cfg_opt
-        cfg_opt=$(echo "$selection" | cut -f1 | tr -d '[:space:]')
-
-        case "$cfg_opt" in
-            1)
-                local new_name rc=0
-                new_name=$(tui_prompt_input "Configure LAN Persona Name" "Enter Player Name (Current: $p_name │ Enter: Confirm │ Esc: Cancel)" "$p_name" "Player Name > ") || rc=$?
-                [ "$rc" -eq 130 ] && continue
-                [ "$rc" -ne 0 ] && return "$rc"
-                validate_tui_fields "$new_name" || return 1
-                [ -n "$new_name" ] && p_name="$new_name"
-
-                local new_id
-                rc=0
-                new_id=$(tui_prompt_input "Configure SteamID64" "Enter 17-digit SteamID64, 'gen' for random ID, or blank for Auto (Current: ${p_id:-Auto})" "" "SteamID64 > ") || rc=$?
-                [ "$rc" -eq 130 ] && continue
-                [ "$rc" -ne 0 ] && return "$rc"
-                new_id=$(echo "$new_id" | tr -d '[:space:]')
-                if [ "$new_id" = "gen" ]; then
-                    p_id=$(generate_steamid64)
-                elif [ -n "$new_id" ]; then
-                    p_id="$new_id"
-                fi
-
-                cat <<EOF > "$HOME/.config/gamectl/persona"
-[user::general]
-account_name=$p_name
-account_steamid=$p_id
-language=english
-EOF
-                log_msg "INFO" "CONFIG" "Saved global LAN persona: $p_name | $p_id"
-                ;;
-            2)
-                configure_wrappers "" || return $?
-                ;;
-            3)
-                while true; do
-                    local lib_items=""
-                    local l_idx=1
-                    if [ -f "$HOME/.config/gamectl/libraries" ]; then
-                        while IFS= read -r l_path; do
-                            [ -z "$l_path" ] && continue
-                            [[ "$l_path" =~ ^[[:space:]]*# ]] && continue
-                            validate_tui_fields "$l_path" || return 1
-                            lib_items+="${l_idx}"$'\t'"[REMOVE] $l_path"$'\t'"Select to remove this library path"$'\n'
-                            l_idx=$((l_idx + 1))
-                        done < "$HOME/.config/gamectl/libraries"
-                    fi
-                    local lib_menu
-                    lib_menu=$(cat <<EOF
-add	[+] Register New Library Path	Enter filesystem path (e.g. ~/Games)
-EOF
-)
-                    [ -n "$lib_items" ] && lib_menu="${lib_menu}"$'\n'"${lib_items%$'\n'}"
-                    lib_menu="${lib_menu}"$'\n'"back	[<] Return to Global Settings	Back"
-
-                    flush_tty_input
-                    local lib_sel l_rc=0
-                    lib_sel=$(echo "$lib_menu" | fzf \
-                        --delimiter=$'\t' \
-                        --with-nth=2,3 \
-                        --border-label="  ╢ gamectl :: Custom Game Libraries ╟  " \
-                        --border-label-pos=2 \
-                        --header="CUSTOM LIBRARIES (Enter: Select │ Esc: Return)" \
-                        --prompt="Libraries > " \
-                        --reverse 2>/dev/null) || l_rc=$?
-
-                    check_fzf_status "$l_rc" || return $?
-                    [ "$l_rc" -eq 130 ] && break
-                    [ -z "$lib_sel" ] && continue
-
-                    local l_action
-                    l_action=$(echo "$lib_sel" | cut -f1 | tr -d '[:space:]')
-
-                    if [ "$l_action" = "add" ]; then
-                        local new_path rc=0
-                        new_path=$(tui_prompt_input "Add Game Library Directory" "Enter directory path (e.g. ~/Games │ Enter: Add │ Esc: Cancel)" "" "Path > ") || rc=$?
-                        [ "$rc" -eq 130 ] && continue
-                        [ "$rc" -ne 0 ] && return "$rc"
-                        validate_tui_fields "$new_path" || return 1
-                        if [ -n "$new_path" ]; then
-                            new_path="${new_path/#\~/$HOME}"
-                            echo "$new_path" >> "$HOME/.config/gamectl/libraries"
-                            log_msg "INFO" "CONFIG" "Added custom library: $new_path"
-                            invalidate_scan_cache
-                        fi
-                    elif [ "$l_action" = "back" ]; then
-                        break
-                    else
-                        local target_line
-                        target_line=$(grep -v -E '^[[:space:]]*(#|$)' "$HOME/.config/gamectl/libraries" 2>/dev/null | sed -n "${l_action}p")
-                        if [ -n "$target_line" ]; then
-                            grep -v -F "$target_line" "$HOME/.config/gamectl/libraries" > "$HOME/.config/gamectl/libraries.tmp" 2>/dev/null && mv "$HOME/.config/gamectl/libraries.tmp" "$HOME/.config/gamectl/libraries"
-                            log_msg "INFO" "CONFIG" "Removed custom library: $target_line"
-                            invalidate_scan_cache
-                        fi
-                    fi
-                done
-                ;;
-            4)
-                local new_rhost rc=0
-                new_rhost=$(tui_prompt_input "Remote Companion Host" "Enter SSH host (serv, host:~/path), rclone (gdrive:path), or '-' to clear (Current: $r_host │ Enter: Save │ Esc: Cancel)" "$r_host" "Remote Target > ") || rc=$?
-                [ "$rc" -eq 130 ] && continue
-                [ "$rc" -ne 0 ] && return "$rc"
-                new_rhost=$(printf '%s' "$new_rhost" | tr -d '[:space:]')
-                if [ "$new_rhost" = "-" ]; then
-                    rm -f "$HOME/.config/gamectl/remote_host"
-                    log_msg "INFO" "CONFIG" "Cleared remote companion host"
-                elif [[ "$new_rhost" == -* ]]; then
-                    tui_modal_notice "Invalid Remote Host" "Remote host cannot start with '-':\n$new_rhost" || return $?
-                    continue
-                elif [ -n "$new_rhost" ]; then
-                    local parse_err=""
-                    if ! parse_err=$(parse_remote_sync_target "$new_rhost" 2>&1); then
-                        tui_modal_notice "Invalid Remote Target" "$parse_err" || return $?
-                        continue
-                    fi
-                    mkdir -p "$HOME/.config/gamectl" || return 1
-                    printf '%s\n' "$new_rhost" > "$HOME/.config/gamectl/remote_host"
-                    log_msg "INFO" "CONFIG" "Saved remote companion host: $new_rhost"
-                fi
-                ;;
-            5)
-                login_luatools_interactive || return $?
-                ;;
-            6)
-                local new_hckey rc=0
-                new_hckey=$(tui_prompt_input "Hubcap Manifest API Key" "Enter Hubcap API key (prefix 'smm_') or '-' to clear (Current: $hc_status │ Enter: Save │ Esc: Cancel)" "" "Hubcap Key > ") || rc=$?
-                [ "$rc" -eq 130 ] && continue
-                [ "$rc" -ne 0 ] && return "$rc"
-                new_hckey=$(echo "$new_hckey" | tr -d '[:space:]')
-                if [ "$new_hckey" = "-" ]; then
-                    set_config_value "hubcap_api_key" ""
-                    log_msg "INFO" "CONFIG" "Cleared Hubcap Manifest API key"
-                elif [ -n "$new_hckey" ]; then
-                    set_config_value "hubcap_api_key" "$new_hckey"
-                    log_msg "INFO" "CONFIG" "Saved Hubcap Manifest API key (${new_hckey:0:4}...)"
-                fi
-                ;;
-            7)
-                break
-                ;;
-            0|q|Q|cancel)
-                break
-                ;;
-            *)
-                continue
-                ;;
-        esac
-    done
-}
-
-
 # --- [MODULE] src/runners/50_launcher.sh ---
 # Preview pane generator for Process HUD Log context (3 lines before and 3 lines after)
 preview_process_log() {
@@ -9554,87 +9568,6 @@ EOF
                 ;;
         esac
     done
-}
-
-# Setup local P2P compatibility and mod DLL overrides without Steam registration.
-setup_onlinefix() {
-    local gdir="${1:-}"
-    shift || true
-    local auto_yes=false
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            -y|--yes|--non-interactive) auto_yes=true; shift ;;
-            *) shift ;;
-        esac
-    done
-
-    if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
-        echo "[ERROR] Game directory not found: $gdir" >&2
-        return 1
-    fi
-    gdir="$(cd "$gdir" && pwd)"
-
-    echo "[INFO] Running local OnlineFix compatibility setup in: $gdir..."
-
-    # 1. Discover OnlineFix signature files
-    local of_files
-    of_files=$(find "$gdir" -maxdepth 3 \( -name "pfx" -o -name ".git" -o -name ".save_snapshots" -o -name "saves" \) -prune -o \( \
-        -iname "OnlineFix64.dll" -o -iname "OnlineFix.dll" -o -iname "OnlineFix.ini" -o \
-        -iname "dnet.dll" -o -iname "SteamOverlay64.dll" \
-    \) -print 2>/dev/null || true)
-
-    if [ -z "$of_files" ]; then
-        echo "[WARN] No OnlineFix signatures found in this game directory." >&2
-        echo "       Neither OnlineFix64.dll, OnlineFix.dll, nor OnlineFix.ini was found." >&2
-        return 1
-    fi
-    echo "[VERIFIED] OnlineFix signature detected."
-
-    # Steam registration remains available through the explicit sync-steam command.
-    # 2. Audit & Sync OnlineFix.ini PlayerName
-    local ini_file
-    ini_file=$(find "$gdir" -maxdepth 3 \( -name "pfx" -o -name ".git" \) -prune -o -iname "OnlineFix.ini" -print 2>/dev/null | head -n 1)
-    if [ -n "$ini_file" ] && [ -f "$ini_file" ]; then
-        local curr_pname
-        curr_pname=$(grep -E '^[[:space:]]*PlayerName[[:space:]]*=' "$ini_file" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*PlayerName[[:space:]]*=[[:space:]]*//' | tr -d '\r')
-        echo "[INFO] OnlineFix.ini detected: $ini_file"
-        echo "       Current PlayerName: ${curr_pname:-[Unset]}"
-
-        local persona_name=""
-        if [ -f "$HOME/.config/gamectl/persona" ]; then
-            persona_name=$(grep -E '^[[:space:]]*account_name[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_name[[:space:]]*=[[:space:]]*//' | tr -d '\r')
-        fi
-        [ -z "$persona_name" ] && persona_name="${USER:-Player}"
-
-        if [ -n "$persona_name" ] && [ "$persona_name" != "$curr_pname" ]; then
-            local should_sync=false
-            if [ "$auto_yes" = true ]; then
-                should_sync=true
-            elif [ -t 0 ]; then
-                echo -n "       Synchronize PlayerName to '$persona_name'? [Y/n] (Auto-yes in 5s): "
-                local confirm_sync=""
-                read -t 5 -r confirm_sync || confirm_sync="y"
-                echo
-                if [[ ! "$confirm_sync" =~ ^[nN] ]]; then
-                    should_sync=true
-                fi
-            else
-                should_sync=true
-            fi
-
-            if [ "$should_sync" = true ]; then
-                if atomic_set_kv_file "$ini_file" "PlayerName" "$persona_name" " = "; then
-                    echo "       ${UI_GREEN}[SUCCESS] PlayerName in OnlineFix.ini synchronized to: $persona_name${UI_RST}"
-                else
-                    echo "[ERROR] Failed to update PlayerName in $ini_file" >&2
-                    return 1
-                fi
-            fi
-        fi
-    fi
-
-    echo "[VERIFIED] OnlineFix setup completed for: $(basename "$gdir")"
-    return 0
 }
 
 # Launch game with performance wrapping and runner isolation
@@ -10158,6 +10091,81 @@ EOF
     return 0
 }
 
+# CLI helper for launching games with wrappers and options
+cli_launch() {
+    local l_dir="${1:-}"
+    shift || true
+
+    # Auto-resolve numeric AppID to installed game directory
+    if [[ "$l_dir" =~ ^[0-9]+$ ]] && [ ! -d "$l_dir" ]; then
+        local resolved_dir
+        resolved_dir=$(scan_installed_games 2>/dev/null | awk -F'\t' -v aid="$l_dir" '$1 == aid {print $4}' | head -n 1)
+        if [ -n "$resolved_dir" ] && [ -d "$resolved_dir" ]; then
+            l_dir="$resolved_dir"
+        fi
+    fi
+
+    local l_bin=""
+    local l_title=""
+    local l_flags=()
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --hud|--mangohud|--no-hud|--no-mangohud|--gamemode|--no-gamemode|--gamescope|--no-gamescope|--fsr|--no-fsr|--glthread|--no-glthread|--scope|--systemd-scope|--no-scope|--no-systemd-scope|--prime|--no-prime|--sandbox|--no-sandbox)
+                l_flags+=("$1")
+                shift
+                ;;
+            *)
+                if [ -z "$l_bin" ]; then
+                    l_bin="$1"
+                elif [ -z "$l_title" ]; then
+                    l_title="$1"
+                else
+                    l_flags+=("$1")
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    [ -z "$l_title" ] && l_title="$(basename "$l_dir")"
+    if [ -z "$l_bin" ]; then
+        l_bin=$(find_game_binary "$l_dir" 2>/dev/null || echo "")
+    fi
+
+    if [ -n "$l_bin" ]; then
+        local l_rc=0
+        launch_game "$l_dir" "$l_bin" "$l_title" "${l_flags[@]}" || l_rc=$?
+        if [ "$l_rc" -eq 0 ] && [ -t 0 ] && [ -t 1 ] && [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 0 ]; then
+            local gpid="${GAMECTL_LAST_LAUNCH_PID:-}"
+            local inf="${GAMECTL_LAST_INFO_FILE:-}"
+            local lfile="${GAMECTL_LAST_LOG_FILE:-}"
+            local rtype="${GAMECTL_LAST_RUN_TYPE:-Native Linux}"
+            if [ -n "$gpid" ] && [ -f "$inf" ] && kill -0 "$gpid" 2>/dev/null; then
+                game_controller_hud "$gpid" "$l_title" "$lfile" "$l_dir" "$l_bin" "$inf" "$rtype" || true
+            fi
+        fi
+        return "$l_rc"
+    else
+        echo "[ERROR] Executable binary not found in: $l_dir" >&2
+        return 1
+    fi
+}
+
+
+# Standalone-source compatibility: load split launcher submodules when sourced directly outside bin/gamectl
+if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
+    _launcher_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    for _launcher_sub in 51_remote_sync.sh 52_inject_runtime.sh; do
+        if [ -f "$_launcher_dir/$_launcher_sub" ]; then
+            # shellcheck source=/dev/null
+            source "$_launcher_dir/$_launcher_sub"
+        fi
+    done
+    unset _launcher_dir _launcher_sub
+fi
+
+# --- [MODULE] src/runners/51_remote_sync.sh ---
 # Probe SSH remote $HOME with honest error classification on stderr
 probe_ssh_remote_home() {
     local ssh_host="$1"
@@ -10580,6 +10588,87 @@ pull_from_tuf() {
     pull_save_remote "$@"
 }
 
+# --- [MODULE] src/runners/52_inject_runtime.sh ---
+# Setup local P2P compatibility and mod DLL overrides without Steam registration.
+setup_onlinefix() {
+    local gdir="${1:-}"
+    shift || true
+    local auto_yes=false
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -y|--yes|--non-interactive) auto_yes=true; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
+        echo "[ERROR] Game directory not found: $gdir" >&2
+        return 1
+    fi
+    gdir="$(cd "$gdir" && pwd)"
+
+    echo "[INFO] Running local OnlineFix compatibility setup in: $gdir..."
+
+    # 1. Discover OnlineFix signature files
+    local of_files
+    of_files=$(find "$gdir" -maxdepth 3 \( -name "pfx" -o -name ".git" -o -name ".save_snapshots" -o -name "saves" \) -prune -o \( \
+        -iname "OnlineFix64.dll" -o -iname "OnlineFix.dll" -o -iname "OnlineFix.ini" -o \
+        -iname "dnet.dll" -o -iname "SteamOverlay64.dll" \
+    \) -print 2>/dev/null || true)
+
+    if [ -z "$of_files" ]; then
+        echo "[WARN] No OnlineFix signatures found in this game directory." >&2
+        echo "       Neither OnlineFix64.dll, OnlineFix.dll, nor OnlineFix.ini was found." >&2
+        return 1
+    fi
+    echo "[VERIFIED] OnlineFix signature detected."
+
+    # Steam registration remains available through the explicit sync-steam command.
+    # 2. Audit & Sync OnlineFix.ini PlayerName
+    local ini_file
+    ini_file=$(find "$gdir" -maxdepth 3 \( -name "pfx" -o -name ".git" \) -prune -o -iname "OnlineFix.ini" -print 2>/dev/null | head -n 1)
+    if [ -n "$ini_file" ] && [ -f "$ini_file" ]; then
+        local curr_pname
+        curr_pname=$(grep -E '^[[:space:]]*PlayerName[[:space:]]*=' "$ini_file" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*PlayerName[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+        echo "[INFO] OnlineFix.ini detected: $ini_file"
+        echo "       Current PlayerName: ${curr_pname:-[Unset]}"
+
+        local persona_name=""
+        if [ -f "$HOME/.config/gamectl/persona" ]; then
+            persona_name=$(grep -E '^[[:space:]]*account_name[[:space:]]*=' "$HOME/.config/gamectl/persona" 2>/dev/null | head -n 1 | sed -E 's/^[[:space:]]*account_name[[:space:]]*=[[:space:]]*//' | tr -d '\r')
+        fi
+        [ -z "$persona_name" ] && persona_name="${USER:-Player}"
+
+        if [ -n "$persona_name" ] && [ "$persona_name" != "$curr_pname" ]; then
+            local should_sync=false
+            if [ "$auto_yes" = true ]; then
+                should_sync=true
+            elif [ -t 0 ]; then
+                echo -n "       Synchronize PlayerName to '$persona_name'? [Y/n] (Auto-yes in 5s): "
+                local confirm_sync=""
+                read -t 5 -r confirm_sync || confirm_sync="y"
+                echo
+                if [[ ! "$confirm_sync" =~ ^[nN] ]]; then
+                    should_sync=true
+                fi
+            else
+                should_sync=true
+            fi
+
+            if [ "$should_sync" = true ]; then
+                if atomic_set_kv_file "$ini_file" "PlayerName" "$persona_name" " = "; then
+                    echo "       ${UI_GREEN}[SUCCESS] PlayerName in OnlineFix.ini synchronized to: $persona_name${UI_RST}"
+                else
+                    echo "[ERROR] Failed to update PlayerName in $ini_file" >&2
+                    return 1
+                fi
+            fi
+        fi
+    fi
+
+    echo "[VERIFIED] OnlineFix setup completed for: $(basename "$gdir")"
+    return 0
+}
 
 # Inject GBE Fork emulator and portable saves into a game folder
 inject_game() {
@@ -10864,69 +10953,6 @@ EOF
     echo "[VERIFIED] GBE Fork successfully injected (Platform: $target_platform, Arch: $arch, Save: ./saves, AppID: ${appid:-None})"
     log_msg "INFO" "INJECT" "GBE Fork successfully injected for $(basename "$target_dir") (Platform: $target_platform, Arch: $arch, Save: ./saves, AppID: ${appid:-None})"
 }
-
-
-# CLI helper for launching games with wrappers and options
-cli_launch() {
-    local l_dir="${1:-}"
-    shift || true
-
-    # Auto-resolve numeric AppID to installed game directory
-    if [[ "$l_dir" =~ ^[0-9]+$ ]] && [ ! -d "$l_dir" ]; then
-        local resolved_dir
-        resolved_dir=$(scan_installed_games 2>/dev/null | awk -F'\t' -v aid="$l_dir" '$1 == aid {print $4}' | head -n 1)
-        if [ -n "$resolved_dir" ] && [ -d "$resolved_dir" ]; then
-            l_dir="$resolved_dir"
-        fi
-    fi
-
-    local l_bin=""
-    local l_title=""
-    local l_flags=()
-
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --hud|--mangohud|--no-hud|--no-mangohud|--gamemode|--no-gamemode|--gamescope|--no-gamescope|--fsr|--no-fsr|--glthread|--no-glthread|--scope|--systemd-scope|--no-scope|--no-systemd-scope|--prime|--no-prime|--sandbox|--no-sandbox)
-                l_flags+=("$1")
-                shift
-                ;;
-            *)
-                if [ -z "$l_bin" ]; then
-                    l_bin="$1"
-                elif [ -z "$l_title" ]; then
-                    l_title="$1"
-                else
-                    l_flags+=("$1")
-                fi
-                shift
-                ;;
-        esac
-    done
-
-    [ -z "$l_title" ] && l_title="$(basename "$l_dir")"
-    if [ -z "$l_bin" ]; then
-        l_bin=$(find_game_binary "$l_dir" 2>/dev/null || echo "")
-    fi
-
-    if [ -n "$l_bin" ]; then
-        local l_rc=0
-        launch_game "$l_dir" "$l_bin" "$l_title" "${l_flags[@]}" || l_rc=$?
-        if [ "$l_rc" -eq 0 ] && [ -t 0 ] && [ -t 1 ] && [ "${GAMECTL_IN_ALT_SCREEN:-0}" -eq 0 ]; then
-            local gpid="${GAMECTL_LAST_LAUNCH_PID:-}"
-            local inf="${GAMECTL_LAST_INFO_FILE:-}"
-            local lfile="${GAMECTL_LAST_LOG_FILE:-}"
-            local rtype="${GAMECTL_LAST_RUN_TYPE:-Native Linux}"
-            if [ -n "$gpid" ] && [ -f "$inf" ] && kill -0 "$gpid" 2>/dev/null; then
-                game_controller_hud "$gpid" "$l_title" "$lfile" "$l_dir" "$l_bin" "$inf" "$rtype" || true
-            fi
-        fi
-        return "$l_rc"
-    else
-        echo "[ERROR] Executable binary not found in: $l_dir" >&2
-        return 1
-    fi
-}
-
 
 # --- [MODULE] src/diagnostics/60_doctor.sh ---
 # System Diagnostics & Health Audit
@@ -11321,6 +11347,874 @@ query_protondb() {
 
 
 # --- [MODULE] src/tui/70_dashboard.sh ---
+# Interactive Centralized Activity & Runtime Log Viewer
+view_logs_interactive() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Interactive log viewer requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for interactive mode but was not found in PATH." >&2
+        return 127
+    fi
+
+    flush_tty_input
+    local log_file
+    log_file="$(get_runtime_log_file)"
+
+    if [ ! -s "$log_file" ]; then
+        log_msg "INFO" "SYSTEM" "Log file initialized"
+    fi
+
+    local fzf_rc=0
+    export GAMECTL_LOG_FILE="$log_file"
+    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
+    if command -v tac >/dev/null 2>&1; then
+        tac "$log_file" 2>/dev/null
+    else
+        sed -e '1!G;h;$!d' "$log_file" 2>/dev/null
+    fi | fzf \
+        --border-label="  ╢ gamectl :: Activity & Runtime Logs ╟  " \
+        --border-label-pos=2 \
+        --header="Ctrl-X: Clear Log │ Esc: Return" \
+        --prompt="Logs > " \
+        --preview='"$GAMECTL_PREVIEW_BIN" --preview-log {}' \
+        --preview-window=down:35%:border-rounded:wrap \
+        --bind='ctrl-x:execute(: > "$GAMECTL_LOG_FILE")+reload(command -v tac >/dev/null 2>&1 && tac "$GAMECTL_LOG_FILE" 2>/dev/null || sed -e "1!G;h;\$!d" "$GAMECTL_LOG_FILE" 2>/dev/null)' \
+        --reverse 2>/dev/null || fzf_rc=$?
+
+    flush_tty_input
+    if [ "$fzf_rc" -eq 130 ]; then
+        return 0
+    fi
+    if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+        echo "[ERROR] Activity log viewer failed (fzf exit code $fzf_rc)." >&2
+        return "$fzf_rc"
+    fi
+    return 0
+}
+
+# In-Dashboard Process Management & Cockpit Controller
+manage_active_processes_interactive() {
+    local run_dir
+    run_dir="$(get_runtime_dir)"
+    if [ ! -d "$run_dir/active_games" ]; then
+        tui_modal_notice "Process Controller" "No games currently running."
+        return 0
+    fi
+
+    local running_list=""
+    local count=0
+    for inf in "$run_dir/active_games"/*.info; do
+        [ -f "$inf" ] || continue
+        local p_pid p_title p_dir p_bin p_log
+        p_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+        p_title=$(grep -E '^TITLE=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+        p_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+        p_bin=$(grep -E '^BIN=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+        p_log=$(grep -E '^LOG=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+        if [ -n "$p_pid" ] && kill -0 "$p_pid" 2>/dev/null; then
+            count=$((count + 1))
+            running_list+="${p_pid}\t${p_title}\t${p_dir}\t${p_bin}\t${p_log}\t${inf}\n"
+        else
+            rm -f "$inf" 2>/dev/null || true
+        fi
+    done
+
+    if [ "$count" -eq 0 ] || [ -z "$running_list" ]; then
+        tui_modal_notice "Process Controller" "No games currently running."
+        return 0
+    fi
+
+    # If only 1 game is running, open its controller HUD directly
+    if [ "$count" -eq 1 ]; then
+        local s_pid s_title s_dir s_bin s_log s_inf
+        s_pid=$(printf '%b' "$running_list" | head -n 1 | cut -f1)
+        s_title=$(printf '%b' "$running_list" | head -n 1 | cut -f2)
+        s_dir=$(printf '%b' "$running_list" | head -n 1 | cut -f3)
+        s_bin=$(printf '%b' "$running_list" | head -n 1 | cut -f4)
+        s_log=$(printf '%b' "$running_list" | head -n 1 | cut -f5)
+        s_inf=$(printf '%b' "$running_list" | head -n 1 | cut -f6)
+        game_controller_hud "$s_pid" "$s_title" "$s_log" "$s_dir" "$s_bin" "$s_inf" "Active Game"
+        return 0
+    fi
+
+    # If multiple games are running, let the user select which one to manage
+    local pick p_rc=0
+    pick=$(tui_action_palette "Running Games ($count Active)" "Select Game Process to Manage (Enter: Select │ Esc: Return)" "$(printf '%b' "$running_list")" "" "Process > ") || p_rc=$?
+    [ "$p_rc" -eq 130 ] && return 0
+    [ "$p_rc" -ne 0 ] && return "$p_rc"
+    [ -z "$pick" ] && return 0
+    local c_pid c_title c_dir c_bin c_log c_inf
+    c_pid=$(echo "$pick" | cut -f1)
+    c_title=$(echo "$pick" | cut -f2)
+    c_dir=$(echo "$pick" | cut -f3)
+    c_bin=$(echo "$pick" | cut -f4)
+    c_log=$(echo "$pick" | cut -f5)
+    c_inf=$(echo "$pick" | cut -f6)
+    game_controller_hud "$c_pid" "$c_title" "$c_log" "$c_dir" "$c_bin" "$c_inf" "Active Game"
+    return 0
+}
+
+# Master Dashboard Hub (Two-Panel Interactive TUI)
+dashboard_menu() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Master Dashboard requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for Master Dashboard but was not found in PATH." >&2
+        return 127
+    fi
+
+    enter_tui_screen
+    clean_stale_locks
+
+    local initial_count
+    initial_count=$(scan_installed_games 2>/dev/null | wc -l || echo "0")
+    log_msg "INFO" "DASHBOARD" "Cockpit active ($initial_count titles indexed)"
+
+    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
+
+    while true; do
+        flush_tty_input
+        local game_count
+        game_count=$(scan_installed_games 2>/dev/null | wc -l || echo "0")
+        export GAMECTL_GAME_COUNT="$game_count"
+
+        local menu_entries
+        menu_entries=$(cat <<EOF
+1	${UI_PURPLE}[01]${UI_RST} ${UI_BOLD}GAME LIBRARY${UI_RST}	${UI_DIM}Browse, inject and launch installed games${UI_RST}
+2	${UI_PURPLE}[02]${UI_RST} ${UI_BOLD}STEAM STORE SEARCH${UI_RST}	${UI_DIM}Search games & check ProtonDB compatibility${UI_RST}
+3	${UI_PURPLE}[03]${UI_RST} ${UI_BOLD}DOWNLOAD MONITOR${UI_RST}	${UI_DIM}Track Steam native downloads & ACF telemetry${UI_RST}
+4	${UI_PURPLE}[04]${UI_RST} ${UI_BOLD}STEAM ACF ADOPTION & ASSET MANAGER${UI_RST}	${UI_DIM}Adopt physical files, shaders & bridge downloads${UI_RST}
+5	${UI_PURPLE}[05]${UI_RST} ${UI_BOLD}GLOBAL SETTINGS${UI_RST}	${UI_DIM}Configure LAN persona, default wrappers & remote host${UI_RST}
+6	${UI_PURPLE}[06]${UI_RST} ${UI_BOLD}SYSTEM DIAGNOSTICS${UI_RST}	${UI_DIM}Audit 7-layer dependencies, runners & GPU health${UI_RST}
+7	${UI_PURPLE}[07]${UI_RST} ${UI_BOLD}ACTIVITY LOGS${UI_RST}	${UI_DIM}Inspect operational events, runner traces & error history${UI_RST}
+EOF
+)
+
+        local fzf_out fzf_rc=0
+        fzf_out=$(echo "$menu_entries" | fzf \
+            --delimiter=$'\t' \
+            --with-nth=2,3 \
+            --expect=ctrl-l,ctrl-p \
+            --border-label="  ╢ gamectl :: Master Dashboard Hub ╟  " \
+            --border-label-pos=2 \
+            --header="Enter: Open │ 1-7: Quick Select │ Ctrl-P: Process Controller │ Ctrl-L: Logs │ Esc: Exit" \
+            --prompt="Dashboard > " \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-dashboard {1} "$GAMECTL_GAME_COUNT"' \
+            --preview-window=right:55%:border-rounded:wrap \
+        ) || fzf_rc=$?
+
+        [ "$fzf_rc" -eq 130 ] && break
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Master Dashboard menu failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
+        [ -z "$fzf_out" ] && continue
+
+        local trigger_key selection
+        trigger_key=$(echo "$fzf_out" | head -n 1)
+        selection=$(echo "$fzf_out" | sed -n '2p')
+
+        if [ "$trigger_key" = "ctrl-l" ]; then
+            view_logs_interactive || return $?
+            continue
+        elif [ "$trigger_key" = "ctrl-p" ]; then
+            manage_active_processes_interactive || return $?
+            continue
+        fi
+
+        [ -z "$selection" ] && continue
+
+        local sel_key
+        sel_key=$(echo "$selection" | awk -F'\t' '{print $1}')
+
+        local sub_rc=0
+        case "$sel_key" in
+            1)
+                library_menu false || sub_rc=$?
+                ;;
+            2)
+                search_steam "" false || sub_rc=$?
+                ;;
+            3)
+                list_downloads_interactive || sub_rc=$?
+                ;;
+            4)
+                unlock_interactive || sub_rc=$?
+                ;;
+            5)
+                configure_global || sub_rc=$?
+                ;;
+            6)
+                flush_tty_input
+                local audit_rc=0
+                doctor_audit 2>&1 | fzf \
+                    --ansi \
+                    --no-sort \
+                    --border-label="  ╢ gamectl :: System Diagnostics Audit ╟  " \
+                    --border-label-pos=2 \
+                    --header="Esc / Enter / q: Return to Dashboard" \
+                    --prompt="Audit > " \
+                    --bind="q:abort" \
+                    --reverse 2>/dev/null || audit_rc=$?
+                check_fzf_status "$audit_rc" || sub_rc=$?
+                ;;
+            7)
+                view_logs_interactive || sub_rc=$?
+                ;;
+            *)
+                break
+                ;;
+        esac
+        if [ "$sub_rc" -ne 0 ] && [ "$sub_rc" -ne 1 ] && [ "$sub_rc" -ne 130 ]; then
+            return "$sub_rc"
+        fi
+        flush_tty_input
+    done
+    exit_tui_screen
+}
+
+# Unified Remote Save Sync Palette (Push, Pull, Dry-Run, Configure Host)
+remote_sync_interactive() {
+    local sel_dir="$1"
+    local sel_title="${2:-$sel_dir}"
+
+    while true; do
+        local rhost="" host_display=""
+        rhost=$(get_remote_host 2>/dev/null || true)
+        host_display="${rhost:-Not configured}"
+
+        local sync_entries
+        sync_entries=$(printf 'push\tPush Saves - Send local saves to %s\npull\tPull Saves - Download remote saves from %s (auto pre-pull backup)\npull-dry\tPull Dry-Run - Simulate remote pull without modifying local files\nconfig\tConfigure Remote Host - Set SSH host (serv, host:~/path) or rclone (gdrive:path) (Current: %s)\n' \
+            "$host_display" "$host_display" "$host_display")
+
+        local pal_rc=0 sel=""
+        sel=$(tui_action_palette \
+            "Remote Save Sync :: ${sel_title:-$sel_dir}" \
+            "Host: $host_display │ Select Sync Action (Enter: Run │ Esc: Return)" \
+            "$sync_entries" \
+            "" \
+            "Sync > ") || pal_rc=$?
+        [ "$pal_rc" -eq 130 ] && return 0
+        [ "$pal_rc" -ne 0 ] && return "$pal_rc"
+        [ -z "$sel" ] && continue
+
+        local action="${sel%%$'\t'*}"
+        case "$action" in
+            push)
+                if tui_run_engine --fail-title "Remote Sync Error" "Remote Push (${sel_title:-$sel_dir})" sync_save_remote "$sel_dir" "$sel_title"; then
+                    tui_modal_notice "Remote Sync (Push)" "Savegames pushed to ${rhost:-remote host} for:\n${sel_title:-$sel_dir}" || return $?
+                fi
+                ;;
+            pull)
+                if tui_run_engine --fail-title "Remote Pull Error" "Remote Pull (${sel_title:-$sel_dir})" pull_save_remote "$sel_dir" "$sel_title"; then
+                    tui_modal_notice "Remote Sync (Pull)" "Savegames pulled from ${rhost:-remote host} for:\n${sel_title:-$sel_dir}\n\nPre-pull local snapshot saved to .save_snapshots/ when local saves existed." || return $?
+                fi
+                ;;
+            pull-dry)
+                if tui_run_engine --fail-title "Remote Pull Dry-Run Error" "Remote Pull Dry-Run (${sel_title:-$sel_dir})" pull_save_remote "$sel_dir" "$sel_title" --dry-run; then
+                    tui_modal_notice "Remote Pull (Dry-Run)" "Dry-run pull simulation completed from ${rhost:-remote host} for:\n${sel_title:-$sel_dir}\n\nNo local files were modified.\nSimulation log:\n$(get_runtime_log_file)" || return $?
+                fi
+                ;;
+            config)
+                local new_rhost="" cfg_rc=0
+                new_rhost=$(tui_prompt_input "Remote Companion Host" "Enter SSH host (serv, host:~/path), rclone (gdrive:path), or '-' to clear (Current: $host_display │ Enter: Save │ Esc: Cancel)" "$rhost" "Remote Target > ") || cfg_rc=$?
+                [ "$cfg_rc" -eq 130 ] && continue
+                [ "$cfg_rc" -ne 0 ] && return "$cfg_rc"
+                new_rhost=$(printf '%s' "$new_rhost" | tr -d '[:space:]')
+                local env_rhost="${GAMECTL_REMOTE_HOST:-${GAMECTL_COMPANION_HOST:-${GAMECTL_SYNC_HOST:-${GAMECTL_TUF_HOST:-}}}}"
+
+                if [ "$new_rhost" = "-" ]; then
+                    rm -f "$HOME/.config/gamectl/remote_host"
+                    log_msg "INFO" "CONFIG" "Cleared remote companion host"
+                    if [ -n "$env_rhost" ]; then
+                        tui_modal_notice "Remote Companion Host" "Cleared saved remote host (~/.config/gamectl/remote_host).\n\nNote: environment variable override is still active:\n$env_rhost" || return $?
+                    else
+                        tui_modal_notice "Remote Companion Host" "Cleared remote companion host." || return $?
+                    fi
+                elif [[ "$new_rhost" == -* ]]; then
+                    tui_modal_notice "Invalid Remote Host" "Remote host cannot start with '-':\n$new_rhost" || return $?
+                    continue
+                elif [ -n "$new_rhost" ]; then
+                    local parse_err=""
+                    if ! parse_err=$(parse_remote_sync_target "$new_rhost" 2>&1); then
+                        tui_modal_notice "Invalid Remote Target" "$parse_err" || return $?
+                        continue
+                    fi
+                    mkdir -p "$HOME/.config/gamectl" || return 1
+                    printf '%s\n' "$new_rhost" > "$HOME/.config/gamectl/remote_host"
+                    log_msg "INFO" "CONFIG" "Saved remote companion host: $new_rhost"
+                    if [ -n "$env_rhost" ] && [ "$env_rhost" != "$new_rhost" ]; then
+                        tui_modal_notice "Remote Companion Host" "Saved remote companion host:\n$new_rhost\n\nNote: environment variable override is currently active:\n$env_rhost" || return $?
+                    else
+                        tui_modal_notice "Remote Companion Host" "Saved remote companion host:\n$new_rhost" || return $?
+                    fi
+                fi
+                ;;
+        esac
+    done
+}
+
+# Main Library View
+library_menu() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Game Library requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for Game Library but was not found in PATH." >&2
+        return 127
+    fi
+
+    local standalone="${1:-false}"
+    [ "$standalone" = "true" ] && enter_tui_screen
+    clean_stale_locks
+
+    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
+
+    while true; do
+        flush_tty_input
+        local fzf_out fzf_rc=0
+        fzf_out=$(scan_installed_games --formatted | fzf \
+            --delimiter=$'\t' \
+            --with-nth=1,2,3 \
+            --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x \
+            --border-label="  ╢ gamectl :: Game Library ╟  " \
+            --border-label-pos=2 \
+            --header="Enter: Launch/Manage │ Ctrl-I: Inject GBE │ Ctrl-D: Make Desktop │ Ctrl-F: Search │ Esc: Dashboard" \
+            --prompt="Library > " \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview {1} {2} {3} {4} {5}' \
+            --preview-window=right:55%:border-rounded:wrap \
+        ) || fzf_rc=$?
+
+        [ "$fzf_rc" -eq 130 ] && break
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Game Library menu failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
+        [ -z "$fzf_out" ] && continue
+
+        local trigger_key selection
+        trigger_key=$(echo "$fzf_out" | head -n 1)
+        selection=$(echo "$fzf_out" | sed -n '2p')
+
+        # Global in-process hotkeys that do not require item selection
+        local hk_rc=0
+        if [ "$trigger_key" = "ctrl-l" ]; then
+            view_logs_interactive || hk_rc=$?
+        elif [ "$trigger_key" = "ctrl-f" ]; then
+            search_steam "" false || hk_rc=$?
+            invalidate_scan_cache
+        fi
+        if [ "$hk_rc" -ne 0 ] && [ "$hk_rc" -ne 1 ] && [ "$hk_rc" -ne 130 ]; then
+            return "$hk_rc"
+        fi
+        if [ "$trigger_key" = "ctrl-l" ] || [ "$trigger_key" = "ctrl-f" ]; then
+            continue
+        fi
+
+        [ -z "$selection" ] && continue
+
+        local sel_appid sel_title sel_status sel_dir sel_bin
+        sel_appid=$(echo "$selection" | awk -F'\t' '{print $1}')
+        sel_title=$(echo "$selection" | awk -F'\t' '{print $2}')
+        sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
+        sel_dir=$(echo "$selection" | awk -F'\t' '{print $4}')
+        sel_bin=$(echo "$selection" | awk -F'\t' '{print $5}')
+
+        case "$trigger_key" in
+            ctrl-d)
+                if tui_run_engine --fail-title "Desktop Shortcut Failed" "Create Desktop Shortcut (${sel_title:-$sel_dir})" create_desktop_entry "$sel_dir" "$sel_title"; then
+                    tui_modal_notice "Desktop Shortcut Created" "Created application launcher for:\n${sel_title:-$sel_dir}\nSaved to ~/.local/share/applications/" || return $?
+                fi
+                continue
+                ;;
+            ctrl-o)
+                configure_wrappers "$sel_dir" "$sel_title" || return $?
+                invalidate_scan_cache
+                continue
+                ;;
+            ctrl-p)
+                set_id_interactive "$sel_dir" "$sel_title" || return $?
+                invalidate_scan_cache
+                continue
+                ;;
+            ctrl-i)
+                if tui_run_engine --fail-title "GBE Injection Failed" "GBE Injection (${sel_title:-$sel_dir})" inject_game "$sel_dir" "$sel_appid" --no-sync; then
+                    tui_modal_notice "Standalone GBE Injection" "Successfully injected GBE Fork for:\n${sel_title:-$sel_dir}" || return $?
+                fi
+                invalidate_scan_cache
+                continue
+                ;;
+            ctrl-s)
+                remote_sync_interactive "$sel_dir" "$sel_title" || return $?
+                invalidate_scan_cache
+                continue
+                ;;
+            ctrl-b)
+                if tui_run_engine --fail-title "Save Backup Error" "Save Backup (${sel_title:-$sel_dir})" backup_save "$sel_dir"; then
+                    tui_modal_notice "Save Backup" "Savegame snapshot created in slot for:\n${sel_title:-$sel_dir}" || return $?
+                fi
+                continue
+                ;;
+            ctrl-r)
+                if [ -d "$sel_dir/.save_snapshots" ]; then
+                    local snaps
+                    snaps=$(ls -d "$sel_dir/.save_snapshots"/slot* 2>/dev/null | wc -l)
+                    if [ "$snaps" -gt 0 ]; then
+                        local chosen_slot="1"
+                        if [ "$snaps" -gt 1 ]; then
+                            local slot_list=""
+                            for s in "$sel_dir/.save_snapshots"/slot*; do
+                                [ -d "$s" ] || continue
+                                local s_name s_time
+                                s_name=$(basename "$s")
+                                s_time=$(date -r "$s" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "Snapshot")
+                                slot_list+="${s_name}\t${s_time}\n"
+                            done
+                            flush_tty_input
+                            local pick="" p_rc=0
+                            pick=$(printf '%b' "$slot_list" | fzf \
+                                --delimiter=$'\t' \
+                                --border-label="  ╢ Restore Save Snapshot :: ${sel_title:-$sel_dir} ╟  " \
+                                --border-label-pos=2 \
+                                --header="Select Recovery Slot to Restore (Enter: Restore │ Esc: Cancel)" \
+                                --prompt="Restore Slot > " \
+                                --reverse 2>/dev/null) || p_rc=$?
+                            check_fzf_status "$p_rc" || return $?
+                            [ "$p_rc" -eq 130 ] || [ -z "$pick" ] && continue
+                            chosen_slot=$(echo "$pick" | cut -f1)
+                            chosen_slot="${chosen_slot#slot}"
+                        fi
+                        if tui_run_engine --fail-title "Save Restore Error" "Save Restore slot${chosen_slot} (${sel_title:-$sel_dir})" restore_save "$sel_dir" "$chosen_slot"; then
+                            tui_modal_notice "Save Restore" "Savegame restored successfully from slot${chosen_slot} for:\n${sel_title:-$sel_dir}" || return $?
+                        fi
+                    else
+                        tui_modal_notice "Save Restore" "No snapshot recovery slots found for:\n${sel_title:-$sel_dir}" || return $?
+                    fi
+                else
+                    tui_modal_notice "Save Restore" "No snapshot recovery directory (.save_snapshots) found for:\n${sel_title:-$sel_dir}" || return $?
+                fi
+                continue
+                ;;
+            ctrl-x)
+                manage_game_fixes_interactive "$sel_appid" "$sel_title" "$sel_dir" || return $?
+                invalidate_scan_cache
+                continue
+                ;;
+            *)
+                local launch_rc=0
+                if [ -z "$sel_bin" ]; then
+                    local cand_bin
+                    cand_bin=$(find_game_binary "$sel_dir" 2>/dev/null || echo "")
+                    if [ -z "$cand_bin" ] && [ -n "$sel_appid" ] && [[ "$sel_appid" =~ ^[0-9]+$ ]]; then
+                        local target_os
+                        target_os="$(detect_app_platform_os "$sel_appid")"
+                        log_msg "INFO" "LIBRARY" "Missing executable binary in $sel_dir for $sel_title ($sel_appid). Bridging to standalone download."
+                        tui_exec_action "Download Missing Files ($sel_title)" download_game "$sel_appid" "$sel_dir" "$sel_title" --all --os "$target_os"
+                        invalidate_scan_cache
+                        continue
+                    fi
+                fi
+                # Check if game is already active / running
+                local active_inf="" active_pid=""
+                local run_dir
+                run_dir="$(get_runtime_dir)"
+                if [ -d "$run_dir/active_games" ]; then
+                    for inf in "$run_dir/active_games"/*.info; do
+                        [ -f "$inf" ] || continue
+                        local inf_dir
+                        inf_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+                        if [ "$inf_dir" = "$sel_dir" ]; then
+                            local check_pid
+                            check_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2)
+                            if [ -n "$check_pid" ] && kill -0 "$check_pid" 2>/dev/null; then
+                                active_inf="$inf"
+                                active_pid="$check_pid"
+                                break
+                            fi
+                        fi
+                    done
+                fi
+
+                if [ -n "$active_pid" ]; then
+                    # Game is already running: open In-Dashboard Process Controller
+                    local active_log
+                    active_log=$(grep -E '^LOG=' "$active_inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+                    local hud_rc=0
+                    game_controller_hud "$active_pid" "$sel_title" "$active_log" "$sel_dir" "$sel_bin" "$active_inf" "Running Process" || hud_rc=$?
+                    invalidate_scan_cache
+                    if [ "$hud_rc" -eq 10 ]; then
+                        break
+                    fi
+                    continue
+                fi
+
+                # Launch game via isolated engine harness (zero terminal leaks, seamless background launch)
+                # Engine failures are already logged and surfaced via tui_run_engine modal; do not conflate with fzf status
+                tui_run_engine "Launch $sel_title" launch_game "$sel_dir" "$sel_bin" "$sel_title" || launch_rc=$?
+                invalidate_scan_cache
+                [ "$launch_rc" -ne 0 ] && log_msg "WARN" "LIBRARY" "Launch returned exit code $launch_rc for $sel_title"
+                ;;
+        esac
+    done
+
+    [ "$standalone" = "true" ] && exit_tui_screen
+    return 0
+}
+
+# Live Steam Search View (Actionable TUI Search)
+search_steam() {
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "[ERROR] Interactive Steam search requires a terminal (TTY)." >&2
+        return 1
+    fi
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "[ERROR] fzf is required for interactive mode but was not found in PATH." >&2
+        return 127
+    fi
+
+    local query="${1:-}"
+    local standalone="${2:-false}"
+    [ "$standalone" = "true" ] && enter_tui_screen
+    flush_tty_input
+    if [ -z "$query" ]; then
+        local fzf_rc=0
+        # Input primitive canonicalized via tui_prompt_input (: | fzf wrapper)
+        query=$(tui_prompt_input "gamectl :: Steam Store Search" "Type game title to search (Enter: Search │ Esc: Cancel)" "" "Search Store > ") || fzf_rc=$?
+        [ "$fzf_rc" -eq 130 ] && return 0
+        if [ "$fzf_rc" -ne 0 ]; then
+            [ "$standalone" = "true" ] && exit_tui_screen
+            return "$fzf_rc"
+        fi
+        query=$(echo "$query" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        if [ -z "$query" ]; then
+            [ "$standalone" = "true" ] && exit_tui_screen
+            return 0
+        fi
+    fi
+
+    log_msg "INFO" "STORE" "Searching '$query' on Steam Store API..."
+    local encoded_query
+    encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$query")
+    local raw_results
+    raw_results=$(curl -s --connect-timeout 5 --max-time 15 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
+
+    local items
+    items=$(printf '%s' "$raw_results" | store_search_items) || {
+        echo "[ERROR] Invalid Steam search catalog." >&2
+        return 1
+    }
+
+    if [ -z "$items" ]; then
+        log_msg "WARN" "STORE" "Game '$query' not found on Steam Store API."
+        tui_modal_notice "Steam Store Search" "Game '$query' was not found on Steam Store." || return $?
+        [ "$standalone" = "true" ] && exit_tui_screen
+        return 0
+    fi
+
+    # Build list with local installed status across all libraries via scan_installed_games
+    local results=""
+    declare -A installed_by_id=()
+    declare -A installed_by_title=()
+    declare -A installed_dir=()
+
+    _refresh_search_results() {
+        results=""
+        installed_by_id=()
+        installed_by_title=()
+        installed_dir=()
+
+        local sc_id sc_name sc_st sc_dir sc_bin
+        while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
+            sc_id="${sc_id//[[:space:]]/}"
+            sc_name="${sc_name#"${sc_name%%[![:space:]]*}"}"
+            sc_name="${sc_name%"${sc_name##*[![:space:]]}"}"
+            sc_dir="${sc_dir//$'\r'/}"
+            if [ -n "$sc_id" ] && [ "$sc_id" != "STANDALONE" ]; then
+                installed_by_id["$sc_id"]=1
+                installed_dir["$sc_id"]="$sc_dir"
+            fi
+            if [ -n "$sc_name" ]; then
+                local clean_title="${sc_name,,}"
+                installed_by_title["$clean_title"]=1
+                [ -z "${installed_dir["$clean_title"]:-}" ] && installed_dir["$clean_title"]="$sc_dir"
+            fi
+        done < <(scan_installed_games --refresh)
+
+        while IFS=$'\t' read -r appid name; do
+            [ -z "$appid" ] && continue
+            local is_installed=0
+            local clean_name="${name,,}"
+            if [[ -v installed_by_id["$appid"] ]] || [[ -v installed_by_title["$clean_name"] ]]; then
+                is_installed=1
+            fi
+            local status="${UI_DIM}[NOT INSTALLED]${UI_RST}"
+            [ "$is_installed" -eq 1 ] && status="${UI_GREEN}[INSTALLED]    ${UI_RST}"
+            results+="${appid}"$'\t'"${name}"$'\t'"${status}"$'\n'
+        done <<< "$items"
+    }
+
+    _refresh_search_results
+
+    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
+
+    while true; do
+        flush_tty_input
+        local fzf_out fzf_rc=0
+        local fzf_header="Enter: Actions │ Ctrl-F: New Search │ Esc: Dashboard"
+        fzf_out=$(echo -n "$results" | fzf \
+            --delimiter=$'\t' \
+            --with-nth=1,2,3 \
+            --expect=ctrl-a,ctrl-u,ctrl-s,ctrl-d,ctrl-f \
+            --bind="ctrl-a:accept,ctrl-u:accept,ctrl-s:accept,ctrl-d:accept,ctrl-f:accept" \
+            --border-label="  ╢ gamectl :: Steam Store Catalog ╟  " \
+            --border-label-pos=2 \
+            --header="$fzf_header" \
+            --prompt="Filter Results > " \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-search {1} {2} {3}' \
+            --preview-window=right:52%:border-rounded:wrap \
+        ) || fzf_rc=$?
+
+        [ "$fzf_rc" -eq 130 ] && break
+        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+            echo "[ERROR] Steam search catalog failed (fzf exit code $fzf_rc)." >&2
+            return "$fzf_rc"
+        fi
+        [ -z "$fzf_out" ] && continue
+
+        local trigger_key selection
+        trigger_key=$(echo "$fzf_out" | sed -n '1p')
+        selection=$(echo "$fzf_out" | sed -n '2,$p')
+
+        if [ "$trigger_key" = "ctrl-f" ]; then
+            local new_q n_rc=0
+            new_q=$(tui_prompt_input "gamectl :: Steam Store Search" "Type game title to search (Enter: Search │ Esc: Keep Current List)" "" "Search Store > ") || n_rc=$?
+            if [ "$n_rc" -eq 130 ]; then
+                continue
+            fi
+            if [ "$n_rc" -ne 0 ]; then
+                return "$n_rc"
+            fi
+            new_q=$(echo "$new_q" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            if [ -z "$new_q" ]; then
+                continue
+            fi
+
+            log_msg "INFO" "STORE" "Searching '$new_q' on Steam Store API..."
+            local new_encoded_query
+            new_encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$new_q")
+            local new_raw_results
+            new_raw_results=$(curl -s --connect-timeout 5 --max-time 15 "https://store.steampowered.com/api/storesearch/?term=${new_encoded_query}&l=english&cc=US" 2>/dev/null)
+            local new_items
+            new_items=$(printf '%s' "$new_raw_results" | store_search_items) || true
+
+            if [ -z "$new_items" ]; then
+                log_msg "WARN" "STORE" "Game '$new_q' not found on Steam Store API."
+                tui_modal_notice "Steam Store Search" "Game '$new_q' was not found on Steam Store." || true
+                continue
+            fi
+
+            query="$new_q"
+            items="$new_items"
+            _refresh_search_results
+            continue
+        fi
+
+        [ -z "$selection" ] && continue
+
+        local sel_id sel_name sel_status
+        sel_id=$(echo "$selection" | awk -F'\t' '{print $1}')
+        sel_name=$(echo "$selection" | awk -F'\t' '{print $2}')
+        sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
+
+        local gdir=""
+        local clean_sel_name="${sel_name,,}"
+        if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
+            if [ -n "${installed_dir["$sel_id"]:-}" ] && [ -d "${installed_dir["$sel_id"]}" ]; then
+                gdir="${installed_dir["$sel_id"]}"
+            elif [ -n "${installed_dir["$clean_sel_name"]:-}" ] && [ -d "${installed_dir["$clean_sel_name"]}" ]; then
+                gdir="${installed_dir["$clean_sel_name"]}"
+            elif [ -d "$HOME/Games/$sel_name" ]; then
+                gdir="$HOME/Games/$sel_name"
+            fi
+        fi
+
+        # Resolve optimal destination library and target OS platform for uninstalled games
+        local dest_dir target_os="linux"
+        if [[ ! "$sel_status" =~ INSTALLED ]] || [[ "$sel_status" =~ NOT ]]; then
+            dest_dir="$(resolve_target_library_dir "$sel_name")"
+            target_os="$(detect_app_platform_os "$sel_id")"
+        fi
+
+        # Direct hotkey triggers
+        if [ "$trigger_key" = "ctrl-a" ]; then
+            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Injecting standalone GBE for $sel_name ($sel_id)"
+                tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$gdir" "$sel_id"
+            else
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Starting All-in-One Download for $sel_name ($target_os)"
+                tui_exec_action "All-in-One Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
+            fi
+        elif [ "$trigger_key" = "ctrl-u" ]; then
+            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-U>: Synchronizing Steam Entitlement & ACF for $sel_name ($sel_id)"
+                tui_exec_action "Synchronize Steam Entitlement ($sel_name)" sync_steam "$sel_id" "$sel_name" "$gdir"
+            else
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-U>: Adopting Steam Entitlement & ACF for $sel_name ($sel_id)"
+                tui_exec_action "Adopt Steam Entitlement ($sel_name)" unlock_game "$sel_id" "$sel_name"
+            fi
+        elif [ "$trigger_key" = "ctrl-s" ]; then
+            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Injecting Standalone GBE Fork for $sel_name ($sel_id)"
+                tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$gdir" "$sel_id" --no-sync
+            else
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Starting Standalone Download for $sel_name ($target_os)"
+                tui_exec_action "Standalone Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --inject-only --os "$target_os"
+            fi
+        elif [ "$trigger_key" = "ctrl-d" ]; then
+            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
+                local gbin
+                gbin=$(find_game_binary "$gdir" 2>/dev/null || echo "")
+                if [ -n "$gbin" ]; then
+                    local launch_rc=0
+                    tui_run_engine "Launch $sel_name" launch_game "$gdir" "$gbin" "$sel_name" || launch_rc=$?
+                    if [ "$launch_rc" -eq 10 ]; then
+                        break
+                    fi
+                else
+                    log_msg "ERROR" "LAUNCH" "Binary executable not found in $gdir for $sel_name"
+                    tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir" || return $?
+                fi
+            else
+                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-D>: Starting Live Stream Download for $sel_name ($target_os)"
+                tui_exec_action "Live Stream Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
+            fi
+        else
+            # Enter key: Open Modal Action Palette
+            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
+                local action_palette
+                action_palette=$(cat <<EOF
+1	Launch Game Directly
+2	Inject GBE Fork Only (Standalone ./saves & DLC.txt)
+3	Inject GBE + Sync Steam Client (All-in-One Full DLC)
+4	Sync to Steam Client Entitlement Only (ACF & Steam Input)
+5	Check Community Fixes & Online-Fix Catalog
+6	Cancel / Return
+EOF
+)
+                local action_sel action_rc=0
+                action_sel=$(echo "$action_palette" | fzf \
+                    --delimiter=$'\t' \
+                    --with-nth=2 \
+                    --border-label="  ╢ Action Palette: $sel_name ╟  " \
+                    --border-label-pos=2 \
+                    --header="ACTION PALETTE (Enter: Execute │ Esc: Return)" \
+                    --prompt="Action > " \
+                    --reverse 2>/dev/null) || action_rc=$?
+                check_fzf_status "$action_rc" || return $?
+                [ "$action_rc" -eq 130 ] && continue
+
+                local act_opt
+                act_opt=$(echo "$action_sel" | awk -F'\t' '{print $1}')
+
+                case "$act_opt" in
+                    1)
+                        local gbin
+                        gbin=$(find_game_binary "$gdir" 2>/dev/null || echo "")
+                        if [ -n "$gbin" ]; then
+                            local launch_rc=0
+                            tui_run_engine "Launch $sel_name" launch_game "$gdir" "$gbin" "$sel_name" || launch_rc=$?
+                            if [ "$launch_rc" -eq 10 ]; then
+                                break
+                            fi
+                        else
+                            log_msg "ERROR" "LAUNCH" "Binary executable not found in $gdir for $sel_name"
+                            tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir" || return $?
+                        fi
+                        ;;
+                    2)
+                        tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$gdir" "$sel_id" --no-sync
+                        ;;
+                    3)
+                        tui_exec_action "Inject GBE + Steam Sync ($sel_name)" inject_game "$gdir" "$sel_id" --all
+                        ;;
+                    4)
+                        tui_exec_action "Synchronize Steam Entitlement ($sel_name)" sync_steam "$sel_id" "$sel_name" "$gdir"
+                        ;;
+                    5)
+                        manage_game_fixes_interactive "$sel_id" "$sel_name" "$gdir" || return $?
+                        ;;
+                    *)
+                        ;;
+                esac
+            else
+                local not_installed_palette
+                not_installed_palette=$(cat <<EOF
+1	[Sovereign Standalone] Download & Auto-Provision via CDN (Zero-Steam GBE)
+2	[Steam Client Bridge] Adopt files & DLC to Steam Client (Requires Steam)
+3	[Offline GBE] Inject GBE LAN runtime (Steam-free)
+4	[Fixes & OnlineFix] Check Community Fixes & Online-Fix Catalog
+5	Cancel / Return
+EOF
+)
+                local pkg_sel pkg_rc=0
+                pkg_sel=$(echo "$not_installed_palette" | fzf \
+                    --delimiter=$'\t' \
+                    --with-nth=2 \
+                    --border-label="  ╢ Action Palette: $sel_name ╟  " \
+                    --border-label-pos=2 \
+                    --header="PACKAGE SELECTION (Enter: Execute │ Esc: Return)" \
+                    --prompt="Package > " \
+                    --reverse 2>/dev/null) || pkg_rc=$?
+                check_fzf_status "$pkg_rc" || return $?
+                [ "$pkg_rc" -eq 130 ] && continue
+
+                local opt
+                opt=$(echo "$pkg_sel" | awk -F'\t' '{print $1}')
+                case "$opt" in
+                    1)
+                        tui_exec_action "Sovereign Standalone Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
+                        ;;
+                    2)
+                        tui_exec_action "Adopt Steam Entitlement ($sel_name)" unlock_game "$sel_id" "$sel_name"
+                        ;;
+                    3)
+                        tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$dest_dir" "$sel_id" --no-sync
+                        ;;
+                    4)
+                        manage_game_fixes_interactive "$sel_id" "$sel_name" "" || return $?
+                        ;;
+                    *)
+                        ;;
+                esac
+            fi
+        fi
+        _refresh_search_results
+    done
+
+    flush_tty_input
+    [ "$standalone" = "true" ] && exit_tui_screen
+    return 0
+}
+
+
+# Standalone-source compatibility: load split tui submodules when sourced directly outside bin/gamectl
+if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
+    _tui_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    for _tui_sub in 71_previews.sh; do
+        if [ -f "$_tui_dir/$_tui_sub" ]; then
+            # shellcheck source=/dev/null
+            source "$_tui_dir/$_tui_sub"
+        fi
+    done
+    unset _tui_dir _tui_sub
+fi
+
+# --- [MODULE] src/tui/71_previews.sh ---
 # Preview pane generator for installed games
 preview_game() {
     local appid title status gdir gbin
@@ -12194,861 +13088,6 @@ preview_log_entry() {
         echo "${UI_RED}╰─────────────────────────────────────────────────────╯${UI_RST}"
     fi
 }
-
-# Interactive Centralized Activity & Runtime Log Viewer
-view_logs_interactive() {
-    if [ ! -t 0 ] || [ ! -t 1 ]; then
-        echo "[ERROR] Interactive log viewer requires a terminal (TTY)." >&2
-        return 1
-    fi
-    if ! command -v fzf >/dev/null 2>&1; then
-        echo "[ERROR] fzf is required for interactive mode but was not found in PATH." >&2
-        return 127
-    fi
-
-    flush_tty_input
-    local log_file
-    log_file="$(get_runtime_log_file)"
-
-    if [ ! -s "$log_file" ]; then
-        log_msg "INFO" "SYSTEM" "Log file initialized"
-    fi
-
-    local fzf_rc=0
-    export GAMECTL_LOG_FILE="$log_file"
-    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
-    if command -v tac >/dev/null 2>&1; then
-        tac "$log_file" 2>/dev/null
-    else
-        sed -e '1!G;h;$!d' "$log_file" 2>/dev/null
-    fi | fzf \
-        --border-label="  ╢ gamectl :: Activity & Runtime Logs ╟  " \
-        --border-label-pos=2 \
-        --header="Ctrl-X: Clear Log │ Esc: Return" \
-        --prompt="Logs > " \
-        --preview='"$GAMECTL_PREVIEW_BIN" --preview-log {}' \
-        --preview-window=down:35%:border-rounded:wrap \
-        --bind='ctrl-x:execute(: > "$GAMECTL_LOG_FILE")+reload(command -v tac >/dev/null 2>&1 && tac "$GAMECTL_LOG_FILE" 2>/dev/null || sed -e "1!G;h;\$!d" "$GAMECTL_LOG_FILE" 2>/dev/null)' \
-        --reverse 2>/dev/null || fzf_rc=$?
-
-    flush_tty_input
-    if [ "$fzf_rc" -eq 130 ]; then
-        return 0
-    fi
-    if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
-        echo "[ERROR] Activity log viewer failed (fzf exit code $fzf_rc)." >&2
-        return "$fzf_rc"
-    fi
-    return 0
-}
-
-# In-Dashboard Process Management & Cockpit Controller
-manage_active_processes_interactive() {
-    local run_dir
-    run_dir="$(get_runtime_dir)"
-    if [ ! -d "$run_dir/active_games" ]; then
-        tui_modal_notice "Process Controller" "No games currently running."
-        return 0
-    fi
-
-    local running_list=""
-    local count=0
-    for inf in "$run_dir/active_games"/*.info; do
-        [ -f "$inf" ] || continue
-        local p_pid p_title p_dir p_bin p_log
-        p_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        p_title=$(grep -E '^TITLE=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        p_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        p_bin=$(grep -E '^BIN=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        p_log=$(grep -E '^LOG=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        if [ -n "$p_pid" ] && kill -0 "$p_pid" 2>/dev/null; then
-            count=$((count + 1))
-            running_list+="${p_pid}\t${p_title}\t${p_dir}\t${p_bin}\t${p_log}\t${inf}\n"
-        else
-            rm -f "$inf" 2>/dev/null || true
-        fi
-    done
-
-    if [ "$count" -eq 0 ] || [ -z "$running_list" ]; then
-        tui_modal_notice "Process Controller" "No games currently running."
-        return 0
-    fi
-
-    # If only 1 game is running, open its controller HUD directly
-    if [ "$count" -eq 1 ]; then
-        local s_pid s_title s_dir s_bin s_log s_inf
-        s_pid=$(printf '%b' "$running_list" | head -n 1 | cut -f1)
-        s_title=$(printf '%b' "$running_list" | head -n 1 | cut -f2)
-        s_dir=$(printf '%b' "$running_list" | head -n 1 | cut -f3)
-        s_bin=$(printf '%b' "$running_list" | head -n 1 | cut -f4)
-        s_log=$(printf '%b' "$running_list" | head -n 1 | cut -f5)
-        s_inf=$(printf '%b' "$running_list" | head -n 1 | cut -f6)
-        game_controller_hud "$s_pid" "$s_title" "$s_log" "$s_dir" "$s_bin" "$s_inf" "Active Game"
-        return 0
-    fi
-
-    # If multiple games are running, let the user select which one to manage
-    local pick p_rc=0
-    pick=$(tui_action_palette "Running Games ($count Active)" "Select Game Process to Manage (Enter: Select │ Esc: Return)" "$(printf '%b' "$running_list")" "" "Process > ") || p_rc=$?
-    [ "$p_rc" -eq 130 ] && return 0
-    [ "$p_rc" -ne 0 ] && return "$p_rc"
-    [ -z "$pick" ] && return 0
-    local c_pid c_title c_dir c_bin c_log c_inf
-    c_pid=$(echo "$pick" | cut -f1)
-    c_title=$(echo "$pick" | cut -f2)
-    c_dir=$(echo "$pick" | cut -f3)
-    c_bin=$(echo "$pick" | cut -f4)
-    c_log=$(echo "$pick" | cut -f5)
-    c_inf=$(echo "$pick" | cut -f6)
-    game_controller_hud "$c_pid" "$c_title" "$c_log" "$c_dir" "$c_bin" "$c_inf" "Active Game"
-    return 0
-}
-
-# Master Dashboard Hub (Two-Panel Interactive TUI)
-dashboard_menu() {
-    if [ ! -t 0 ] || [ ! -t 1 ]; then
-        echo "[ERROR] Master Dashboard requires a terminal (TTY)." >&2
-        return 1
-    fi
-    if ! command -v fzf >/dev/null 2>&1; then
-        echo "[ERROR] fzf is required for Master Dashboard but was not found in PATH." >&2
-        return 127
-    fi
-
-    enter_tui_screen
-    clean_stale_locks
-
-    local initial_count
-    initial_count=$(scan_installed_games 2>/dev/null | wc -l || echo "0")
-    log_msg "INFO" "DASHBOARD" "Cockpit active ($initial_count titles indexed)"
-
-    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
-
-    while true; do
-        flush_tty_input
-        local game_count
-        game_count=$(scan_installed_games 2>/dev/null | wc -l || echo "0")
-        export GAMECTL_GAME_COUNT="$game_count"
-
-        local menu_entries
-        menu_entries=$(cat <<EOF
-1	${UI_PURPLE}[01]${UI_RST} ${UI_BOLD}GAME LIBRARY${UI_RST}	${UI_DIM}Browse, inject and launch installed games${UI_RST}
-2	${UI_PURPLE}[02]${UI_RST} ${UI_BOLD}STEAM STORE SEARCH${UI_RST}	${UI_DIM}Search games & check ProtonDB compatibility${UI_RST}
-3	${UI_PURPLE}[03]${UI_RST} ${UI_BOLD}DOWNLOAD MONITOR${UI_RST}	${UI_DIM}Track Steam native downloads & ACF telemetry${UI_RST}
-4	${UI_PURPLE}[04]${UI_RST} ${UI_BOLD}STEAM ACF ADOPTION & ASSET MANAGER${UI_RST}	${UI_DIM}Adopt physical files, shaders & bridge downloads${UI_RST}
-5	${UI_PURPLE}[05]${UI_RST} ${UI_BOLD}GLOBAL SETTINGS${UI_RST}	${UI_DIM}Configure LAN persona, default wrappers & remote host${UI_RST}
-6	${UI_PURPLE}[06]${UI_RST} ${UI_BOLD}SYSTEM DIAGNOSTICS${UI_RST}	${UI_DIM}Audit 7-layer dependencies, runners & GPU health${UI_RST}
-7	${UI_PURPLE}[07]${UI_RST} ${UI_BOLD}ACTIVITY LOGS${UI_RST}	${UI_DIM}Inspect operational events, runner traces & error history${UI_RST}
-EOF
-)
-
-        local fzf_out fzf_rc=0
-        fzf_out=$(echo "$menu_entries" | fzf \
-            --delimiter=$'\t' \
-            --with-nth=2,3 \
-            --expect=ctrl-l,ctrl-p \
-            --border-label="  ╢ gamectl :: Master Dashboard Hub ╟  " \
-            --border-label-pos=2 \
-            --header="Enter: Open │ 1-7: Quick Select │ Ctrl-P: Process Controller │ Ctrl-L: Logs │ Esc: Exit" \
-            --prompt="Dashboard > " \
-            --preview='"$GAMECTL_PREVIEW_BIN" --preview-dashboard {1} "$GAMECTL_GAME_COUNT"' \
-            --preview-window=right:55%:border-rounded:wrap \
-        ) || fzf_rc=$?
-
-        [ "$fzf_rc" -eq 130 ] && break
-        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
-            echo "[ERROR] Master Dashboard menu failed (fzf exit code $fzf_rc)." >&2
-            return "$fzf_rc"
-        fi
-        [ -z "$fzf_out" ] && continue
-
-        local trigger_key selection
-        trigger_key=$(echo "$fzf_out" | head -n 1)
-        selection=$(echo "$fzf_out" | sed -n '2p')
-
-        if [ "$trigger_key" = "ctrl-l" ]; then
-            view_logs_interactive || return $?
-            continue
-        elif [ "$trigger_key" = "ctrl-p" ]; then
-            manage_active_processes_interactive || return $?
-            continue
-        fi
-
-        [ -z "$selection" ] && continue
-
-        local sel_key
-        sel_key=$(echo "$selection" | awk -F'\t' '{print $1}')
-
-        local sub_rc=0
-        case "$sel_key" in
-            1)
-                library_menu false || sub_rc=$?
-                ;;
-            2)
-                search_steam "" false || sub_rc=$?
-                ;;
-            3)
-                list_downloads_interactive || sub_rc=$?
-                ;;
-            4)
-                unlock_interactive || sub_rc=$?
-                ;;
-            5)
-                configure_global || sub_rc=$?
-                ;;
-            6)
-                flush_tty_input
-                local audit_rc=0
-                doctor_audit 2>&1 | fzf \
-                    --ansi \
-                    --no-sort \
-                    --border-label="  ╢ gamectl :: System Diagnostics Audit ╟  " \
-                    --border-label-pos=2 \
-                    --header="Esc / Enter / q: Return to Dashboard" \
-                    --prompt="Audit > " \
-                    --bind="q:abort" \
-                    --reverse 2>/dev/null || audit_rc=$?
-                check_fzf_status "$audit_rc" || sub_rc=$?
-                ;;
-            7)
-                view_logs_interactive || sub_rc=$?
-                ;;
-            *)
-                break
-                ;;
-        esac
-        if [ "$sub_rc" -ne 0 ] && [ "$sub_rc" -ne 1 ] && [ "$sub_rc" -ne 130 ]; then
-            return "$sub_rc"
-        fi
-        flush_tty_input
-    done
-    exit_tui_screen
-}
-
-# Unified Remote Save Sync Palette (Push, Pull, Dry-Run, Configure Host)
-remote_sync_interactive() {
-    local sel_dir="$1"
-    local sel_title="${2:-$sel_dir}"
-
-    while true; do
-        local rhost="" host_display=""
-        rhost=$(get_remote_host 2>/dev/null || true)
-        host_display="${rhost:-Not configured}"
-
-        local sync_entries
-        sync_entries=$(printf 'push\tPush Saves - Send local saves to %s\npull\tPull Saves - Download remote saves from %s (auto pre-pull backup)\npull-dry\tPull Dry-Run - Simulate remote pull without modifying local files\nconfig\tConfigure Remote Host - Set SSH host (serv, host:~/path) or rclone (gdrive:path) (Current: %s)\n' \
-            "$host_display" "$host_display" "$host_display")
-
-        local pal_rc=0 sel=""
-        sel=$(tui_action_palette \
-            "Remote Save Sync :: ${sel_title:-$sel_dir}" \
-            "Host: $host_display │ Select Sync Action (Enter: Run │ Esc: Return)" \
-            "$sync_entries" \
-            "" \
-            "Sync > ") || pal_rc=$?
-        [ "$pal_rc" -eq 130 ] && return 0
-        [ "$pal_rc" -ne 0 ] && return "$pal_rc"
-        [ -z "$sel" ] && continue
-
-        local action="${sel%%$'\t'*}"
-        case "$action" in
-            push)
-                if tui_run_engine --fail-title "Remote Sync Error" "Remote Push (${sel_title:-$sel_dir})" sync_save_remote "$sel_dir" "$sel_title"; then
-                    tui_modal_notice "Remote Sync (Push)" "Savegames pushed to ${rhost:-remote host} for:\n${sel_title:-$sel_dir}" || return $?
-                fi
-                ;;
-            pull)
-                if tui_run_engine --fail-title "Remote Pull Error" "Remote Pull (${sel_title:-$sel_dir})" pull_save_remote "$sel_dir" "$sel_title"; then
-                    tui_modal_notice "Remote Sync (Pull)" "Savegames pulled from ${rhost:-remote host} for:\n${sel_title:-$sel_dir}\n\nPre-pull local snapshot saved to .save_snapshots/ when local saves existed." || return $?
-                fi
-                ;;
-            pull-dry)
-                if tui_run_engine --fail-title "Remote Pull Dry-Run Error" "Remote Pull Dry-Run (${sel_title:-$sel_dir})" pull_save_remote "$sel_dir" "$sel_title" --dry-run; then
-                    tui_modal_notice "Remote Pull (Dry-Run)" "Dry-run pull simulation completed from ${rhost:-remote host} for:\n${sel_title:-$sel_dir}\n\nNo local files were modified.\nSimulation log:\n$(get_runtime_log_file)" || return $?
-                fi
-                ;;
-            config)
-                local new_rhost="" cfg_rc=0
-                new_rhost=$(tui_prompt_input "Remote Companion Host" "Enter SSH host (serv, host:~/path), rclone (gdrive:path), or '-' to clear (Current: $host_display │ Enter: Save │ Esc: Cancel)" "$rhost" "Remote Target > ") || cfg_rc=$?
-                [ "$cfg_rc" -eq 130 ] && continue
-                [ "$cfg_rc" -ne 0 ] && return "$cfg_rc"
-                new_rhost=$(printf '%s' "$new_rhost" | tr -d '[:space:]')
-                local env_rhost="${GAMECTL_REMOTE_HOST:-${GAMECTL_COMPANION_HOST:-${GAMECTL_SYNC_HOST:-${GAMECTL_TUF_HOST:-}}}}"
-
-                if [ "$new_rhost" = "-" ]; then
-                    rm -f "$HOME/.config/gamectl/remote_host"
-                    log_msg "INFO" "CONFIG" "Cleared remote companion host"
-                    if [ -n "$env_rhost" ]; then
-                        tui_modal_notice "Remote Companion Host" "Cleared saved remote host (~/.config/gamectl/remote_host).\n\nNote: environment variable override is still active:\n$env_rhost" || return $?
-                    else
-                        tui_modal_notice "Remote Companion Host" "Cleared remote companion host." || return $?
-                    fi
-                elif [[ "$new_rhost" == -* ]]; then
-                    tui_modal_notice "Invalid Remote Host" "Remote host cannot start with '-':\n$new_rhost" || return $?
-                    continue
-                elif [ -n "$new_rhost" ]; then
-                    local parse_err=""
-                    if ! parse_err=$(parse_remote_sync_target "$new_rhost" 2>&1); then
-                        tui_modal_notice "Invalid Remote Target" "$parse_err" || return $?
-                        continue
-                    fi
-                    mkdir -p "$HOME/.config/gamectl" || return 1
-                    printf '%s\n' "$new_rhost" > "$HOME/.config/gamectl/remote_host"
-                    log_msg "INFO" "CONFIG" "Saved remote companion host: $new_rhost"
-                    if [ -n "$env_rhost" ] && [ "$env_rhost" != "$new_rhost" ]; then
-                        tui_modal_notice "Remote Companion Host" "Saved remote companion host:\n$new_rhost\n\nNote: environment variable override is currently active:\n$env_rhost" || return $?
-                    else
-                        tui_modal_notice "Remote Companion Host" "Saved remote companion host:\n$new_rhost" || return $?
-                    fi
-                fi
-                ;;
-        esac
-    done
-}
-
-# Main Library View
-library_menu() {
-    if [ ! -t 0 ] || [ ! -t 1 ]; then
-        echo "[ERROR] Game Library requires a terminal (TTY)." >&2
-        return 1
-    fi
-    if ! command -v fzf >/dev/null 2>&1; then
-        echo "[ERROR] fzf is required for Game Library but was not found in PATH." >&2
-        return 127
-    fi
-
-    local standalone="${1:-false}"
-    [ "$standalone" = "true" ] && enter_tui_screen
-    clean_stale_locks
-
-    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
-
-    while true; do
-        flush_tty_input
-        local fzf_out fzf_rc=0
-        fzf_out=$(scan_installed_games --formatted | fzf \
-            --delimiter=$'\t' \
-            --with-nth=1,2,3 \
-            --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x \
-            --border-label="  ╢ gamectl :: Game Library ╟  " \
-            --border-label-pos=2 \
-            --header="Enter: Launch/Manage │ Ctrl-I: Inject GBE │ Ctrl-D: Make Desktop │ Ctrl-F: Search │ Esc: Dashboard" \
-            --prompt="Library > " \
-            --preview='"$GAMECTL_PREVIEW_BIN" --preview {1} {2} {3} {4} {5}' \
-            --preview-window=right:55%:border-rounded:wrap \
-        ) || fzf_rc=$?
-
-        [ "$fzf_rc" -eq 130 ] && break
-        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
-            echo "[ERROR] Game Library menu failed (fzf exit code $fzf_rc)." >&2
-            return "$fzf_rc"
-        fi
-        [ -z "$fzf_out" ] && continue
-
-        local trigger_key selection
-        trigger_key=$(echo "$fzf_out" | head -n 1)
-        selection=$(echo "$fzf_out" | sed -n '2p')
-
-        # Global in-process hotkeys that do not require item selection
-        local hk_rc=0
-        if [ "$trigger_key" = "ctrl-l" ]; then
-            view_logs_interactive || hk_rc=$?
-        elif [ "$trigger_key" = "ctrl-f" ]; then
-            search_steam "" false || hk_rc=$?
-            invalidate_scan_cache
-        fi
-        if [ "$hk_rc" -ne 0 ] && [ "$hk_rc" -ne 1 ] && [ "$hk_rc" -ne 130 ]; then
-            return "$hk_rc"
-        fi
-        if [ "$trigger_key" = "ctrl-l" ] || [ "$trigger_key" = "ctrl-f" ]; then
-            continue
-        fi
-
-        [ -z "$selection" ] && continue
-
-        local sel_appid sel_title sel_status sel_dir sel_bin
-        sel_appid=$(echo "$selection" | awk -F'\t' '{print $1}')
-        sel_title=$(echo "$selection" | awk -F'\t' '{print $2}')
-        sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
-        sel_dir=$(echo "$selection" | awk -F'\t' '{print $4}')
-        sel_bin=$(echo "$selection" | awk -F'\t' '{print $5}')
-
-        case "$trigger_key" in
-            ctrl-d)
-                if tui_run_engine --fail-title "Desktop Shortcut Failed" "Create Desktop Shortcut (${sel_title:-$sel_dir})" create_desktop_entry "$sel_dir" "$sel_title"; then
-                    tui_modal_notice "Desktop Shortcut Created" "Created application launcher for:\n${sel_title:-$sel_dir}\nSaved to ~/.local/share/applications/" || return $?
-                fi
-                continue
-                ;;
-            ctrl-o)
-                configure_wrappers "$sel_dir" "$sel_title" || return $?
-                invalidate_scan_cache
-                continue
-                ;;
-            ctrl-p)
-                set_id_interactive "$sel_dir" "$sel_title" || return $?
-                invalidate_scan_cache
-                continue
-                ;;
-            ctrl-i)
-                if tui_run_engine --fail-title "GBE Injection Failed" "GBE Injection (${sel_title:-$sel_dir})" inject_game "$sel_dir" "$sel_appid" --no-sync; then
-                    tui_modal_notice "Standalone GBE Injection" "Successfully injected GBE Fork for:\n${sel_title:-$sel_dir}" || return $?
-                fi
-                invalidate_scan_cache
-                continue
-                ;;
-            ctrl-s)
-                remote_sync_interactive "$sel_dir" "$sel_title" || return $?
-                invalidate_scan_cache
-                continue
-                ;;
-            ctrl-b)
-                if tui_run_engine --fail-title "Save Backup Error" "Save Backup (${sel_title:-$sel_dir})" backup_save "$sel_dir"; then
-                    tui_modal_notice "Save Backup" "Savegame snapshot created in slot for:\n${sel_title:-$sel_dir}" || return $?
-                fi
-                continue
-                ;;
-            ctrl-r)
-                if [ -d "$sel_dir/.save_snapshots" ]; then
-                    local snaps
-                    snaps=$(ls -d "$sel_dir/.save_snapshots"/slot* 2>/dev/null | wc -l)
-                    if [ "$snaps" -gt 0 ]; then
-                        local chosen_slot="1"
-                        if [ "$snaps" -gt 1 ]; then
-                            local slot_list=""
-                            for s in "$sel_dir/.save_snapshots"/slot*; do
-                                [ -d "$s" ] || continue
-                                local s_name s_time
-                                s_name=$(basename "$s")
-                                s_time=$(date -r "$s" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "Snapshot")
-                                slot_list+="${s_name}\t${s_time}\n"
-                            done
-                            flush_tty_input
-                            local pick="" p_rc=0
-                            pick=$(printf '%b' "$slot_list" | fzf \
-                                --delimiter=$'\t' \
-                                --border-label="  ╢ Restore Save Snapshot :: ${sel_title:-$sel_dir} ╟  " \
-                                --border-label-pos=2 \
-                                --header="Select Recovery Slot to Restore (Enter: Restore │ Esc: Cancel)" \
-                                --prompt="Restore Slot > " \
-                                --reverse 2>/dev/null) || p_rc=$?
-                            check_fzf_status "$p_rc" || return $?
-                            [ "$p_rc" -eq 130 ] || [ -z "$pick" ] && continue
-                            chosen_slot=$(echo "$pick" | cut -f1)
-                            chosen_slot="${chosen_slot#slot}"
-                        fi
-                        if tui_run_engine --fail-title "Save Restore Error" "Save Restore slot${chosen_slot} (${sel_title:-$sel_dir})" restore_save "$sel_dir" "$chosen_slot"; then
-                            tui_modal_notice "Save Restore" "Savegame restored successfully from slot${chosen_slot} for:\n${sel_title:-$sel_dir}" || return $?
-                        fi
-                    else
-                        tui_modal_notice "Save Restore" "No snapshot recovery slots found for:\n${sel_title:-$sel_dir}" || return $?
-                    fi
-                else
-                    tui_modal_notice "Save Restore" "No snapshot recovery directory (.save_snapshots) found for:\n${sel_title:-$sel_dir}" || return $?
-                fi
-                continue
-                ;;
-            ctrl-x)
-                manage_game_fixes_interactive "$sel_appid" "$sel_title" "$sel_dir" || return $?
-                invalidate_scan_cache
-                continue
-                ;;
-            *)
-                local launch_rc=0
-                if [ -z "$sel_bin" ]; then
-                    local cand_bin
-                    cand_bin=$(find_game_binary "$sel_dir" 2>/dev/null || echo "")
-                    if [ -z "$cand_bin" ] && [ -n "$sel_appid" ] && [[ "$sel_appid" =~ ^[0-9]+$ ]]; then
-                        local target_os
-                        target_os="$(detect_app_platform_os "$sel_appid")"
-                        log_msg "INFO" "LIBRARY" "Missing executable binary in $sel_dir for $sel_title ($sel_appid). Bridging to standalone download."
-                        tui_exec_action "Download Missing Files ($sel_title)" download_game "$sel_appid" "$sel_dir" "$sel_title" --all --os "$target_os"
-                        invalidate_scan_cache
-                        continue
-                    fi
-                fi
-                # Check if game is already active / running
-                local active_inf="" active_pid=""
-                local run_dir
-                run_dir="$(get_runtime_dir)"
-                if [ -d "$run_dir/active_games" ]; then
-                    for inf in "$run_dir/active_games"/*.info; do
-                        [ -f "$inf" ] || continue
-                        local inf_dir
-                        inf_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-                        if [ "$inf_dir" = "$sel_dir" ]; then
-                            local check_pid
-                            check_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2)
-                            if [ -n "$check_pid" ] && kill -0 "$check_pid" 2>/dev/null; then
-                                active_inf="$inf"
-                                active_pid="$check_pid"
-                                break
-                            fi
-                        fi
-                    done
-                fi
-
-                if [ -n "$active_pid" ]; then
-                    # Game is already running: open In-Dashboard Process Controller
-                    local active_log
-                    active_log=$(grep -E '^LOG=' "$active_inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-                    local hud_rc=0
-                    game_controller_hud "$active_pid" "$sel_title" "$active_log" "$sel_dir" "$sel_bin" "$active_inf" "Running Process" || hud_rc=$?
-                    invalidate_scan_cache
-                    if [ "$hud_rc" -eq 10 ]; then
-                        break
-                    fi
-                    continue
-                fi
-
-                # Launch game via isolated engine harness (zero terminal leaks, seamless background launch)
-                # Engine failures are already logged and surfaced via tui_run_engine modal; do not conflate with fzf status
-                tui_run_engine "Launch $sel_title" launch_game "$sel_dir" "$sel_bin" "$sel_title" || launch_rc=$?
-                invalidate_scan_cache
-                [ "$launch_rc" -ne 0 ] && log_msg "WARN" "LIBRARY" "Launch returned exit code $launch_rc for $sel_title"
-                ;;
-        esac
-    done
-
-    [ "$standalone" = "true" ] && exit_tui_screen
-    return 0
-}
-
-# Live Steam Search View (Actionable TUI Search)
-search_steam() {
-    if [ ! -t 0 ] || [ ! -t 1 ]; then
-        echo "[ERROR] Interactive Steam search requires a terminal (TTY)." >&2
-        return 1
-    fi
-    if ! command -v fzf >/dev/null 2>&1; then
-        echo "[ERROR] fzf is required for interactive mode but was not found in PATH." >&2
-        return 127
-    fi
-
-    local query="${1:-}"
-    local standalone="${2:-false}"
-    [ "$standalone" = "true" ] && enter_tui_screen
-    flush_tty_input
-    if [ -z "$query" ]; then
-        local fzf_rc=0
-        # Input primitive canonicalized via tui_prompt_input (: | fzf wrapper)
-        query=$(tui_prompt_input "gamectl :: Steam Store Search" "Type game title to search (Enter: Search │ Esc: Cancel)" "" "Search Store > ") || fzf_rc=$?
-        [ "$fzf_rc" -eq 130 ] && return 0
-        if [ "$fzf_rc" -ne 0 ]; then
-            [ "$standalone" = "true" ] && exit_tui_screen
-            return "$fzf_rc"
-        fi
-        query=$(echo "$query" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-        if [ -z "$query" ]; then
-            [ "$standalone" = "true" ] && exit_tui_screen
-            return 0
-        fi
-    fi
-
-    log_msg "INFO" "STORE" "Searching '$query' on Steam Store API..."
-    local encoded_query
-    encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$query")
-    local raw_results
-    raw_results=$(curl -s --connect-timeout 5 --max-time 15 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
-
-    local items
-    items=$(printf '%s' "$raw_results" | store_search_items) || {
-        echo "[ERROR] Invalid Steam search catalog." >&2
-        return 1
-    }
-
-    if [ -z "$items" ]; then
-        log_msg "WARN" "STORE" "Game '$query' not found on Steam Store API."
-        tui_modal_notice "Steam Store Search" "Game '$query' was not found on Steam Store." || return $?
-        [ "$standalone" = "true" ] && exit_tui_screen
-        return 0
-    fi
-
-    # Build list with local installed status across all libraries via scan_installed_games
-    local results=""
-    declare -A installed_by_id=()
-    declare -A installed_by_title=()
-    declare -A installed_dir=()
-
-    _refresh_search_results() {
-        results=""
-        installed_by_id=()
-        installed_by_title=()
-        installed_dir=()
-
-        local sc_id sc_name sc_st sc_dir sc_bin
-        while IFS=$'\t' read -r sc_id sc_name sc_st sc_dir sc_bin; do
-            sc_id="${sc_id//[[:space:]]/}"
-            sc_name="${sc_name#"${sc_name%%[![:space:]]*}"}"
-            sc_name="${sc_name%"${sc_name##*[![:space:]]}"}"
-            sc_dir="${sc_dir//$'\r'/}"
-            if [ -n "$sc_id" ] && [ "$sc_id" != "STANDALONE" ]; then
-                installed_by_id["$sc_id"]=1
-                installed_dir["$sc_id"]="$sc_dir"
-            fi
-            if [ -n "$sc_name" ]; then
-                local clean_title="${sc_name,,}"
-                installed_by_title["$clean_title"]=1
-                [ -z "${installed_dir["$clean_title"]:-}" ] && installed_dir["$clean_title"]="$sc_dir"
-            fi
-        done < <(scan_installed_games --refresh)
-
-        while IFS=$'\t' read -r appid name; do
-            [ -z "$appid" ] && continue
-            local is_installed=0
-            local clean_name="${name,,}"
-            if [[ -v installed_by_id["$appid"] ]] || [[ -v installed_by_title["$clean_name"] ]]; then
-                is_installed=1
-            fi
-            local status="${UI_DIM}[NOT INSTALLED]${UI_RST}"
-            [ "$is_installed" -eq 1 ] && status="${UI_GREEN}[INSTALLED]    ${UI_RST}"
-            results+="${appid}"$'\t'"${name}"$'\t'"${status}"$'\n'
-        done <<< "$items"
-    }
-
-    _refresh_search_results
-
-    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
-
-    while true; do
-        flush_tty_input
-        local fzf_out fzf_rc=0
-        local fzf_header="Enter: Actions │ Ctrl-F: New Search │ Esc: Dashboard"
-        fzf_out=$(echo -n "$results" | fzf \
-            --delimiter=$'\t' \
-            --with-nth=1,2,3 \
-            --expect=ctrl-a,ctrl-u,ctrl-s,ctrl-d,ctrl-f \
-            --bind="ctrl-a:accept,ctrl-u:accept,ctrl-s:accept,ctrl-d:accept,ctrl-f:accept" \
-            --border-label="  ╢ gamectl :: Steam Store Catalog ╟  " \
-            --border-label-pos=2 \
-            --header="$fzf_header" \
-            --prompt="Filter Results > " \
-            --preview='"$GAMECTL_PREVIEW_BIN" --preview-search {1} {2} {3}' \
-            --preview-window=right:52%:border-rounded:wrap \
-        ) || fzf_rc=$?
-
-        [ "$fzf_rc" -eq 130 ] && break
-        if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
-            echo "[ERROR] Steam search catalog failed (fzf exit code $fzf_rc)." >&2
-            return "$fzf_rc"
-        fi
-        [ -z "$fzf_out" ] && continue
-
-        local trigger_key selection
-        trigger_key=$(echo "$fzf_out" | sed -n '1p')
-        selection=$(echo "$fzf_out" | sed -n '2,$p')
-
-        if [ "$trigger_key" = "ctrl-f" ]; then
-            local new_q n_rc=0
-            new_q=$(tui_prompt_input "gamectl :: Steam Store Search" "Type game title to search (Enter: Search │ Esc: Keep Current List)" "" "Search Store > ") || n_rc=$?
-            if [ "$n_rc" -eq 130 ]; then
-                continue
-            fi
-            if [ "$n_rc" -ne 0 ]; then
-                return "$n_rc"
-            fi
-            new_q=$(echo "$new_q" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-            if [ -z "$new_q" ]; then
-                continue
-            fi
-
-            log_msg "INFO" "STORE" "Searching '$new_q' on Steam Store API..."
-            local new_encoded_query
-            new_encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$new_q")
-            local new_raw_results
-            new_raw_results=$(curl -s --connect-timeout 5 --max-time 15 "https://store.steampowered.com/api/storesearch/?term=${new_encoded_query}&l=english&cc=US" 2>/dev/null)
-            local new_items
-            new_items=$(printf '%s' "$new_raw_results" | store_search_items) || true
-
-            if [ -z "$new_items" ]; then
-                log_msg "WARN" "STORE" "Game '$new_q' not found on Steam Store API."
-                tui_modal_notice "Steam Store Search" "Game '$new_q' was not found on Steam Store." || true
-                continue
-            fi
-
-            query="$new_q"
-            items="$new_items"
-            _refresh_search_results
-            continue
-        fi
-
-        [ -z "$selection" ] && continue
-
-        local sel_id sel_name sel_status
-        sel_id=$(echo "$selection" | awk -F'\t' '{print $1}')
-        sel_name=$(echo "$selection" | awk -F'\t' '{print $2}')
-        sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
-
-        local gdir=""
-        local clean_sel_name="${sel_name,,}"
-        if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-            if [ -n "${installed_dir["$sel_id"]:-}" ] && [ -d "${installed_dir["$sel_id"]}" ]; then
-                gdir="${installed_dir["$sel_id"]}"
-            elif [ -n "${installed_dir["$clean_sel_name"]:-}" ] && [ -d "${installed_dir["$clean_sel_name"]}" ]; then
-                gdir="${installed_dir["$clean_sel_name"]}"
-            elif [ -d "$HOME/Games/$sel_name" ]; then
-                gdir="$HOME/Games/$sel_name"
-            fi
-        fi
-
-        # Resolve optimal destination library and target OS platform for uninstalled games
-        local dest_dir target_os="linux"
-        if [[ ! "$sel_status" =~ INSTALLED ]] || [[ "$sel_status" =~ NOT ]]; then
-            dest_dir="$(resolve_target_library_dir "$sel_name")"
-            target_os="$(detect_app_platform_os "$sel_id")"
-        fi
-
-        # Direct hotkey triggers
-        if [ "$trigger_key" = "ctrl-a" ]; then
-            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Injecting standalone GBE for $sel_name ($sel_id)"
-                tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$gdir" "$sel_id"
-            else
-                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Starting All-in-One Download for $sel_name ($target_os)"
-                tui_exec_action "All-in-One Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
-            fi
-        elif [ "$trigger_key" = "ctrl-u" ]; then
-            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-U>: Synchronizing Steam Entitlement & ACF for $sel_name ($sel_id)"
-                tui_exec_action "Synchronize Steam Entitlement ($sel_name)" sync_steam "$sel_id" "$sel_name" "$gdir"
-            else
-                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-U>: Adopting Steam Entitlement & ACF for $sel_name ($sel_id)"
-                tui_exec_action "Adopt Steam Entitlement ($sel_name)" unlock_game "$sel_id" "$sel_name"
-            fi
-        elif [ "$trigger_key" = "ctrl-s" ]; then
-            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Injecting Standalone GBE Fork for $sel_name ($sel_id)"
-                tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$gdir" "$sel_id" --no-sync
-            else
-                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Starting Standalone Download for $sel_name ($target_os)"
-                tui_exec_action "Standalone Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --inject-only --os "$target_os"
-            fi
-        elif [ "$trigger_key" = "ctrl-d" ]; then
-            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-                local gbin
-                gbin=$(find_game_binary "$gdir" 2>/dev/null || echo "")
-                if [ -n "$gbin" ]; then
-                    local launch_rc=0
-                    tui_run_engine "Launch $sel_name" launch_game "$gdir" "$gbin" "$sel_name" || launch_rc=$?
-                    if [ "$launch_rc" -eq 10 ]; then
-                        break
-                    fi
-                else
-                    log_msg "ERROR" "LAUNCH" "Binary executable not found in $gdir for $sel_name"
-                    tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir" || return $?
-                fi
-            else
-                log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-D>: Starting Live Stream Download for $sel_name ($target_os)"
-                tui_exec_action "Live Stream Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
-            fi
-        else
-            # Enter key: Open Modal Action Palette
-            if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
-                local action_palette
-                action_palette=$(cat <<EOF
-1	Launch Game Directly
-2	Inject GBE Fork Only (Standalone ./saves & DLC.txt)
-3	Inject GBE + Sync Steam Client (All-in-One Full DLC)
-4	Sync to Steam Client Entitlement Only (ACF & Steam Input)
-5	Check Community Fixes & Online-Fix Catalog
-6	Cancel / Return
-EOF
-)
-                local action_sel action_rc=0
-                action_sel=$(echo "$action_palette" | fzf \
-                    --delimiter=$'\t' \
-                    --with-nth=2 \
-                    --border-label="  ╢ Action Palette: $sel_name ╟  " \
-                    --border-label-pos=2 \
-                    --header="ACTION PALETTE (Enter: Execute │ Esc: Return)" \
-                    --prompt="Action > " \
-                    --reverse 2>/dev/null) || action_rc=$?
-                check_fzf_status "$action_rc" || return $?
-                [ "$action_rc" -eq 130 ] && continue
-
-                local act_opt
-                act_opt=$(echo "$action_sel" | awk -F'\t' '{print $1}')
-
-                case "$act_opt" in
-                    1)
-                        local gbin
-                        gbin=$(find_game_binary "$gdir" 2>/dev/null || echo "")
-                        if [ -n "$gbin" ]; then
-                            local launch_rc=0
-                            tui_run_engine "Launch $sel_name" launch_game "$gdir" "$gbin" "$sel_name" || launch_rc=$?
-                            if [ "$launch_rc" -eq 10 ]; then
-                                break
-                            fi
-                        else
-                            log_msg "ERROR" "LAUNCH" "Binary executable not found in $gdir for $sel_name"
-                            tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir" || return $?
-                        fi
-                        ;;
-                    2)
-                        tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$gdir" "$sel_id" --no-sync
-                        ;;
-                    3)
-                        tui_exec_action "Inject GBE + Steam Sync ($sel_name)" inject_game "$gdir" "$sel_id" --all
-                        ;;
-                    4)
-                        tui_exec_action "Synchronize Steam Entitlement ($sel_name)" sync_steam "$sel_id" "$sel_name" "$gdir"
-                        ;;
-                    5)
-                        manage_game_fixes_interactive "$sel_id" "$sel_name" "$gdir" || return $?
-                        ;;
-                    *)
-                        ;;
-                esac
-            else
-                local not_installed_palette
-                not_installed_palette=$(cat <<EOF
-1	[Sovereign Standalone] Download & Auto-Provision via CDN (Zero-Steam GBE)
-2	[Steam Client Bridge] Adopt files & DLC to Steam Client (Requires Steam)
-3	[Offline GBE] Inject GBE LAN runtime (Steam-free)
-4	[Fixes & OnlineFix] Check Community Fixes & Online-Fix Catalog
-5	Cancel / Return
-EOF
-)
-                local pkg_sel pkg_rc=0
-                pkg_sel=$(echo "$not_installed_palette" | fzf \
-                    --delimiter=$'\t' \
-                    --with-nth=2 \
-                    --border-label="  ╢ Action Palette: $sel_name ╟  " \
-                    --border-label-pos=2 \
-                    --header="PACKAGE SELECTION (Enter: Execute │ Esc: Return)" \
-                    --prompt="Package > " \
-                    --reverse 2>/dev/null) || pkg_rc=$?
-                check_fzf_status "$pkg_rc" || return $?
-                [ "$pkg_rc" -eq 130 ] && continue
-
-                local opt
-                opt=$(echo "$pkg_sel" | awk -F'\t' '{print $1}')
-                case "$opt" in
-                    1)
-                        tui_exec_action "Sovereign Standalone Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
-                        ;;
-                    2)
-                        tui_exec_action "Adopt Steam Entitlement ($sel_name)" unlock_game "$sel_id" "$sel_name"
-                        ;;
-                    3)
-                        tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$dest_dir" "$sel_id" --no-sync
-                        ;;
-                    4)
-                        manage_game_fixes_interactive "$sel_id" "$sel_name" "" || return $?
-                        ;;
-                    *)
-                        ;;
-                esac
-            fi
-        fi
-        _refresh_search_results
-    done
-
-    flush_tty_input
-    [ "$standalone" = "true" ] && exit_tui_screen
-    return 0
-}
-
 
 # --- [MODULE] src/main.sh ---
 # Export functions for subshells in fzf
