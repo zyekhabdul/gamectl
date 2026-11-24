@@ -20,20 +20,31 @@ Alur inti tidak boleh bergantung pada Steam Client, SLSsteam, atau hook pola mem
 ```text
 src/
 ├── core/
-│   ├── 00_header.sh       # SSoT Constants, Tokyo Night ANSI styling palette, FZF base configuration
-│   └── 10_utils.sh        # Decentralized LAN templates, remote host, save snapshots, binary discovery, ephemeral cache tier
+│   ├── 00_header.sh            # SSoT Constants, Tokyo Night ANSI styling palette, FZF base configuration
+│   ├── 10_utils.sh             # GBE template resolver, atomic config/KV helpers, zip audit, ephemeral cache tier
+│   ├── 12_tui_primitives.sh    # Zero-flicker FZF dialogs, tty input flush, tui_run_engine, screen lifecycle
+│   ├── 14_saves.sh             # 3-slot savegame snapshot rotation, rollback recovery, Wine prefix save collector
+│   └── 16_steamstub.sh         # SteamStub (.bind ELF & PE) forensic detector and unpacker
 ├── steam/
-│   ├── 20_discovery.sh    # Multi-path Steam root discovery, manifest scanning, active steam process guard, desktop launcher
-│   ├── 25_identity.sh     # SteamID64 generation, active SteamID resolution, persona configuration, set-id
-│   └── 30_downloader.sh   # Standalone native downloader, manifest harvesting, local library routing
+│   ├── 20_discovery.sh         # Multi-path Steam & standalone scanner, active process guard, desktop launcher
+│   ├── 25_identity.sh          # SteamID64 generation, active SteamID resolution, persona configuration, set-id
+│   ├── 30_downloader.sh        # Standalone native CDN downloader, depot OS filtering, local library routing
+│   ├── 31_manifests.sh         # Multi-provider manifest harvester, DLC extractor, LuaTools auth session
+│   ├── 32_steam_bridge.sh      # Explicit opt-in Steam Client & SLSsteam compatibility bridge
+│   └── 35_fixes.sh             # Community & Online-Fix harvester, backup snapshot, atomic revert
 ├── runners/
-│   ├── 40_wrappers.sh     # Windows runner, wineserver resolver, detect_dll_overrides, GE-Proton manager, manage_prefix
-│   └── 50_launcher.sh     # Prefix isolation, normalized remote sync, P2P compatibility, PipeWire audio, wineserver guard
+│   ├── 40_wrappers.sh          # Wrapper config loader, developer profiler, wrapper builder, global settings
+│   ├── 41_proton_prefix.sh     # Windows runner, wineserver resolver, DLL overrides, GE-Proton manager, manage_prefix
+│   ├── 42_graphics_isolation.sh # Vulkan/GPU capability probe, Gamescope args, cgroups v2 scope, Bubblewrap sandbox
+│   ├── 50_launcher.sh          # Process HUD, launch_game lifecycle, PipeWire audio, wineserver guard, cli_launch
+│   ├── 51_remote_sync.sh       # SSH/Rsync & Rclone save synchronization and companion pull helpers
+│   └── 52_inject_runtime.sh    # Offline GBE Fork injector and mod/OnlineFix DLL override setup
 ├── diagnostics/
-│   └── 60_doctor.sh       # 7-layer health diagnostics, hardware audit, and cached query_protondb
+│   └── 60_doctor.sh            # 8-layer system & GPU health diagnostics and cached query_protondb
 ├── tui/
-│   └── 70_dashboard.sh    # Terminal previews with cache tier, interactive dashboard hub, library menu, Steam Store search
-└── main.sh                # Subshell exports (export -f) and top-level CLI command dispatcher
+│   ├── 70_dashboard.sh         # Interactive dashboard hub, library menu, Steam Store search, remote sync palette
+│   └── 71_previews.sh          # Read-only FZF preview renderers (game, dashboard, store search, logs)
+└── main.sh                     # Subshell exports (export -f) and top-level CLI command dispatcher
 ```
 
 ---

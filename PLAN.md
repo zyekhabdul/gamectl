@@ -1,7 +1,7 @@
 # WORK PACKET 37: MODULAR RUNNERS & TUI SPLIT (PRASYARAT WP38)
 
 - **Track**: Long-Term Maintainability / Domain Modularization (`runners/` & `tui/`)
-- **Status**: PENDING [0/4 PACKETS]
+- **Status**: COMPLETED [4/4 PACKETS]
 - **Riwayat Selesai**: WP33..WP36 (`9a1be91..15e95bc`), CI/Dual-License/Hygiene (`5ea7948..a678046`), Modular Core & Steam Split (`a73bfc5..085327b`), RFC Multi-Store v2.0 (`2af9c4c`), CLI Alias/CI Gates & Clean Debian 13 `depot-dl` (`75c168a..8f10dbe`) — seluruhnya COMPLETED & terverifikasi.
 - **Basis**: `docs/SOVEREIGN_ORIGINAL_PURPOSE.md` dan pola sibling loader `a73bfc5` (`GAMECTL_BUNDLED`).
 - **Target Files**: `src/runners/{40_wrappers,41_proton_prefix,42_graphics_isolation}.sh`, `src/runners/{50_launcher,51_remote_sync,52_inject_runtime}.sh`, `src/tui/{70_dashboard,71_previews}.sh`, `scripts/build.sh`, `tests/test_cli.sh`, `tests/test_remediation.sh`, `bin/gamectl`
@@ -17,7 +17,7 @@
 
 ## 2. Rencana Eksekusi Detail (Packet 37A - 37D)
 
-### [ ] Packet 37A: Split `src/runners/40_wrappers.sh` (2.072 LOC -> 3 Modul)
+### [x] Packet 37A: Split `src/runners/40_wrappers.sh` (2.072 LOC -> 3 Modul)
 - **Target Files**: `src/runners/40_wrappers.sh`, `src/runners/41_proton_prefix.sh`, `src/runners/42_graphics_isolation.sh`, `scripts/build.sh`
 - **Langkah Teknis**:
   1. Pertahankan di `40_wrappers.sh` (~722 LOC): `load_wrapper_config`, `resolve_dev_profiler_env`, `configure_dev_profile`, `build_wrapper_command`, `configure_wrappers`, `configure_global`, ditambah sibling auto-loader (`41_proton_prefix.sh`, `42_graphics_isolation.sh`).
@@ -27,7 +27,7 @@
 - **Definition of Done (DoD)**:
   - `source src/runners/40_wrappers.sh` memuat seluruh fungsi runner, prefix, dan isolasi tanpa error; `./scripts/build.sh` lulus `bash -n`.
 
-### [ ] Packet 37B: Split `src/runners/50_launcher.sh` (1.572 LOC -> 3 Modul)
+### [x] Packet 37B: Split `src/runners/50_launcher.sh` (1.572 LOC -> 3 Modul)
 - **Target Files**: `src/runners/50_launcher.sh`, `src/runners/51_remote_sync.sh`, `src/runners/52_inject_runtime.sh`, `scripts/build.sh`
 - **Langkah Teknis**:
   1. Pertahankan di `50_launcher.sh` (~794 LOC): `preview_process_log`, `game_controller_hud`, `launch_game`, `cli_launch`, ditambah sibling auto-loader (`51_remote_sync.sh`, `52_inject_runtime.sh`).
@@ -37,7 +37,7 @@
 - **Definition of Done (DoD)**:
   - `source src/runners/50_launcher.sh` memuat seluruh fungsi sync & inject secara transparan; `./scripts/build.sh` lulus `bash -n`.
 
-### [ ] Packet 37C: Split `src/tui/70_dashboard.sh` (1.728 LOC -> 2 Modul)
+### [x] Packet 37C: Split `src/tui/70_dashboard.sh` (1.728 LOC -> 2 Modul)
 - **Target Files**: `src/tui/70_dashboard.sh`, `src/tui/71_previews.sh`, `scripts/build.sh`
 - **Langkah Teknis**:
   1. Pertahankan di `70_dashboard.sh` (~865 LOC): `view_logs_interactive`, `manage_active_processes_interactive`, `dashboard_menu`, `remote_sync_interactive`, `library_menu`, `search_steam`, ditambah sibling auto-loader (`71_previews.sh`).
@@ -46,7 +46,7 @@
 - **Definition of Done (DoD)**:
   - `source src/tui/70_dashboard.sh` memuat seluruh preview renderer; seluruh `--expect` dan `download_game.*--os` tetap utuh di `70_dashboard.sh`.
 
-### [ ] Packet 37D: Update Static Test Paths, Rebuild & Full Verification di `serv`
+### [x] Packet 37D: Update Static Test Paths, Rebuild & Full Verification di `serv`
 - **Target Files**: `tests/test_cli.sh`, `tests/test_remediation.sh`, `bin/gamectl`
 - **Langkah Teknis**:
   1. Perbarui path assertions statis yang mereferensikan lokasi fungsi yang dipindah:
