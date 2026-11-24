@@ -3,6 +3,7 @@ export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_compa
 
 export -f require_tui check_fzf_status validate_tui_fields store_search_items tui_exec_action tui_run_engine tui_prompt_input tui_action_palette remote_sync_interactive manage_active_processes_interactive login_luatools_interactive resolve_game_drm_status install_tui_screen_traps get_desktop_runtime_dir detect_vulkan_capability resolve_graphics_renderer inspect_game_log_hint resolve_game_appid get_game_log_file load_wrapper_config prepare_windows_runner_env
 export -f is_gbe_library install_gbe_library get_config_value set_config_value get_hubcap_api_key atomic_set_kv_file atomic_prepend_line audit_zip_safety list_runner_dirs is_game_active_for_dir parse_remote_sync_target probe_ssh_remote_home resolve_ssh_remote_base resolve_rclone_remote_saves
+export -f _is_prefix_save_noise _check_confined_ancestor discover_prefix_saves collect_prefix_saves restore_prefix_saves resolve_dev_profiler_env configure_dev_profile
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -268,6 +269,38 @@ case "${1:-}" in
             exit 1
         fi
         ;;
+    dev-profile)
+        if [ -n "${2:-}" ]; then
+            configure_dev_profile "$2" "${3:-status}"
+        else
+            echo "Usage: gamectl dev-profile <game_dir> [status|basic|full|off]" >&2
+            exit 1
+        fi
+        ;;
+    scan-saves|discover-saves)
+        if [ -n "${2:-}" ]; then
+            discover_prefix_saves "$2"
+        else
+            echo "Usage: gamectl scan-saves <game_dir>" >&2
+            exit 1
+        fi
+        ;;
+    collect-saves)
+        if [ -n "${2:-}" ]; then
+            collect_prefix_saves "$2"
+        else
+            echo "Usage: gamectl collect-saves <game_dir>" >&2
+            exit 1
+        fi
+        ;;
+    restore-prefix-saves)
+        if [ -n "${2:-}" ]; then
+            restore_prefix_saves "$2"
+        else
+            echo "Usage: gamectl restore-prefix-saves <game_dir>" >&2
+            exit 1
+        fi
+        ;;
     inject|--inject)
         if [ -n "${2:-}" ]; then
             inject_game "$2" "${3:-}" "${4:---no-sync}"
@@ -458,6 +491,14 @@ Usage:
                       Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]
                       Configure per-game wrappers (GameMode/MangoHud/Gamescope FSR/MesaGL)
+  gamectl dev-profile <dir> [status|basic|full|off]
+                      Inspect or toggle developer profiler (WINEDEBUG/VK_LOADER_DEBUG/GBE log)
+  gamectl scan-saves <dir>
+                      Discover savegame directories inside a Wine/Proton prefix (read-only)
+  gamectl collect-saves <dir>
+                      Collect discovered Wine prefix saves into <dir>/saves/_prefix_saves/
+  gamectl restore-prefix-saves <dir>
+                      Restore staged Wine prefix saves back into <dir>/pfx/drive_c/users/
   gamectl download <appid> [dir] [title] [--source <auto|...>] [--standalone|--sls] [--raw|--inject-only]
                       Download game via native Valve CDN (default: Pure Standalone zero-client)
   gamectl downloads   Monitor active & recent downloads (Interactive TUI)

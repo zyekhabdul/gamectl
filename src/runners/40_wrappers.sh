@@ -1374,6 +1374,10 @@ load_wrapper_config() {
     GAMECTL_CFG_SANDBOX=0
     GAMECTL_CFG_RENDERER="auto"
     GAMECTL_CFG_GAMESCOPE_ARGS=""
+    GAMECTL_CFG_AUTO_LOCATE_SAVES=0
+    GAMECTL_CFG_DEV_WINEDEBUG="0"
+    GAMECTL_CFG_DEV_VK_DEBUG="0"
+    GAMECTL_CFG_DEV_GBE_LOG="0"
 
     local w_cfgs=("$HOME/.config/gamectl/wrappers")
     [ -n "$gdir" ] && w_cfgs+=("$gdir/.wrappers")
@@ -1401,6 +1405,10 @@ load_wrapper_config() {
                 sandbox) GAMECTL_CFG_SANDBOX="$v" ;;
                 renderer) GAMECTL_CFG_RENDERER="$v" ;;
                 gamescope_args) GAMECTL_CFG_GAMESCOPE_ARGS="$v" ;;
+                auto_locate_saves) GAMECTL_CFG_AUTO_LOCATE_SAVES="$v" ;;
+                dev_winedebug) GAMECTL_CFG_DEV_WINEDEBUG="$v" ;;
+                dev_vk_debug) GAMECTL_CFG_DEV_VK_DEBUG="$v" ;;
+                dev_gbe_log) GAMECTL_CFG_DEV_GBE_LOG="$v" ;;
             esac
         done < "$w_cfg"
     done
@@ -1421,7 +1429,125 @@ load_wrapper_config() {
             [ "$PROTON_USE_WINED3D" = "0" ] && GAMECTL_CFG_RENDERER="dxvk"
         fi
         [ -n "${GAMECTL_GAMESCOPE_ARGS:-}" ] && GAMECTL_CFG_GAMESCOPE_ARGS="$GAMECTL_GAMESCOPE_ARGS"
+        [ -n "${GAMECTL_AUTO_LOCATE_SAVES:-}" ] && GAMECTL_CFG_AUTO_LOCATE_SAVES="$GAMECTL_AUTO_LOCATE_SAVES"
+        [ -n "${GAMECTL_DEV_WINEDEBUG:-}" ] && GAMECTL_CFG_DEV_WINEDEBUG="$GAMECTL_DEV_WINEDEBUG"
+        [ -n "${GAMECTL_DEV_VK_DEBUG:-}" ] && GAMECTL_CFG_DEV_VK_DEBUG="$GAMECTL_DEV_VK_DEBUG"
+        [ -n "${GAMECTL_DEV_GBE_LOG:-}" ] && GAMECTL_CFG_DEV_GBE_LOG="$GAMECTL_DEV_GBE_LOG"
     fi
+}
+
+# Canonical developer profiler environment resolver (SSoT; zero pollution when OFF)
+resolve_dev_profiler_env() {
+    local gdir="${1:-}"
+    local apply_env="${2:-1}"
+
+    load_wrapper_config "$gdir" "$apply_env"
+
+    GAMECTL_DEV_ACTIVE=0
+    GAMECTL_DEV_RESOLVED_WINEDEBUG=""
+    GAMECTL_DEV_RESOLVED_VK_DEBUG=""
+    GAMECTL_DEV_RESOLVED_GBE_LOG=0
+    GAMECTL_DEV_TRACE_LOG=""
+    GAMECTL_DEV_RESPECTED_USER_WINEDEBUG=0
+    GAMECTL_DEV_RESPECTED_USER_VK_DEBUG=0
+
+    local wd_raw="${GAMECTL_CFG_DEV_WINEDEBUG:-0}"
+    local wd_lc="${wd_raw,,}"
+    local mapped_wd=""
+    case "$wd_lc" in
+        ""|0|off|false) mapped_wd="" ;;
+        basic) mapped_wd="+loaddll,+seh" ;;
+        full)  mapped_wd="+relay,+seh,+loaddll" ;;
+        *)
+            mapped_wd=$(printf '%s' "$wd_raw" | tr -cd 'A-Za-z0-9_+,=-')
+            if [ -z "$mapped_wd" ]; then
+                echo "[WARN] Ignored invalid dev_winedebug setting." >&2
+            fi
+            ;;
+    esac
+
+    if [ -n "$mapped_wd" ]; then
+        GAMECTL_DEV_ACTIVE=1
+        if [ -n "${WINEDEBUG:-}" ]; then
+            GAMECTL_DEV_RESPECTED_USER_WINEDEBUG=1
+        else
+            GAMECTL_DEV_RESOLVED_WINEDEBUG="$mapped_wd"
+        fi
+    fi
+
+    local vk_lc="${GAMECTL_CFG_DEV_VK_DEBUG:-0}"
+    vk_lc="${vk_lc,,}"
+    if [ "$vk_lc" = "1" ] || [ "$vk_lc" = "true" ]; then
+        GAMECTL_DEV_ACTIVE=1
+        if [ -n "${VK_LOADER_DEBUG:-}" ]; then
+            GAMECTL_DEV_RESPECTED_USER_VK_DEBUG=1
+        else
+            GAMECTL_DEV_RESOLVED_VK_DEBUG="all"
+        fi
+    fi
+
+    local gbe_lc="${GAMECTL_CFG_DEV_GBE_LOG:-0}"
+    gbe_lc="${gbe_lc,,}"
+    if [ "$gbe_lc" = "1" ] || [ "$gbe_lc" = "true" ]; then
+        GAMECTL_DEV_ACTIVE=1
+        GAMECTL_DEV_RESOLVED_GBE_LOG=1
+    fi
+
+    if [ "$GAMECTL_DEV_ACTIVE" -eq 1 ]; then
+        local base_slug hash_part
+        base_slug=$(basename "${gdir:-global}" | tr -cd '[:alnum:]_-')
+        [ -z "$base_slug" ] && base_slug="game"
+        hash_part=$(printf '%s' "${gdir:-global}" | cksum | awk '{print $1}')
+        GAMECTL_DEV_TRACE_LOG="$(get_runtime_dir)/dev_traces/${base_slug}_${hash_part}.log"
+    fi
+}
+
+# CLI helper for per-game developer profiler configuration
+configure_dev_profile() {
+    local gdir="${1:-}"
+    local mode="${2:-status}"
+
+    if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
+        echo "[ERROR] Game directory not found: ${gdir:-<empty>}" >&2
+        echo "Usage: gamectl dev-profile <game_dir> [status|basic|full|off]" >&2
+        return 1
+    fi
+
+    local w_file="$gdir/.wrappers"
+    case "$mode" in
+        status)
+            resolve_dev_profiler_env "$gdir" 1
+            echo "dev_winedebug=${GAMECTL_CFG_DEV_WINEDEBUG:-0}"
+            echo "dev_vk_debug=${GAMECTL_CFG_DEV_VK_DEBUG:-0}"
+            echo "dev_gbe_log=${GAMECTL_CFG_DEV_GBE_LOG:-0}"
+            echo "active=$GAMECTL_DEV_ACTIVE"
+            echo "resolved_winedebug=$GAMECTL_DEV_RESOLVED_WINEDEBUG"
+            echo "resolved_vk_debug=$GAMECTL_DEV_RESOLVED_VK_DEBUG"
+            echo "trace_log=$GAMECTL_DEV_TRACE_LOG"
+            ;;
+        basic)
+            atomic_set_kv_file "$w_file" "dev_winedebug" "basic" && \
+            atomic_set_kv_file "$w_file" "dev_vk_debug" "0" && \
+            atomic_set_kv_file "$w_file" "dev_gbe_log" "1" || return 1
+            echo "[VERIFIED] Developer profiler set to 'basic' in $w_file"
+            ;;
+        full)
+            atomic_set_kv_file "$w_file" "dev_winedebug" "full" && \
+            atomic_set_kv_file "$w_file" "dev_vk_debug" "1" && \
+            atomic_set_kv_file "$w_file" "dev_gbe_log" "1" || return 1
+            echo "[VERIFIED] Developer profiler set to 'full' in $w_file"
+            ;;
+        off)
+            atomic_set_kv_file "$w_file" "dev_winedebug" "0" && \
+            atomic_set_kv_file "$w_file" "dev_vk_debug" "0" && \
+            atomic_set_kv_file "$w_file" "dev_gbe_log" "0" || return 1
+            echo "[VERIFIED] Developer profiler disabled in $w_file"
+            ;;
+        *)
+            echo "Usage: gamectl dev-profile <game_dir> [status|basic|full|off]" >&2
+            return 1
+            ;;
+    esac
 }
 
 # Resolve and build wrapper prefix command array (gamemoderun, mangohud, gamescope)
@@ -1515,6 +1641,7 @@ build_wrapper_command() {
     GAMECTL_ACTIVE_PRIME_VENDOR="$dgpu_vendor"
     GAMECTL_ACTIVE_SANDBOX="$use_sandbox"
     GAMECTL_ACTIVE_ALLOW_UNSHIELDED="${opt_allow_unshielded:-0}"
+    GAMECTL_ACTIVE_AUTO_LOCATE_SAVES="${GAMECTL_CFG_AUTO_LOCATE_SAVES:-0}"
 
     local prefix=()
     if [ "$use_gm" = "1" ]; then
@@ -1575,17 +1702,30 @@ configure_wrappers() {
     load_wrapper_config "${gdir:-}" 0
     local gm="$GAMECTL_CFG_GM" hud="$GAMECTL_CFG_HUD" scope="$GAMECTL_CFG_SCOPE"
     local fsr="$GAMECTL_CFG_FSR" glt="$GAMECTL_CFG_GLTHREAD" renderer="${GAMECTL_CFG_RENDERER:-auto}"
+    local auto_saves="${GAMECTL_CFG_AUTO_LOCATE_SAVES:-0}"
+    local dev_wd="${GAMECTL_CFG_DEV_WINEDEBUG:-0}" dev_vk="${GAMECTL_CFG_DEV_VK_DEBUG:-0}" dev_gbe="${GAMECTL_CFG_DEV_GBE_LOG:-0}"
     local gscope_args="${GAMECTL_CFG_GAMESCOPE_ARGS:-}"
     [ -z "$gscope_args" ] && gscope_args=$(get_default_gamescope_args)
 
     while true; do
         local b_gm="${UI_DIM}[OFF]${UI_RST}" b_hud="${UI_DIM}[OFF]${UI_RST}"
         local b_scope="${UI_DIM}[OFF]${UI_RST}" b_fsr="${UI_DIM}[OFF]${UI_RST}" b_glt="${UI_DIM}[OFF]${UI_RST}"
+        local b_autosaves="${UI_DIM}[OFF]${UI_RST}" b_devwd="${UI_DIM}[OFF]${UI_RST}"
+        local b_devvk="${UI_DIM}[OFF]${UI_RST}" b_devgbe="${UI_DIM}[OFF]${UI_RST}"
         [ "$gm" = 1 ] && b_gm="${UI_GREEN}[ACTIVE]${UI_RST}"
         [ "$hud" = 1 ] && b_hud="${UI_GREEN}[ACTIVE]${UI_RST}"
         [ "$scope" = 1 ] && b_scope="${UI_GREEN}[ACTIVE]${UI_RST}"
         [ "$fsr" = 1 ] && b_fsr="${UI_GREEN}[ACTIVE]${UI_RST}"
         [ "$glt" = 1 ] && b_glt="${UI_GREEN}[ACTIVE]${UI_RST}"
+        [ "$auto_saves" = 1 ] && b_autosaves="${UI_GREEN}[ACTIVE]${UI_RST}"
+        case "${dev_wd,,}" in
+            ""|0|off|false) ;;
+            basic) b_devwd="${UI_AMBER}[BASIC]${UI_RST}" ;;
+            full)  b_devwd="${UI_RED}[FULL]${UI_RST}" ;;
+            *)     b_devwd="${UI_CYAN}[$dev_wd]${UI_RST}" ;;
+        esac
+        [ "$dev_vk" = 1 ] && b_devvk="${UI_AMBER}[ACTIVE]${UI_RST}"
+        [ "$dev_gbe" = 1 ] && b_devgbe="${UI_AMBER}[ACTIVE]${UI_RST}"
 
         local eff_rend b_rend
         eff_rend="$(resolve_graphics_renderer "$renderer" 0)"
@@ -1611,6 +1751,10 @@ configure_wrappers() {
 4	Gamescope FSR Upscaling	$b_fsr
 5	Mesa GL Threading (mesa_gl)	$b_glt $glt_hint
 r	Graphics Renderer (DXVK/WineD3D)	$b_rend
+s	Auto-Locate Wine Prefix Saves	$b_autosaves
+d	Dev Profiler: WINEDEBUG	$b_devwd
+v	Dev Profiler: Vulkan Debug	$b_devvk
+g	Dev Profiler: GBE Callback Log	$b_devgbe
 6	Preset: Balanced Performance	GameMode + MangoHud
 7	Preset: Handheld / FSR	GameMode + MangoHud + Gamescope FSR
 8	Reset: Safe Defaults	All Disabled (Renderer: Auto)
@@ -1653,9 +1797,19 @@ EOF
                     *)       renderer="auto" ;;
                 esac
                 ;;
+            s|S) auto_saves=$((1 - auto_saves)) ;;
+            d|D)
+                case "${dev_wd,,}" in
+                    ""|0|off|false) dev_wd="basic" ;;
+                    basic) dev_wd="full" ;;
+                    *)     dev_wd="0" ;;
+                esac
+                ;;
+            v|V) dev_vk=$((1 - dev_vk)) ;;
+            g|G) dev_gbe=$((1 - dev_gbe)) ;;
             6) gm=1; hud=1; scope=0; fsr=0; glt=0 ;;
             7) gm=1; hud=1; scope=1; fsr=1; glt=0 ;;
-            8) gm=0; hud=0; scope=0; fsr=0; glt=0; renderer="auto" ;;
+            8) gm=0; hud=0; scope=0; fsr=0; glt=0; renderer="auto"; auto_saves=0; dev_wd="0"; dev_vk=0; dev_gbe=0 ;;
             9)
                 cat <<EOF > "$w_file"
 # Runtime wrappers for $title
@@ -1666,8 +1820,12 @@ fsr=$fsr
 glthread=$glt
 renderer=$renderer
 gamescope_args=$gscope_args
+auto_locate_saves=$auto_saves
+dev_winedebug=$dev_wd
+dev_vk_debug=$dev_vk
+dev_gbe_log=$dev_gbe
 EOF
-                log_msg "INFO" "WRAPPERS" "Saved wrapper configuration for $title -> $w_file (gm=$gm,hud=$hud,scope=$scope,fsr=$fsr,glt=$glt,renderer=$renderer)"
+                log_msg "INFO" "WRAPPERS" "Saved wrapper configuration for $title -> $w_file (gm=$gm,hud=$hud,scope=$scope,fsr=$fsr,glt=$glt,renderer=$renderer,auto_saves=$auto_saves,dev_wd=$dev_wd,dev_vk=$dev_vk,dev_gbe=$dev_gbe)"
                 break
                 ;;
             0|q|Q|cancel)

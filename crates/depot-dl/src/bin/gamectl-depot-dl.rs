@@ -3,12 +3,32 @@ use std::path::PathBuf;
 use std::process;
 use steam_depot_downloader_mod::{DepotDownloader, DownloadRequest, ProgressEvent};
 
-#[tokio::main]
-async fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 || args.contains(&"--help".to_string()) || args.contains(&"-h".to_string()) {
-        eprintln!("Usage: gamectl-depot-dl --app <appid> --dir <dir> --depot <manifest>:<key> [--depot <manifest>:<key> ...] [--max-downloads <n>] [--verbose|-v] [--quiet|-q]");
-        process::exit(1);
+const USAGE: &str = "Usage: gamectl-depot-dl --app <appid> --dir <dir> --depot <manifest>:<key> [--depot <manifest>:<key> ...] [--max-downloads <n>] [--verbose|-v] [--quiet|-q]";
+
+#[derive(Debug, PartialEq, Eq)]
+struct CliConfig {
+    app_id: u32,
+    dir: PathBuf,
+    depots: Vec<(PathBuf, String)>,
+    max_downloads: usize,
+    verbose: bool,
+    quiet: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum CliError {
+    HelpRequested,
+    InvalidArg(String),
+}
+
+fn parse_cli_args<I, S>(args: I) -> Result<CliConfig, CliError>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let args: Vec<String> = args.into_iter().map(Into::into).collect();
+    if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err(CliError::HelpRequested);
     }
 
     let mut app_id: Option<u32> = None;
@@ -18,51 +38,72 @@ async fn main() {
     let mut verbose: bool = false;
     let mut quiet: bool = false;
 
-    let mut i = 1;
+    let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--app" => {
-                if i + 1 < args.len() {
-                    app_id = args[i + 1].parse().ok();
-                    i += 2;
-                } else {
-                    eprintln!("Error: --app requires an appid");
-                    process::exit(1);
+                if i + 1 >= args.len() {
+                    return Err(CliError::InvalidArg("--app requires an appid".to_string()));
                 }
+                let parsed = args[i + 1].parse::<u32>().map_err(|_| {
+                    CliError::InvalidArg(format!("Invalid --app value: {}", args[i + 1]))
+                })?;
+                app_id = Some(parsed);
+                i += 2;
             }
             "--dir" => {
-                if i + 1 < args.len() {
-                    dir = Some(PathBuf::from(&args[i + 1]));
-                    i += 2;
-                } else {
-                    eprintln!("Error: --dir requires a directory path");
-                    process::exit(1);
+                if i + 1 >= args.len() {
+                    return Err(CliError::InvalidArg(
+                        "--dir requires a directory path".to_string(),
+                    ));
                 }
+                if args[i + 1].is_empty() {
+                    return Err(CliError::InvalidArg(
+                        "--dir path cannot be empty".to_string(),
+                    ));
+                }
+                dir = Some(PathBuf::from(&args[i + 1]));
+                i += 2;
             }
             "--depot" => {
-                if i + 1 < args.len() {
-                    let pair = &args[i + 1];
-                    if let Some(pos) = pair.rfind(':') {
-                        let manifest_path = PathBuf::from(&pair[..pos]);
-                        let key = pair[pos + 1..].to_string();
-                        depots.push((manifest_path, key));
-                    } else {
-                        eprintln!("Error: --depot requires format <manifest_path>:<hex_key>");
-                        process::exit(1);
-                    }
-                    i += 2;
-                } else {
-                    eprintln!("Error: --depot requires an argument");
-                    process::exit(1);
+                if i + 1 >= args.len() {
+                    return Err(CliError::InvalidArg(
+                        "--depot requires an argument".to_string(),
+                    ));
                 }
+                let pair = &args[i + 1];
+                if let Some(pos) = pair.rfind(':') {
+                    let manifest_str = &pair[..pos];
+                    let key_str = &pair[pos + 1..];
+                    if manifest_str.is_empty() || key_str.is_empty() {
+                        return Err(CliError::InvalidArg(
+                            "--depot requires non-empty <manifest_path>:<hex_key>".to_string(),
+                        ));
+                    }
+                    depots.push((PathBuf::from(manifest_str), key_str.to_string()));
+                } else {
+                    return Err(CliError::InvalidArg(
+                        "--depot requires format <manifest_path>:<hex_key>".to_string(),
+                    ));
+                }
+                i += 2;
             }
             "--max-downloads" => {
-                if i + 1 < args.len() {
-                    max_downloads = args[i + 1].parse().unwrap_or(8);
-                    i += 2;
-                } else {
-                    i += 1;
+                if i + 1 >= args.len() {
+                    return Err(CliError::InvalidArg(
+                        "--max-downloads requires a positive integer".to_string(),
+                    ));
                 }
+                let parsed = args[i + 1].parse::<usize>().map_err(|_| {
+                    CliError::InvalidArg(format!("Invalid --max-downloads value: {}", args[i + 1]))
+                })?;
+                if parsed == 0 {
+                    return Err(CliError::InvalidArg(
+                        "--max-downloads must be greater than 0".to_string(),
+                    ));
+                }
+                max_downloads = parsed;
+                i += 2;
             }
             "--verbose" | "-v" => {
                 verbose = true;
@@ -72,32 +113,57 @@ async fn main() {
                 quiet = true;
                 i += 1;
             }
-            _ => {
-                i += 1;
+            other => {
+                return Err(CliError::InvalidArg(format!(
+                    "Unknown argument: {other}"
+                )));
             }
         }
     }
 
-    let app_id = match app_id {
-        Some(id) => id,
-        None => {
-            eprintln!("Error: Missing required --app <appid>");
-            process::exit(1);
-        }
-    };
-
-    let dir = match dir {
-        Some(d) => d,
-        None => {
-            eprintln!("Error: Missing required --dir <output_dir>");
-            process::exit(1);
-        }
-    };
-
+    let app_id =
+        app_id.ok_or_else(|| CliError::InvalidArg("Missing required --app <appid>".to_string()))?;
+    let dir = dir.ok_or_else(|| {
+        CliError::InvalidArg("Missing required --dir <output_dir>".to_string())
+    })?;
     if depots.is_empty() {
-        eprintln!("Error: At least one --depot <manifest>:<key> is required");
-        process::exit(1);
+        return Err(CliError::InvalidArg(
+            "At least one --depot <manifest>:<key> is required".to_string(),
+        ));
     }
+
+    Ok(CliConfig {
+        app_id,
+        dir,
+        depots,
+        max_downloads,
+        verbose,
+        quiet,
+    })
+}
+
+#[tokio::main]
+async fn main() {
+    let config = match parse_cli_args(env::args().skip(1)) {
+        Ok(cfg) => cfg,
+        Err(CliError::HelpRequested) => {
+            eprintln!("{USAGE}");
+            process::exit(1);
+        }
+        Err(CliError::InvalidArg(msg)) => {
+            eprintln!("Error: {msg}");
+            process::exit(1);
+        }
+    };
+
+    let CliConfig {
+        app_id,
+        dir,
+        depots,
+        max_downloads,
+        verbose,
+        quiet,
+    } = config;
 
     println!("[INFO] Standalone Steam Depot Downloader");
     println!("[INFO] App ID: {}", app_id);
@@ -224,5 +290,173 @@ async fn main() {
             eprintln!("[FATAL] Download failed: {}", e);
             process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_multi_depot_with_defaults() {
+        let cfg = parse_cli_args([
+            "--app",
+            "48000",
+            "--dir",
+            "/tmp/limbo",
+            "--depot",
+            "/tmp/48001.manifest:deadbeef01",
+            "--depot",
+            "/tmp/48002.manifest:deadbeef02",
+        ])
+        .expect("valid args should parse");
+
+        assert_eq!(cfg.app_id, 48000);
+        assert_eq!(cfg.dir, PathBuf::from("/tmp/limbo"));
+        assert_eq!(
+            cfg.depots,
+            vec![
+                (PathBuf::from("/tmp/48001.manifest"), "deadbeef01".to_string()),
+                (PathBuf::from("/tmp/48002.manifest"), "deadbeef02".to_string()),
+            ]
+        );
+        assert_eq!(cfg.max_downloads, 8);
+        assert!(!cfg.verbose);
+        assert!(!cfg.quiet);
+    }
+
+    #[test]
+    fn valid_flags_and_colon_in_manifest_path() {
+        let cfg = parse_cli_args([
+            "--app",
+            "105600",
+            "--dir",
+            "/tmp/terraria",
+            "--depot",
+            "/tmp/dir:1/depot_105601.manifest:cafebabe",
+            "--max-downloads",
+            "16",
+            "-v",
+            "-q",
+        ])
+        .expect("flags and colon path should parse");
+
+        assert_eq!(cfg.app_id, 105600);
+        assert_eq!(cfg.max_downloads, 16);
+        assert!(cfg.verbose);
+        assert!(cfg.quiet);
+        assert_eq!(
+            cfg.depots,
+            vec![(
+                PathBuf::from("/tmp/dir:1/depot_105601.manifest"),
+                "cafebabe".to_string()
+            )]
+        );
+
+        let long_flags = parse_cli_args([
+            "--app",
+            "105600",
+            "--dir",
+            "/tmp/terraria",
+            "--depot",
+            "/tmp/m.manifest:0011",
+            "--verbose",
+            "--quiet",
+        ])
+        .expect("long flags should parse");
+        assert!(long_flags.verbose);
+        assert!(long_flags.quiet);
+    }
+
+    #[test]
+    fn help_and_empty_args_return_help_requested() {
+        assert_eq!(parse_cli_args(Vec::<String>::new()), Err(CliError::HelpRequested));
+        assert_eq!(parse_cli_args(["-h"]), Err(CliError::HelpRequested));
+        assert_eq!(parse_cli_args(["--help"]), Err(CliError::HelpRequested));
+        assert_eq!(
+            parse_cli_args(["--app", "48000", "--help"]),
+            Err(CliError::HelpRequested)
+        );
+    }
+
+    #[test]
+    fn missing_required_flags_and_values_fail() {
+        assert!(matches!(
+            parse_cli_args(["--dir", "/tmp/x", "--depot", "m:k"]),
+            Err(CliError::InvalidArg(_))
+        ));
+        assert!(matches!(
+            parse_cli_args(["--app", "48000", "--depot", "m:k"]),
+            Err(CliError::InvalidArg(_))
+        ));
+        assert!(matches!(
+            parse_cli_args(["--app", "48000", "--dir", "/tmp/x"]),
+            Err(CliError::InvalidArg(_))
+        ));
+        for flag in ["--app", "--dir", "--depot", "--max-downloads"] {
+            assert!(
+                matches!(parse_cli_args([flag]), Err(CliError::InvalidArg(_))),
+                "flag {flag} without value must fail"
+            );
+        }
+        assert!(matches!(
+            parse_cli_args(["--app", "48000", "--dir", "", "--depot", "m:k"]),
+            Err(CliError::InvalidArg(_))
+        ));
+    }
+
+    #[test]
+    fn malformed_app_depot_and_max_downloads_fail() {
+        assert!(matches!(
+            parse_cli_args(["--app", "abc", "--dir", "/tmp/x", "--depot", "m:k"]),
+            Err(CliError::InvalidArg(_))
+        ));
+        for bad_depot in ["nocolon", ":onlykey", "onlymanifest:"] {
+            assert!(
+                matches!(
+                    parse_cli_args(["--app", "48000", "--dir", "/tmp/x", "--depot", bad_depot]),
+                    Err(CliError::InvalidArg(_))
+                ),
+                "malformed depot {bad_depot} must fail"
+            );
+        }
+        for bad_max in ["0", "-1", "abc"] {
+            assert!(
+                matches!(
+                    parse_cli_args([
+                        "--app",
+                        "48000",
+                        "--dir",
+                        "/tmp/x",
+                        "--depot",
+                        "m:k",
+                        "--max-downloads",
+                        bad_max,
+                    ]),
+                    Err(CliError::InvalidArg(_))
+                ),
+                "invalid --max-downloads {bad_max} must fail"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_flags_and_positional_args_fail() {
+        assert!(matches!(
+            parse_cli_args([
+                "--app",
+                "48000",
+                "--dir",
+                "/tmp/x",
+                "--depot",
+                "m:k",
+                "--unknown",
+            ]),
+            Err(CliError::InvalidArg(_))
+        ));
+        assert!(matches!(
+            parse_cli_args(["--app", "48000", "--dir", "/tmp/x", "--depot", "m:k", "extra"]),
+            Err(CliError::InvalidArg(_))
+        ));
     }
 }

@@ -319,6 +319,13 @@ launch_game() {
 
     _launch_echo "[INFO] Preparing launch: $title..."
     log_msg "INFO" "LAUNCH" "Preparing launch: $title ($gdir/$gbin)"
+    load_wrapper_config "$gdir" 1
+    if [ "${GAMECTL_CFG_AUTO_LOCATE_SAVES:-0}" = "1" ] && [ -d "$gdir/pfx" ]; then
+        if ! collect_prefix_saves "$gdir" true; then
+            _launch_err "[WARN] Pre-launch prefix save collection failed for '$title'. Proceeding with launch."
+            log_msg "WARN" "LAUNCH" "Pre-launch prefix save collection failed for $title"
+        fi
+    fi
     if [ -d "$gdir/saves" ] || [ -L "$gdir/saves" ]; then
         if ! backup_save "$gdir" true; then
             _launch_err "[WARN] Pre-launch save snapshot backup failed for '$title'. Proceeding with launch."
@@ -333,6 +340,23 @@ launch_game() {
     build_wrapper_command "$gdir" "$@"
     local wrappers=("${GAMECTL_WRAPPER_PREFIX[@]}")
     local game_args=("${GAMECTL_REMAINING_ARGS[@]}")
+
+    # Resolve Developer Mode & Engine Profiler (default OFF -> zero env pollution)
+    resolve_dev_profiler_env "$gdir" 1
+    local dev_trace_log=""
+    if [ "${GAMECTL_DEV_ACTIVE:-0}" -eq 1 ] && [ -n "${GAMECTL_DEV_TRACE_LOG:-}" ]; then
+        dev_trace_log="$GAMECTL_DEV_TRACE_LOG"
+        mkdir -p -m 700 "$(dirname "$dev_trace_log")" 2>/dev/null || true
+        {
+            printf '=== gamectl dev-trace [%s] ===\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+            printf 'Title=%s\nDir=%s\nBin=%s\n' "$title" "$gdir" "$gbin"
+            printf 'WINEDEBUG=%s (user_override=%s)\n' "${GAMECTL_DEV_RESOLVED_WINEDEBUG:-<unset>}" "${GAMECTL_DEV_RESPECTED_USER_WINEDEBUG:-0}"
+            printf 'VK_LOADER_DEBUG=%s (user_override=%s)\n' "${GAMECTL_DEV_RESOLVED_VK_DEBUG:-<unset>}" "${GAMECTL_DEV_RESPECTED_USER_VK_DEBUG:-0}"
+            printf 'GBE_LOG=%s\nMainLog=%s\n' "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" "$log_file"
+        } > "$dev_trace_log" 2>/dev/null || true
+        _launch_echo "[INFO] Developer Profiler active. Trace log: $dev_trace_log"
+        log_msg "INFO" "LAUNCH" "Developer Profiler active for $title (Trace: $dev_trace_log)"
+    fi
 
     # Set Mesa performance env safely (only enable glthread if explicitly opted in)
     if [ "${GAMECTL_ACTIVE_GLTHREAD:-0}" = "1" ]; then
@@ -648,6 +672,9 @@ launch_game() {
                         WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
                         PROTON_USE_WINED3D="$GAMECTL_WIN_PROTON_WINED3D"
                     [ "$GAMECTL_WIN_DISABLE_PROTONFIXES" = "1" ] && export PROTONFIXES_DISABLE=1
+                    [ -n "${GAMECTL_DEV_RESOLVED_WINEDEBUG:-}" ] && export WINEDEBUG="$GAMECTL_DEV_RESOLVED_WINEDEBUG"
+                    [ -n "${GAMECTL_DEV_RESOLVED_VK_DEBUG:-}" ] && export VK_LOADER_DEBUG="$GAMECTL_DEV_RESOLVED_VK_DEBUG"
+                    [ "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" = "1" ] && export GAMECTL_GBE_LOG=1 GBE_LOG_FILE="$dev_trace_log"
                     _exec_in_scope "${wrappers[@]}" "$runner_bin" "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
@@ -664,6 +691,9 @@ launch_game() {
                         WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
                         PROTON_USE_WINED3D="$GAMECTL_WIN_PROTON_WINED3D"
                     [ "$GAMECTL_WIN_DISABLE_PROTONFIXES" = "1" ] && export PROTONFIXES_DISABLE=1
+                    [ -n "${GAMECTL_DEV_RESOLVED_WINEDEBUG:-}" ] && export WINEDEBUG="$GAMECTL_DEV_RESOLVED_WINEDEBUG"
+                    [ -n "${GAMECTL_DEV_RESOLVED_VK_DEBUG:-}" ] && export VK_LOADER_DEBUG="$GAMECTL_DEV_RESOLVED_VK_DEBUG"
+                    [ "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" = "1" ] && export GAMECTL_GBE_LOG=1 GBE_LOG_FILE="$dev_trace_log"
                     _exec_in_scope "${wrappers[@]}" "$runner_bin" waitforexitandrun "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
@@ -675,6 +705,9 @@ launch_game() {
                         SteamAppId="$GAMECTL_WIN_APPID" \
                         SteamGameId="$GAMECTL_WIN_APPID" \
                         WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}"
+                    [ -n "${GAMECTL_DEV_RESOLVED_WINEDEBUG:-}" ] && export WINEDEBUG="$GAMECTL_DEV_RESOLVED_WINEDEBUG"
+                    [ -n "${GAMECTL_DEV_RESOLVED_VK_DEBUG:-}" ] && export VK_LOADER_DEBUG="$GAMECTL_DEV_RESOLVED_VK_DEBUG"
+                    [ "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" = "1" ] && export GAMECTL_GBE_LOG=1 GBE_LOG_FILE="$dev_trace_log"
                     _exec_in_scope "${wrappers[@]}" "$runner_bin" "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
@@ -685,6 +718,9 @@ launch_game() {
         _launch_echo "[INFO] Log stream: $log_file"
         (
             export LD_LIBRARY_PATH=".:$gdir:${LD_LIBRARY_PATH:-}"
+            [ -n "${GAMECTL_DEV_RESOLVED_WINEDEBUG:-}" ] && export WINEDEBUG="$GAMECTL_DEV_RESOLVED_WINEDEBUG"
+            [ -n "${GAMECTL_DEV_RESOLVED_VK_DEBUG:-}" ] && export VK_LOADER_DEBUG="$GAMECTL_DEV_RESOLVED_VK_DEBUG"
+            [ "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" = "1" ] && export GAMECTL_GBE_LOG=1 GBE_LOG_FILE="$dev_trace_log"
             _exec_in_scope "${wrappers[@]}" ./"$gbin" "${game_args[@]}"
         ) > "$log_file" 2>&1 &
         game_pid=$!
@@ -728,6 +764,21 @@ EOF
             [ -n "$ws_bin" ] && WINEPREFIX="$pfx_dir" "$ws_bin" -w 2>/dev/null || true
         fi
         rm -f "$info_file" 2>/dev/null || true
+        if [ "$is_win" = true ] && [ "${GAMECTL_ACTIVE_AUTO_LOCATE_SAVES:-0}" = "1" ] && [ -d "$gdir/pfx" ]; then
+            collect_prefix_saves "$gdir" true || true
+        fi
+        if [ "${GAMECTL_DEV_ACTIVE:-0}" -eq 1 ] && [ -n "${dev_trace_log:-}" ]; then
+            {
+                if [ -s "$log_file" ]; then
+                    printf '\n--- Runner Output (%s) ---\n' "$log_file"
+                    cat "$log_file"
+                fi
+                if [ "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" = "1" ] && [ -s "$gdir/STEAM_LOG.txt" ]; then
+                    printf '\n--- GBE STEAM_LOG.txt ---\n'
+                    cat "$gdir/STEAM_LOG.txt"
+                fi
+            } >> "$dev_trace_log" 2>/dev/null || true
+        fi
         log_msg "INFO" "LAUNCH" "Game '$title' (PID: $game_pid) exited"
         _restore_launch_state
     }
