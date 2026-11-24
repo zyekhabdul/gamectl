@@ -527,7 +527,9 @@ test_proton_env_contract() {
     mkdir -p "$t_dir/runtime" "$g_dir/steam_settings"
     export XDG_RUNTIME_DIR="$t_dir/runtime"
 
-    # Dummy PE executable + GBE shield marker
+    # Dummy PE executable + local GBE template/shield fixture (deterministic offline verification)
+    mkdir -p "$t_dir/.local/share/gbe-fork/windows/release/regular/x64"
+    printf 'fake_dll' > "$t_dir/.local/share/gbe-fork/windows/release/regular/x64/steam_api64.dll"
     printf 'MZ' > "$g_dir/game.exe"
     printf 'fake_dll' > "$g_dir/steam_api64.dll"
     chmod +x "$g_dir/game.exe"
@@ -864,6 +866,8 @@ EOF
         grep -qx "PROTONFIXES_DISABLE=UNSET" "$t_dir/pfx_env.out" || exit 1
 
         # 4c. launch_game on GameBeta (only .gamectl_appid) propagates 444555 + writes anti-collision log
+        mkdir -p "$t_dir/home/.local/share/gbe-fork/windows/release/regular/x64"
+        printf 'fake_dll' > "$t_dir/home/.local/share/gbe-fork/windows/release/regular/x64/steam_api64.dll"
         printf 'MZ' > "$t_dir/games/GameBeta/game.exe"
         printf 'fake_dll' > "$t_dir/games/GameBeta/steam_api64.dll"
         mkdir -p "$t_dir/games/GameBeta/steam_settings"
@@ -880,6 +884,92 @@ EOF
     )
 }
 run_test "SSoT Unification (WP31 Packet 31B): AppID, anti-collision log, wrapper config & runner env" test_ssot_unification_contract
+
+# Test 16: WP31 Packet 31C — Detection Integrity, Standalone XDG Runners & Child Env Hygiene
+test_detection_integrity_runners_and_env_hygiene_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp31c_XXXXXX")
+    mkdir -p "$t_dir/home/.local/share/Steam/compatibilitytools.d/GE-Proton8-1" \
+             "$t_dir/xdg_data/gamectl/runners/GE-Proton9-99" \
+             "$t_dir/runtime" \
+             "$t_dir/games/StrippedGbeGame" \
+             "$t_dir/games/MarkerGbeGame" \
+             "$t_dir/games/StockValveGame" \
+             "$t_dir/games/EnvHygieneGame"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_DATA_HOME="$t_dir/xdg_data"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        export GAMECTL_GBE_DIR="$t_dir/empty_gbe"
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/runners/40_wrappers.sh"
+        source "$REPO_ROOT/src/runners/50_launcher.sh"
+
+        # 1. Stripped small GBE DLL (<7MB) with embedded signature or .gamectl_gbe -> GBE_FORK
+        printf 'MZ\x00goldberg\x00steam_settings/configs.user.ini\x00' > "$t_dir/games/StrippedGbeGame/steam_api64.dll"
+        printf 'MZ\x00' > "$t_dir/games/StrippedGbeGame/game.exe"
+        [ "$(resolve_game_drm_status "$t_dir/games/StrippedGbeGame" "game.exe")" = "GBE_FORK" ] || exit 1
+
+        printf 'MZ\x00valve_original_stub\x00' > "$t_dir/games/MarkerGbeGame/steam_api64.dll"
+        printf 'MZ\x00' > "$t_dir/games/MarkerGbeGame/game.exe"
+        touch "$t_dir/games/MarkerGbeGame/.gamectl_gbe"
+        [ "$(resolve_game_drm_status "$t_dir/games/MarkerGbeGame" "game.exe")" = "GBE_FORK" ] || exit 1
+
+        printf 'MZ\x00valve_original_stub\x00' > "$t_dir/games/StockValveGame/steam_api64.dll"
+        printf 'MZ\x00' > "$t_dir/games/StockValveGame/game.exe"
+        [ "$(resolve_game_drm_status "$t_dir/games/StockValveGame" "game.exe")" = "VALVE_DLL" ] || exit 1
+
+        # 2. Standalone XDG runner in XDG_DATA_HOME/gamectl/runners takes precedence over Steam compat dir
+        printf '#!/bin/sh\nexit 0\n' > "$t_dir/xdg_data/gamectl/runners/GE-Proton9-99/proton"
+        printf '#!/bin/sh\nexit 0\n' > "$t_dir/home/.local/share/Steam/compatibilitytools.d/GE-Proton8-1/proton"
+        chmod +x "$t_dir/xdg_data/gamectl/runners/GE-Proton9-99/proton" \
+                 "$t_dir/home/.local/share/Steam/compatibilitytools.d/GE-Proton8-1/proton"
+        (
+            command() {
+                if [ "${1:-}" = "-v" ] && [ "${2:-}" = "umu-run" ]; then
+                    return 1
+                fi
+                builtin command "$@"
+            }
+            local found_runner
+            found_runner="$(find_runner "$t_dir/games/StockValveGame")"
+            [ "$found_runner" = "$t_dir/xdg_data/gamectl/runners/GE-Proton9-99/proton" ] || exit 1
+        ) || exit 1
+
+        # 3. Child process launched via launch_game receives zero BASH_FUNC_* pollution
+        dummy_leak_check_fn() { echo "leak"; }
+        export -f dummy_leak_check_fn
+        env | grep -q '^BASH_FUNC_' || exit 1
+
+        cat <<EOF > "$t_dir/games/EnvHygieneGame/game.sh"
+#!/usr/bin/env bash
+env | grep -E '^BASH_FUNC_' > "$t_dir/child_funcs.out" || true
+touch "$t_dir/child_done"
+EOF
+        chmod +x "$t_dir/games/EnvHygieneGame/game.sh"
+        backup_save() { :; }
+        clean_stale_locks() { :; }
+        detect_steamstub_drm() { return 1; }
+        check_systemd_scope_support() { return 1; }
+
+        GAMECTL_IN_ALT_SCREEN=1 launch_game "$t_dir/games/EnvHygieneGame" "game.sh" "EnvHygiene" >/dev/null 2>&1 || exit 1
+        for _ in $(seq 1 40); do
+            [ -f "$t_dir/child_done" ] && break
+            sleep 0.05
+        done
+        [ -f "$t_dir/child_done" ] || exit 1
+        [ ! -s "$t_dir/child_funcs.out" ] || exit 1
+
+        # 4. Hygiene & dashboard optional bridge labeling
+        grep -q 'src/gamectl.egg-info' "$REPO_ROOT/Makefile" || exit 1
+        grep -q 'src/gamectl_runner/bin' "$REPO_ROOT/Makefile" || exit 1
+        grep -q 'Bridge (Opt)' "$REPO_ROOT/src/tui/70_dashboard.sh" || exit 1
+    )
+}
+run_test "Detection & Hygiene (WP31 Packet 31C): GBE markers, XDG runners, child env & Makefile clean" test_detection_integrity_runners_and_env_hygiene_contract
 
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
