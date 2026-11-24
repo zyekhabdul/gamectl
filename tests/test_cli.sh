@@ -737,11 +737,11 @@ run_test "Library Scanner Optimization: Single-pass parser & runtime disk cache"
 test_fzf_interactive_input_contract() {
     # Invariant: Free-text fzf input prompts must not contaminate stdin and must distinguish ESC (130) from Enter (0 or 1)
     ! grep -q 'query_raw=$(echo "Search Steam Store' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
-    ! grep -q 'u_appid_raw=$(echo "Enter Steam AppID' "$REPO_ROOT/src/steam/30_downloader.sh" && \
+    ! grep -q 'u_appid_raw=$(echo "Enter Steam AppID' "$REPO_ROOT/src/steam/32_steam_bridge.sh" && \
     grep -q '\[ "$fzf_rc" -eq 130 \] && return 0' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
-    grep -q '\[ "$fzf_rc" -eq 130 \] && return 0' "$REPO_ROOT/src/steam/30_downloader.sh" && \
+    grep -q '\[ "$fzf_rc" -eq 130 \] && return 0' "$REPO_ROOT/src/steam/32_steam_bridge.sh" && \
     grep -q ': | fzf' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
-    grep -q ': | fzf' "$REPO_ROOT/src/steam/30_downloader.sh" && \
+    grep -q ': | fzf' "$REPO_ROOT/src/steam/32_steam_bridge.sh" && \
     grep -q '\[ "$fzf_rc" -eq 130 \] && break' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
     grep -q '\[ -z "$selection" \] && continue' "$REPO_ROOT/src/tui/70_dashboard.sh"
 }
@@ -1904,8 +1904,8 @@ test_screen_flickering_elimination_contract() {
         return 1
     fi
 
-    # Invariant 2: Zero sleep calls in 30_downloader.sh (no screen freezing in TUI)
-    if grep -q 'sleep' "$REPO_ROOT/src/steam/30_downloader.sh"; then
+    # Invariant 2: Zero sleep calls in steam downloader/manifest/bridge modules (no screen freezing in TUI)
+    if grep -q 'sleep' "$REPO_ROOT/src/steam/30_downloader.sh" "$REPO_ROOT/src/steam/31_manifests.sh" "$REPO_ROOT/src/steam/32_steam_bridge.sh"; then
         return 1
     fi
 
@@ -1989,14 +1989,14 @@ run_test "Standalone Navigation Invariant (Chunk 5): Direct shell exit on Esc wi
 
 test_dual_input_acf_adoption_contract() {
     # 1. unlock_interactive accepts title or numeric AppID without non-numeric hardblock
-    ! grep -q 'AppID must contain only numeric characters' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    ! grep -q 'AppID must contain only numeric characters' "$REPO_ROOT/src/steam/32_steam_bridge.sh" || return 1
 
     # 2. Contains Steam Store API search branch for title resolution
-    grep -q 'Searching Steam Store API for title:' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
-    grep -q 'storesearch/?term=' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    grep -q 'Searching Steam Store API for title:' "$REPO_ROOT/src/steam/32_steam_bridge.sh" || return 1
+    grep -q 'storesearch/?term=' "$REPO_ROOT/src/steam/32_steam_bridge.sh" || return 1
 
     # 3. Contains target game selector FZF palette for title adoption
-    grep -q 'SELECT GAME FOR ACF ADOPTION' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    grep -q 'SELECT GAME FOR ACF ADOPTION' "$REPO_ROOT/src/steam/32_steam_bridge.sh" || return 1
 
     # 4. Dashboard preview reflects dual-input capability
     grep -q 'Dual-input adoption by Game Title or numeric AppID' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
@@ -2055,7 +2055,7 @@ run_test "Standalone Signals (Chunk 2): Native POSIX signal dispatch for standal
 test_steam_store_api_caching_contract() {
     # 1. Verify appdetails and dlcforapp calls in 30_downloader.sh use fetch_cached_json
     grep -q 'fetch_cached_json .* "steam_basic_\${appid}" 3600' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
-    grep -q 'fetch_cached_json .* "steam_dlc_\${appid}" 3600' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    grep -q 'fetch_cached_json .* "steam_dlc_\${appid}" 3600' "$REPO_ROOT/src/steam/31_manifests.sh" || return 1
 
     # 2. Dynamic cache hit verification
     source "$REPO_ROOT/src/core/10_utils.sh"

@@ -239,7 +239,7 @@ test_tui_os_parameter_forwarding_contract() {
     [ "$search_matches" -ge 4 ] || { echo "[FAIL] Expected at least 4 download_game --os calls in 70_dashboard.sh, found: $search_matches" >&2; return 1; }
 
     # In unlock_interactive: auto-download bridge must include --os "$target_os"
-    grep -q 'download_game.*--os "\$target_os"' "$REPO_ROOT/src/steam/30_downloader.sh" || { echo "[FAIL] Missing --os in unlock_interactive" >&2; return 1; }
+    grep -q 'download_game.*--os "\$target_os"' "$REPO_ROOT/src/steam/32_steam_bridge.sh" || { echo "[FAIL] Missing --os in unlock_interactive" >&2; return 1; }
 
     # 2. Dynamic execution contract for library_menu missing binary bridge
     local t_root

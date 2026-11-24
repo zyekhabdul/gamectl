@@ -344,7 +344,7 @@ test_dual_mode_runtime_paths_contract() {
     fi
 
     # 3. Verify zero hardcoded /run/user/ outside canonical resolver get_desktop_runtime_dir
-    if grep -rn "/run/user/" "$REPO_ROOT/src/runners/40_wrappers.sh" "$REPO_ROOT/src/steam/30_downloader.sh" | grep -q .; then
+    if grep -rn "/run/user/" "$REPO_ROOT/src/runners/40_wrappers.sh" "$REPO_ROOT/src/steam/30_downloader.sh" "$REPO_ROOT/src/steam/31_manifests.sh" "$REPO_ROOT/src/steam/32_steam_bridge.sh" | grep -q .; then
         rm -rf "$t_dir"
         [ -n "$orig_xdg" ] && export XDG_RUNTIME_DIR="$orig_xdg" || unset XDG_RUNTIME_DIR
         return 1
@@ -1221,7 +1221,7 @@ test_runner_ssot_timeouts_and_downloader_dedup_contract() {
 
         # 4. Store search curl calls enforce --max-time 15
         [ "$(grep -c -- '--max-time 15.*storesearch' "$REPO_ROOT/src/tui/70_dashboard.sh")" -eq 2 ] || exit 1
-        grep -q -- '--max-time 15.*storesearch' "$REPO_ROOT/src/steam/30_downloader.sh" || exit 1
+        grep -q -- '--max-time 15.*storesearch' "$REPO_ROOT/src/steam/32_steam_bridge.sh" || exit 1
     )
 }
 run_test "Runner SSoT & Network Guard (WP32 Packet 32C): list_runner_dirs, proton_remove XDG, timeouts & dedup" test_runner_ssot_timeouts_and_downloader_dedup_contract
