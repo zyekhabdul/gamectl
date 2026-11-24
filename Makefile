@@ -27,6 +27,7 @@ test:
 	./tests/test_cli.sh < /dev/null
 	./tests/test_remediation.sh
 	./tests/test_tui_ergonomics.sh
+	./tests/test_depot_filter.sh
 
 lint:
 	@set -e; for file in src/*.sh src/*/*.sh bin/gamectl install.sh scripts/*.sh packaging/debian/*.sh packaging/scripts/*.sh tests/*.sh completions/*.bash; do \

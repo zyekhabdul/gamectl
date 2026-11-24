@@ -62,7 +62,7 @@ jobs:
 
       - name: Compile native depot downloader binary
         run: |
-          ./scripts/build-depot-dl.sh
+          ./scripts/build-depot-dl.sh --force
           ./scripts/build-depot-dl.sh --check
 
       - name: Execute CLI regression and integrity harness
@@ -72,3 +72,4 @@ jobs:
         run: |
           ./tests/test_remediation.sh
           ./tests/test_tui_ergonomics.sh
+          ./tests/test_depot_filter.sh

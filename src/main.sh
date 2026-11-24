@@ -325,7 +325,7 @@ case "${1:-}" in
             exit 1
         fi
         ;;
-    unlock|add-steam|entitle|adopt-steam|--unlock|--entitle)
+    unlock|entitle|adopt-steam|--unlock|--entitle)
         if [ -n "${2:-}" ]; then
             unlock_game "$2" "${3:-}"
         else
