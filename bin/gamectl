@@ -1185,16 +1185,27 @@ resolve_game_drm_status() {
 
     local is_gbe=false
     if [ -n "$api_file" ] && [ -f "$api_file" ]; then
-        local sz
-        sz=$(stat -c%s "$api_file" 2>/dev/null || echo 0)
-        [ "$sz" -gt 7000000 ] && is_gbe=true
+        if is_gbe_library "$api_file" 2>/dev/null; then
+            is_gbe=true
+        fi
     fi
 
     if [ "$is_gbe" = false ]; then
-        if [ -f "$gdir/libsteam_api.so.orig" ] || [ -f "$gdir/lib64/libsteam_api.so.orig" ] || \
+        if { [ -n "$api_file" ] && [ -f "${api_file}.orig" ]; } || \
+           [ -f "$gdir/libsteam_api.so.orig" ] || [ -f "$gdir/lib64/libsteam_api.so.orig" ] || \
            [ -f "$gdir/steam_api64.dll.orig" ] || [ -f "$gdir/steam_api.dll.orig" ] || \
-           [ -d "$gdir/steam_settings" ] || [ -f "$gdir/local_save.txt" ]; then
+           [ -d "$gdir/steam_settings" ] || [ -f "$gdir/local_save.txt" ] || [ -f "$gdir/.gamectl_gbe" ]; then
             is_gbe=true
+        fi
+    fi
+
+    if [ "$is_gbe" = false ] && [ -n "$api_file" ] && [ -f "$api_file" ]; then
+        if LC_ALL=C grep -q -a -E 'steam_settings/configs\.user\.ini|coldclient|goldberg|gbe_fork' "$api_file" 2>/dev/null; then
+            is_gbe=true
+        else
+            local sz
+            sz=$(stat -c%s "$api_file" 2>/dev/null || echo 0)
+            [ "$sz" -gt 7000000 ] && is_gbe=true
         fi
     fi
 
@@ -6877,10 +6888,12 @@ find_runner() {
         return 0
     fi
 
-    # Priority 2: GE-Proton / Proton in Steam compatibilitytools.d or common
-    local s_dyn_root
+    # Priority 2: Standalone XDG runners & Steam compatibilitytools.d
+    local s_dyn_root xdg_runners
     s_dyn_root="$(get_steam_root 2>/dev/null || true)"
+    xdg_runners="${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners"
     local compat_dirs=(
+        "$xdg_runners"
         "$s_dyn_root/compatibilitytools.d"
         "$HOME/.local/share/Steam/compatibilitytools.d"
         "$HOME/.steam/root/compatibilitytools.d"
@@ -6895,7 +6908,7 @@ find_runner() {
                 echo "$p/proton"
                 return 0
             fi
-        done < <(find "$cdir" -mindepth 1 -maxdepth 1 -type d -name "*Proton*" 2>/dev/null | sort -Vr)
+        done < <(find "$cdir" -mindepth 1 -maxdepth 1 -type d -iname "*proton*" 2>/dev/null | sort -Vr)
     done
 
     # Check Proton in Steam common libraries
@@ -7928,6 +7941,7 @@ build_sandbox_command() {
         --tmpfs "$HOME"
         --ro-bind-try "$xauth_file" "$xauth_file"
         --bind-try "$HOME/.config/gamectl" "$HOME/.config/gamectl"
+        --ro-bind-try "${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners" "${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners"
         --ro-bind-try "$HOME/.local/share/Steam" "$HOME/.local/share/Steam"
         --ro-bind-try "$HOME/.local/share/gbe-fork" "$HOME/.local/share/gbe-fork"
         --ro-bind-try "$HOME/.steam" "$HOME/.steam"
@@ -9071,6 +9085,10 @@ launch_game() {
     fi
 
     _exec_in_scope() {
+        local fn
+        while IFS= read -r fn; do
+            [ -n "$fn" ] && export -fn "$fn" 2>/dev/null || true
+        done < <(declare -Fx | awk '{print $NF}')
         local -a final_cmd=()
         [ ${#sandbox_cmd[@]} -gt 0 ] && final_cmd+=("${sandbox_cmd[@]}")
         final_cmd+=("$@")
@@ -10461,7 +10479,7 @@ preview_dashboard() {
     echo "  ${UI_CYAN}Win Runner  ${UI_RST}: $runner_str"
     echo "  ${UI_CYAN}GBE Fork    ${UI_RST}: $gbe_status ${UI_DIM}(Linux x64: $([ -n "$gbe_l64" ] && echo "OK" || echo "MISSING") | Win x64: $([ -n "$gbe_w64" ] && echo "OK" || echo "MISSING"))${UI_RST}"
     echo "  ${UI_CYAN}Tooling     ${UI_RST}: GameMode $w_gm • MangoHud $w_hud • Gamescope $w_scope"
-    echo "  ${UI_CYAN}Integration ${UI_RST}: SLSsteam $sls_status • Steam Client $steam_status"
+    echo "  ${UI_CYAN}Bridge (Opt)${UI_RST}: SLSsteam $sls_status • Steam Client $steam_status"
     echo
 
     case "$item_key" in
@@ -10831,7 +10849,7 @@ preview_dashboard() {
             echo "  • L1 CLI Core Tools: $l1_st    • L2 Python & YAML: $l2_st"
             echo "  • L3 Windows Runner: $l3_st    • L4 GBE Templates: $l4_st"
             echo "  • L5 Wrappers      : GameMode $w_gm • MangoHud $w_hud • Gamescope $w_scope"
-            echo "  • L6 Integrations  : SLSsteam $sls_status • Steam Client $steam_status"
+            echo "  • L6 Bridge (Opt)  : SLSsteam $sls_status • Steam Client $steam_status"
             echo "  • L8 Security      : Sandbox $([ "$has_bwrap" -eq 1 ] && echo "${UI_GREEN}[READY]${UI_RST}" || echo "${UI_AMBER}[OFF]${UI_RST}") • Scope $([ "$has_scope" -eq 1 ] && echo "${UI_GREEN}[READY]${UI_RST}" || echo "${UI_AMBER}[OFF]${UI_RST}")"
             echo
             echo "  ${UI_DIM}Full Audit: Press Enter to launch interactive 7-layer doctor_audit${UI_RST}"

@@ -52,7 +52,7 @@ uninstall:
 	rm -f $(HOME)/.local/share/applications/gamectl.desktop
 
 clean:
-	rm -rf packaging/debian/build_deb packaging/debian/*.deb packaging/arch/*.pkg.tar* packaging/aur-git/*.pkg.tar* packaging/aur-git/src packaging/aur-git/pkg
+	rm -rf packaging/debian/build_deb packaging/debian/*.deb packaging/arch/*.pkg.tar* packaging/aur-git/*.pkg.tar* packaging/aur-git/src packaging/aur-git/pkg src/gamectl.egg-info src/gamectl_runner/bin src/gamectl_runner/__pycache__
 	@if [ -f crates/depot-dl/Cargo.toml ] && command -v cargo >/dev/null 2>&1; then \
 		cargo clean --manifest-path crates/depot-dl/Cargo.toml; \
 	fi

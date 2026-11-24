@@ -328,7 +328,7 @@ preview_dashboard() {
     echo "  ${UI_CYAN}Win Runner  ${UI_RST}: $runner_str"
     echo "  ${UI_CYAN}GBE Fork    ${UI_RST}: $gbe_status ${UI_DIM}(Linux x64: $([ -n "$gbe_l64" ] && echo "OK" || echo "MISSING") | Win x64: $([ -n "$gbe_w64" ] && echo "OK" || echo "MISSING"))${UI_RST}"
     echo "  ${UI_CYAN}Tooling     ${UI_RST}: GameMode $w_gm • MangoHud $w_hud • Gamescope $w_scope"
-    echo "  ${UI_CYAN}Integration ${UI_RST}: SLSsteam $sls_status • Steam Client $steam_status"
+    echo "  ${UI_CYAN}Bridge (Opt)${UI_RST}: SLSsteam $sls_status • Steam Client $steam_status"
     echo
 
     case "$item_key" in
@@ -698,7 +698,7 @@ preview_dashboard() {
             echo "  • L1 CLI Core Tools: $l1_st    • L2 Python & YAML: $l2_st"
             echo "  • L3 Windows Runner: $l3_st    • L4 GBE Templates: $l4_st"
             echo "  • L5 Wrappers      : GameMode $w_gm • MangoHud $w_hud • Gamescope $w_scope"
-            echo "  • L6 Integrations  : SLSsteam $sls_status • Steam Client $steam_status"
+            echo "  • L6 Bridge (Opt)  : SLSsteam $sls_status • Steam Client $steam_status"
             echo "  • L8 Security      : Sandbox $([ "$has_bwrap" -eq 1 ] && echo "${UI_GREEN}[READY]${UI_RST}" || echo "${UI_AMBER}[OFF]${UI_RST}") • Scope $([ "$has_scope" -eq 1 ] && echo "${UI_GREEN}[READY]${UI_RST}" || echo "${UI_AMBER}[OFF]${UI_RST}")"
             echo
             echo "  ${UI_DIM}Full Audit: Press Enter to launch interactive 7-layer doctor_audit${UI_RST}"

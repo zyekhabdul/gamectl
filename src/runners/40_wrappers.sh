@@ -161,10 +161,12 @@ find_runner() {
         return 0
     fi
 
-    # Priority 2: GE-Proton / Proton in Steam compatibilitytools.d or common
-    local s_dyn_root
+    # Priority 2: Standalone XDG runners & Steam compatibilitytools.d
+    local s_dyn_root xdg_runners
     s_dyn_root="$(get_steam_root 2>/dev/null || true)"
+    xdg_runners="${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners"
     local compat_dirs=(
+        "$xdg_runners"
         "$s_dyn_root/compatibilitytools.d"
         "$HOME/.local/share/Steam/compatibilitytools.d"
         "$HOME/.steam/root/compatibilitytools.d"
@@ -179,7 +181,7 @@ find_runner() {
                 echo "$p/proton"
                 return 0
             fi
-        done < <(find "$cdir" -mindepth 1 -maxdepth 1 -type d -name "*Proton*" 2>/dev/null | sort -Vr)
+        done < <(find "$cdir" -mindepth 1 -maxdepth 1 -type d -iname "*proton*" 2>/dev/null | sort -Vr)
     done
 
     # Check Proton in Steam common libraries
@@ -1212,6 +1214,7 @@ build_sandbox_command() {
         --tmpfs "$HOME"
         --ro-bind-try "$xauth_file" "$xauth_file"
         --bind-try "$HOME/.config/gamectl" "$HOME/.config/gamectl"
+        --ro-bind-try "${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners" "${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners"
         --ro-bind-try "$HOME/.local/share/Steam" "$HOME/.local/share/Steam"
         --ro-bind-try "$HOME/.local/share/gbe-fork" "$HOME/.local/share/gbe-fork"
         --ro-bind-try "$HOME/.steam" "$HOME/.steam"

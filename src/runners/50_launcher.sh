@@ -581,6 +581,10 @@ launch_game() {
     fi
 
     _exec_in_scope() {
+        local fn
+        while IFS= read -r fn; do
+            [ -n "$fn" ] && export -fn "$fn" 2>/dev/null || true
+        done < <(declare -Fx | awk '{print $NF}')
         local -a final_cmd=()
         [ ${#sandbox_cmd[@]} -gt 0 ] && final_cmd+=("${sandbox_cmd[@]}")
         final_cmd+=("$@")

@@ -1126,16 +1126,27 @@ resolve_game_drm_status() {
 
     local is_gbe=false
     if [ -n "$api_file" ] && [ -f "$api_file" ]; then
-        local sz
-        sz=$(stat -c%s "$api_file" 2>/dev/null || echo 0)
-        [ "$sz" -gt 7000000 ] && is_gbe=true
+        if is_gbe_library "$api_file" 2>/dev/null; then
+            is_gbe=true
+        fi
     fi
 
     if [ "$is_gbe" = false ]; then
-        if [ -f "$gdir/libsteam_api.so.orig" ] || [ -f "$gdir/lib64/libsteam_api.so.orig" ] || \
+        if { [ -n "$api_file" ] && [ -f "${api_file}.orig" ]; } || \
+           [ -f "$gdir/libsteam_api.so.orig" ] || [ -f "$gdir/lib64/libsteam_api.so.orig" ] || \
            [ -f "$gdir/steam_api64.dll.orig" ] || [ -f "$gdir/steam_api.dll.orig" ] || \
-           [ -d "$gdir/steam_settings" ] || [ -f "$gdir/local_save.txt" ]; then
+           [ -d "$gdir/steam_settings" ] || [ -f "$gdir/local_save.txt" ] || [ -f "$gdir/.gamectl_gbe" ]; then
             is_gbe=true
+        fi
+    fi
+
+    if [ "$is_gbe" = false ] && [ -n "$api_file" ] && [ -f "$api_file" ]; then
+        if LC_ALL=C grep -q -a -E 'steam_settings/configs\.user\.ini|coldclient|goldberg|gbe_fork' "$api_file" 2>/dev/null; then
+            is_gbe=true
+        else
+            local sz
+            sz=$(stat -c%s "$api_file" 2>/dev/null || echo 0)
+            [ "$sz" -gt 7000000 ] && is_gbe=true
         fi
     fi
 
