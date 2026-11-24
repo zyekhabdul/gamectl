@@ -344,7 +344,7 @@ test_dual_mode_runtime_paths_contract() {
     fi
 
     # 3. Verify zero hardcoded /run/user/ outside canonical resolver get_desktop_runtime_dir
-    if grep -rn "/run/user/" "$REPO_ROOT/src/runners/40_wrappers.sh" "$REPO_ROOT/src/steam/30_downloader.sh" "$REPO_ROOT/src/steam/31_manifests.sh" "$REPO_ROOT/src/steam/32_steam_bridge.sh" | grep -q .; then
+    if grep -rn "/run/user/" "$REPO_ROOT/src/runners/40_wrappers.sh" "$REPO_ROOT/src/runners/41_proton_prefix.sh" "$REPO_ROOT/src/runners/42_graphics_isolation.sh" "$REPO_ROOT/src/steam/30_downloader.sh" "$REPO_ROOT/src/steam/31_manifests.sh" "$REPO_ROOT/src/steam/32_steam_bridge.sh" | grep -q .; then
         rm -rf "$t_dir"
         [ -n "$orig_xdg" ] && export XDG_RUNTIME_DIR="$orig_xdg" || unset XDG_RUNTIME_DIR
         return 1
@@ -966,7 +966,7 @@ EOF
         # 4. Hygiene & dashboard optional bridge labeling
         grep -q 'src/gamectl.egg-info' "$REPO_ROOT/Makefile" || exit 1
         grep -q 'src/gamectl_runner/bin' "$REPO_ROOT/Makefile" || exit 1
-        grep -q 'Bridge (Opt)' "$REPO_ROOT/src/tui/70_dashboard.sh" || exit 1
+        grep -q 'Bridge (Opt)' "$REPO_ROOT/src/tui/71_previews.sh" || exit 1
     )
 }
 run_test "Detection & Hygiene (WP31 Packet 31C): GBE markers, XDG runners, child env & Makefile clean" test_detection_integrity_runners_and_env_hygiene_contract

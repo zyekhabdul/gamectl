@@ -658,8 +658,8 @@ test_steam_active_guardrail() {
 run_test "Steam Runtime Guardrail: Emits warning on active steam client process" test_steam_active_guardrail
 
 test_savegame_remote_sync_path_normalization() {
-    grep -q 'rel_path="Games/\$(basename "\$canon_gdir")"' "$REPO_ROOT/src/runners/50_launcher.sh" && \
-    grep -q 'rel_path="\${canon_gdir#\$HOME/}"' "$REPO_ROOT/src/runners/50_launcher.sh"
+    grep -q 'rel_path="Games/\$(basename "\$canon_gdir")"' "$REPO_ROOT/src/runners/51_remote_sync.sh" && \
+    grep -q 'rel_path="\${canon_gdir#\$HOME/}"' "$REPO_ROOT/src/runners/51_remote_sync.sh"
 }
 run_test "Remote Sync Invariant: Normalizes savegame path for secondary drive paths" test_savegame_remote_sync_path_normalization
 
@@ -709,9 +709,9 @@ test_bwrap_sandbox_contract() {
     local out code=0
     out=$("$GAMECTL" check-sandbox 2>&1) || code=$?
     echo "$out" | grep -q "bubblewrap (bwrap)" && \
-    grep -q "build_sandbox_command" "$REPO_ROOT/src/runners/40_wrappers.sh" && \
-    grep -q -- "--unshare-user" "$REPO_ROOT/src/runners/40_wrappers.sh" && \
-    grep -q -- "--tmpfs \"\$HOME\"" "$REPO_ROOT/src/runners/40_wrappers.sh"
+    grep -q "build_sandbox_command" "$REPO_ROOT/src/runners/42_graphics_isolation.sh" && \
+    grep -q -- "--unshare-user" "$REPO_ROOT/src/runners/42_graphics_isolation.sh" && \
+    grep -q -- "--tmpfs \"\$HOME\"" "$REPO_ROOT/src/runners/42_graphics_isolation.sh"
 }
 run_test "Security Sandboxing: Rootless Bubblewrap (bwrap) isolation profile" test_bwrap_sandbox_contract
 
@@ -1184,7 +1184,7 @@ run_test "ACF Telemetry: format_bytes integer conversion" test_format_bytes_repr
 
 test_tui_dashboard_and_cli_help_integration() {
     # Invariant: Dashboard cockpit exposes SLSsteam and Steam Client indicators
-    grep -q 'SLSsteam \$sls_status • Steam Client \$steam_status' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
+    grep -q 'SLSsteam \$sls_status • Steam Client \$steam_status' "$REPO_ROOT/src/tui/71_previews.sh" && \
     grep -q 'fetch-manifest <appid>' "$REPO_ROOT/src/main.sh" && \
     grep -q 'deploy-manifest <appid>' "$REPO_ROOT/src/main.sh" && \
     "$GAMECTL" --help | grep -q 'fetch-manifest' && \
@@ -1963,7 +1963,7 @@ test_zero_flicker_tui_actions_contract() {
     if grep -n 'clear' "$REPO_ROOT/src/runners/50_launcher.sh" | grep -v 'clean'; then
         return 1
     fi
-    if sed -n '/manage_prefix()/,/^}/p' "$REPO_ROOT/src/runners/40_wrappers.sh" | grep -E '^[[:space:]]+clear$'; then
+    if sed -n '/manage_prefix()/,/^}/p' "$REPO_ROOT/src/runners/41_proton_prefix.sh" | grep -E '^[[:space:]]+clear$'; then
         return 1
     fi
 
@@ -1999,7 +1999,7 @@ test_dual_input_acf_adoption_contract() {
     grep -q 'SELECT GAME FOR ACF ADOPTION' "$REPO_ROOT/src/steam/32_steam_bridge.sh" || return 1
 
     # 4. Dashboard preview reflects dual-input capability
-    grep -q 'Dual-input adoption by Game Title or numeric AppID' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
+    grep -q 'Dual-input adoption by Game Title or numeric AppID' "$REPO_ROOT/src/tui/71_previews.sh" || return 1
 
     return 0
 }
@@ -2215,7 +2215,7 @@ run_test "Savegame Recovery (Chunk 1): Restore savegame snapshot from recovery s
 
 test_pull_save_remote_contract() {
     # 1. Static check: pull_save_remote function is exported and defined
-    grep -q 'pull_save_remote()' "$REPO_ROOT/src/runners/50_launcher.sh" || return 1
+    grep -q 'pull_save_remote()' "$REPO_ROOT/src/runners/51_remote_sync.sh" || return 1
     grep -q 'export -f .*pull_save_remote' "$REPO_ROOT/src/main.sh" || return 1
     grep -q 'sync-pull' "$REPO_ROOT/src/main.sh" || return 1
 
