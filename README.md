@@ -125,7 +125,7 @@ paru -S gamectl-git
 ```bash
 # Build and install Debian package:
 make pkg-deb
-sudo dpkg -i packaging/debian/gamectl_1.2.0_all.deb
+sudo dpkg -i packaging/debian/gamectl_1.4.0_amd64.deb
 sudo apt install -f
 ```
 
@@ -178,7 +178,7 @@ The turnkey installer automatically executes:
 gamectl               # Launch Master Dashboard Hub TUI
 gamectl library       # Open Game Library TUI directly (alias: list-ui)
 gamectl config        # Open global configuration editor (alias: configure)
-gamectl doctor        # Run 7-layer system & GPU health diagnostics (alias: audit)
+gamectl doctor        # Run 8-layer system & GPU health diagnostics (alias: audit)
 ```
 
 ### 2. Launching Games
@@ -314,7 +314,7 @@ gamectl protondb "$HOME/Games/Terraria"
 gamectl make-desktop "$HOME/Games/Terraria" "Terraria"
 ```
 
-### 12. Automated Game Fixes & Steam Lifecycle Engine
+### 11. Automated Game Fixes & Steam Lifecycle Engine
 Directly queries community bypasses and Online-Fixes from LuaTools API & Cloudflare R2, extracts them with zip-slip safety audits, creates atomic rollback snapshots, and hooks Spacewar 480 automatically:
 
 ```bash
@@ -334,7 +334,7 @@ gamectl fix-revert "$HOME/Games/UNO"
 gamectl restart-steam
 ```
 
-### 11. Multi-Node Savegame Synchronization
+### 12. Multi-Node Savegame Synchronization
 ```bash
 # Synchronize local savegame snapshots to configured remote companion host:
 gamectl --sync "$HOME/Games/Terraria" "Terraria"
@@ -375,10 +375,10 @@ gamectl/
 │   └── arch/            # Arch Linux PKGBUILD packaging recipes
 ├── scripts/
 │   ├── build.sh         # Source-to-bundle deterministic compilation script
-│   └── format.sh        # Shell formatting and lint harness
+│   └── build-depot-dl.sh # Native Rust Steam CDN depot downloader compiler
 ├── src/
 │   ├── core/            # Header constants, ANSI palette, snapshot engine, utils
-│   ├── diagnostics/     # 7-layer system health audit and ProtonDB client
+│   ├── diagnostics/     # 8-layer system health audit and ProtonDB client
 │   ├── runners/         # Windows runners, prefix manager, DLL overrides, launcher HUD
 │   ├── steam/           # Multi-path discovery, identity, and headless downloader
 │   ├── tui/             # Master dashboard hub, preview cards, interactive search
@@ -405,6 +405,8 @@ If `gamectl` freed your RAM, eliminated background browser bloat, or improved yo
 
 ## License & Legal Notice
 
-Distributed under the MIT License. See `LICENSE` for details.
+`gamectl` (Bash TUI/CLI, runtime wrappers, and packaging scripts) is distributed under the **MIT License**. See [LICENSE](LICENSE) for details.
+
+The companion native Rust depot downloader binary `gamectl-depot-dl` ([crates/depot-dl/](crates/depot-dl/)) is derived from `steam-depot-downloader-mod` and distributed separately under **GPL-2.0-only** (see [crates/depot-dl/Cargo.toml](crates/depot-dl/Cargo.toml)).
 
 `gamectl` is an independent open-source utility designed for managing standalone local game files and compatibility runners on Linux. It does not distribute, host, or bypass proprietary encryption on copyrighted game software. All trademarks and brand names belong to their respective owners.

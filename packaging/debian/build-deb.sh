@@ -40,8 +40,7 @@ Recommends: bubblewrap, gamemode, mangohud, gamescope, python3-ruamel.yaml
 Maintainer: Zyekh Abdul <zyekhabdulqadirjailani@gmail.com>
 Homepage: https://github.com/zyekhabdul/gamectl
 Description: Sovereign TUI Game Manager & Launcher for Linux (Zero-Bloat)
- gamectl is an ultra-lightweight (< 15 MB RAM RSS), high-performance
- Terminal User Interface (TUI) game manager and launcher designed for
+ gamectl is a lightweight, standalone Terminal User Interface (TUI) game manager and launcher designed for
  Linux workstations and handhelds. It manages, launches, and synchronizes
  standalone portable games with zero dependency on heavyweight graphical
  client runtimes. Includes shorthand alias 'game'.
@@ -70,12 +69,29 @@ ln -sf gamectl "$WORK_DIR/usr/share/bash-completion/completions/game"
 cp "$PROJECT_ROOT/gamectl.desktop" "$WORK_DIR/usr/share/applications/gamectl.desktop"
 chmod 644 "$WORK_DIR/usr/share/applications/gamectl.desktop"
 
-# Install documentation and copyright
+# Install documentation and copyright (MIT for gamectl; GPL-2.0-only for gamectl-depot-dl)
 cp "$PROJECT_ROOT/README.md" "$WORK_DIR/usr/share/doc/$PKG_NAME/"
 cp "$PROJECT_ROOT/docs/GUIDE.md" "$WORK_DIR/usr/share/doc/$PKG_NAME/"
 cp "$PROJECT_ROOT/docs/ARCHITECTURE.md" "$WORK_DIR/usr/share/doc/$PKG_NAME/"
-cp "$PROJECT_ROOT/LICENSE" "$WORK_DIR/usr/share/doc/$PKG_NAME/copyright"
 cp "$PROJECT_ROOT/LICENSE" "$WORK_DIR/usr/share/licenses/$PKG_NAME/LICENSE"
+cat << EOF > "$WORK_DIR/usr/share/doc/$PKG_NAME/copyright"
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: gamectl
+Source: https://github.com/zyekhabdul/gamectl
+
+Files: *
+Copyright: 2026 Zyekh Abdul
+License: MIT
+ Full MIT license text is installed at /usr/share/licenses/${PKG_NAME}/LICENSE.
+
+Files: usr/bin/gamectl-depot-dl
+Copyright: enXov / steam-depot-downloader-mod contributors
+License: GPL-2.0-only
+ Derived from steam-depot-downloader-mod (https://github.com/enXov/steam-depot-downloader-mod).
+ On Debian systems, the complete text of the GNU General Public License
+ version 2 can be found in '/usr/share/common-licenses/GPL-2'.
+EOF
+chmod 644 "$WORK_DIR/usr/share/doc/$PKG_NAME/copyright"
 
 # Build .deb archive
 dpkg-deb --build --root-owner-group "$WORK_DIR" "$DIST_DIR/${PKG_NAME}_${PKG_VER}_${PKG_ARCH}.deb"

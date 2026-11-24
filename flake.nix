@@ -10,6 +10,18 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        runtimeDeps = with pkgs; [
+          bash
+          curl
+          file
+          fzf
+          jq
+          openssh
+          python3
+          rsync
+          unzip
+          zip
+        ];
       in
       {
         packages.default = pkgs.stdenv.mkDerivation {
@@ -23,6 +35,12 @@
             mkdir -p $out/bin $out/share/bash-completion/completions $out/share/applications $out/share/doc/gamectl $out/share/licenses/gamectl
             cp bin/gamectl $out/bin/gamectl
             chmod +x $out/bin/gamectl
+            if [ -f bin/gamectl-depot-dl ]; then
+              cp bin/gamectl-depot-dl $out/bin/gamectl-depot-dl
+              chmod +x $out/bin/gamectl-depot-dl
+            fi
+            wrapProgram $out/bin/gamectl \
+              --prefix PATH : "$out/bin:${pkgs.lib.makeBinPath runtimeDeps}"
             ln -sf gamectl $out/bin/game
 
             cp completions/gamectl.bash $out/share/bash-completion/completions/gamectl
@@ -36,7 +54,7 @@
           meta = with pkgs.lib; {
             description = "Sovereign TUI Game Manager & Launcher for Linux (Zero-Bloat)";
             homepage = "https://github.com/zyekhabdul/gamectl";
-            license = licenses.mit;
+            license = [ licenses.mit licenses.gpl2Only ];
             platforms = platforms.linux;
             mainProgram = "gamectl";
           };

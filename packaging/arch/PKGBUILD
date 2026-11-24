@@ -6,7 +6,7 @@ pkgrel=1
 pkgdesc="Sovereign TUI Game Manager & Launcher for Linux (Zero-Bloat)"
 arch=('x86_64')
 url="https://github.com/zyekhabdul/gamectl"
-license=('MIT')
+license=('MIT' 'GPL-2.0-only')
 depends=(
     'bash'
     'curl'
