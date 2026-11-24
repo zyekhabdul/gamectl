@@ -188,16 +188,8 @@ EOF
 
         local ini_file="$target_dir/steam_settings/configs.user.ini"
         if [ -f "$ini_file" ]; then
-            if grep -q -E '^[[:space:]]*account_name[[:space:]]*=' "$ini_file"; then
-                sed -i -E "s/^[[:space:]]*account_name[[:space:]]*=.*/account_name=$player_name/" "$ini_file"
-            else
-                echo "account_name=$player_name" >> "$ini_file"
-            fi
-            if grep -q -E '^[[:space:]]*account_steamid[[:space:]]*=' "$ini_file"; then
-                sed -i -E "s/^[[:space:]]*account_steamid[[:space:]]*=.*/account_steamid=$steamid/" "$ini_file"
-            else
-                echo "account_steamid=$steamid" >> "$ini_file"
-            fi
+            atomic_set_kv_file "$ini_file" "account_name" "$player_name" "="
+            atomic_set_kv_file "$ini_file" "account_steamid" "$steamid" "="
         else
             cat <<EOF > "$ini_file"
 [user::general]

@@ -266,7 +266,7 @@ setup_onlinefix() {
             fi
 
             if [ "$should_sync" = true ]; then
-                sed -i -E "s/^[[:space:]]*PlayerName[[:space:]]*=.*/PlayerName = $persona_name/" "$ini_file"
+                atomic_set_kv_file "$ini_file" "PlayerName" "$persona_name" " = "
                 echo "       ${UI_GREEN}[SUCCESS] PlayerName in OnlineFix.ini synchronized to: $persona_name${UI_RST}"
             fi
         fi

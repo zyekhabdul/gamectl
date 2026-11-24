@@ -1,51 +1,20 @@
-if ! declare -F strip_ansi >/dev/null 2>&1; then
-    strip_ansi() {
-        printf "%s" "${1:-}" | sed -E $'s/\033\\[[0-9;]*[a-zA-Z]//g'
-    }
+# Standalone-source bootstrap: load canonical SSoT helpers when sourced outside bin/gamectl
+if ! declare -F get_runtime_dir >/dev/null 2>&1 || ! declare -F audit_zip_safety >/dev/null 2>&1 || ! declare -F atomic_prepend_line >/dev/null 2>&1; then
+    _dl_core_utils="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/core/10_utils.sh"
+    if [ -f "$_dl_core_utils" ]; then
+        # shellcheck source=../core/10_utils.sh
+        source "$_dl_core_utils"
+    fi
+    unset _dl_core_utils
 fi
 
 if ! declare -F get_runtime_dir >/dev/null 2>&1; then
     get_runtime_dir() {
         local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
         local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+        [ -z "${UID:-}" ] && run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
         mkdir -p -m 700 "$run_dir" 2>/dev/null || true
         echo "$run_dir"
-    }
-fi
-
-if ! declare -F fetch_cached_json >/dev/null 2>&1; then
-    fetch_cached_json() {
-        local url="${1:-}" cache_key="${2:-}" ttl="${3:-3600}"
-        [ -z "$url" ] || [ -z "$cache_key" ] && return 1
-        local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl"
-        mkdir -p "$cache_dir" 2>/dev/null || true
-        local safe_key
-        safe_key=$(echo "$cache_key" | tr -cd '[:alnum:]_-')
-        local cache_file="$cache_dir/${safe_key}.json"
-        local now
-        now=$(date +%s)
-        if [ -f "$cache_file" ]; then
-            local mtime
-            mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null || echo 0)
-            local age=$(( now - mtime ))
-            if [ "$age" -ge 0 ] && [ "$age" -lt "$ttl" ] && [ -s "$cache_file" ]; then
-                cat "$cache_file"
-                return 0
-            fi
-        fi
-        local tmp_file="${cache_file}.tmp.$$"
-        local fetched
-        fetched=$(curl -s --connect-timeout 2 --max-time 4 "$url" 2>/dev/null || true)
-        if [ -n "$fetched" ] && [ "$fetched" != "null" ]; then
-            if echo "$fetched" | jq . >/dev/null 2>&1; then
-                echo "$fetched" > "$tmp_file" 2>/dev/null && mv -f "$tmp_file" "$cache_file" 2>/dev/null || rm -f "$tmp_file" 2>/dev/null
-                echo "$fetched"
-                return 0
-            fi
-        fi
-        rm -f "$tmp_file" 2>/dev/null || true
-        [ -s "$cache_file" ] && { cat "$cache_file"; return 0; }
-        return 1
     }
 fi
 
@@ -149,18 +118,11 @@ validate_manifest_zip() {
     local z_file="$1"
     local appid="${2:-}"
     local require_depots="${3:-false}"
-    [ -f "$z_file" ] || return 1
-    unzip -tq "$z_file" >/dev/null 2>&1 || return 1
+    audit_zip_safety "$z_file" || return 1
 
     local entries
     entries=$(unzip -Z1 "$z_file" 2>/dev/null) || return 1
     [ -n "$entries" ] || return 1
-
-    # Security: Path traversal & absolute path rejection
-    if echo "$entries" | grep -Eq '(^/|^[A-Za-z]:|(^|[/\\])\.\.([/\\]|$)|\\)'; then
-        echo "[ERROR] Manifest zip contains unsafe paths (path traversal rejected)." >&2
-        return 1
-    fi
 
     # Content check: must contain at least one .manifest or .lua file
     if ! echo "$entries" | grep -Eq '(\.manifest|\.lua)$'; then
@@ -905,7 +867,7 @@ deploy_sls_manifest() {
     if [ -n "$staged_lua" ] && [ -f "$staged_lua" ]; then
         cp -f "$staged_lua" "$target_lua"
         if ! grep -Eq "^[[:space:]]*addappid[[:space:]]*\([[:space:]]*${appid}[[:space:]]*\)" "$target_lua"; then
-            sed -i "1i addappid(${appid})" "$target_lua"
+            atomic_prepend_line "$target_lua" "addappid(${appid})"
         fi
         chmod 600 "$target_lua"
         echo "[VERIFIED] Stplug-in Lua deployed from archive: $target_lua" >&2
@@ -2259,7 +2221,7 @@ except Exception as e:
         local target_lua="$stplug_dir/${appid}.lua"
         if [ -f "$target_lua" ]; then
             if ! grep -Eq "^[[:space:]]*addappid[[:space:]]*\([[:space:]]*${appid}[[:space:]]*\)" "$target_lua"; then
-                sed -i "1i addappid(${appid})" "$target_lua"
+                atomic_prepend_line "$target_lua" "addappid(${appid})"
             fi
         else
             printf "addappid(%s)\n" "$appid" > "$target_lua"
@@ -2525,7 +2487,7 @@ unlock_interactive() {
         local encoded_query
         encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$u_input" 2>/dev/null || echo "$u_input")
         local raw_results
-        raw_results=$(curl -s --connect-timeout 5 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
+        raw_results=$(curl -s --connect-timeout 5 --max-time 15 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
         local search_items
         search_items=$(printf '%s' "$raw_results" | store_search_items) || {
             echo "[ERROR] Invalid Steam search catalog." >&2

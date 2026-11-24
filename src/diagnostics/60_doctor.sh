@@ -93,14 +93,12 @@ doctor_audit() {
     fi
 
     local ge_proton=""
-    local s_dyn_root
-    s_dyn_root="$(get_steam_root 2>/dev/null || true)"
     local cdir
-    for cdir in "$s_dyn_root/compatibilitytools.d" "$HOME/.local/share/Steam/compatibilitytools.d" "$HOME/.steam/root/compatibilitytools.d" "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"; do
+    while IFS= read -r cdir; do
         [ -n "$cdir" ] && [ -d "$cdir" ] || continue
         ge_proton=$(find "$cdir" -maxdepth 2 -name "proton" 2>/dev/null | head -n 1 || true)
         [ -n "$ge_proton" ] && break
-    done
+    done < <(list_runner_dirs)
     if [ -n "$ge_proton" ]; then
         echo "    • $(printf '%-10s' "GE-Proton") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($ge_proton)${UI_RST}"
         r_found=1

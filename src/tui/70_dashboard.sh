@@ -1354,7 +1354,7 @@ search_steam() {
     local encoded_query
     encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$query")
     local raw_results
-    raw_results=$(curl -s --connect-timeout 5 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
+    raw_results=$(curl -s --connect-timeout 5 --max-time 15 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
 
     local items
     items=$(printf '%s' "$raw_results" | store_search_items) || {
@@ -1461,7 +1461,7 @@ search_steam() {
             local new_encoded_query
             new_encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$new_q")
             local new_raw_results
-            new_raw_results=$(curl -s --connect-timeout 5 "https://store.steampowered.com/api/storesearch/?term=${new_encoded_query}&l=english&cc=US" 2>/dev/null)
+            new_raw_results=$(curl -s --connect-timeout 5 --max-time 15 "https://store.steampowered.com/api/storesearch/?term=${new_encoded_query}&l=english&cc=US" 2>/dev/null)
             local new_items
             new_items=$(printf '%s' "$new_raw_results" | store_search_items) || true
 

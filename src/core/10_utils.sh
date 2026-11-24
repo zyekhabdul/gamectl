@@ -1799,6 +1799,120 @@ cli_unpack_stub() {
     fi
 }
 
+# Atomically set or append a key=value entry without sed delimiter/escape injection
+atomic_set_kv_file() {
+    local file="${1:-}"
+    local key="${2:-}"
+    local val="${3:-}"
+    local sep="${4:-=}"
+    [ -n "$file" ] && [ -n "$key" ] || return 1
+    mkdir -p "$(dirname "$file")" || return 1
+
+    local tmp
+    tmp=$(mktemp "${file}.gamectl.XXXXXX") || return 1
+    local src_file="/dev/null"
+    [ -f "$file" ] && src_file="$file"
+
+    if ! GAMECTL_KV_KEY="$key" GAMECTL_KV_VAL="$val" GAMECTL_KV_SEP="$sep" awk '
+        BEGIN {
+            k = ENVIRON["GAMECTL_KV_KEY"]
+            v = ENVIRON["GAMECTL_KV_VAL"]
+            s = ENVIRON["GAMECTL_KV_SEP"]
+            found = 0
+        }
+        {
+            pos = index($0, "=")
+            if (pos > 0) {
+                lhs = substr($0, 1, pos - 1)
+                gsub(/^[ \t]+|[ \t]+$/, "", lhs)
+                if (lhs == k) {
+                    if (!found) {
+                        print k s v
+                        found = 1
+                    }
+                    next
+                }
+            }
+            print $0
+        }
+        END {
+            if (!found) {
+                print k s v
+            }
+        }
+    ' "$src_file" > "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+
+    if [ -f "$file" ]; then
+        chmod --reference="$file" "$tmp" 2>/dev/null || true
+    else
+        chmod 600 "$tmp" 2>/dev/null || true
+    fi
+
+    if ! mv -f "$tmp" "$file"; then
+        rm -f "$tmp"
+        return 1
+    fi
+}
+
+# Atomically prepend a line to a file (safe on 0-byte or nonexistent files)
+atomic_prepend_line() {
+    local file="${1:-}"
+    local line="${2:-}"
+    [ -n "$file" ] || return 1
+    mkdir -p "$(dirname "$file")" || return 1
+
+    local tmp
+    tmp=$(mktemp "${file}.gamectl.XXXXXX") || return 1
+    if ! printf '%s\n' "$line" > "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    if [ -f "$file" ]; then
+        if ! cat "$file" >> "$tmp"; then
+            rm -f "$tmp"
+            return 1
+        fi
+        chmod --reference="$file" "$tmp" 2>/dev/null || true
+    else
+        chmod 600 "$tmp" 2>/dev/null || true
+    fi
+    if ! mv -f "$tmp" "$file"; then
+        rm -f "$tmp"
+        return 1
+    fi
+}
+
+# Audit ZIP archive integrity, path traversal, and symlink entries before extraction
+audit_zip_safety() {
+    local zip_file="${1:-}"
+    if [ -z "$zip_file" ] || [ ! -f "$zip_file" ] || [ ! -s "$zip_file" ]; then
+        echo "[ERROR] Archive not found or empty: ${zip_file:-<empty>}" >&2
+        return 1
+    fi
+    if ! unzip -tq "$zip_file" >/dev/null 2>&1; then
+        echo "[ERROR] Archive failed ZIP integrity check: $zip_file" >&2
+        return 1
+    fi
+    local entries
+    entries=$(unzip -Z1 "$zip_file" 2>/dev/null) || return 1
+    if [ -z "$entries" ]; then
+        echo "[ERROR] Archive contains no entries: $zip_file" >&2
+        return 1
+    fi
+    if printf '%s\n' "$entries" | grep -Eq '(^/|^[A-Za-z]:|(^|[/\\])\.\.([/\\]|$)|\\)'; then
+        echo "[ERROR] Security violation: unsafe path traversal detected in archive payload." >&2
+        return 1
+    fi
+    if unzip -Z "$zip_file" 2>/dev/null | grep -Eq '^l[-rwxstST]{6,9}[[:space:]]'; then
+        echo "[ERROR] Security violation: symlink entry detected in archive payload." >&2
+        return 1
+    fi
+    return 0
+}
+
 # Read a configuration key from ~/.config/gamectl/config
 get_config_value() {
     local key="$1"
@@ -1827,12 +1941,7 @@ set_config_value() {
     local cfg_dir="$HOME/.config/gamectl"
     local cfg_file="$cfg_dir/config"
     mkdir -p "$cfg_dir"
-    [ -f "$cfg_file" ] || touch "$cfg_file"
-    if grep -q -E "^[[:space:]]*${key}[[:space:]]*=" "$cfg_file" 2>/dev/null; then
-        sed -i -E "s|^[[:space:]]*${key}[[:space:]]*=.*|${key}=${val}|" "$cfg_file"
-    else
-        echo "${key}=${val}" >> "$cfg_file"
-    fi
+    atomic_set_kv_file "$cfg_file" "$key" "$val" "="
 }
 
 # Resolve Hubcap Manifest API key across environment, config file, and legacy stash

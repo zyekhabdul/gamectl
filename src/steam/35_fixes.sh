@@ -355,16 +355,9 @@ except Exception:
         return 1
     fi
 
-    if [ ! -s "$tmp_zip" ] || ! unzip -tq "$tmp_zip" >/dev/null 2>&1; then
+    if ! audit_zip_safety "$tmp_zip"; then
         rm -f "$tmp_zip"
-        echo "[ERROR] Downloaded archive is corrupt or not a valid ZIP file." >&2
-        return 1
-    fi
-
-    # 7. Zip-Slip Security Audit
-    if unzip -Z1 "$tmp_zip" 2>/dev/null | grep -E '(^/|^\.\./|/\.\./|^\.\.\\|\\\.\.\\)' >/dev/null 2>&1; then
-        rm -f "$tmp_zip"
-        echo "[ERROR] Security violation: Zip slip path traversal detected in archive payload!" >&2
+        echo "[ERROR] Downloaded archive failed integrity or security audit." >&2
         return 1
     fi
     echo "[VERIFIED] Archive payload integrity & security audit passed."
@@ -392,15 +385,21 @@ except Exception:
         fi
     done <<< "$zip_files"
 
-    cat <<META > "$resolved_dir/.gamectl_fix_backup/latest.json"
-{
-  "timestamp": "$ts",
-  "appid": "$appid",
-  "fix_id": "$fix_id",
-  "fix_title": "$fix_title",
-  "backed_up_count": $backed_up_count
-}
-META
+    local meta_file="$resolved_dir/.gamectl_fix_backup/latest.json"
+    local meta_tmp
+    meta_tmp=$(mktemp "${meta_file}.gamectl.XXXXXX") || return 1
+    if ! jq -n \
+        --arg timestamp "$ts" \
+        --arg appid "$appid" \
+        --arg fix_id "$fix_id" \
+        --arg fix_title "$fix_title" \
+        --argjson backed_up_count "${backed_up_count:-0}" \
+        '{timestamp: $timestamp, appid: $appid, fix_id: $fix_id, fix_title: $fix_title, backed_up_count: $backed_up_count}' \
+        > "$meta_tmp" || ! mv -f "$meta_tmp" "$meta_file"; then
+        rm -f "$meta_tmp"
+        echo "[ERROR] Failed to write fix snapshot metadata: $meta_file" >&2
+        return 1
+    fi
     echo "[VERIFIED] Created pre-install snapshot: $backed_up_count original file(s) saved to .gamectl_fix_backup/$ts"
 
     # 9. Extract Payload into Target Game Directory
