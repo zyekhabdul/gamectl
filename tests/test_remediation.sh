@@ -971,6 +971,259 @@ EOF
 }
 run_test "Detection & Hygiene (WP31 Packet 31C): GBE markers, XDG runners, child env & Makefile clean" test_detection_integrity_runners_and_env_hygiene_contract
 
+# Test 17: WP32 Packet 32A — Atomic KV/Prepend Mutations & Safe latest.json
+test_atomic_mutations_and_json_safety_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp32a_XXXXXX")
+    mkdir -p "$t_dir/home/.config/gamectl" "$t_dir/game/steam_settings" "$t_dir/runtime" "$t_dir/bin"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/25_identity.sh"
+        source "$REPO_ROOT/src/runners/50_launcher.sh"
+        source "$REPO_ROOT/src/steam/35_fixes.sh"
+
+        # 1. Zero sed -i across modular sources
+        if grep -rn "sed -i" "$REPO_ROOT/src/core" "$REPO_ROOT/src/steam" "$REPO_ROOT/src/runners" "$REPO_ROOT/src/diagnostics" "$REPO_ROOT/src/tui" "$REPO_ROOT/src/main.sh" | grep -q .; then
+            echo "Found forbidden sed -i in src/" >&2
+            exit 1
+        fi
+
+        # 2. Special characters in atomic_set_kv_file without backslash/delimiter mangling
+        local special_val='foo/bar|baz&qux\n\1"quote'\'''
+        printf 'other_key=keep_me\ntarget=old\n' > "$t_dir/test.kv"
+        atomic_set_kv_file "$t_dir/test.kv" "target" "$special_val" "="
+        [ "$(grep -F 'other_key=keep_me' "$t_dir/test.kv")" = "other_key=keep_me" ] || exit 1
+        [ "$(grep -E '^target=' "$t_dir/test.kv")" = "target=$special_val" ] || exit 1
+
+        # 3. atomic_prepend_line on 0-byte and non-empty file
+        : > "$t_dir/empty.lua"
+        atomic_prepend_line "$t_dir/empty.lua" "addappid(12345)"
+        [ "$(cat "$t_dir/empty.lua")" = "addappid(12345)" ] || exit 1
+        printf 'line2\n' > "$t_dir/nonempty.lua"
+        atomic_prepend_line "$t_dir/nonempty.lua" "line1"
+        [ "$(head -n 1 "$t_dir/nonempty.lua")" = "line1" ] && [ "$(tail -n 1 "$t_dir/nonempty.lua")" = "line2" ] || exit 1
+
+        # 4. set_id and setup_onlinefix preserve / | & \ literally
+        local persona_special='Player/One|Two&Three\Four'
+        cat <<'EOF' > "$t_dir/game/steam_settings/configs.user.ini"
+[user::general]
+account_name=old
+account_steamid=76561198000000000
+EOF
+        set_id "$persona_special" "76561198000000123" "$t_dir/game" >/dev/null || exit 1
+        [ "$(grep -E '^account_name=' "$t_dir/game/steam_settings/configs.user.ini")" = "account_name=$persona_special" ] || exit 1
+
+        cat <<'EOF' > "$t_dir/home/.config/gamectl/persona"
+account_name=Player/One|Two&Three\Four
+EOF
+        printf '[Main]\nPlayerName = OldName\n' > "$t_dir/game/OnlineFix.ini"
+        printf 'MZ\x00' > "$t_dir/game/OnlineFix64.dll"
+        setup_onlinefix "$t_dir/game" --yes >/dev/null || exit 1
+        [ "$(grep -E '^PlayerName' "$t_dir/game/OnlineFix.ini")" = "PlayerName = $persona_special" ] || exit 1
+
+        # 5. install_game_fix produces valid JSON even when fix_title has quotes and backslashes
+        local fix_src="$t_dir/fix_src"
+        mkdir -p "$fix_src"
+        printf 'payload\n' > "$fix_src/fix.txt"
+        (cd "$fix_src" && zip -q "$t_dir/fix_payload.zip" fix.txt)
+        get_valid_luatools_token() { echo "dummy_token"; }
+        resolve_game_install_dir() { echo "$t_dir/game"; }
+        audit_proton_compatibility() { :; }
+        detect_fix_custom_launcher() { :; }
+        curl() {
+            local out_file="" url=""
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    -o) shift; out_file="${1:-}" ;;
+                    https://*|http://*) url="$1" ;;
+                esac
+                shift || true
+            done
+            case "$url" in
+                *fixes?appid=*)
+                    printf '{"fixes":[{"id":"fix-1","title":"Fix \\"Alpha\\" \\\\ Beta","fixFilename":"fix.zip","hasFix":true}]}'
+                    ;;
+                *download?fix=*)
+                    printf '{"url":"https://example.invalid/fix.zip"}'
+                    ;;
+                *fix.zip*)
+                    cp -f "$t_dir/fix_payload.zip" "$out_file"
+                    ;;
+            esac
+        }
+        install_game_fix "12345" "$t_dir/game" --yes >/dev/null || exit 1
+        jq -e '.fix_title == "Fix \"Alpha\" \\ Beta"' "$t_dir/game/.gamectl_fix_backup/latest.json" >/dev/null || exit 1
+    )
+}
+run_test "Atomic Safety (WP32 Packet 32A): atomic KV/prepend & injection-safe latest.json" test_atomic_mutations_and_json_safety_contract
+
+# Test 18: WP32 Packet 32B — Supply-Chain & Archive Security Hardening
+test_archive_security_and_staged_proton_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp32b_XXXXXX")
+    mkdir -p "$t_dir/home/.local/share/Steam/compatibilitytools.d" "$t_dir/runtime" "$t_dir/stage_clean" "$t_dir/stage_sym" "$t_dir/stage_trav/sub"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/30_downloader.sh"
+        source "$REPO_ROOT/src/runners/40_wrappers.sh"
+
+        # 1. audit_zip_safety: clean passes, symlink fails, traversal fails
+        printf '\xd0\x17\xf6\x71payload' > "$t_dir/stage_clean/100_1.manifest"
+        (cd "$t_dir/stage_clean" && zip -q "$t_dir/clean.zip" 100_1.manifest)
+        audit_zip_safety "$t_dir/clean.zip" || exit 1
+
+        ln -s /etc/passwd "$t_dir/stage_sym/evil_link.manifest"
+        (cd "$t_dir/stage_sym" && zip -qy "$t_dir/symlink.zip" evil_link.manifest)
+        ! audit_zip_safety "$t_dir/symlink.zip" 2>/dev/null || exit 1
+        ! validate_manifest_zip "$t_dir/symlink.zip" "100" 2>/dev/null || exit 1
+
+        python3 - "$t_dir/trav.zip" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as zf:
+    zf.writestr("../escape.txt", "bad")
+PY
+        ! audit_zip_safety "$t_dir/trav.zip" 2>/dev/null || exit 1
+
+        # 2. Staged proton_install: valid SHA-512 succeeds, mismatch & traversal fail atomically
+        local compat_dir="$t_dir/home/.local/share/Steam/compatibilitytools.d"
+        local arch_sfx="x86_64"
+        [ "$(uname -m 2>/dev/null || echo x86_64)" = "aarch64" ] && arch_sfx="aarch64"
+
+        mkdir -p "$t_dir/tar_ok/GE-Proton9-99"
+        printf '"compatibilitytools"\n{}\n' > "$t_dir/tar_ok/GE-Proton9-99/compatibilitytool.vdf"
+        printf '#!/bin/sh\nexit 0\n' > "$t_dir/tar_ok/GE-Proton9-99/proton"
+        tar -czf "$t_dir/GE-Proton9-99-${arch_sfx}.tar.gz" -C "$t_dir/tar_ok" GE-Proton9-99
+        local good_hash
+        good_hash=$(sha512sum "$t_dir/GE-Proton9-99-${arch_sfx}.tar.gz" | awk '{print $1}')
+        printf '%s  GE-Proton9-99-%s.tar.gz\n' "$good_hash" "$arch_sfx" > "$t_dir/good.sha512sum"
+        printf '%0128d  GE-Proton9-99-%s.tar.gz\n' 0 "$arch_sfx" > "$t_dir/bad.sha512sum"
+
+        python3 - "$t_dir/evil.tar.gz" <<'PY'
+import io, sys, tarfile
+with tarfile.open(sys.argv[1], "w:gz") as tf:
+    info = tarfile.TarInfo("../evil_proton")
+    data = b"bad"
+    info.size = len(data)
+    tf.addfile(info, io.BytesIO(data))
+PY
+
+        export TEST_SUM_MODE="good" TEST_TAR_MODE="good"
+        curl() {
+            local out_file="" url=""
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    -o) shift; out_file="${1:-}" ;;
+                    https://*|http://*) url="$1" ;;
+                esac
+                shift || true
+            done
+            case "$url" in
+                *api.github.com*)
+                    printf '{"tag_name":"GE-Proton9-99","assets":[{"name":"GE-Proton9-99-%s.tar.gz","browser_download_url":"https://example.invalid/GE-Proton9-99-%s.tar.gz"},{"name":"GE-Proton9-99.sha512sum","browser_download_url":"https://example.invalid/GE-Proton9-99.sha512sum"}]}' "$arch_sfx" "$arch_sfx"
+                    ;;
+                *.sha512sum)
+                    if [ "$TEST_SUM_MODE" = "good" ]; then
+                        cp -f "$t_dir/good.sha512sum" "$out_file"
+                    else
+                        cp -f "$t_dir/bad.sha512sum" "$out_file"
+                    fi
+                    ;;
+                *.tar.gz)
+                    if [ "$TEST_TAR_MODE" = "good" ]; then
+                        cp -f "$t_dir/GE-Proton9-99-${arch_sfx}.tar.gz" "$out_file"
+                    else
+                        cp -f "$t_dir/evil.tar.gz" "$out_file"
+                    fi
+                    ;;
+            esac
+        }
+
+        # Bad SHA-512 must fail and leave zero installed/stage directories
+        TEST_SUM_MODE="bad"
+        ! proton_install "GE-Proton9-99" --yes >/dev/null 2>&1 || exit 1
+        [ ! -d "$compat_dir/GE-Proton9-99" ] || exit 1
+        ! find "$compat_dir" -maxdepth 1 -name '.proton_stage.*' | grep -q . || exit 1
+
+        # Path traversal tarball must fail and leave zero installed/stage directories
+        TEST_SUM_MODE="good"
+        TEST_TAR_MODE="evil"
+        rm -f "$t_dir/good.sha512sum"
+        printf '%s  GE-Proton9-99-%s.tar.gz\n' "$(sha512sum "$t_dir/evil.tar.gz" | awk '{print $1}')" "$arch_sfx" > "$t_dir/good.sha512sum"
+        ! proton_install "GE-Proton9-99" --yes >/dev/null 2>&1 || exit 1
+        [ ! -d "$compat_dir/GE-Proton9-99" ] || exit 1
+        ! find "$compat_dir" -maxdepth 1 -name '.proton_stage.*' | grep -q . || exit 1
+
+        # Valid SHA-512 + clean tarball succeeds atomically
+        TEST_TAR_MODE="good"
+        printf '%s  GE-Proton9-99-%s.tar.gz\n' "$good_hash" "$arch_sfx" > "$t_dir/good.sha512sum"
+        proton_install "GE-Proton9-99" --yes >/dev/null || exit 1
+        [ -f "$compat_dir/GE-Proton9-99/compatibilitytool.vdf" ] && [ -x "$compat_dir/GE-Proton9-99/proton" ] || exit 1
+        ! find "$compat_dir" -maxdepth 1 -name '.proton_stage.*' | grep -q . || exit 1
+    )
+}
+run_test "Archive & Supply-Chain (WP32 Packet 32B): audit_zip_safety & staged proton_install" test_archive_security_and_staged_proton_contract
+
+# Test 19: WP32 Packet 32C — Runner Directory SSoT, Timeout Guards & Downloader Dedup
+test_runner_ssot_timeouts_and_downloader_dedup_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp32c_XXXXXX")
+    mkdir -p "$t_dir/home/.local/share/Steam/compatibilitytools.d" \
+             "$t_dir/xdg_data/gamectl/runners/GE-Proton-XDG" \
+             "$t_dir/runtime"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_DATA_HOME="$t_dir/xdg_data"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+
+        # 1. Standalone sourcing of 30_downloader.sh without pre-sourcing 10_utils.sh
+        (
+            source "$REPO_ROOT/src/steam/30_downloader.sh"
+            declare -F get_runtime_dir >/dev/null 2>&1 || exit 1
+            declare -F audit_zip_safety >/dev/null 2>&1 || exit 1
+            declare -F atomic_prepend_line >/dev/null 2>&1 || exit 1
+            [ "$(get_runtime_dir)" = "$t_dir/runtime" ] || exit 1
+        ) || exit 1
+
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/runners/40_wrappers.sh"
+        source "$REPO_ROOT/src/diagnostics/60_doctor.sh"
+
+        # 2. list_runner_dirs starts with XDG runners and deduplicates Steam dirs
+        local dirs_out
+        dirs_out=$(list_runner_dirs)
+        [ "$(echo "$dirs_out" | head -n 1)" = "$t_dir/xdg_data/gamectl/runners" ] || exit 1
+        [ "$(echo "$dirs_out" | wc -l)" -eq "$(echo "$dirs_out" | sort -u | wc -l)" ] || exit 1
+
+        # 3. proton_list, doctor_audit, and proton_remove see standalone XDG runner
+        printf '#!/bin/sh\nexit 0\n' > "$t_dir/xdg_data/gamectl/runners/GE-Proton-XDG/proton"
+        chmod +x "$t_dir/xdg_data/gamectl/runners/GE-Proton-XDG/proton"
+        curl() { return 1; }
+        local list_out doc_out
+        list_out=$(proton_list) || exit 1
+        printf '%s\n' "$list_out" | grep -q 'GE-Proton-XDG' || exit 1
+        doc_out=$(doctor_audit || true)
+        printf '%s\n' "$doc_out" | grep -q 'GE-Proton-XDG/proton' || exit 1
+        proton_remove "GE-Proton-XDG" --yes >/dev/null || exit 1
+        [ ! -d "$t_dir/xdg_data/gamectl/runners/GE-Proton-XDG" ] || exit 1
+
+        # 4. Store search curl calls enforce --max-time 15
+        [ "$(grep -c -- '--max-time 15.*storesearch' "$REPO_ROOT/src/tui/70_dashboard.sh")" -eq 2 ] || exit 1
+        grep -q -- '--max-time 15.*storesearch' "$REPO_ROOT/src/steam/30_downloader.sh" || exit 1
+    )
+}
+run_test "Runner SSoT & Network Guard (WP32 Packet 32C): list_runner_dirs, proton_remove XDG, timeouts & dedup" test_runner_ssot_timeouts_and_downloader_dedup_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"
