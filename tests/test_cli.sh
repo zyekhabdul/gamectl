@@ -470,11 +470,26 @@ run_test "AUR Git Packaging: Valid PKGBUILD syntax and .SRCINFO generation" test
 test_debian_packaging_validation() {
     [ -x "$REPO_ROOT/packaging/debian/build-deb.sh" ] && \
     bash "$REPO_ROOT/packaging/debian/build-deb.sh" >/dev/null 2>&1 && \
-    local deb_pkg && \
-    deb_pkg=$(ls "$REPO_ROOT/packaging/debian"/gamectl_*_all.deb 2>/dev/null | head -n 1) && \
+    local expected_arch="all" && \
+    if [ -f "$REPO_ROOT/bin/gamectl-depot-dl" ]; then
+        local elf_info
+        elf_info="$(file -Lb "$REPO_ROOT/bin/gamectl-depot-dl" 2>/dev/null || true)"
+        case "$elf_info" in
+            *x86-64*|*x86_64*) expected_arch="amd64" ;;
+            *"ARM aarch64"*|*aarch64*) expected_arch="arm64" ;;
+            *"Intel 80386"*|*i386*) expected_arch="i386" ;;
+            *) expected_arch="$(dpkg --print-architecture 2>/dev/null || echo amd64)" ;;
+        esac
+    fi && \
+    local deb_pkg deb_info deb_list && \
+    deb_pkg=$(ls "$REPO_ROOT/packaging/debian"/gamectl_*_"${expected_arch}".deb 2>/dev/null | head -n 1) && \
     [ -n "$deb_pkg" ] && [ -f "$deb_pkg" ] && \
-    dpkg-deb -I "$deb_pkg" | grep "Package: gamectl" >/dev/null && \
-    dpkg-deb -c "$deb_pkg" | grep "usr/bin/gamectl-depot-dl" >/dev/null
+    deb_info=$(dpkg-deb -I "$deb_pkg") && \
+    deb_list=$(dpkg-deb -c "$deb_pkg") && \
+    printf '%s\n' "$deb_info" | grep -q "Package: gamectl" && \
+    printf '%s\n' "$deb_info" | grep -q "Architecture: ${expected_arch}" && \
+    printf '%s\n' "$deb_info" | grep -qE "Depends:.*\bzip\b" && \
+    printf '%s\n' "$deb_list" | grep -q "usr/bin/gamectl-depot-dl"
 }
 run_test "Debian Packaging: Valid .deb construction and control metadata" test_debian_packaging_validation
 

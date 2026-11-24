@@ -34,7 +34,7 @@ run_test() {
         FAILED_TESTS=$((FAILED_TESTS + 1))
         echo "    Command: $*"
         echo "    Exit: $exit_code"
-        [ -n "$output" ] && echo "    Output: $output"
+        if [ -n "$output" ]; then echo "    Output: $output"; fi
     fi
 }
 
@@ -1093,7 +1093,9 @@ PY
         ! audit_zip_safety "$t_dir/trav.zip" 2>/dev/null || exit 1
 
         # 2. Staged proton_install: valid SHA-512 succeeds, mismatch & traversal fail atomically
-        local compat_dir="$t_dir/home/.local/share/Steam/compatibilitytools.d"
+        local compat_dir
+        compat_dir="$(get_compat_dir)"
+        mkdir -p "$compat_dir"
         local arch_sfx="x86_64"
         [ "$(uname -m 2>/dev/null || echo x86_64)" = "aarch64" ] && arch_sfx="aarch64"
 
@@ -1262,7 +1264,9 @@ test_wp32_1_hardening_contracts() {
         unset -f atomic_set_kv_file
 
         # 3. proton_install selects arch-matching .sha512sum when opposite arch is listed first
-        local compat_dir="$t_dir/home/.local/share/Steam/compatibilitytools.d"
+        local compat_dir
+        compat_dir="$(get_compat_dir)"
+        mkdir -p "$compat_dir"
         local arch_sfx="x86_64" other_sfx="aarch64"
         if [ "$(uname -m 2>/dev/null || echo x86_64)" = "aarch64" ]; then
             arch_sfx="aarch64"; other_sfx="x86_64"
@@ -1344,6 +1348,192 @@ PY
     )
 }
 run_test "Hardening (WP32.1): newline guard, multi-arch SHA512, tarball symlink audit & list priority" test_wp32_1_hardening_contracts
+
+# Test 21: WP33 Packet 33A — Remote Save Sync Hardening & Active-Game Save Guard
+test_remote_sync_and_active_game_guard_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp33a_XXXXXX")
+    local gdir="$t_dir/ext/My \"Test\" Game"
+    local dry_gdir="$t_dir/ext/Dry \"Only\" Game"
+    mkdir -p "$t_dir/home" "$t_dir/remote_home" "$t_dir/mock_bin" "$t_dir/runtime/active_games" \
+             "$gdir/saves" "$gdir/.save_snapshots/slot1" "$dry_gdir"
+    printf 'local_save_v1\n' > "$gdir/saves/slot.dat"
+    printf 'snap_save_v0\n' > "$gdir/.save_snapshots/slot1/slot.dat"
+
+    cat <<'EOF' > "$t_dir/mock_bin/ssh"
+#!/usr/bin/env bash
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -q|-n|-T|-N|-x|-v|-Y|-A|-a|-C|-f|-g|-k|-M|-O|-s|-t|-V|-X)
+            shift ;;
+        -o|-l|-p|-i|-F|-J|-W|-b|-c|-D|-E|-e|-I|-L|-m|-Q|-R|-S|-w)
+            shift 2 ;;
+        --)
+            shift; break ;;
+        -*)
+            shift ;;
+        *)
+            break ;;
+    esac
+done
+shift || true
+if [ "${MOCK_SSH_FAIL_MKDIR:-0}" = "1" ] && [[ "$*" == *"mkdir -p"* ]]; then
+    exit 42
+fi
+export HOME="$MOCK_REMOTE_HOME"
+if [ "${1:-}" = "rsync" ]; then
+    exec "$@"
+fi
+exec /bin/sh -c "$*"
+EOF
+    chmod +x "$t_dir/mock_bin/ssh"
+
+    local bg_pid=""
+    (
+        trap ' [ -n "$bg_pid" ] && kill "$bg_pid" 2>/dev/null || true; rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export MOCK_REMOTE_HOME="$t_dir/remote_home"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        export PATH="$t_dir/mock_bin:$PATH"
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/runners/50_launcher.sh"
+
+        # 1. sync_save_remote handles spaces & double quotes and resolves remote $HOME
+        local out="" rc=0
+        out=$(sync_save_remote "$gdir" 'My "Test" Game' "mockhost" 2>&1) || rc=$?
+        [ "$rc" -eq 0 ] || exit 1
+        printf '%s\n' "$out" | grep -q '\[VERIFIED\]' || exit 1
+        [ "$(cat "$t_dir/remote_home/Games/My \"Test\" Game/saves/slot.dat")" = "local_save_v1" ] || exit 1
+
+        # 2. pull_save_remote --dry-run does NOT create local saves/ directory
+        mkdir -p "$t_dir/remote_home/Games/Dry \"Only\" Game/saves"
+        printf 'remote_dry\n' > "$t_dir/remote_home/Games/Dry \"Only\" Game/saves/slot.dat"
+        out=$(pull_save_remote "$dry_gdir" 'Dry "Only" Game' "mockhost" --dry-run 2>&1) || exit 1
+        [ ! -d "$dry_gdir/saves" ] || exit 1
+
+        # 3. pull_save_remote (real) pulls remote save
+        printf 'remote_v2\n' > "$t_dir/remote_home/Games/My \"Test\" Game/saves/slot.dat"
+        out=$(pull_save_remote "$gdir" 'My "Test" Game' "mockhost" 2>&1) || exit 1
+        printf '%s\n' "$out" | grep -q '\[VERIFIED\]' || exit 1
+        [ "$(cat "$gdir/saves/slot.dat")" = "remote_v2" ] || exit 1
+
+        # 4. ssh mkdir failure and rsync exit 23 propagate non-zero and emit ZERO [VERIFIED]
+        out=$(MOCK_SSH_FAIL_MKDIR=1 sync_save_remote "$gdir" 'My "Test" Game' "mockhost" 2>&1) && rc=0 || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+        ! printf '%s\n' "$out" | grep -q '\[VERIFIED\]' || exit 1
+
+        rsync() { return 23; }
+        out=$(sync_save_remote "$gdir" 'My "Test" Game' "mockhost" 2>&1) && rc=0 || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+        ! printf '%s\n' "$out" | grep -q '\[VERIFIED\]' || exit 1
+
+        out=$(pull_save_remote "$gdir" 'My "Test" Game' "mockhost" 2>&1) && rc=0 || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+        ! printf '%s\n' "$out" | grep -q '\[VERIFIED\]' || exit 1
+        unset -f rsync
+
+        # 5. Active-game save guard blocks restore_save, pull_save_remote, and sync_save_remote (without --force)
+        sleep 30 &
+        bg_pid=$!
+        printf 'PID=%s\nDIR=%s\n' "$bg_pid" "$gdir" > "$t_dir/runtime/active_games/${bg_pid}.info"
+        [ "$(is_game_active_for_dir "$gdir")" = "$bg_pid" ] || exit 1
+
+        ! restore_save "$gdir" 1 false >/dev/null 2>&1 || exit 1
+        [ "$(cat "$gdir/saves/slot.dat")" = "remote_v2" ] || exit 1
+        ! pull_save_remote "$gdir" 'My "Test" Game' "mockhost" >/dev/null 2>&1 || exit 1
+        ! sync_save_remote "$gdir" 'My "Test" Game' "mockhost" >/dev/null 2>&1 || exit 1
+        sync_save_remote "$gdir" 'My "Test" Game' "mockhost" --force >/dev/null 2>&1 || exit 1
+    )
+}
+run_test "Remote Sync & Active Guard (WP33 Packet 33A): quoting, error propagation, dry-run & active PID guard" test_remote_sync_and_active_game_guard_contract
+
+# Test 22: WP33 Packet 33B — Packaging Architecture Integrity & Freshness Gate
+test_packaging_arch_and_freshness_gate_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp33b_XXXXXX")
+    mkdir -p "$t_dir/scripts" "$t_dir/crates/depot-dl/src" "$t_dir/bin"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        cp -f "$REPO_ROOT/scripts/build-depot-dl.sh" "$t_dir/scripts/build-depot-dl.sh"
+        printf '[package]\nname = "depot-dl"\n' > "$t_dir/crates/depot-dl/Cargo.toml"
+        printf '# lock\n' > "$t_dir/crates/depot-dl/Cargo.lock"
+        printf 'fn main() {}\n' > "$t_dir/crates/depot-dl/src/main.rs"
+        printf '#!/bin/sh\nexit 0\n' > "$t_dir/bin/gamectl-depot-dl"
+        chmod +x "$t_dir/bin/gamectl-depot-dl"
+
+        # 1. Fresh binary passes --check; stale binary (newer Rust source) fails --check
+        touch -d "2026-01-01 00:00:00" "$t_dir/crates/depot-dl/Cargo.toml" "$t_dir/crates/depot-dl/Cargo.lock" "$t_dir/crates/depot-dl/src/main.rs"
+        touch -d "2026-01-02 00:00:00" "$t_dir/bin/gamectl-depot-dl"
+        bash "$t_dir/scripts/build-depot-dl.sh" --check >/dev/null 2>&1 || exit 1
+
+        touch -d "2026-01-03 00:00:00" "$t_dir/crates/depot-dl/src/main.rs"
+        local stale_out="" stale_rc=0
+        stale_out=$(bash "$t_dir/scripts/build-depot-dl.sh" --check 2>&1) || stale_rc=$?
+        [ "$stale_rc" -ne 0 ] || exit 1
+        printf '%s\n' "$stale_out" | grep -q 'stale' || exit 1
+
+        # 2. Pure Python wheel excludes native ELF
+        grep -qx 'include src/gamectl_runner/bin/gamectl' "$REPO_ROOT/MANIFEST.in" || exit 1
+        ! grep -q 'recursive-include src/gamectl_runner/bin' "$REPO_ROOT/MANIFEST.in" || exit 1
+        [ ! -e "$REPO_ROOT/src/gamectl_runner/bin/gamectl-depot-dl" ] || exit 1
+
+        # 3. Arch .SRCINFO files reflect x86_64 instead of any
+        grep -q 'arch = x86_64' "$REPO_ROOT/packaging/arch/.SRCINFO" || exit 1
+        ! grep -q 'arch = any' "$REPO_ROOT/packaging/arch/.SRCINFO" || exit 1
+        grep -q 'arch = x86_64' "$REPO_ROOT/packaging/aur-git/.SRCINFO" || exit 1
+        ! grep -q 'arch = any' "$REPO_ROOT/packaging/aur-git/.SRCINFO" || exit 1
+
+        # 4. Debian package carries native arch matching ELF and declares zip dependency
+        local deb_pkg
+        deb_pkg=$(ls "$REPO_ROOT/packaging/debian"/gamectl_*_amd64.deb 2>/dev/null | head -n 1)
+        [ -n "$deb_pkg" ] && [ -f "$deb_pkg" ] || exit 1
+        dpkg-deb -I "$deb_pkg" | grep -q 'Architecture: amd64' || exit 1
+        dpkg-deb -I "$deb_pkg" | grep -qE 'Depends:.*\bzip\b' || exit 1
+    )
+}
+run_test "Packaging & Freshness (WP33 Packet 33B): .deb arch/zip, .SRCINFO x86_64, pure wheel & depot-dl freshness" test_packaging_arch_and_freshness_gate_contract
+
+# Test 23: WP33 Packet 33C — Standalone-First get_compat_dir() & Optional/Strict shellcheck Lint
+test_standalone_compat_dir_and_lint_gate_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp33c_XXXXXX")
+    mkdir -p "$t_dir/home" "$t_dir/xdg_data" "$t_dir/no_sc_bin"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_DATA_HOME="$t_dir/xdg_data"
+        unset STEAM_ROOT GAMECTL_RUNNER_DIR
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/runners/40_wrappers.sh"
+
+        # 1. Standalone machine without Steam falls back to XDG_DATA_HOME/gamectl/runners
+        [ "$(get_compat_dir)" = "$t_dir/xdg_data/gamectl/runners" ] || exit 1
+
+        # 2. Explicit GAMECTL_RUNNER_DIR override takes priority in both get_compat_dir and list_runner_dirs
+        export GAMECTL_RUNNER_DIR="$t_dir/custom_runners"
+        [ "$(get_compat_dir)" = "$t_dir/custom_runners" ] || exit 1
+        [ "$(list_runner_dirs | head -n 1)" = "$t_dir/custom_runners" ] || exit 1
+
+        # 3. make lint passes without shellcheck; STRICT_LINT=1 make lint fails deterministically
+        local cmd_tool tool_path
+        for cmd_tool in bash sh make dirname basename; do
+            tool_path="$(command -v "$cmd_tool" 2>/dev/null || true)"
+            [ -n "$tool_path" ] && ln -sf "$tool_path" "$t_dir/no_sc_bin/$cmd_tool"
+        done
+        local lint_out="" lint_rc=0
+        lint_out=$(PATH="$t_dir/no_sc_bin" make -C "$REPO_ROOT" lint 2>&1) || lint_rc=$?
+        [ "$lint_rc" -eq 0 ] || exit 1
+        printf '%s\n' "$lint_out" | grep -q 'shellcheck not found' || exit 1
+
+        local strict_rc=0
+        PATH="$t_dir/no_sc_bin" STRICT_LINT=1 make -C "$REPO_ROOT" lint >/dev/null 2>&1 || strict_rc=$?
+        [ "$strict_rc" -ne 0 ] || exit 1
+    )
+}
+run_test "Standalone Runner & Lint (WP33 Packet 33C): XDG get_compat_dir fallback & STRICT_LINT gate" test_standalone_compat_dir_and_lint_gate_contract
 
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
