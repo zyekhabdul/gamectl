@@ -73,3 +73,7 @@ jobs:
           ./tests/test_remediation.sh
           ./tests/test_tui_ergonomics.sh
           ./tests/test_depot_filter.sh
+          ./tests/test_hubcap.sh
+
+      - name: Execute Python safety test suites
+        run: python3 -m unittest discover -s tests -p "test_*.py" -v
