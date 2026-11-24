@@ -2581,6 +2581,57 @@ EOF
 }
 run_test "Game Developer Mode & Engine Profiler (WP36C)" test_wp36c_dev_profiler_contract
 
+test_cli_alias_and_ci_gates_contract() {
+    local main_sh="$REPO_ROOT/src/main.sh"
+    local makefile="$REPO_ROOT/Makefile"
+    local ci_yml="$REPO_ROOT/.github/workflows/ci.yml"
+    local bin_gamectl="$REPO_ROOT/bin/gamectl"
+
+    # 1. No duplicate add-steam case branch pattern in src/main.sh
+    local branch_matches
+    branch_matches=$(grep -cE '^[[:space:]]*[^#]*add-steam[^#]*\)$' "$main_sh" || true)
+    [ "$branch_matches" -eq 1 ] || return 1
+
+    local unlock_branch
+    unlock_branch=$(grep -E '^[[:space:]]*unlock\|' "$main_sh" || true)
+    [ -n "$unlock_branch" ] || return 1
+    case "$unlock_branch" in
+        *add-steam*) return 1 ;;
+    esac
+
+    # 2. ShellCheck SC2221/SC2222 clean on src/main.sh
+    if command -v shellcheck >/dev/null 2>&1; then
+        shellcheck -s bash -i SC2221,SC2222 "$main_sh" >/dev/null || return 1
+    fi
+
+    # 3. Runtime CLI dispatch on bundled bin/gamectl
+    local t_home
+    t_home="$(mktemp -d "${TMPDIR:-/tmp}/gamectl_alias_test.XXXXXX")"
+    (
+        trap 'rm -rf "$t_home"' EXIT
+        local out rc
+
+        out=$(HOME="$t_home" "$bin_gamectl" add-steam < /dev/null 2>&1) && rc=0 || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+        printf '%s\n' "$out" | grep -Fq 'Usage: gamectl add-to-steam' || exit 1
+
+        local cmd_alias
+        for cmd_alias in entitle unlock; do
+            out=$(HOME="$t_home" "$bin_gamectl" "$cmd_alias" < /dev/null 2>&1) && rc=0 || rc=$?
+            [ "$rc" -ne 0 ] || exit 1
+            printf '%s\n' "$out" | grep -Fq 'Usage: gamectl entitle' || exit 1
+        done
+    ) || return 1
+
+    # 4. Makefile test recipe includes test_depot_filter.sh
+    awk '/^test:/{flag=1;next} /^[^ \t]/{flag=0} flag' "$makefile" | grep -Fq './tests/test_depot_filter.sh' || return 1
+
+    # 5. CI workflow enforces build-depot-dl.sh --force and test_depot_filter.sh
+    grep -Fq './scripts/build-depot-dl.sh --force' "$ci_yml" || return 1
+    grep -Fq './tests/test_depot_filter.sh' "$ci_yml" || return 1
+}
+run_test "CLI Alias Collision & CI Test Gates Contract" test_cli_alias_and_ci_gates_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"
