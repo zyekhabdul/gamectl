@@ -2381,6 +2381,206 @@ PY
 }
 run_test "Remote Sync Resolver, SSH Diagnostics & Rclone (WP35)" test_wp35_remote_sync_resolver_ssh_diagnostics_and_rclone_contract
 
+# Test 29: WP36B Wine prefix save auto-locate, noise/escape guards, and backup/restore roundtrip
+test_wp36b_prefix_save_auto_locate_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "/tmp/gamectl_wp36b_test.XXXXXX")
+    local bg_pid=""
+
+    (
+        trap '[ -n "$bg_pid" ] && kill "$bg_pid" 2>/dev/null || true; rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        mkdir -p -m 700 "$HOME" "$XDG_RUNTIME_DIR/active_games"
+
+        local gdir="$t_dir/MyPrefixGame"
+        local users="$gdir/pfx/drive_c/users"
+        local udir="$users/steamuser"
+        mkdir -p \
+            "$udir/AppData/Local/StudioA" \
+            "$udir/AppData/Roaming/GameB" \
+            "$udir/Documents/My Games/GameC" \
+            "$udir/Saved Games/GameD" \
+            "$udir/AppData/Local/Microsoft" \
+            "$udir/AppData/Local/Temp" \
+            "$udir/AppData/Local/NVIDIA" \
+            "$udir/AppData/Roaming/Goldberg SteamEmu Saves" \
+            "$udir/AppData/Local/EmptyMod" \
+            "$udir/AppData/Roaming/BadGame" \
+            "$t_dir/outside_secret"
+
+        printf 'v1_local\n' > "$udir/AppData/Local/StudioA/save1.dat"
+        printf 'v1_roaming\n' > "$udir/AppData/Roaming/GameB/profile.bin"
+        printf 'v1_docs\n' > "$udir/Documents/My Games/GameC/slot.sav"
+        printf 'v1_saved\n' > "$udir/Saved Games/GameD/world.dat"
+        printf 'noise\n' > "$udir/AppData/Local/Microsoft/noise.dat"
+        printf 'noise\n' > "$udir/AppData/Local/Temp/tmp.dat"
+        printf 'noise\n' > "$udir/AppData/Local/NVIDIA/shader.bin"
+        printf 'gbe\n' > "$udir/AppData/Roaming/Goldberg SteamEmu Saves/gbe.dat"
+        printf 'secret\n' > "$t_dir/outside_secret/secret.txt"
+        printf 'ok\n' > "$udir/AppData/Roaming/BadGame/normal.dat"
+
+        ln -s "$udir/Documents" "$udir/My Documents"
+        ln -s "$t_dir/outside_secret" "$udir/AppData/Local/EscapeDir"
+        ln -s "$t_dir/outside_secret/secret.txt" "$udir/AppData/Roaming/BadGame/escape.dat"
+
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+
+        local disc_out err_f="$t_dir/err.txt"
+        disc_out=$(discover_prefix_saves "$gdir" 2>"$err_f") || exit 1
+        local expected
+        expected=$(printf '%s\n' \
+            "steamuser/AppData/Local/StudioA" \
+            "steamuser/AppData/Roaming/GameB" \
+            "steamuser/Documents/My Games/GameC" \
+            "steamuser/Saved Games/GameD")
+        [ "$disc_out" = "$expected" ] || { echo "Unexpected discovery: $disc_out"; exit 1; }
+        grep -Fq 'Rejected escaping prefix save' "$err_f" || exit 1
+        [ ! -e "$gdir/saves" ] || exit 1
+
+        # Active-game guard blocks collect & restore
+        sleep 30 &
+        bg_pid=$!
+        printf 'PID=%s\nDIR=%s\n' "$bg_pid" "$gdir" > "$XDG_RUNTIME_DIR/active_games/${bg_pid}.info"
+        ! collect_prefix_saves "$gdir" true 2>/dev/null || exit 1
+        ! restore_prefix_saves "$gdir" true 2>/dev/null || exit 1
+        kill "$bg_pid" 2>/dev/null || true
+        wait "$bg_pid" 2>/dev/null || true
+        bg_pid=""
+
+        # Collect -> backup -> overwrite -> restore -> restore_prefix_saves roundtrip
+        collect_prefix_saves "$gdir" true || exit 1
+        [ "$(cat "$gdir/saves/_prefix_saves/steamuser/AppData/Local/StudioA/save1.dat")" = "v1_local" ] || exit 1
+        [ ! -e "$gdir/saves/_prefix_saves/steamuser/AppData/Local/EscapeDir" ] || exit 1
+
+        backup_save "$gdir" true || exit 1
+        printf 'corrupted\n' > "$udir/AppData/Local/StudioA/save1.dat"
+        restore_save "$gdir" 1 true || exit 1
+        restore_prefix_saves "$gdir" true || exit 1
+        [ "$(cat "$udir/AppData/Local/StudioA/save1.dat")" = "v1_local" ] || exit 1
+
+        # CLI entrypoint parity via compiled bin/gamectl
+        "$REPO_ROOT/scripts/build.sh" >/dev/null
+        local cli_out
+        cli_out=$("$REPO_ROOT/bin/gamectl" scan-saves "$gdir" 2>/dev/null) || exit 1
+        [ "$cli_out" = "$expected" ] || exit 1
+        rm -rf "$gdir/saves/_prefix_saves"
+        "$REPO_ROOT/bin/gamectl" collect-saves "$gdir" >/dev/null || exit 1
+        [ "$(cat "$gdir/saves/_prefix_saves/steamuser/Saved Games/GameD/world.dat")" = "v1_saved" ] || exit 1
+    )
+}
+run_test "Wine Prefix Save Auto-Locate & Safety Contracts (WP36B)" test_wp36b_prefix_save_auto_locate_contract
+
+# Test 30: WP36C Game Developer Mode & Engine Profiler contracts
+test_wp36c_dev_profiler_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "/tmp/gamectl_wp36c_test.XXXXXX")
+
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        mkdir -p -m 700 "$HOME/.config/gamectl" "$XDG_RUNTIME_DIR"
+        unset WINEDEBUG VK_LOADER_DEBUG GAMECTL_DEV_WINEDEBUG GAMECTL_DEV_VK_DEBUG GAMECTL_DEV_GBE_LOG
+
+        local gdir="$t_dir/DevGame"
+        mkdir -p "$gdir"
+        printf 'gamemode=1\n' > "$gdir/.wrappers"
+
+        cat <<'EOF' > "$gdir/devprobe.sh"
+#!/usr/bin/env bash
+printf 'CHILD_WINEDEBUG=%s\nCHILD_VK=%s\nCHILD_GBE=%s\n' \
+    "${WINEDEBUG:-UNSET}" "${VK_LOADER_DEBUG:-UNSET}" "${GAMECTL_GBE_LOG:-0}"
+sleep 0.2
+EOF
+        chmod +x "$gdir/devprobe.sh"
+
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/steam/25_identity.sh"
+        source "$REPO_ROOT/src/steam/30_downloader.sh"
+        source "$REPO_ROOT/src/runners/40_wrappers.sh"
+        source "$REPO_ROOT/src/runners/50_launcher.sh"
+
+        # 1. Default OFF: zero env pollution, no trace dir
+        resolve_dev_profiler_env "$gdir" 1
+        [ "$GAMECTL_DEV_ACTIVE" -eq 0 ] || exit 1
+        [ -z "$GAMECTL_DEV_RESOLVED_WINEDEBUG" ] || exit 1
+        [ -z "$GAMECTL_DEV_RESOLVED_VK_DEBUG" ] || exit 1
+        [ "$GAMECTL_DEV_RESOLVED_GBE_LOG" -eq 0 ] || exit 1
+        [ -z "$GAMECTL_DEV_TRACE_LOG" ] || exit 1
+        [ ! -d "$(get_runtime_dir)/dev_traces" ] || exit 1
+        [ -z "${WINEDEBUG+x}" ] || exit 1
+        [ -z "${VK_LOADER_DEBUG+x}" ] || exit 1
+
+        # 2. CLI persistence basic/full/status/off preserves unrelated keys
+        "$REPO_ROOT/scripts/build.sh" >/dev/null
+        "$REPO_ROOT/bin/gamectl" dev-profile "$gdir" basic >/dev/null || exit 1
+        grep -q '^gamemode=1$' "$gdir/.wrappers" || exit 1
+        resolve_dev_profiler_env "$gdir" 1
+        [ "$GAMECTL_DEV_ACTIVE" -eq 1 ] || exit 1
+        [ "$GAMECTL_DEV_RESOLVED_WINEDEBUG" = "+loaddll,+seh" ] || exit 1
+        [ -z "$GAMECTL_DEV_RESOLVED_VK_DEBUG" ] || exit 1
+        [ "$GAMECTL_DEV_RESOLVED_GBE_LOG" -eq 1 ] || exit 1
+        [[ "$GAMECTL_DEV_TRACE_LOG" == "$(get_runtime_dir)/dev_traces/"*.log ]] || exit 1
+
+        "$REPO_ROOT/bin/gamectl" dev-profile "$gdir" full >/dev/null || exit 1
+        resolve_dev_profiler_env "$gdir" 1
+        [ "$GAMECTL_DEV_RESOLVED_WINEDEBUG" = "+relay,+seh,+loaddll" ] || exit 1
+        [ "$GAMECTL_DEV_RESOLVED_VK_DEBUG" = "all" ] || exit 1
+        [ "$GAMECTL_DEV_RESOLVED_GBE_LOG" -eq 1 ] || exit 1
+
+        local status_out
+        status_out=$("$REPO_ROOT/bin/gamectl" dev-profile "$gdir" status) || exit 1
+        echo "$status_out" | grep -Fq 'resolved_winedebug=+relay,+seh,+loaddll' || exit 1
+        echo "$status_out" | grep -Fq 'resolved_vk_debug=all' || exit 1
+
+        # 3. Respect explicit user WINEDEBUG / VK_LOADER_DEBUG
+        WINEDEBUG="+err" VK_LOADER_DEBUG="error" resolve_dev_profiler_env "$gdir" 1
+        [ -z "$GAMECTL_DEV_RESOLVED_WINEDEBUG" ] || exit 1
+        [ "$GAMECTL_DEV_RESPECTED_USER_WINEDEBUG" -eq 1 ] || exit 1
+        [ -z "$GAMECTL_DEV_RESOLVED_VK_DEBUG" ] || exit 1
+        [ "$GAMECTL_DEV_RESPECTED_USER_VK_DEBUG" -eq 1 ] || exit 1
+
+        # 4. Custom WINEDEBUG sanitization
+        GAMECTL_DEV_WINEDEBUG='+heap;rm -rf' resolve_dev_profiler_env "$gdir" 1
+        [ "$GAMECTL_DEV_RESOLVED_WINEDEBUG" = "+heaprm-rf" ] || exit 1
+
+        # 5. Launch integration exports only into child and creates trace log
+        launch_game "$gdir" "devprobe.sh" "DevProbe" --no-scope >/dev/null || exit 1
+        local gpid="$GAMECTL_LAST_LAUNCH_PID"
+        local glog="$GAMECTL_LAST_LOG_FILE"
+        local tlog="$GAMECTL_DEV_TRACE_LOG"
+        [ -z "${WINEDEBUG+x}" ] || exit 1
+        [ -z "${VK_LOADER_DEBUG+x}" ] || exit 1
+        for _ in $(seq 1 30); do
+            kill -0 "$gpid" 2>/dev/null || break
+            sleep 0.1
+        done
+        sleep 0.3
+        grep -Fq 'CHILD_WINEDEBUG=+relay,+seh,+loaddll' "$glog" || exit 1
+        grep -Fq 'CHILD_VK=all' "$glog" || exit 1
+        grep -Fq 'CHILD_GBE=1' "$glog" || exit 1
+        grep -Fq 'CHILD_WINEDEBUG=+relay,+seh,+loaddll' "$tlog" || exit 1
+
+        # 6. Turning off leaves child env clean
+        "$REPO_ROOT/bin/gamectl" dev-profile "$gdir" off >/dev/null || exit 1
+        launch_game "$gdir" "devprobe.sh" "DevProbeOff" --no-scope >/dev/null || exit 1
+        gpid="$GAMECTL_LAST_LAUNCH_PID"
+        glog="$GAMECTL_LAST_LOG_FILE"
+        for _ in $(seq 1 30); do
+            kill -0 "$gpid" 2>/dev/null || break
+            sleep 0.1
+        done
+        grep -Fq 'CHILD_WINEDEBUG=UNSET' "$glog" || exit 1
+        grep -Fq 'CHILD_VK=UNSET' "$glog" || exit 1
+        grep -Fq 'CHILD_GBE=0' "$glog" || exit 1
+    )
+}
+run_test "Game Developer Mode & Engine Profiler (WP36C)" test_wp36c_dev_profiler_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"
