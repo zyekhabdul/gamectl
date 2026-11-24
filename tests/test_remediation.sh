@@ -2085,6 +2085,302 @@ PY
 }
 run_test "Unified Ctrl-S Remote Sync Palette (WP34 Packet 34D): Push, Pull, Dry-Run & Config routing" test_wp34d_ctrl_s_remote_sync_palette_contract
 
+# Test 28: WP35 — Remote Sync Resolver, Honest SSH Diagnostics, Custom SSH Paths & Rclone Backend
+test_wp35_remote_sync_resolver_ssh_diagnostics_and_rclone_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp35_XXXXXX")
+    mkdir -p "$t_dir/home" "$t_dir/remote_home" "$t_dir/rclone_store" "$t_dir/runtime/active_games" \
+             "$t_dir/mock_bin" "$t_dir/captures" "$t_dir/MyGame/saves" "$t_dir/DryGame"
+    printf 'save_local_v1\n' > "$t_dir/MyGame/saves/data.sav"
+
+    # Mock ssh: logs args, optionally returns targeted auth/hostkey/dns errors, or runs sh -c against MOCK_REMOTE_HOME
+    cat <<'EOF' > "$t_dir/mock_bin/ssh"
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$MOCK_SSH_ARGS_LOG"
+case "${MOCK_SSH_MODE:-ok}" in
+    auth)
+        echo "aomiqaza@100.101.15.31: Permission denied (publickey)." >&2
+        exit 255
+        ;;
+    hostkey)
+        echo "Host key verification failed." >&2
+        exit 255
+        ;;
+    dns)
+        echo "ssh: Could not resolve hostname badhost: Name or service not known" >&2
+        exit 255
+        ;;
+esac
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -q|-n|-T|-N|-x|-v|-Y|-A|-a|-C|-f|-g|-k|-M|-O|-s|-t|-V|-X)
+            shift ;;
+        -o|-l|-p|-i|-F|-J|-W|-b|-c|-D|-E|-e|-I|-L|-m|-Q|-R|-S|-w)
+            shift 2 ;;
+        --)
+            shift; break ;;
+        -*)
+            shift ;;
+        *)
+            break ;;
+    esac
+done
+shift || true
+export HOME="$MOCK_REMOTE_HOME"
+if [ "${1:-}" = "rsync" ]; then
+    exec "$@"
+fi
+exec /bin/sh -c "$*"
+EOF
+    chmod +x "$t_dir/mock_bin/ssh"
+
+    # Mock rclone backed by $MOCK_RCLONE_STORE
+    cat <<'EOF' > "$t_dir/mock_bin/rclone"
+#!/usr/bin/env bash
+sub="${1:-}"
+shift || true
+case "$sub" in
+    listremotes)
+        printf 'gdrive:\nproton:\n'
+        exit 0
+        ;;
+    lsf)
+        while [ $# -gt 0 ]; do
+            [ "$1" = "--" ] && { shift; break; }
+            shift
+        done
+        target="${1:-}"
+        rel="${target#*:}"
+        rel="${rel#/}"
+        real_dir="$MOCK_RCLONE_STORE/${target%%:*}/$rel"
+        if [ ! -d "$real_dir" ]; then
+            echo "ERROR : error listing: directory not found" >&2
+            exit 3
+        fi
+        ls -1 "$real_dir"
+        exit 0
+        ;;
+    copy)
+        is_dry=false
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --dry-run) is_dry=true; shift ;;
+                --) shift; break ;;
+                --exclude|--contimeout|--timeout|--retries|--low-level-retries) shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        src="${1:-}"
+        dst="${2:-}"
+        map_path() {
+            local p="$1"
+            if [[ "$p" == *:* ]]; then
+                local r="${p%%:*}"
+                local rel="${p#*:}"
+                rel="${rel#/}"
+                printf '%s/%s/%s' "$MOCK_RCLONE_STORE" "$r" "$rel"
+            else
+                printf '%s' "$p"
+            fi
+        }
+        src_fs=$(map_path "$src")
+        dst_fs=$(map_path "$dst")
+        if [ ! -d "$src_fs" ]; then
+            echo "ERROR : source directory not found: $src" >&2
+            exit 3
+        fi
+        if [ "$is_dry" = true ]; then
+            echo "NOTICE: dry-run simulated copy $src -> $dst"
+            exit 0
+        fi
+        mkdir -p "$dst_fs"
+        cp -a "$src_fs/." "$dst_fs/"
+        exit 0
+        ;;
+esac
+exit 1
+EOF
+    chmod +x "$t_dir/mock_bin/rclone"
+
+    local bg_pid=""
+    (
+        trap '[ -n "$bg_pid" ] && kill "$bg_pid" 2>/dev/null || true; rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export MOCK_REMOTE_HOME="$t_dir/remote_home"
+        export MOCK_RCLONE_STORE="$t_dir/rclone_store"
+        export MOCK_SSH_ARGS_LOG="$t_dir/ssh_args.log"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        export PATH="$t_dir/mock_bin:$PATH"
+        unset GAMECTL_REMOTE_HOST GAMECTL_COMPANION_HOST GAMECTL_SYNC_HOST GAMECTL_TUF_HOST GAMECTL_SSH_TIMEOUT
+
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/runners/50_launcher.sh"
+        source "$REPO_ROOT/src/tui/70_dashboard.sh"
+
+        local out_f="$t_dir/out.txt" err_f="$t_dir/err.txt" rc=0
+
+        # 1. Honest SSH diagnostics + ConnectTimeout default 5s and override
+        MOCK_SSH_MODE=auth sync_save_remote "$t_dir/MyGame" "MyGame" "serv" >"$out_f" 2>"$err_f" && rc=0 || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+        grep -Fq '[ERROR] SSH authentication failed' "$err_f" || exit 1
+        grep -Fq 'ssh-add' "$err_f" || exit 1
+        ! grep -Fq 'offline or unreachable' "$err_f" || exit 1
+        grep -Fq 'ConnectTimeout=5' "$MOCK_SSH_ARGS_LOG" || exit 1
+
+        : > "$MOCK_SSH_ARGS_LOG"
+        GAMECTL_SSH_TIMEOUT=9 MOCK_SSH_MODE=hostkey sync_save_remote "$t_dir/MyGame" "MyGame" "serv" >"$out_f" 2>"$err_f" && rc=0 || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+        grep -Fq '[ERROR] SSH host key verification failed' "$err_f" || exit 1
+        grep -Fq 'ConnectTimeout=9' "$MOCK_SSH_ARGS_LOG" || exit 1
+
+        MOCK_SSH_MODE=dns sync_save_remote "$t_dir/MyGame" "MyGame" "badhost" >"$out_f" 2>"$err_f" && rc=0 || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+        grep -Fq '[ERROR] SSH hostname' "$err_f" || exit 1
+
+        # 2. SSH custom base path (mockhost:~/Trash/gamectl-testing & user@mockhost:~/Trash/gamectl-testing)
+        export MOCK_SSH_MODE=ok
+        sync_save_remote "$t_dir/MyGame" "MyGame" "mockhost:~/Trash/gamectl-testing" >"$out_f" 2>"$err_f" || exit 1
+        [ "$(cat "$t_dir/remote_home/Trash/gamectl-testing/MyGame/saves/data.sav")" = "save_local_v1" ] || exit 1
+
+        printf 'save_remote_v2\n' > "$t_dir/remote_home/Trash/gamectl-testing/MyGame/saves/data.sav"
+        mkdir -p "$t_dir/remote_home/Trash/gamectl-testing/DryGame/saves"
+        printf 'dry_val\n' > "$t_dir/remote_home/Trash/gamectl-testing/DryGame/saves/data.sav"
+        pull_save_remote "$t_dir/DryGame" "DryGame" "aomiqaza@mockhost:~/Trash/gamectl-testing" --dry-run >"$out_f" 2>"$err_f" || exit 1
+        [ ! -d "$t_dir/DryGame/saves" ] || exit 1
+
+        pull_save_remote "$t_dir/MyGame" "MyGame" "aomiqaza@mockhost:~/Trash/gamectl-testing" >"$out_f" 2>"$err_f" || exit 1
+        [ "$(cat "$t_dir/MyGame/saves/data.sav")" = "save_remote_v2" ] || exit 1
+        [ "$(cat "$t_dir/MyGame/.save_snapshots/slot1/data.sav")" = "save_local_v1" ] || exit 1
+
+        # Path traversal guard on SSH custom path
+        ! sync_save_remote "$t_dir/MyGame" "MyGame" "mockhost:~/../etc" >"$out_f" 2>"$err_f" || exit 1
+        grep -Fq 'path traversal' "$err_f" || exit 1
+
+        # 3. rclone backend: default path (gdrive:), custom prefix (gdrive:Trash/gamectl-testing), explicit rclone:gdrive:sub/dir
+        sync_save_remote "$t_dir/MyGame" "MyGame" "gdrive:" >"$out_f" 2>"$err_f" || exit 1
+        [ "$(cat "$t_dir/rclone_store/gdrive/gamectl-saves/MyGame/saves/data.sav")" = "save_remote_v2" ] || exit 1
+
+        sync_save_remote "$t_dir/MyGame" "MyGame" "gdrive:Trash/gamectl-testing" >"$out_f" 2>"$err_f" || exit 1
+        [ "$(cat "$t_dir/rclone_store/gdrive/Trash/gamectl-testing/MyGame/saves/data.sav")" = "save_remote_v2" ] || exit 1
+
+        sync_save_remote "$t_dir/MyGame" "MyGame" "rclone:gdrive:sub/dir" >"$out_f" 2>"$err_f" || exit 1
+        [ "$(cat "$t_dir/rclone_store/gdrive/sub/dir/MyGame/saves/data.sav")" = "save_remote_v2" ] || exit 1
+
+        # rclone pull --dry-run must NOT create DryGame/saves; missing remote dir must fail to stderr without [VERIFIED]
+        mkdir -p "$t_dir/rclone_store/gdrive/Trash/gamectl-testing/DryGame/saves"
+        printf 'rclone_dry\n' > "$t_dir/rclone_store/gdrive/Trash/gamectl-testing/DryGame/saves/data.sav"
+        pull_save_remote "$t_dir/DryGame" "DryGame" "gdrive:Trash/gamectl-testing" --dry-run >"$out_f" 2>"$err_f" || exit 1
+        [ ! -d "$t_dir/DryGame/saves" ] || exit 1
+
+        ! pull_save_remote "$t_dir/DryGame" "DryGame" "gdrive:missing-prefix" >"$out_f" 2>"$err_f" || exit 1
+        grep -Fq '[ERROR] Remote saves directory not found or inaccessible' "$err_f" || exit 1
+        ! grep -Fq '[VERIFIED]' "$out_f" || exit 1
+
+        # rclone real pull creates pre-pull backup snapshot and pulls remote state
+        printf 'rclone_v3\n' > "$t_dir/rclone_store/gdrive/Trash/gamectl-testing/MyGame/saves/data.sav"
+        pull_save_remote "$t_dir/MyGame" "MyGame" "gdrive:Trash/gamectl-testing" >"$out_f" 2>"$err_f" || exit 1
+        [ "$(cat "$t_dir/MyGame/saves/data.sav")" = "rclone_v3" ] || exit 1
+        [ "$(cat "$t_dir/MyGame/.save_snapshots/slot1/data.sav")" = "save_remote_v2" ] || exit 1
+
+        # rclone rejects unknown remote and '~' prefix
+        ! sync_save_remote "$t_dir/MyGame" "MyGame" "nonexistent:" >"$out_f" 2>"$err_f" || exit 1
+        grep -Fq 'not found' "$err_f" || exit 1
+        ! sync_save_remote "$t_dir/MyGame" "MyGame" "gdrive:~/bad" >"$out_f" 2>"$err_f" || exit 1
+        grep -Fq "cannot start with '~'" "$err_f" || exit 1
+
+        # Active-game guard blocks rclone push (unless --force) and pull
+        sleep 30 &
+        bg_pid=$!
+        printf 'PID=%s\nDIR=%s\n' "$bg_pid" "$t_dir/MyGame" > "$t_dir/runtime/active_games/${bg_pid}.info"
+        ! sync_save_remote "$t_dir/MyGame" "MyGame" "gdrive:Trash/gamectl-testing" >/dev/null 2>&1 || exit 1
+        ! pull_save_remote "$t_dir/MyGame" "MyGame" "gdrive:Trash/gamectl-testing" >/dev/null 2>&1 || exit 1
+        sync_save_remote "$t_dir/MyGame" "MyGame" "gdrive:Trash/gamectl-testing" --force >/dev/null 2>&1 || exit 1
+        kill "$bg_pid" 2>/dev/null || true
+        wait "$bg_pid" 2>/dev/null || true
+        bg_pid=""
+
+        # 4. TUI config validation rejects unknown_remote: and saves serv:~/Trash/gamectl-testing & gdrive:Trash/gamectl-testing
+        cat <<'EOF' > "$t_dir/mock_bin/fzf"
+#!/usr/bin/env bash
+cat >/dev/null
+cnt_file="$HOME/fzf_wp35_cnt"
+idx=0
+[ -f "$cnt_file" ] && idx=$(cat "$cnt_file")
+echo $((idx + 1)) > "$cnt_file"
+case "$idx" in
+    0) printf 'config\tConfigure Remote Host\n'; exit 0 ;;
+    1) printf 'serv:~/Trash/gamectl-testing\n'; exit 0 ;;
+    2) printf 'config\tConfigure Remote Host\n'; exit 0 ;;
+    3) printf 'unknown_remote:\n'; exit 0 ;;
+    4) printf 'config\tConfigure Remote Host\n'; exit 0 ;;
+    5) printf 'gdrive:Trash/gamectl-testing\n'; exit 0 ;;
+    *) exit 130 ;;
+esac
+EOF
+        chmod +x "$t_dir/mock_bin/fzf"
+
+        python3 - "$REPO_ROOT" "$t_dir" <<'PY' || exit 1
+import errno, os, pty, select, signal, sys, time
+
+repo_root, t_dir = sys.argv[1], sys.argv[2]
+pid, fd = pty.fork()
+if pid == 0:
+    os.environ["HOME"] = f"{t_dir}/home"
+    os.environ["XDG_RUNTIME_DIR"] = f"{t_dir}/runtime"
+    os.environ["PATH"] = f"{t_dir}/mock_bin:" + os.environ.get("PATH", "")
+    os.environ["TEST_OUT_DIR"] = t_dir
+    script = '''
+source "$1/src/core/00_header.sh"
+source "$1/src/core/10_utils.sh"
+source "$1/src/steam/20_discovery.sh"
+source "$1/src/runners/40_wrappers.sh"
+source "$1/src/runners/50_launcher.sh"
+source "$1/src/tui/70_dashboard.sh"
+tui_modal_notice() {
+    printf '%s|%s\\n' "$1" "${2//$'\n'/ }" >> "$TEST_OUT_DIR/wp35_notices.log"
+    return 0
+}
+remote_sync_interactive "$TEST_OUT_DIR/MyGame" "MyGame"
+'''
+    os.execvp("bash", ["bash", "-c", script, "_", repo_root])
+
+output = bytearray()
+status = None
+try:
+    deadline = time.monotonic() + 8.0
+    while time.monotonic() < deadline:
+        if select.select([fd], [], [], 0.05)[0]:
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError as err:
+                if err.errno != errno.EIO:
+                    raise
+                chunk = b""
+            output.extend(chunk)
+        done, status_now = os.waitpid(pid, os.WNOHANG)
+        if done:
+            status = status_now
+            break
+finally:
+    if status is None:
+        os.killpg(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+    os.close(fd)
+
+assert status is not None and os.waitstatus_to_exitcode(status) == 0, f"TUI config validation failed: {bytes(output)!r}"
+with open(f"{t_dir}/wp35_notices.log") as f:
+    notices = f.read()
+assert "Remote Companion Host|Saved remote companion host:\\nserv:~/Trash/gamectl-testing" in notices, notices
+assert "Invalid Remote Target|" in notices and "unknown_remote:" in notices, notices
+assert "Remote Companion Host|Saved remote companion host:\\ngdrive:Trash/gamectl-testing" in notices, notices
+with open(f"{t_dir}/home/.config/gamectl/remote_host") as f:
+    assert f.read().strip() == "gdrive:Trash/gamectl-testing"
+PY
+    )
+}
+run_test "Remote Sync Resolver, SSH Diagnostics & Rclone (WP35)" test_wp35_remote_sync_resolver_ssh_diagnostics_and_rclone_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"
