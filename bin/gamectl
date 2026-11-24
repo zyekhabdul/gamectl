@@ -1857,6 +1857,120 @@ cli_unpack_stub() {
     fi
 }
 
+# Atomically set or append a key=value entry without sed delimiter/escape injection
+atomic_set_kv_file() {
+    local file="${1:-}"
+    local key="${2:-}"
+    local val="${3:-}"
+    local sep="${4:-=}"
+    [ -n "$file" ] && [ -n "$key" ] || return 1
+    mkdir -p "$(dirname "$file")" || return 1
+
+    local tmp
+    tmp=$(mktemp "${file}.gamectl.XXXXXX") || return 1
+    local src_file="/dev/null"
+    [ -f "$file" ] && src_file="$file"
+
+    if ! GAMECTL_KV_KEY="$key" GAMECTL_KV_VAL="$val" GAMECTL_KV_SEP="$sep" awk '
+        BEGIN {
+            k = ENVIRON["GAMECTL_KV_KEY"]
+            v = ENVIRON["GAMECTL_KV_VAL"]
+            s = ENVIRON["GAMECTL_KV_SEP"]
+            found = 0
+        }
+        {
+            pos = index($0, "=")
+            if (pos > 0) {
+                lhs = substr($0, 1, pos - 1)
+                gsub(/^[ \t]+|[ \t]+$/, "", lhs)
+                if (lhs == k) {
+                    if (!found) {
+                        print k s v
+                        found = 1
+                    }
+                    next
+                }
+            }
+            print $0
+        }
+        END {
+            if (!found) {
+                print k s v
+            }
+        }
+    ' "$src_file" > "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+
+    if [ -f "$file" ]; then
+        chmod --reference="$file" "$tmp" 2>/dev/null || true
+    else
+        chmod 600 "$tmp" 2>/dev/null || true
+    fi
+
+    if ! mv -f "$tmp" "$file"; then
+        rm -f "$tmp"
+        return 1
+    fi
+}
+
+# Atomically prepend a line to a file (safe on 0-byte or nonexistent files)
+atomic_prepend_line() {
+    local file="${1:-}"
+    local line="${2:-}"
+    [ -n "$file" ] || return 1
+    mkdir -p "$(dirname "$file")" || return 1
+
+    local tmp
+    tmp=$(mktemp "${file}.gamectl.XXXXXX") || return 1
+    if ! printf '%s\n' "$line" > "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    if [ -f "$file" ]; then
+        if ! cat "$file" >> "$tmp"; then
+            rm -f "$tmp"
+            return 1
+        fi
+        chmod --reference="$file" "$tmp" 2>/dev/null || true
+    else
+        chmod 600 "$tmp" 2>/dev/null || true
+    fi
+    if ! mv -f "$tmp" "$file"; then
+        rm -f "$tmp"
+        return 1
+    fi
+}
+
+# Audit ZIP archive integrity, path traversal, and symlink entries before extraction
+audit_zip_safety() {
+    local zip_file="${1:-}"
+    if [ -z "$zip_file" ] || [ ! -f "$zip_file" ] || [ ! -s "$zip_file" ]; then
+        echo "[ERROR] Archive not found or empty: ${zip_file:-<empty>}" >&2
+        return 1
+    fi
+    if ! unzip -tq "$zip_file" >/dev/null 2>&1; then
+        echo "[ERROR] Archive failed ZIP integrity check: $zip_file" >&2
+        return 1
+    fi
+    local entries
+    entries=$(unzip -Z1 "$zip_file" 2>/dev/null) || return 1
+    if [ -z "$entries" ]; then
+        echo "[ERROR] Archive contains no entries: $zip_file" >&2
+        return 1
+    fi
+    if printf '%s\n' "$entries" | grep -Eq '(^/|^[A-Za-z]:|(^|[/\\])\.\.([/\\]|$)|\\)'; then
+        echo "[ERROR] Security violation: unsafe path traversal detected in archive payload." >&2
+        return 1
+    fi
+    if unzip -Z "$zip_file" 2>/dev/null | grep -Eq '^l[-rwxstST]{6,9}[[:space:]]'; then
+        echo "[ERROR] Security violation: symlink entry detected in archive payload." >&2
+        return 1
+    fi
+    return 0
+}
+
 # Read a configuration key from ~/.config/gamectl/config
 get_config_value() {
     local key="$1"
@@ -1885,12 +1999,7 @@ set_config_value() {
     local cfg_dir="$HOME/.config/gamectl"
     local cfg_file="$cfg_dir/config"
     mkdir -p "$cfg_dir"
-    [ -f "$cfg_file" ] || touch "$cfg_file"
-    if grep -q -E "^[[:space:]]*${key}[[:space:]]*=" "$cfg_file" 2>/dev/null; then
-        sed -i -E "s|^[[:space:]]*${key}[[:space:]]*=.*|${key}=${val}|" "$cfg_file"
-    else
-        echo "${key}=${val}" >> "$cfg_file"
-    fi
+    atomic_set_kv_file "$cfg_file" "$key" "$val" "="
 }
 
 # Resolve Hubcap Manifest API key across environment, config file, and legacy stash
@@ -2929,16 +3038,8 @@ EOF
 
         local ini_file="$target_dir/steam_settings/configs.user.ini"
         if [ -f "$ini_file" ]; then
-            if grep -q -E '^[[:space:]]*account_name[[:space:]]*=' "$ini_file"; then
-                sed -i -E "s/^[[:space:]]*account_name[[:space:]]*=.*/account_name=$player_name/" "$ini_file"
-            else
-                echo "account_name=$player_name" >> "$ini_file"
-            fi
-            if grep -q -E '^[[:space:]]*account_steamid[[:space:]]*=' "$ini_file"; then
-                sed -i -E "s/^[[:space:]]*account_steamid[[:space:]]*=.*/account_steamid=$steamid/" "$ini_file"
-            else
-                echo "account_steamid=$steamid" >> "$ini_file"
-            fi
+            atomic_set_kv_file "$ini_file" "account_name" "$player_name" "="
+            atomic_set_kv_file "$ini_file" "account_steamid" "$steamid" "="
         else
             cat <<EOF > "$ini_file"
 [user::general]
@@ -3087,54 +3188,23 @@ EOF
 
 
 # --- [MODULE] src/steam/30_downloader.sh ---
-if ! declare -F strip_ansi >/dev/null 2>&1; then
-    strip_ansi() {
-        printf "%s" "${1:-}" | sed -E $'s/\033\\[[0-9;]*[a-zA-Z]//g'
-    }
+# Standalone-source bootstrap: load canonical SSoT helpers when sourced outside bin/gamectl
+if ! declare -F get_runtime_dir >/dev/null 2>&1 || ! declare -F audit_zip_safety >/dev/null 2>&1 || ! declare -F atomic_prepend_line >/dev/null 2>&1; then
+    _dl_core_utils="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/core/10_utils.sh"
+    if [ -f "$_dl_core_utils" ]; then
+        # shellcheck source=../core/10_utils.sh
+        source "$_dl_core_utils"
+    fi
+    unset _dl_core_utils
 fi
 
 if ! declare -F get_runtime_dir >/dev/null 2>&1; then
     get_runtime_dir() {
         local run_uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
         local run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$UID}"
+        [ -z "${UID:-}" ] && run_dir="${XDG_RUNTIME_DIR:-/tmp/gamectl-$run_uid}"
         mkdir -p -m 700 "$run_dir" 2>/dev/null || true
         echo "$run_dir"
-    }
-fi
-
-if ! declare -F fetch_cached_json >/dev/null 2>&1; then
-    fetch_cached_json() {
-        local url="${1:-}" cache_key="${2:-}" ttl="${3:-3600}"
-        [ -z "$url" ] || [ -z "$cache_key" ] && return 1
-        local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl"
-        mkdir -p "$cache_dir" 2>/dev/null || true
-        local safe_key
-        safe_key=$(echo "$cache_key" | tr -cd '[:alnum:]_-')
-        local cache_file="$cache_dir/${safe_key}.json"
-        local now
-        now=$(date +%s)
-        if [ -f "$cache_file" ]; then
-            local mtime
-            mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null || echo 0)
-            local age=$(( now - mtime ))
-            if [ "$age" -ge 0 ] && [ "$age" -lt "$ttl" ] && [ -s "$cache_file" ]; then
-                cat "$cache_file"
-                return 0
-            fi
-        fi
-        local tmp_file="${cache_file}.tmp.$$"
-        local fetched
-        fetched=$(curl -s --connect-timeout 2 --max-time 4 "$url" 2>/dev/null || true)
-        if [ -n "$fetched" ] && [ "$fetched" != "null" ]; then
-            if echo "$fetched" | jq . >/dev/null 2>&1; then
-                echo "$fetched" > "$tmp_file" 2>/dev/null && mv -f "$tmp_file" "$cache_file" 2>/dev/null || rm -f "$tmp_file" 2>/dev/null
-                echo "$fetched"
-                return 0
-            fi
-        fi
-        rm -f "$tmp_file" 2>/dev/null || true
-        [ -s "$cache_file" ] && { cat "$cache_file"; return 0; }
-        return 1
     }
 fi
 
@@ -3238,18 +3308,11 @@ validate_manifest_zip() {
     local z_file="$1"
     local appid="${2:-}"
     local require_depots="${3:-false}"
-    [ -f "$z_file" ] || return 1
-    unzip -tq "$z_file" >/dev/null 2>&1 || return 1
+    audit_zip_safety "$z_file" || return 1
 
     local entries
     entries=$(unzip -Z1 "$z_file" 2>/dev/null) || return 1
     [ -n "$entries" ] || return 1
-
-    # Security: Path traversal & absolute path rejection
-    if echo "$entries" | grep -Eq '(^/|^[A-Za-z]:|(^|[/\\])\.\.([/\\]|$)|\\)'; then
-        echo "[ERROR] Manifest zip contains unsafe paths (path traversal rejected)." >&2
-        return 1
-    fi
 
     # Content check: must contain at least one .manifest or .lua file
     if ! echo "$entries" | grep -Eq '(\.manifest|\.lua)$'; then
@@ -3994,7 +4057,7 @@ deploy_sls_manifest() {
     if [ -n "$staged_lua" ] && [ -f "$staged_lua" ]; then
         cp -f "$staged_lua" "$target_lua"
         if ! grep -Eq "^[[:space:]]*addappid[[:space:]]*\([[:space:]]*${appid}[[:space:]]*\)" "$target_lua"; then
-            sed -i "1i addappid(${appid})" "$target_lua"
+            atomic_prepend_line "$target_lua" "addappid(${appid})"
         fi
         chmod 600 "$target_lua"
         echo "[VERIFIED] Stplug-in Lua deployed from archive: $target_lua" >&2
@@ -5348,7 +5411,7 @@ except Exception as e:
         local target_lua="$stplug_dir/${appid}.lua"
         if [ -f "$target_lua" ]; then
             if ! grep -Eq "^[[:space:]]*addappid[[:space:]]*\([[:space:]]*${appid}[[:space:]]*\)" "$target_lua"; then
-                sed -i "1i addappid(${appid})" "$target_lua"
+                atomic_prepend_line "$target_lua" "addappid(${appid})"
             fi
         else
             printf "addappid(%s)\n" "$appid" > "$target_lua"
@@ -5614,7 +5677,7 @@ unlock_interactive() {
         local encoded_query
         encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$u_input" 2>/dev/null || echo "$u_input")
         local raw_results
-        raw_results=$(curl -s --connect-timeout 5 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
+        raw_results=$(curl -s --connect-timeout 5 --max-time 15 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
         local search_items
         search_items=$(printf '%s' "$raw_results" | store_search_items) || {
             echo "[ERROR] Invalid Steam search catalog." >&2
@@ -6094,16 +6157,9 @@ except Exception:
         return 1
     fi
 
-    if [ ! -s "$tmp_zip" ] || ! unzip -tq "$tmp_zip" >/dev/null 2>&1; then
+    if ! audit_zip_safety "$tmp_zip"; then
         rm -f "$tmp_zip"
-        echo "[ERROR] Downloaded archive is corrupt or not a valid ZIP file." >&2
-        return 1
-    fi
-
-    # 7. Zip-Slip Security Audit
-    if unzip -Z1 "$tmp_zip" 2>/dev/null | grep -E '(^/|^\.\./|/\.\./|^\.\.\\|\\\.\.\\)' >/dev/null 2>&1; then
-        rm -f "$tmp_zip"
-        echo "[ERROR] Security violation: Zip slip path traversal detected in archive payload!" >&2
+        echo "[ERROR] Downloaded archive failed integrity or security audit." >&2
         return 1
     fi
     echo "[VERIFIED] Archive payload integrity & security audit passed."
@@ -6131,15 +6187,21 @@ except Exception:
         fi
     done <<< "$zip_files"
 
-    cat <<META > "$resolved_dir/.gamectl_fix_backup/latest.json"
-{
-  "timestamp": "$ts",
-  "appid": "$appid",
-  "fix_id": "$fix_id",
-  "fix_title": "$fix_title",
-  "backed_up_count": $backed_up_count
-}
-META
+    local meta_file="$resolved_dir/.gamectl_fix_backup/latest.json"
+    local meta_tmp
+    meta_tmp=$(mktemp "${meta_file}.gamectl.XXXXXX") || return 1
+    if ! jq -n \
+        --arg timestamp "$ts" \
+        --arg appid "$appid" \
+        --arg fix_id "$fix_id" \
+        --arg fix_title "$fix_title" \
+        --argjson backed_up_count "${backed_up_count:-0}" \
+        '{timestamp: $timestamp, appid: $appid, fix_id: $fix_id, fix_title: $fix_title, backed_up_count: $backed_up_count}' \
+        > "$meta_tmp" || ! mv -f "$meta_tmp" "$meta_file"; then
+        rm -f "$meta_tmp"
+        echo "[ERROR] Failed to write fix snapshot metadata: $meta_file" >&2
+        return 1
+    fi
     echo "[VERIFIED] Created pre-install snapshot: $backed_up_count original file(s) saved to .gamectl_fix_backup/$ts"
 
     # 9. Extract Payload into Target Game Directory
@@ -6854,6 +6916,29 @@ detect_dll_overrides() {
     echo "$result"
 }
 
+# Canonical ordered list of standalone XDG and Steam runner parent directories
+list_runner_dirs() {
+    local s_dyn_root
+    s_dyn_root="$(get_steam_root 2>/dev/null || true)"
+    local xdg_runners="${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners"
+    local -a raw_dirs=("$xdg_runners")
+    [ -n "$s_dyn_root" ] && raw_dirs+=("$s_dyn_root/compatibilitytools.d")
+    raw_dirs+=(
+        "$HOME/.local/share/Steam/compatibilitytools.d"
+        "$HOME/.steam/root/compatibilitytools.d"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"
+    )
+    local d
+    declare -A seen=()
+    for d in "${raw_dirs[@]}"; do
+        [ -n "$d" ] || continue
+        if [ -z "${seen["$d"]:-}" ]; then
+            seen["$d"]=1
+            printf '%s\n' "$d"
+        fi
+    done
+}
+
 # Discover runner for Windows games (priority: umu-run -> GE-Proton / Proton Steam -> wine)
 find_runner() {
     local target_dir="${1:-}"
@@ -6889,16 +6974,11 @@ find_runner() {
     fi
 
     # Priority 2: Standalone XDG runners & Steam compatibilitytools.d
-    local s_dyn_root xdg_runners
-    s_dyn_root="$(get_steam_root 2>/dev/null || true)"
-    xdg_runners="${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners"
-    local compat_dirs=(
-        "$xdg_runners"
-        "$s_dyn_root/compatibilitytools.d"
-        "$HOME/.local/share/Steam/compatibilitytools.d"
-        "$HOME/.steam/root/compatibilitytools.d"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"
-    )
+    local -a compat_dirs=()
+    local cdir
+    while IFS= read -r cdir; do
+        [ -n "$cdir" ] && compat_dirs+=("$cdir")
+    done < <(list_runner_dirs)
     for cdir in "${compat_dirs[@]}"; do
         [ -d "$cdir" ] || continue
         local p
@@ -6972,15 +7052,12 @@ get_wineserver_bin() {
         return 0
     fi
 
-    # 3. Fallback: Search Steam compatibility tools for highest GE-Proton wineserver
-    local s_dyn_root
-    s_dyn_root="$(get_steam_root 2>/dev/null || true)"
-    local compat_dirs=(
-        "$s_dyn_root/compatibilitytools.d"
-        "$HOME/.local/share/Steam/compatibilitytools.d"
-        "$HOME/.steam/root/compatibilitytools.d"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"
-    )
+    # 3. Fallback: Search standalone XDG & Steam compatibility tools for highest GE-Proton wineserver
+    local -a compat_dirs=()
+    local cdir
+    while IFS= read -r cdir; do
+        [ -n "$cdir" ] && compat_dirs+=("$cdir")
+    done < <(list_runner_dirs)
     for cdir in "${compat_dirs[@]}"; do
         [ -n "$cdir" ] && [ -d "$cdir" ] || continue
         local p
@@ -6992,7 +7069,7 @@ get_wineserver_bin() {
                     return 0
                 fi
             done
-        done < <(find "$cdir" -mindepth 1 -maxdepth 1 -type d -name "*Proton*" 2>/dev/null | sort -Vr)
+        done < <(find "$cdir" -mindepth 1 -maxdepth 1 -type d -iname "*proton*" 2>/dev/null | sort -Vr)
     done
 
     # 4. Check system wine64 / wine adjacent wineserver
@@ -7024,14 +7101,11 @@ get_compat_dir() {
 
 # List local and latest upstream GE-Proton releases
 proton_list() {
-    local s_dyn_root
-    s_dyn_root="$(get_steam_root 2>/dev/null || true)"
-    local compat_dirs=(
-        "$s_dyn_root/compatibilitytools.d"
-        "$HOME/.local/share/Steam/compatibilitytools.d"
-        "$HOME/.steam/root/compatibilitytools.d"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"
-    )
+    local -a compat_dirs=()
+    local cdir
+    while IFS= read -r cdir; do
+        [ -n "$cdir" ] && compat_dirs+=("$cdir")
+    done < <(list_runner_dirs)
 
     declare -A local_installs=()
     for cdir in "${compat_dirs[@]}"; do
@@ -7135,6 +7209,7 @@ proton_install() {
 
     local resolved_tag=""
     local download_url=""
+    local sha512_url=""
 
     if [ "$target_tag" = "latest" ]; then
         local latest_json
@@ -7144,6 +7219,10 @@ proton_install() {
             local pat="${arch_suffix}\\.tar\\.gz$"
             download_url=$(echo "$latest_json" | jq -r --arg pat "$pat" '
                 [.assets[] | select(.name | test($pat))] | first | .browser_download_url
+            ' 2>/dev/null || echo "")
+            local sum_pat="${arch_suffix}.*\\.sha512sum$|\\.sha512sum$"
+            sha512_url=$(echo "$latest_json" | jq -r --arg spat "$sum_pat" '
+                [.assets[] | select(.name | test($spat))] | first | .browser_download_url // ""
             ' 2>/dev/null || echo "")
         fi
         if [ -z "$resolved_tag" ] || [ -z "$download_url" ] || [ "$download_url" = "null" ]; then
@@ -7159,6 +7238,10 @@ proton_install() {
             local pat="${arch_suffix}\\.tar\\.gz$"
             download_url=$(echo "$tag_json" | jq -r --arg pat "$pat" '
                 [.assets[] | select(.name | test($pat))] | first | .browser_download_url
+            ' 2>/dev/null || echo "")
+            local sum_pat="${arch_suffix}.*\\.sha512sum$|\\.sha512sum$"
+            sha512_url=$(echo "$tag_json" | jq -r --arg spat "$sum_pat" '
+                [.assets[] | select(.name | test($spat))] | first | .browser_download_url // ""
             ' 2>/dev/null || echo "")
         fi
         if [ -z "$download_url" ] || [ "$download_url" = "null" ]; then
@@ -7183,24 +7266,97 @@ proton_install() {
         fi
     fi
 
-    echo "[INFO] Downloading and streaming tarball extraction..."
-    if curl -# -fL "$download_url" | tar -xz -C "$compat_dir/"; then
-        local installed_folder="$compat_dir/$resolved_tag"
-        if [ ! -d "$installed_folder" ]; then
-            installed_folder=$(find "$compat_dir" -mindepth 1 -maxdepth 1 -type d -name "*${resolved_tag}*" 2>/dev/null | head -n 1)
-        fi
-        if [ -n "$installed_folder" ] && [ -f "$installed_folder/compatibilitytool.vdf" ]; then
-            [ -f "$installed_folder/proton" ] && chmod +x "$installed_folder/proton"
-            echo "[VERIFIED] GE-Proton $resolved_tag installed successfully in: $installed_folder"
-            return 0
-        else
-            echo "[ERROR] Extraction completed but compatibilitytool.vdf not found in $installed_folder." >&2
-            return 1
-        fi
-    else
-        echo "[ERROR] Failed to download or extract $resolved_tag from $download_url" >&2
+    local stage_dir
+    stage_dir=$(mktemp -d "$compat_dir/.proton_stage.XXXXXX") || return 1
+    local tarball_name
+    tarball_name=$(basename "${download_url%%\?*}")
+    [ -z "$tarball_name" ] && tarball_name="${resolved_tag}-${arch_suffix}.tar.gz"
+    local staged_tar="$stage_dir/$tarball_name"
+
+    echo "[INFO] Downloading release tarball to staging directory..."
+    if ! curl -# -fL --connect-timeout 15 -o "$staged_tar" "$download_url" || [ ! -s "$staged_tar" ]; then
+        rm -rf "$stage_dir"
+        echo "[ERROR] Failed to download $resolved_tag from $download_url" >&2
         return 1
     fi
+
+    if [ -n "$sha512_url" ] && [ "$sha512_url" != "null" ]; then
+        echo "[INFO] Verifying SHA-512 checksum..."
+        local sum_file="$stage_dir/release.sha512sum"
+        if ! curl -sSL --connect-timeout 15 --max-time 30 -o "$sum_file" "$sha512_url" || [ ! -s "$sum_file" ]; then
+            rm -rf "$stage_dir"
+            echo "[ERROR] Failed to download SHA-512 checksum from $sha512_url" >&2
+            return 1
+        fi
+        local expected_hash=""
+        expected_hash=$(grep -F "$tarball_name" "$sum_file" 2>/dev/null | grep -Eoi '[0-9a-f]{128}' | head -n 1 || true)
+        [ -z "$expected_hash" ] && expected_hash=$(grep -Eoi '[0-9a-f]{128}' "$sum_file" 2>/dev/null | head -n 1 || true)
+        if [ -z "$expected_hash" ]; then
+            rm -rf "$stage_dir"
+            echo "[ERROR] SHA-512 checksum asset did not contain a valid 128-hex digest." >&2
+            return 1
+        fi
+        printf '%s  %s\n' "$expected_hash" "$tarball_name" > "$stage_dir/verify.sha512sum"
+        if ! ( cd "$stage_dir" && sha512sum -c "verify.sha512sum" >/dev/null 2>&1 ); then
+            rm -rf "$stage_dir"
+            echo "[ERROR] SHA-512 checksum verification failed for $tarball_name." >&2
+            return 1
+        fi
+        echo "[VERIFIED] SHA-512 checksum matched."
+    fi
+
+    local tar_entries=""
+    if ! tar_entries=$(tar -tzf "$staged_tar" 2>/dev/null) || [ -z "$tar_entries" ]; then
+        rm -rf "$stage_dir"
+        echo "[ERROR] Downloaded tarball is corrupt or unreadable: $tarball_name" >&2
+        return 1
+    fi
+    if printf '%s\n' "$tar_entries" | grep -Eq '(^/|^[A-Za-z]:|(^|[/\\])\.\.([/\\]|$)|\\)'; then
+        rm -rf "$stage_dir"
+        echo "[ERROR] Security violation: unsafe path traversal detected in tarball $tarball_name." >&2
+        return 1
+    fi
+
+    mkdir -p "$stage_dir/extract"
+    echo "[INFO] Extracting staged tarball..."
+    if ! tar -xzf "$staged_tar" -C "$stage_dir/extract"; then
+        rm -rf "$stage_dir"
+        echo "[ERROR] Failed to extract $tarball_name in staging directory." >&2
+        return 1
+    fi
+
+    local extracted_folder="$stage_dir/extract/$resolved_tag"
+    if [ ! -d "$extracted_folder" ]; then
+        extracted_folder=$(find "$stage_dir/extract" -mindepth 1 -maxdepth 1 -type d -name "*${resolved_tag}*" 2>/dev/null | head -n 1)
+    fi
+    if [ -z "$extracted_folder" ] || [ ! -d "$extracted_folder" ]; then
+        extracted_folder=$(find "$stage_dir/extract" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -n 1)
+    fi
+    if [ -z "$extracted_folder" ] || [ ! -f "$extracted_folder/compatibilitytool.vdf" ]; then
+        rm -rf "$stage_dir"
+        echo "[ERROR] Extraction completed but compatibilitytool.vdf not found in staged release." >&2
+        return 1
+    fi
+    [ -f "$extracted_folder/proton" ] && chmod +x "$extracted_folder/proton"
+
+    local final_folder="$compat_dir/$(basename "$extracted_folder")"
+    if [ -e "$final_folder" ]; then
+        mv "$final_folder" "$stage_dir/old_backup" 2>/dev/null || {
+            rm -rf "$stage_dir"
+            echo "[ERROR] Failed to replace existing runner directory: $final_folder" >&2
+            return 1
+        }
+    fi
+    if ! mv "$extracted_folder" "$final_folder"; then
+        [ -d "$stage_dir/old_backup" ] && mv "$stage_dir/old_backup" "$final_folder" 2>/dev/null || true
+        rm -rf "$stage_dir"
+        echo "[ERROR] Failed to promote staged runner to: $final_folder" >&2
+        return 1
+    fi
+
+    rm -rf "$stage_dir"
+    echo "[VERIFIED] GE-Proton $resolved_tag installed successfully in: $final_folder"
+    return 0
 }
 
 # Safely remove an installed GE-Proton version
@@ -7226,14 +7382,11 @@ proton_remove() {
         return 1
     fi
 
-    local s_dyn_root
-    s_dyn_root="$(get_steam_root 2>/dev/null || true)"
-    local compat_dirs=(
-        "$s_dyn_root/compatibilitytools.d"
-        "$HOME/.local/share/Steam/compatibilitytools.d"
-        "$HOME/.steam/root/compatibilitytools.d"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"
-    )
+    local -a compat_dirs=()
+    local cdir
+    while IFS= read -r cdir; do
+        [ -n "$cdir" ] && compat_dirs+=("$cdir")
+    done < <(list_runner_dirs)
 
     local target_dir=""
     for cdir in "${compat_dirs[@]}"; do
@@ -7245,14 +7398,24 @@ proton_remove() {
     done
 
     if [ -z "$target_dir" ] || [ ! -d "$target_dir" ]; then
-        echo "[ERROR] GE-Proton version '$tag' not found in compatibilitytools.d/" >&2
+        echo "[ERROR] GE-Proton version '$tag' not found in runner directories." >&2
         return 1
     fi
 
-    # Canonical path traversal assertion
-    local real_target
+    # Canonical path traversal assertion against authorized runner parent directories
+    local real_target guard_ok=0 real_parent
     real_target="$(realpath "$target_dir" 2>/dev/null || echo "")"
-    if [[ "$real_target" != *"compatibilitytools.d"* ]]; then
+    if [ -n "$real_target" ]; then
+        for cdir in "${compat_dirs[@]}"; do
+            [ -n "$cdir" ] && [ -d "$cdir" ] || continue
+            real_parent="$(realpath "$cdir" 2>/dev/null || echo "")"
+            if [ -n "$real_parent" ] && [[ "$real_target" == "$real_parent/"* ]] && [ "$real_target" != "$real_parent" ]; then
+                guard_ok=1
+                break
+            fi
+        done
+    fi
+    if [ "$guard_ok" -ne 1 ]; then
         echo "[ERROR] Path traversal guard failed for: $target_dir" >&2
         return 1
     fi
@@ -8770,7 +8933,7 @@ setup_onlinefix() {
             fi
 
             if [ "$should_sync" = true ]; then
-                sed -i -E "s/^[[:space:]]*PlayerName[[:space:]]*=.*/PlayerName = $persona_name/" "$ini_file"
+                atomic_set_kv_file "$ini_file" "PlayerName" "$persona_name" " = "
                 echo "       ${UI_GREEN}[SUCCESS] PlayerName in OnlineFix.ini synchronized to: $persona_name${UI_RST}"
             fi
         fi
@@ -9850,14 +10013,12 @@ doctor_audit() {
     fi
 
     local ge_proton=""
-    local s_dyn_root
-    s_dyn_root="$(get_steam_root 2>/dev/null || true)"
     local cdir
-    for cdir in "$s_dyn_root/compatibilitytools.d" "$HOME/.local/share/Steam/compatibilitytools.d" "$HOME/.steam/root/compatibilitytools.d" "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"; do
+    while IFS= read -r cdir; do
         [ -n "$cdir" ] && [ -d "$cdir" ] || continue
         ge_proton=$(find "$cdir" -maxdepth 2 -name "proton" 2>/dev/null | head -n 1 || true)
         [ -n "$ge_proton" ] && break
-    done
+    done < <(list_runner_dirs)
     if [ -n "$ge_proton" ]; then
         echo "    • $(printf '%-10s' "GE-Proton") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($ge_proton)${UI_RST}"
         r_found=1
@@ -11505,7 +11666,7 @@ search_steam() {
     local encoded_query
     encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$query")
     local raw_results
-    raw_results=$(curl -s --connect-timeout 5 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
+    raw_results=$(curl -s --connect-timeout 5 --max-time 15 "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null)
 
     local items
     items=$(printf '%s' "$raw_results" | store_search_items) || {
@@ -11612,7 +11773,7 @@ search_steam() {
             local new_encoded_query
             new_encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$new_q")
             local new_raw_results
-            new_raw_results=$(curl -s --connect-timeout 5 "https://store.steampowered.com/api/storesearch/?term=${new_encoded_query}&l=english&cc=US" 2>/dev/null)
+            new_raw_results=$(curl -s --connect-timeout 5 --max-time 15 "https://store.steampowered.com/api/storesearch/?term=${new_encoded_query}&l=english&cc=US" 2>/dev/null)
             local new_items
             new_items=$(printf '%s' "$new_raw_results" | store_search_items) || true
 
@@ -11813,7 +11974,7 @@ EOF
 export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_companion sync_to_tuf pull_save_remote pull_from_companion pull_from_tuf backup_save restore_save inject_game fetch_dlc setup_gbe_templates download_game parse_depot_os_map ensure_linux_binaries_executable ensure_downloader resolve_depot_dl_bin resolve_target_library_dir resolve_standalone_library_dir detect_steamstub_drm detect_steamstub_type is_steamstub_elf_active resolve_unpacked_binary find_steamless_cli unpack_steamstub_pe unpack_steamstub_elf setup_steam_interceptor diagnose_steamstub cli_unpack_stub harvest_dlc_manifests detect_app_platform_os sync_steam list_downloads list_downloads_interactive unlock_game unlock_interactive entitle_game entitle_interactive adopt_steam get_remote_host get_gbe_template find_game_binary find_runner get_wineserver_bin launch_game game_controller_hud is_haswell_gpu get_native_resolution get_default_gamescope_args get_steam_root get_steam_primary_apps get_steam_libraries build_wrapper_command configure_wrappers configure_global doctor_audit cli_launch generate_steamid64 resolve_active_steamid get_game_persona set_id set_id_interactive preview_dashboard dashboard_menu scan_installed_games detect_dll_overrides setup_onlinefix proton_list proton_install proton_remove manage_prefix query_protondb create_desktop_entry get_steam_grid_dir fetch_steam_artwork get_steam_shortcuts_vdf add_steam_shortcut check_steam_active fetch_cached_json check_systemd_scope_support detect_dgpu_vendor build_sandbox_command manifest_has_payload_magic validate_manifest_zip fetch_manifest get_sls_root get_sls_manifests_dir get_steam_stplug_in_dir get_steam_depotcache_dir deploy_sls_manifest trigger_steam_install find_app_acf format_bytes parse_acf_download_state check_game_fixes resolve_game_install_dir audit_proton_compatibility detect_fix_custom_launcher install_game_fix revert_game_fix restart_steam_client clean_stale_locks get_compat_dir get_valid_luatools_token is_valid_lua_manifest library_menu login_luatools luatools_status search_steam invalidate_scan_cache flush_tty_input enter_tui_screen exit_tui_screen tui_modal_notice get_runtime_log_file log_msg log_info log_warn log_error view_logs_interactive preview_search_game preview_download get_depot_dl_progress preview_log_entry preview_process_log preview_adopt_candidate manage_game_fixes_interactive preview_fix_entry
 
 export -f require_tui check_fzf_status validate_tui_fields store_search_items tui_exec_action tui_run_engine tui_prompt_input tui_action_palette manage_active_processes_interactive login_luatools_interactive resolve_game_drm_status install_tui_screen_traps get_desktop_runtime_dir detect_vulkan_capability resolve_graphics_renderer inspect_game_log_hint resolve_game_appid get_game_log_file load_wrapper_config prepare_windows_runner_env
-export -f is_gbe_library install_gbe_library get_config_value set_config_value get_hubcap_api_key
+export -f is_gbe_library install_gbe_library get_config_value set_config_value get_hubcap_api_key atomic_set_kv_file atomic_prepend_line audit_zip_safety list_runner_dirs
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

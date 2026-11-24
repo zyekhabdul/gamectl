@@ -1,60 +1,68 @@
-# WORK PACKET 31: SSoT GENERALIZATION, RUNNER HARDENING & HYGIENE
+# WORK PACKET 32: TRANSACTIONAL SAFETY, SUPPLY-CHAIN INTEGRITY & NETWORK/RUNNER HARDENING
 
-- **Track**: Cross-Distro Hardware Generalization / SSoT Unification / Environment & Detection Hygiene
-- **Status**: IN PROGRESS [2/4 PACKETS]
-- **Basis**: Forensic audit codebase `src/` pasca-WP30 (`c1dc31b`) — deteksi `llvmpipe`, drift AppID & runner env, tabrakan nama log, duplikasi parser `.wrappers`, magic-size GBE heuristic, dan polusi `export -f`.
-- **Target Files**: `src/core/10_utils.sh`, `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/steam/20_discovery.sh`, `src/steam/30_downloader.sh`, `src/steam/35_fixes.sh`, `src/diagnostics/60_doctor.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `Makefile`, `tests/test_remediation.sh`, `bin/gamectl`
+- **Track**: Atomic File Integrity / Archive Supply-Chain Security / Runner & Network Hardening
+- **Status**: COMPLETED [4/4 PACKETS]
+- **Basis**: Audit empiris lanjutan codebase `src/` (`sed -i` injection, raw JSON heredoc, streaming `proton_install` tanpa SHA-512/staging, Zip-Slip symlink gap, unbounded `curl` Store Search, drift `list_runner_dirs`, dan duplikasi fallback `30_downloader.sh`).
+- **Target Files**: `src/core/10_utils.sh`, `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/steam/25_identity.sh`, `src/steam/30_downloader.sh`, `src/steam/35_fixes.sh`, `src/diagnostics/60_doctor.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `tests/test_remediation.sh`, `bin/gamectl`
 
 ---
 
-## 1. Rencana Eksekusi Detail (Packet 31A - 31D)
+## 1. Rencana Eksekusi Detail (Packet 32A - 32D)
 
-### [x] Packet 31A: True Hardware & Multilib Generalization (`Vulkan` + `32-bit ABI`)
-- **Target Files**: `src/runners/40_wrappers.sh`, `src/diagnostics/60_doctor.sh`, `tests/test_remediation.sh`
+### [x] Packet 32A: Atomic & Injection-Safe File Mutations (Eliminasi `sed -i` & JSON Injection)
+- **Target Files**: `src/core/10_utils.sh`, `src/steam/25_identity.sh`, `src/runners/50_launcher.sh`, `src/steam/30_downloader.sh`, `src/steam/35_fixes.sh`, `src/main.sh`
 - **Langkah Teknis**:
-  1. Refactor `detect_vulkan_capability()` (`src/runners/40_wrappers.sh:805-885`) agar mem-parsing output `vulkaninfo --summary` **per-device block** (`GPU0`, `GPU1`, ...):
-     - Abaikan `PHYSICAL_DEVICE_TYPE_CPU` (`llvmpipe`/`swiftshader`) dan `VIRTUAL_GPU` saat menghitung `max_ver` supaya rasterizer CPU Vulkan `1.3+` tidak pernah meracuni capability GPU hardware.
-     - Tangkap stderr `vulkaninfo` (`incomplete`) sebagai sinyal eksplisit `VULKAN_LEGACY`.
-  2. Perkuat `is_haswell_gpu()` (`src/runners/40_wrappers.sh:789-801`) agar fallback `/sys/bus/pci/devices/*/uevent` benar-benar mencocokkan PCI ID (`8086:04*`, `8086:0a*`, `8086:0d*`) tanpa bergantung pada keberadaan binary `lspci`, serta generalisasikan hint driver legacy.
-  3. Upgrade audit 32-bit multilib pada `doctor_audit()` (`src/diagnostics/60_doctor.sh:240-254`) agar memeriksa `ldconfig -p` terlebih dahulu untuk mencari `libGL.so.1` dengan ABI 32-bit (lintas distro: Arch, Debian/Ubuntu, Fedora/RHEL, openSUSE, Gentoo, Void) sebelum fallback ke pengecekan path filesystem.
+  1. Tambahkan dua helper atomik SSoT di `src/core/10_utils.sh` dan ekspor di `src/main.sh`:
+     - `atomic_set_kv_file "$file" "$key" "$val" [sep]`: perbarui key-value secara deterministik memakai `awk -v` + `mktemp` + `mv -f`, kebal karakter khusus (`|`, `/`, `&`, `\`, `"`) dan tanpa mutasi parsial saat crash.
+     - `atomic_prepend_line "$file" "$line"`: tambahkan baris di awal file via `mktemp` + `mv -f` (tetap bekerja pada file 0-byte dan menjaga permission `0600` bila file baru).
+  2. Gantikan seluruh 6 titik `sed -i` non-atomik:
+     - `src/core/10_utils.sh:1832` (`set_config_value`)
+     - `src/steam/25_identity.sh:192,197` (`set_id`)
+     - `src/runners/50_launcher.sh:269` (`setup_onlinefix`)
+     - `src/steam/30_downloader.sh:908,2262` (`addappid(...)` pada `stplug-in/*.lua`)
+  3. Gantikan konstruksi heredoc `latest.json` pada `install_game_fix()` (`src/steam/35_fixes.sh:395-403`) dengan `jq -n --arg ...` yang ditulis secara atomik lewat `mktemp` + `mv -f` agar judul fix berisi tanda kutip `"` atau backslash `\` tidak merusak JSON backup.
 - **Definition of Done (DoD)**:
-  - Unit test membuktikan kombinasi mock `llvmpipe` (Vulkan 1.3) + GPU fisik (Vulkan 1.2) menghasilkan `VULKAN_LEGACY`, bukan `VULKAN_READY`.
-  - `is_haswell_gpu()` berfungsi konsisten via PCI ID uevent maupun output `lspci`.
-  - `doctor_audit()` mendeteksi runtime OpenGL 32-bit melalui `ldconfig -p` atau path distro standar.
-  - [ VERIFIED ] `test_vulkan_per_device_and_multilib_contract`, `test_cli.sh` (147/147), `test_remediation.sh` (14/14), `test_tui_ergonomics.sh` (3/3), `./scripts/build.sh --check` (12309 lines), dan `make lint` lulus Exit 0.
+  - `grep -rn "sed -i" src/` mengembalikan 0 pemanggilan pada mutasi config/INI/Lua.
+  - Nilai persona / config yang mengandung `/`, `|`, `&`, `\`, serta judul fix berisi `"` tersimpan utuh dan valid JSON (`jq empty`).
 
-### [x] Packet 31B: Core SSoT Unification (`AppID`, `Log Path`, `.wrappers`, `Windows Runner Env`)
-- **Target Files**: `src/core/10_utils.sh`, `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/steam/20_discovery.sh`, `src/steam/30_downloader.sh`, `src/steam/35_fixes.sh`, `src/diagnostics/60_doctor.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `tests/test_remediation.sh`
+### [x] Packet 32B: Supply-Chain & Archive Security Hardening (`tar` / `zip`)
+- **Target Files**: `src/core/10_utils.sh`, `src/runners/40_wrappers.sh`, `src/steam/30_downloader.sh`, `src/steam/35_fixes.sh`, `src/main.sh`
 - **Langkah Teknis**:
-  1. Tambahkan SSoT `resolve_game_appid "$gdir"` di `src/core/10_utils.sh` (prioritas deterministik: `steam_appid.txt` -> `steam_settings/steam_appid.txt` -> `.gamectl_appid` -> `0`) dan gantikan seluruh parser ad-hoc di `launch_game()`, `manage_prefix()`, `20_discovery.sh`, `30_downloader.sh`, `35_fixes.sh`, `60_doctor.sh`, serta `70_dashboard.sh`.
-  2. Tambahkan SSoT `get_game_log_file "$gdir" "$gbin"` di `src/core/10_utils.sh` berbasis slug direktori/AppID (`game_<dir_slug>_<safe_gbin>.log`) agar dua game berbeda yang sama-sama memakai `game.exe` / `Launcher.exe` tidak saling menimpa log, lalu hubungkan ke `launch_game()`, `game_controller_hud()`, dan `preview_game()`.
-  3. Ekstrak SSoT `load_wrapper_config "$gdir"` di `src/runners/40_wrappers.sh` untuk menyatukan pembacaan global + per-game `.wrappers`, pemangkasan spasi/quote, serta override env (`GAMECTL_*` / `PROTON_USE_WINED3D`) di `build_wrapper_command()`, `configure_wrappers()`, `preview_game()`, dan `preview_dashboard()`.
-  4. Ekstrak `prepare_windows_runner_env()` di `src/runners/40_wrappers.sh` / `50_launcher.sh` agar `manage_prefix()` (`winecfg`/`regedit`/`cmd`) dan `launch_game()` berbagi kontrak `umu-` `GAMEID`, `SteamAppId`, `SteamGameId`, `PROTON_USE_WINED3D`, dan `PROTONFIXES_DISABLE`, serta tidak mencetak log `PROTON_USE_WINED3D` pada cabang `wine`/`wine64` vanilla.
+  1. Tambahkan SSoT `audit_zip_safety "$zip_file"` di `src/core/10_utils.sh` (ekspor di `src/main.sh`) yang memvalidasi:
+     - Integritas `unzip -tq`
+     - Penolakan path traversal (`..`), absolute path (`/`), backslash/drive letter (`\`, `C:`)
+     - Penolakan entri **symlink di dalam ZIP** (`unzip -Z` dengan mode awal `l`)
+  2. Gunakan `audit_zip_safety` pada `validate_manifest_zip()` (`src/steam/30_downloader.sh:160`) dan `install_game_fix()` (`src/steam/35_fixes.sh:365`).
+  3. Refactor `proton_install()` (`src/runners/40_wrappers.sh:460`) agar tidak langsung `curl | tar -xz` ke direktori live:
+     - Unduh tarball ke direktori staging `mktemp -d` (dengan `trap` cleanup + `--connect-timeout 15`).
+     - Bila release GitHub menyediakan aset `.sha512sum`, unduh dan verifikasi `sha512sum -c`.
+     - Audit daftar path tarball (`tar -tzf`) sebelum ekstraksi agar bebas path traversal (`..` / `/`).
+     - Ekstrak ke direktori staging lalu pindahkan secara atomik (`mv`) ke direktori runner target hanya setelah seluruh verifikasi lulus.
 - **Definition of Done (DoD)**:
-  - Game standalone yang hanya memiliki `.gamectl_appid` atau `steam_settings/steam_appid.txt` tetap mengekspor AppID yang tepat saat launch.
-  - Dua game dengan executable bernama identik (`game.exe`) menghasilkan file log terpisah.
-  - `manage_prefix()` menerapkan kontrak env Proton/umu-run dan guard `PROTONFIXES_DISABLE=1` yang identik dengan `launch_game()`.
-  - [ VERIFIED ] `test_ssot_unification_contract`, `test_cli.sh` (147/147), `test_remediation.sh` (15/15), `test_tui_ergonomics.sh` (3/3), `./scripts/build.sh --check` (12334 lines), dan `make lint` lulus Exit 0.
+  - Arsip ZIP berisi symlink atau `../` ditolak oleh `audit_zip_safety` sebelum ekstraksi.
+  - `proton_install()` menolak tarball bila checksum `.sha512sum` tidak cocok atau tarball rusak tanpa meninggalkan direktori runner setengah jadi.
 
-### [ ] Packet 31C: Detection Integrity, Standalone Runners & Hygiene
-- **Target Files**: `src/core/10_utils.sh`, `src/runners/40_wrappers.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `Makefile`
+### [x] Packet 32C: Runner Directory SSoT, Network Timeout Guard & Deduplikasi `30_downloader.sh`
+- **Target Files**: `src/runners/40_wrappers.sh`, `src/diagnostics/60_doctor.sh`, `src/steam/30_downloader.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`
 - **Langkah Teknis**:
-  1. Perkeras `resolve_game_drm_status()` (`src/core/10_utils.sh:1127-1140`) agar tidak bergantung semata pada magic size `> 7000000` byte: utamakan penanda struktural (`.orig`, `steam_settings/`, `.gamectl_gbe`, atau string signature GBE pada binary) dan turunkan size heuristic ke sinyal sekunder.
-  2. Dukung direktori runner XDG standalone `$HOME/.local/share/gamectl/runners` pada `find_runner()` (`src/runners/40_wrappers.sh:167-183`) sambil menjaga kompatibilitas penuh `compatibilitytools.d`.
-  3. Audit dan pangkas daftar `export -f` berlebih di `src/main.sh` (atau bersihkan `BASH_FUNC_*` sebelum `exec` child process game/Proton di `launch_game()`) agar environment runtime game bersih.
-  4. Perjelas label integrasi opsional Steam/SLSsteam di TUI utama (`src/tui/70_dashboard.sh`) sebagai `Bridge (Opt)` sesuai `docs/SOVEREIGN_ORIGINAL_PURPOSE.md`, dan pastikan target `make clean` membersihkan artefak build lama (`src/gamectl.egg-info/`, `src/gamectl_runner/bin/`).
+  1. Ekstrak SSoT `list_runner_dirs()` di `src/runners/40_wrappers.sh` (ekspor di `src/main.sh`) yang mencacah `${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners` + direktori Steam `compatibilitytools.d`, lalu gunakan secara seragam di `find_runner()`, `proton_list()`, `proton_remove()`, dan `doctor_audit()`.
+  2. Tambahkan `--max-time 15` pada 3 pemanggilan `curl` Store Search (`src/tui/70_dashboard.sh:1357,1464` dan `src/steam/30_downloader.sh:2528`) agar TUI/CLI tidak menggantung bila upstream macet pasca-TCP handshake.
+  3. Bersihkan duplikasi fallback `strip_ansi`, `get_runtime_dir` (inkonsistensi `/tmp/gamectl-$UID`), dan `fetch_cached_json` di `src/steam/30_downloader.sh:1-50` dengan menyelaraskannya ke `src/core/10_utils.sh` (sambil tetap menjaga skrip aman bila di-`source` mandiri oleh suite test).
 - **Definition of Done (DoD)**:
-  - DLL GBE hasil strip (<7MB) yang memiliki penanda struktural tetap terdeteksi sebagai `GBE_FORK`.
-  - Runner yang ditempatkan di `~/.local/share/gamectl/runners` terdeteksi otomatis oleh `find_runner()`.
-  - Subshell child process game bersih dari polusi fungsi `BASH_FUNC_*` yang tidak diperlukan.
+  - `gamectl proton-list`, `gamectl proton-remove`, `find_runner()`, dan `doctor_audit()` melihat runner standalone XDG maupun Steam secara konsisten.
+  - Tidak ada pemanggilan `curl` Store Search tanpa `--max-time`.
+  - Test yang meng-`source` `30_downloader.sh` secara langsung tetap berjalan dengan jalur runtime `get_runtime_dir` yang konsisten.
 
-### [ ] Packet 31D: Regression Contracts, Bundle Sync & Full Verification
+### [x] Packet 32D: Regression Contracts, Bundle Sync & Full Verification
 - **Target Files**: `tests/test_remediation.sh`, `bin/gamectl`
 - **Langkah Teknis**:
-  1. Tambahkan contract tests deterministik di `tests/test_remediation.sh` untuk Packet 31A, 31B, dan 31C.
+  1. Tambahkan contract tests deterministik offline di `tests/test_remediation.sh` untuk Packet 32A, 32B, dan 32C:
+     - Uji karakter spesial (`/`, `|`, `&`, `\`, `"`) pada `atomic_set_kv_file`, `set_id`, `setup_onlinefix`, dan `latest.json` via `jq`.
+     - Uji penolakan ZIP bersymlink & path traversal oleh `audit_zip_safety`.
+     - Uji staged `proton_install` (verifikasi SHA-512 lulus/gagal + zero partial dir) serta `list_runner_dirs`.
   2. Kompilasi bundle via `./scripts/build.sh` dan verifikasi `./scripts/build.sh --check`.
   3. Eksekusi gerbang verifikasi penuh: `make lint && make test && python3 -m unittest tests/test_tui_safety.py tests/test_standalone_safety.py tests/test_save_safety.py`.
 - **Definition of Done (DoD)**:
   - `make lint` dan `make test` (`test_cli.sh`, `test_remediation.sh`, `test_tui_ergonomics.sh`) lulus Exit Code 0.
-  - Seluruh Python safety suites lulus Exit Code 0 (0 failures).
+  - Seluruh Python safety suites (`42+` tests) lulus Exit Code 0.
   - `bin/gamectl` sinkron 100% dengan source (`./scripts/build.sh --check` Exit 0).

@@ -127,6 +127,29 @@ detect_dll_overrides() {
     echo "$result"
 }
 
+# Canonical ordered list of standalone XDG and Steam runner parent directories
+list_runner_dirs() {
+    local s_dyn_root
+    s_dyn_root="$(get_steam_root 2>/dev/null || true)"
+    local xdg_runners="${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners"
+    local -a raw_dirs=("$xdg_runners")
+    [ -n "$s_dyn_root" ] && raw_dirs+=("$s_dyn_root/compatibilitytools.d")
+    raw_dirs+=(
+        "$HOME/.local/share/Steam/compatibilitytools.d"
+        "$HOME/.steam/root/compatibilitytools.d"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"
+    )
+    local d
+    declare -A seen=()
+    for d in "${raw_dirs[@]}"; do
+        [ -n "$d" ] || continue
+        if [ -z "${seen["$d"]:-}" ]; then
+            seen["$d"]=1
+            printf '%s\n' "$d"
+        fi
+    done
+}
+
 # Discover runner for Windows games (priority: umu-run -> GE-Proton / Proton Steam -> wine)
 find_runner() {
     local target_dir="${1:-}"
@@ -162,16 +185,11 @@ find_runner() {
     fi
 
     # Priority 2: Standalone XDG runners & Steam compatibilitytools.d
-    local s_dyn_root xdg_runners
-    s_dyn_root="$(get_steam_root 2>/dev/null || true)"
-    xdg_runners="${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners"
-    local compat_dirs=(
-        "$xdg_runners"
-        "$s_dyn_root/compatibilitytools.d"
-        "$HOME/.local/share/Steam/compatibilitytools.d"
-        "$HOME/.steam/root/compatibilitytools.d"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"
-    )
+    local -a compat_dirs=()
+    local cdir
+    while IFS= read -r cdir; do
+        [ -n "$cdir" ] && compat_dirs+=("$cdir")
+    done < <(list_runner_dirs)
     for cdir in "${compat_dirs[@]}"; do
         [ -d "$cdir" ] || continue
         local p
@@ -245,15 +263,12 @@ get_wineserver_bin() {
         return 0
     fi
 
-    # 3. Fallback: Search Steam compatibility tools for highest GE-Proton wineserver
-    local s_dyn_root
-    s_dyn_root="$(get_steam_root 2>/dev/null || true)"
-    local compat_dirs=(
-        "$s_dyn_root/compatibilitytools.d"
-        "$HOME/.local/share/Steam/compatibilitytools.d"
-        "$HOME/.steam/root/compatibilitytools.d"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"
-    )
+    # 3. Fallback: Search standalone XDG & Steam compatibility tools for highest GE-Proton wineserver
+    local -a compat_dirs=()
+    local cdir
+    while IFS= read -r cdir; do
+        [ -n "$cdir" ] && compat_dirs+=("$cdir")
+    done < <(list_runner_dirs)
     for cdir in "${compat_dirs[@]}"; do
         [ -n "$cdir" ] && [ -d "$cdir" ] || continue
         local p
@@ -265,7 +280,7 @@ get_wineserver_bin() {
                     return 0
                 fi
             done
-        done < <(find "$cdir" -mindepth 1 -maxdepth 1 -type d -name "*Proton*" 2>/dev/null | sort -Vr)
+        done < <(find "$cdir" -mindepth 1 -maxdepth 1 -type d -iname "*proton*" 2>/dev/null | sort -Vr)
     done
 
     # 4. Check system wine64 / wine adjacent wineserver
@@ -297,14 +312,11 @@ get_compat_dir() {
 
 # List local and latest upstream GE-Proton releases
 proton_list() {
-    local s_dyn_root
-    s_dyn_root="$(get_steam_root 2>/dev/null || true)"
-    local compat_dirs=(
-        "$s_dyn_root/compatibilitytools.d"
-        "$HOME/.local/share/Steam/compatibilitytools.d"
-        "$HOME/.steam/root/compatibilitytools.d"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"
-    )
+    local -a compat_dirs=()
+    local cdir
+    while IFS= read -r cdir; do
+        [ -n "$cdir" ] && compat_dirs+=("$cdir")
+    done < <(list_runner_dirs)
 
     declare -A local_installs=()
     for cdir in "${compat_dirs[@]}"; do
@@ -408,6 +420,7 @@ proton_install() {
 
     local resolved_tag=""
     local download_url=""
+    local sha512_url=""
 
     if [ "$target_tag" = "latest" ]; then
         local latest_json
@@ -417,6 +430,10 @@ proton_install() {
             local pat="${arch_suffix}\\.tar\\.gz$"
             download_url=$(echo "$latest_json" | jq -r --arg pat "$pat" '
                 [.assets[] | select(.name | test($pat))] | first | .browser_download_url
+            ' 2>/dev/null || echo "")
+            local sum_pat="${arch_suffix}.*\\.sha512sum$|\\.sha512sum$"
+            sha512_url=$(echo "$latest_json" | jq -r --arg spat "$sum_pat" '
+                [.assets[] | select(.name | test($spat))] | first | .browser_download_url // ""
             ' 2>/dev/null || echo "")
         fi
         if [ -z "$resolved_tag" ] || [ -z "$download_url" ] || [ "$download_url" = "null" ]; then
@@ -432,6 +449,10 @@ proton_install() {
             local pat="${arch_suffix}\\.tar\\.gz$"
             download_url=$(echo "$tag_json" | jq -r --arg pat "$pat" '
                 [.assets[] | select(.name | test($pat))] | first | .browser_download_url
+            ' 2>/dev/null || echo "")
+            local sum_pat="${arch_suffix}.*\\.sha512sum$|\\.sha512sum$"
+            sha512_url=$(echo "$tag_json" | jq -r --arg spat "$sum_pat" '
+                [.assets[] | select(.name | test($spat))] | first | .browser_download_url // ""
             ' 2>/dev/null || echo "")
         fi
         if [ -z "$download_url" ] || [ "$download_url" = "null" ]; then
@@ -456,24 +477,97 @@ proton_install() {
         fi
     fi
 
-    echo "[INFO] Downloading and streaming tarball extraction..."
-    if curl -# -fL "$download_url" | tar -xz -C "$compat_dir/"; then
-        local installed_folder="$compat_dir/$resolved_tag"
-        if [ ! -d "$installed_folder" ]; then
-            installed_folder=$(find "$compat_dir" -mindepth 1 -maxdepth 1 -type d -name "*${resolved_tag}*" 2>/dev/null | head -n 1)
-        fi
-        if [ -n "$installed_folder" ] && [ -f "$installed_folder/compatibilitytool.vdf" ]; then
-            [ -f "$installed_folder/proton" ] && chmod +x "$installed_folder/proton"
-            echo "[VERIFIED] GE-Proton $resolved_tag installed successfully in: $installed_folder"
-            return 0
-        else
-            echo "[ERROR] Extraction completed but compatibilitytool.vdf not found in $installed_folder." >&2
-            return 1
-        fi
-    else
-        echo "[ERROR] Failed to download or extract $resolved_tag from $download_url" >&2
+    local stage_dir
+    stage_dir=$(mktemp -d "$compat_dir/.proton_stage.XXXXXX") || return 1
+    local tarball_name
+    tarball_name=$(basename "${download_url%%\?*}")
+    [ -z "$tarball_name" ] && tarball_name="${resolved_tag}-${arch_suffix}.tar.gz"
+    local staged_tar="$stage_dir/$tarball_name"
+
+    echo "[INFO] Downloading release tarball to staging directory..."
+    if ! curl -# -fL --connect-timeout 15 -o "$staged_tar" "$download_url" || [ ! -s "$staged_tar" ]; then
+        rm -rf "$stage_dir"
+        echo "[ERROR] Failed to download $resolved_tag from $download_url" >&2
         return 1
     fi
+
+    if [ -n "$sha512_url" ] && [ "$sha512_url" != "null" ]; then
+        echo "[INFO] Verifying SHA-512 checksum..."
+        local sum_file="$stage_dir/release.sha512sum"
+        if ! curl -sSL --connect-timeout 15 --max-time 30 -o "$sum_file" "$sha512_url" || [ ! -s "$sum_file" ]; then
+            rm -rf "$stage_dir"
+            echo "[ERROR] Failed to download SHA-512 checksum from $sha512_url" >&2
+            return 1
+        fi
+        local expected_hash=""
+        expected_hash=$(grep -F "$tarball_name" "$sum_file" 2>/dev/null | grep -Eoi '[0-9a-f]{128}' | head -n 1 || true)
+        [ -z "$expected_hash" ] && expected_hash=$(grep -Eoi '[0-9a-f]{128}' "$sum_file" 2>/dev/null | head -n 1 || true)
+        if [ -z "$expected_hash" ]; then
+            rm -rf "$stage_dir"
+            echo "[ERROR] SHA-512 checksum asset did not contain a valid 128-hex digest." >&2
+            return 1
+        fi
+        printf '%s  %s\n' "$expected_hash" "$tarball_name" > "$stage_dir/verify.sha512sum"
+        if ! ( cd "$stage_dir" && sha512sum -c "verify.sha512sum" >/dev/null 2>&1 ); then
+            rm -rf "$stage_dir"
+            echo "[ERROR] SHA-512 checksum verification failed for $tarball_name." >&2
+            return 1
+        fi
+        echo "[VERIFIED] SHA-512 checksum matched."
+    fi
+
+    local tar_entries=""
+    if ! tar_entries=$(tar -tzf "$staged_tar" 2>/dev/null) || [ -z "$tar_entries" ]; then
+        rm -rf "$stage_dir"
+        echo "[ERROR] Downloaded tarball is corrupt or unreadable: $tarball_name" >&2
+        return 1
+    fi
+    if printf '%s\n' "$tar_entries" | grep -Eq '(^/|^[A-Za-z]:|(^|[/\\])\.\.([/\\]|$)|\\)'; then
+        rm -rf "$stage_dir"
+        echo "[ERROR] Security violation: unsafe path traversal detected in tarball $tarball_name." >&2
+        return 1
+    fi
+
+    mkdir -p "$stage_dir/extract"
+    echo "[INFO] Extracting staged tarball..."
+    if ! tar -xzf "$staged_tar" -C "$stage_dir/extract"; then
+        rm -rf "$stage_dir"
+        echo "[ERROR] Failed to extract $tarball_name in staging directory." >&2
+        return 1
+    fi
+
+    local extracted_folder="$stage_dir/extract/$resolved_tag"
+    if [ ! -d "$extracted_folder" ]; then
+        extracted_folder=$(find "$stage_dir/extract" -mindepth 1 -maxdepth 1 -type d -name "*${resolved_tag}*" 2>/dev/null | head -n 1)
+    fi
+    if [ -z "$extracted_folder" ] || [ ! -d "$extracted_folder" ]; then
+        extracted_folder=$(find "$stage_dir/extract" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -n 1)
+    fi
+    if [ -z "$extracted_folder" ] || [ ! -f "$extracted_folder/compatibilitytool.vdf" ]; then
+        rm -rf "$stage_dir"
+        echo "[ERROR] Extraction completed but compatibilitytool.vdf not found in staged release." >&2
+        return 1
+    fi
+    [ -f "$extracted_folder/proton" ] && chmod +x "$extracted_folder/proton"
+
+    local final_folder="$compat_dir/$(basename "$extracted_folder")"
+    if [ -e "$final_folder" ]; then
+        mv "$final_folder" "$stage_dir/old_backup" 2>/dev/null || {
+            rm -rf "$stage_dir"
+            echo "[ERROR] Failed to replace existing runner directory: $final_folder" >&2
+            return 1
+        }
+    fi
+    if ! mv "$extracted_folder" "$final_folder"; then
+        [ -d "$stage_dir/old_backup" ] && mv "$stage_dir/old_backup" "$final_folder" 2>/dev/null || true
+        rm -rf "$stage_dir"
+        echo "[ERROR] Failed to promote staged runner to: $final_folder" >&2
+        return 1
+    fi
+
+    rm -rf "$stage_dir"
+    echo "[VERIFIED] GE-Proton $resolved_tag installed successfully in: $final_folder"
+    return 0
 }
 
 # Safely remove an installed GE-Proton version
@@ -499,14 +593,11 @@ proton_remove() {
         return 1
     fi
 
-    local s_dyn_root
-    s_dyn_root="$(get_steam_root 2>/dev/null || true)"
-    local compat_dirs=(
-        "$s_dyn_root/compatibilitytools.d"
-        "$HOME/.local/share/Steam/compatibilitytools.d"
-        "$HOME/.steam/root/compatibilitytools.d"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"
-    )
+    local -a compat_dirs=()
+    local cdir
+    while IFS= read -r cdir; do
+        [ -n "$cdir" ] && compat_dirs+=("$cdir")
+    done < <(list_runner_dirs)
 
     local target_dir=""
     for cdir in "${compat_dirs[@]}"; do
@@ -518,14 +609,24 @@ proton_remove() {
     done
 
     if [ -z "$target_dir" ] || [ ! -d "$target_dir" ]; then
-        echo "[ERROR] GE-Proton version '$tag' not found in compatibilitytools.d/" >&2
+        echo "[ERROR] GE-Proton version '$tag' not found in runner directories." >&2
         return 1
     fi
 
-    # Canonical path traversal assertion
-    local real_target
+    # Canonical path traversal assertion against authorized runner parent directories
+    local real_target guard_ok=0 real_parent
     real_target="$(realpath "$target_dir" 2>/dev/null || echo "")"
-    if [[ "$real_target" != *"compatibilitytools.d"* ]]; then
+    if [ -n "$real_target" ]; then
+        for cdir in "${compat_dirs[@]}"; do
+            [ -n "$cdir" ] && [ -d "$cdir" ] || continue
+            real_parent="$(realpath "$cdir" 2>/dev/null || echo "")"
+            if [ -n "$real_parent" ] && [[ "$real_target" == "$real_parent/"* ]] && [ "$real_target" != "$real_parent" ]; then
+                guard_ok=1
+                break
+            fi
+        done
+    fi
+    if [ "$guard_ok" -ne 1 ]; then
         echo "[ERROR] Path traversal guard failed for: $target_dir" >&2
         return 1
     fi
