@@ -1,85 +1,71 @@
-# WORK PACKET 36: DEPOT-DL CLI TESTS, WINE PREFIX SAVE AUTO-LOCATE & DEV PROFILER
+# WORK PACKET 38: MULTI-STORE PHASE 1 (STORE INTERFACE, STEAM ADAPTER, SCANNER V3 & FILTER)
 
-- **Track**: Testing Hardening / Savegame Safety / Developer Diagnostics
-- **Status**: COMPLETED [4/4 PACKETS]
-- **Riwayat Selesai**: WP33 (`49b518f..17a1284`), WP34 (`86319f1..67d5c02`), WP35 (`aaf39df..13ffb6f`) — seluruhnya COMPLETED & terverifikasi.
-- **Basis**: Sisa 3 item terbuka hasil audit `HEAD` (`13ffb6f`) terhadap `docs/PROPOSAL_GLOBAL_FEATURES.md:132-147` dan `crates/depot-dl/src/bin/gamectl-depot-dl.rs`.
-- **Target Files**: `crates/depot-dl/src/bin/gamectl-depot-dl.rs`, `bin/gamectl-depot-dl`, `src/core/10_utils.sh`, `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/main.sh`, `tests/test_remediation.sh`, `bin/gamectl`
-
----
-
-## 1. Masalah Empiris & Celah Terbuka
-
-1. **`crates/depot-dl/src/bin/gamectl-depot-dl.rs:1-228`**:
-   - Parsing argumen CLI (`--app`, `--dir`, `--depot`, `--max-downloads`, `--verbose`, `--quiet`, `-h`/`--help`) masih menyatu di `async fn main()` dengan `process::exit(1)`.
-   - Terdapat `0` unit test `#[test]` / `#[cfg(test)]` pada target binary (`gamectl-depot-dl.rs`), sehingga regresi parsing flag atau `--depot <manifest>:<key>` hanya mengandalkan test runtime eksternal.
-2. **Wine Prefix Save Auto-Locate (`docs/PROPOSAL_GLOBAL_FEATURES.md:132-138`)**:
-   - `backup_save()` (`src/core/10_utils.sh:845-952`), `restore_save()` (`L987-L1100`), serta remote sync (`sync_save_remote`, `pull_save_remote`) baru melindungi `<game_dir>/saves/`.
-   - Savegame Windows di dalam `pfx/drive_c/users/.../(AppData/{Local,LocalLow,Roaming}|Documents/My Games|Saved Games)` belum terdeteksi atau terlindungi (`0` implementasi).
-3. **Game Developer Mode & Engine Profiler (`docs/PROPOSAL_GLOBAL_FEATURES.md:141-147`)**:
-   - Belum ada toggle `WINEDEBUG` (`+relay`, `+seh`, `+loaddll`), `VK_LOADER_DEBUG=all`, maupun capture log callback Steamworks/GBE di `load_wrapper_config()`, `configure_wrappers()`, atau `launch_game()` (`0` implementasi).
+- **Track**: Multi-Store Architecture / Discovery Schema v3 / TUI Filter
+- **Status**: PENDING [0/4 PACKETS]
+- **Riwayat Selesai**: WP33..WP36 (`9a1be91..15e95bc`), CI/Dual-License/Hygiene (`5ea7948..a678046`), Modular Core & Steam Split (`a73bfc5..085327b`), RFC Multi-Store v2.0 (`2af9c4c`) — seluruhnya COMPLETED & terverifikasi.
+- **Basis**: `docs/RFC_MULTISTORE_SUPPORT.md` (v2.0) dan `docs/SOVEREIGN_ORIGINAL_PURPOSE.md`.
+- **Target Files**: `src/stores/00_store_interface.sh`, `src/stores/10_store_steam.sh`, `src/steam/20_discovery.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `scripts/build.sh`, `tests/test_remediation.sh`, `bin/gamectl`
 
 ---
 
-## 2. Rencana Eksekusi Detail (Packet 36A - 36D)
+## 1. Tujuan & Batasan Phase 1
 
-### [x] Packet 36A: Rust CLI Unit Tests untuk `gamectl-depot-dl.rs`
-- **Target Files**: `crates/depot-dl/src/bin/gamectl-depot-dl.rs`, `bin/gamectl-depot-dl`
-- **Langkah Teknis**:
-  1. Ekstrak parsing argumen dari `main()` menjadi fungsi murni (zero external crate):
-     - `struct CliConfig` (`app_id: u32`, `dir: PathBuf`, `depots: Vec<(PathBuf, String)>`, `max_downloads: usize`, `verbose: bool`, `quiet: bool`)
-     - `enum CliError` (`HelpRequested`, `InvalidArg(String)`)
-     - `fn parse_cli_args<I, S>(args: I) -> Result<CliConfig, CliError>`
-  2. Tambahkan `#[cfg(test)] mod tests` pada `gamectl-depot-dl.rs` yang menguji:
-     - Kasus valid multi-depot, flag `--verbose`/`-v`, `--quiet`/`-q`, `--max-downloads`, dan path ber-titik-dua via `rfind(':')`.
-     - `-h` / `--help` mengembalikan `Err(CliError::HelpRequested)`.
-     - Flag wajib hilang (`--app`, `--dir`, `--depot`), `--app` non-numerik, `--depot` tanpa `:`, manifest/key kosong, dan `--max-downloads` invalid/`0`.
-  3. Rebuild `bin/gamectl-depot-dl` via `./scripts/build-depot-dl.sh` agar freshness gate `--check` tetap sinkron.
-- **Definition of Done (DoD)**:
-  - `cargo test --manifest-path crates/depot-dl/Cargo.toml --bins` lulus `> 0` test.
-  - `cargo test --manifest-path crates/depot-dl/Cargo.toml` penuh exit `0` dan `./scripts/build-depot-dl.sh --check` PASS.
+1. **Unified Store Abstraction (`src/stores/`)**:
+   - Menyediakan layer registry dan dispatch (`store_list_registered`, `store_list_available`, `store_dispatch`) agar adapter store eksternal berikutnya (`gog`, `epic`, `amazon`) dapat dipasang tanpa menyentuh core launcher atau merusak alur standalone Steam.
+2. **Backward-Compatible Scanner v3 (`src/steam/20_discovery.sh`)**:
+   - Menambahkan Kolom 6 (`STORE`: `STEAM|STANDALONE`, siap ekstensi ke `GOG|EPIC|AMAZON`) dengan header cache `# gamectl scanner v3`, sambil mempertahankan Kolom 1–5 (`APP_ID\tTITLE\tSTATUS\tGAME_DIR\tGAME_BIN`) agar seluruh consumer dan test eksisting tetap utuh.
+3. **Zero Key Collision Store Filter (`src/tui/70_dashboard.sh`)**:
+   - Menambahkan filter store via `Tab` dan `Alt-S` pada `library_menu` (`ALL | STEAM | STANDALONE`), menjaga `Ctrl-S` tetap eksklusif untuk Unified Remote Sync Palette.
 
-### [x] Packet 36B: Smart Savegame Auto-Locate (Ludusavi-style Wine Prefix Scanner)
-- **Target Files**: `src/core/10_utils.sh`, `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/main.sh`
-- **Langkah Teknis**:
-  1. Tambahkan SSoT read-only `discover_prefix_saves "$game_dir"` di `src/core/10_utils.sh`:
-     - Memindai `pfx/drive_c/users/*/(AppData/Local|AppData/LocalLow|AppData/Roaming|Documents/My Games|My Documents/My Games|Saved Games)`.
-     - Memfilter folder noise sistem (`Microsoft`, `Temp`, `Packages`, `CrashDumps`, `D3DSCache`, `NVIDIA`, `AMD`, `Intel`, `Wine`, `Steam`, `Goldberg SteamEmu Saves`, `GSE Saves`, `mesa_shader_cache`, `vulkan`).
-     - Hanya melaporkan direktori yang berisi file reguler dan memblokir symlink escape di luar `pfx/drive_c/users/`.
-  2. Tambahkan `collect_prefix_saves` & `restore_prefix_saves` (non-destruktif, opt-in):
-     - Staging terisolasi ke `<game_dir>/saves/_prefix_saves/<rel>` sehingga `backup_save`, `restore_save`, dan `sync_save_remote`/`pull_save_remote` otomatis ikut memproteksi dan menyinkronkannya tanpa memutus kontrak tes `saves/` eksisting.
-     - Mematuhi active-game guard (`is_game_active_for_dir`).
-  3. Ekspos melalui CLI (`gamectl scan-saves <game_dir>`, `gamectl collect-saves <game_dir>`) serta opsi opt-in `.wrappers` `auto_locate_saves=1` saat pre-launch/post-exit `launch_game()`.
-- **Definition of Done (DoD)**:
-  - Zero mutasi pada direktori sistem Wine/Windows.
-  - Symlink escape di luar prefix ditolak.
-  - Seluruh kontrak `tests/test_save_safety.py` tetap 100% PASS.
+---
 
-### [x] Packet 36C: Game Developer Mode & Engine Profiler
-- **Target Files**: `src/runners/40_wrappers.sh`, `src/runners/50_launcher.sh`, `src/main.sh`
-- **Langkah Teknis**:
-  1. Perluas `load_wrapper_config()` (`src/runners/40_wrappers.sh:1363-1425`) dengan 3 kunci opt-in default OFF:
-     - `dev_winedebug` (`0|basic|full|<custom>`) + override `GAMECTL_DEV_WINEDEBUG`
-     - `dev_vk_debug` (`0|1`) + override `GAMECTL_DEV_VK_DEBUG`
-     - `dev_gbe_log` (`0|1`) + override `GAMECTL_DEV_GBE_LOG`
-  2. Tambahkan SSoT `resolve_dev_profiler_env()` (ekspor di `src/main.sh`):
-     - `basic` -> `+loaddll,+seh`; `full` -> `+relay,+seh,+loaddll`; custom string diteruskan apa adanya (sanitized).
-     - `dev_vk_debug=1` -> `VK_LOADER_DEBUG=all`.
-     - Tidak menimpa `WINEDEBUG` atau `VK_LOADER_DEBUG` yang sudah disetel eksplisit di environment shell user.
-     - Arahkan trace log ke `$(get_runtime_dir)/dev_traces/<slug>.log` dan aktifkan penangkapan log callback GBE/Steamworks bila `dev_gbe_log=1`.
-  3. Hubungkan ke `launch_game()` (`src/runners/50_launcher.sh`), tambahkan toggle di `configure_wrappers()` (`src/runners/40_wrappers.sh:1560-1680`), dan subcommand CLI `gamectl dev-profile <game_dir> [status|basic|full|off]`.
-- **Definition of Done (DoD)**:
-  - Saat default OFF, menghasilkan `0` polusi environment (`WINEDEBUG`, `VK_LOADER_DEBUG` tidak disentuh).
-  - Saat aktif, variabel debug/profiler terekspor deterministik dan jalur log trace tercatat di log peluncuran.
+## 2. Rencana Eksekusi Detail (Packet 38A - 38D)
 
-### [x] Packet 36D: Regression Contracts, Bundle Sync & Full Verification
-- **Target Files**: `tests/test_remediation.sh`, `bin/gamectl`, `bin/gamectl-depot-dl`
+### [ ] Packet 38A: Unified Store Interface (`src/stores/00_store_interface.sh`)
+- **Target Files**: `src/stores/00_store_interface.sh`, `scripts/build.sh`
 - **Langkah Teknis**:
-  1. Tambahkan Tests 29–30 di `tests/test_remediation.sh`:
-     - **Test 29 (36B)**: kontrak `discover_prefix_saves`, filter noise sistem, penolakan symlink escape, dan roundtrip `collect_prefix_saves` -> `backup_save` -> `restore_save`.
-     - **Test 30 (36C)**: kontrak `resolve_dev_profiler_env` (default OFF bersih, `basic`/`full`, `VK_LOADER_DEBUG=all`, respect user env override, dan persistensi `dev-profile`).
-  2. Kompilasi ulang `bin/gamectl` (`./scripts/build.sh && ./scripts/build.sh --check`) dan pastikan `./scripts/build-depot-dl.sh --check` PASS.
-  3. Jalankan gerbang penuh:
-     `cargo test --manifest-path crates/depot-dl/Cargo.toml && STRICT_LINT=1 make lint && ./tests/test_remediation.sh && python3 -m unittest tests/test_tui_safety.py tests/test_standalone_safety.py tests/test_save_safety.py && ./tests/test_cli.sh < /dev/null && ./tests/test_tui_ergonomics.sh`
+  1. Buat `src/stores/00_store_interface.sh`:
+     - `store_list_registered()`: mencetak daftar adapter store terdaftar (`steam`, diperluas saat WP39+).
+     - `store_list_available()`: mengecek `store_<name>_available` dan melaporkan store yang siap secara offline.
+     - `store_dispatch <store> <op> [args...]`: memvalidasi nama store/operasi (`available|status|search|list_installed|download|sync`) dan meneruskan ke `store_<store>_<op>`, mengembalikan error terstruktur ke `stderr` bila tidak didukung.
+     - Loader sibling standalone saat di-`source` langsung di luar `bin/gamectl` (`[ -z "${GAMECTL_BUNDLED:-}" ]`).
+  2. Daftarkan `src/stores/00_store_interface.sh` dan `src/stores/10_store_steam.sh` ke `MODULES=(...)` di `scripts/build.sh`.
 - **Definition of Done (DoD)**:
-  - Seluruh suite Rust (`--bins` & `--lib`), `STRICT_LINT=1 make lint`, Remediation `30/30`, Python `42/42`, CLI `147/147`, dan Ergonomics lulus Exit Code `0`.
+  - `store_dispatch` menolak store/op invalid dengan exit non-zero dan pesan `stderr`.
+  - `./scripts/build.sh` dan `STRICT_LINT=1 make lint` lulus.
+
+### [ ] Packet 38B: Built-in Steam Store Adapter (`src/stores/10_store_steam.sh`)
+- **Target Files**: `src/stores/10_store_steam.sh`, `src/main.sh`
+- **Langkah Teknis**:
+  1. Implementasikan adapter tipis yang membungkus `src/steam/{30_downloader,31_manifests}.sh`:
+     - `store_steam_available`: cek ketersediaan `gamectl-depot-dl` atau provider manifest dasar.
+     - `store_steam_status`: laporkan status `gamectl-depot-dl`, GBE templates, dan LuaTools session secara offline-safe.
+     - `store_steam_search <query>`: query Steam Store API tervalidasi `validate_tui_fields` -> format TSV `<STORE>\t<APP_ID>\t<TITLE>\t<PLATFORMS>\t<STATUS>`.
+     - `store_steam_list_installed`: pindai entri Steam/Standalone dari `scan_installed_games`.
+     - `store_steam_download <app_id> <target_dir> [opts]`: delegasi ke `download_game`.
+     - `store_steam_sync <app_id> <game_dir>`: sinkronisasi manifest/DLC offline (`fetch_dlc`), tanpa mengaktifkan Steam Client kecuali diminta eksplisit.
+  2. Ekspor helper store dan tambahkan subcommand CLI `gamectl stores [list|status]` di `src/main.sh`.
+- **Definition of Done (DoD)**:
+  - Zero regresi pada perintah standalone (`download`, `inject`, `search`, `sync-steam`).
+  - Seluruh output katalog lolos `validate_tui_fields`.
+
+### [ ] Packet 38C: Backward-Compatible Scanner v3 (`src/steam/20_discovery.sh`)
+- **Target Files**: `src/steam/20_discovery.sh`
+- **Langkah Teknis**:
+  1. Naikkan header cache dari `# gamectl scanner v2` -> `# gamectl scanner v3` agar cache v2 lama otomatis ter-refresh.
+  2. Tambahkan Kolom 6 `STORE` (`STEAM` untuk game dari Steam `appmanifest_*.acf`, `STANDALONE` untuk game dari `~/Games/` atau library kustom non-ACF; siap menerima adapter `GOG`/`EPIC`/`AMAZON`).
+  3. Pertahankan format 5 kolom terdepan (`APP_ID\tTITLE\tSTATUS\tGAME_DIR\tGAME_BIN`) serta mode `--formatted` dan raw TSV tanpa memutus `cut -f1..5`, `awk`, `preview_game`, maupun `cli_launch`.
+- **Definition of Done (DoD)**:
+  - Cache `# gamectl scanner v2` ditolak/di-refresh ke v3.
+  - Seluruh consumer 5 kolom dan test discovery eksisting tetap 100% PASS.
+
+### [ ] Packet 38D: TUI Store Switcher, Regression Contracts & Full Verification
+- **Target Files**: `src/tui/70_dashboard.sh`, `tests/test_remediation.sh`, `bin/gamectl`
+- **Langkah Teknis**:
+  1. Tambahkan state filter store aktif di `library_menu()` (`ALL` -> `STEAM` -> `STANDALONE`) yang di-cycle lewat `Tab` dan dipilih langsung lewat `Alt-S` (tanpa menyentuh `Ctrl-S` Remote Sync).
+  2. Tambahkan Tests 31–32 di `tests/test_remediation.sh`:
+     - **Test 31 (38A/38B)**: kontrak `store_list_registered`, `store_dispatch`, `store_steam_*`, dan sanitasi `validate_tui_fields`.
+     - **Test 32 (38C/38D)**: kontrak scanner v3 6-kolom (`STEAM` vs `STANDALONE`), invalidasi cache v2, kompatibilitas consumer 5-kolom, dan `gamectl stores`.
+  3. Kompilasi ulang `bin/gamectl` (`./scripts/build.sh && ./scripts/build.sh --check`) dan jalankan full gate (`STRICT_LINT=1 make lint`, `test_depot_filter.sh`, `test_remediation.sh`, Python safety 42/42, `test_cli.sh` 147/147, `test_tui_ergonomics.sh`).
+- **Definition of Done (DoD)**:
+  - Seluruh suite lint, Bash, Rust, dan Python lulus Exit Code `0` tanpa regresi.
