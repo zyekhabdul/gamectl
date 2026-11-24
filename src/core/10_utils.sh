@@ -370,21 +370,26 @@ exit_tui_screen() {
 tui_modal_notice() {
     local title="${1:-Notice}"
     local msg="${2:-}"
-    local height="${3:-25%}"
+    local rendered="${msg//\\n/$'\n'}"
 
     if [ ! -t 0 ] || [ ! -t 1 ]; then
-        log_msg "INFO" "UI" "[$title] $msg"
-        echo "[$title] $msg"
+        log_msg "INFO" "UI" "[$title] ${rendered//$'\n'/ | }"
+        printf '[%s]\n%s\n' "$title" "$rendered"
         return 0
     fi
     require_tui "$title" || return $?
+    flush_tty_input
 
     local fzf_rc=0
-    printf "%s\n" "$msg" | fzf \
+    printf '%s\n' "$rendered" | fzf \
+        --disabled \
+        --no-info \
+        --no-sort \
+        --pointer=' ' \
+        --prompt='' \
         --border-label="  ╢ $title ╟  " \
         --border-label-pos=2 \
         --header="NOTICE (Enter or Esc: Dismiss)" \
-        --prompt="> " \
         --reverse 2>/dev/null || fzf_rc=$?
     check_fzf_status "$fzf_rc" || return $?
     return 0
@@ -471,27 +476,43 @@ tui_action_palette() {
 
 # Execute headless engine command with isolated subshell and deterministic error capture
 tui_run_engine() {
+    local fail_title=""
+    if [ "${1:-}" = "--fail-title" ]; then
+        fail_title="${2:-}"
+        shift 2
+    fi
     local action_name="$1"
     shift
+    [ -n "$fail_title" ] || fail_title="Engine Failure ($action_name)"
     local cmd=("$@")
-    local run_log
+    local run_dir run_log out_log err_log
+    run_dir="$(get_runtime_dir)"
     run_log="$(get_runtime_log_file)"
-    local err_log
-    err_log="$(get_runtime_dir)/err_${$}_${RANDOM}.log"
-    : > "$err_log"
+    out_log=$(mktemp "$run_dir/out_${$}.XXXXXX") || return 1
+    err_log=$(mktemp "$run_dir/err_${$}.XXXXXX") || { rm -f "$out_log" 2>/dev/null || true; return 1; }
 
     local rc=0
     # Execute inside isolated subshell with stdin disconnected (< /dev/null)
-    # Redirect stdout to runtime log and capture stderr into error buffer
-    ( export GAMECTL_ENGINE_ISOLATED=1; "${cmd[@]}" ) < /dev/null >> "$run_log" 2> "$err_log" || rc=$?
+    # Capture stdout & stderr per invocation, append stdout to runtime log, and fall back to stdout on silent stderr
+    ( export GAMECTL_ENGINE_ISOLATED=1; "${cmd[@]}" ) < /dev/null > "$out_log" 2> "$err_log" || rc=$?
+    if [ -s "$out_log" ]; then
+        cat "$out_log" >> "$run_log" 2>/dev/null || true
+    fi
 
     if [ "$rc" -ne 0 ]; then
-        local err_summary
-        err_summary=$(tail -n 12 "$err_log" 2>/dev/null || echo "Unknown engine failure.")
+        local err_summary=""
+        if [ -s "$err_log" ]; then
+            err_summary=$(tail -n 12 "$err_log" 2>/dev/null || true)
+        elif [ -s "$out_log" ]; then
+            err_summary=$(tail -n 12 "$out_log" 2>/dev/null || true)
+        fi
+        if [ -z "${err_summary//[[:space:]]/}" ]; then
+            err_summary="No diagnostic output emitted."
+        fi
         log_msg "ERROR" "ENGINE" "$action_name failed (exit code $rc)"
-        tui_modal_notice "Engine Failure ($action_name)" "Operation returned Exit Code $rc.\n\nError Traces:\n$err_summary\n\nFull log:\n$run_log"
+        tui_modal_notice "$fail_title" "Operation returned Exit Code $rc.\n\nError Traces:\n$err_summary\n\nFull log:\n$run_log"
     fi
-    rm -f "$err_log" 2>/dev/null || true
+    rm -f "$out_log" "$err_log" 2>/dev/null || true
     return "$rc"
 }
 
