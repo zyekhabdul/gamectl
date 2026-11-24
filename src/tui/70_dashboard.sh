@@ -233,9 +233,9 @@ preview_game() {
     local rhost
     rhost=$(get_remote_host)
     if [ -n "$rhost" ]; then
-        echo "  ${UI_PILL_CTRLS} ${UI_BOLD}Sync to $rhost${UI_RST}   ${UI_PILL_CTRLB} ${UI_BOLD}Manual Save Snapshot${UI_RST}"
+        echo "  ${UI_PILL_CTRLS} ${UI_BOLD}Remote Sync ($rhost)${UI_RST}   ${UI_PILL_CTRLB} ${UI_BOLD}Manual Save Snapshot${UI_RST}"
     else
-        echo "  ${UI_PILL_CTRLS} ${UI_BOLD}Cloud Sync (N/A)${UI_RST}   ${UI_PILL_CTRLB} ${UI_BOLD}Manual Save Snapshot${UI_RST}"
+        echo "  ${UI_PILL_CTRLS} ${UI_BOLD}Remote Sync (Setup)${UI_RST}   ${UI_PILL_CTRLB} ${UI_BOLD}Manual Save Snapshot${UI_RST}"
     fi
     echo "  ${UI_PILL_CTRLR} ${UI_BOLD}Restore Snapshot${UI_RST}   ${UI_PILL_CTRLX} ${UI_BOLD}Community Fixes${UI_RST}"
     echo "  ${UI_PILL_ESC}   ${UI_BOLD}Back to Master Dashboard Hub${UI_RST}"
@@ -1102,6 +1102,82 @@ EOF
     exit_tui_screen
 }
 
+# Unified Remote Save Sync Palette (Push, Pull, Dry-Run, Configure Host)
+remote_sync_interactive() {
+    local sel_dir="$1"
+    local sel_title="${2:-$sel_dir}"
+
+    while true; do
+        local rhost="" host_display=""
+        rhost=$(get_remote_host 2>/dev/null || true)
+        host_display="${rhost:-Not configured}"
+
+        local sync_entries
+        sync_entries=$(printf 'push\tPush Saves - Send local saves to %s\npull\tPull Saves - Download remote saves from %s (auto pre-pull backup)\npull-dry\tPull Dry-Run - Simulate remote pull without modifying local files\nconfig\tConfigure Remote Host - Set or clear SSH host (Current: %s)\n' \
+            "$host_display" "$host_display" "$host_display")
+
+        local pal_rc=0 sel=""
+        sel=$(tui_action_palette \
+            "Remote Save Sync :: ${sel_title:-$sel_dir}" \
+            "Host: $host_display │ Select Sync Action (Enter: Run │ Esc: Return)" \
+            "$sync_entries" \
+            "" \
+            "Sync > ") || pal_rc=$?
+        [ "$pal_rc" -eq 130 ] && return 0
+        [ "$pal_rc" -ne 0 ] && return "$pal_rc"
+        [ -z "$sel" ] && continue
+
+        local action="${sel%%$'\t'*}"
+        case "$action" in
+            push)
+                if tui_run_engine --fail-title "Remote Sync Error" "Remote Push (${sel_title:-$sel_dir})" sync_save_remote "$sel_dir" "$sel_title"; then
+                    tui_modal_notice "Remote Sync (Push)" "Savegames pushed to ${rhost:-remote host} for:\n${sel_title:-$sel_dir}" || return $?
+                fi
+                ;;
+            pull)
+                if tui_run_engine --fail-title "Remote Pull Error" "Remote Pull (${sel_title:-$sel_dir})" pull_save_remote "$sel_dir" "$sel_title"; then
+                    tui_modal_notice "Remote Sync (Pull)" "Savegames pulled from ${rhost:-remote host} for:\n${sel_title:-$sel_dir}\n\nPre-pull local snapshot saved to .save_snapshots/ when local saves existed." || return $?
+                fi
+                ;;
+            pull-dry)
+                if tui_run_engine --fail-title "Remote Pull Dry-Run Error" "Remote Pull Dry-Run (${sel_title:-$sel_dir})" pull_save_remote "$sel_dir" "$sel_title" --dry-run; then
+                    tui_modal_notice "Remote Pull (Dry-Run)" "Dry-run pull simulation completed from ${rhost:-remote host} for:\n${sel_title:-$sel_dir}\n\nNo local files were modified.\nSimulation log:\n$(get_runtime_log_file)" || return $?
+                fi
+                ;;
+            config)
+                local new_rhost="" cfg_rc=0
+                new_rhost=$(tui_prompt_input "Remote Companion Host" "Enter SSH hostname/alias or '-' to clear (Current: $host_display │ Enter: Save │ Esc: Cancel)" "$rhost" "SSH Host > ") || cfg_rc=$?
+                [ "$cfg_rc" -eq 130 ] && continue
+                [ "$cfg_rc" -ne 0 ] && return "$cfg_rc"
+                new_rhost=$(printf '%s' "$new_rhost" | tr -d '[:space:]')
+                local env_rhost="${GAMECTL_REMOTE_HOST:-${GAMECTL_COMPANION_HOST:-${GAMECTL_SYNC_HOST:-${GAMECTL_TUF_HOST:-}}}}"
+
+                if [ "$new_rhost" = "-" ]; then
+                    rm -f "$HOME/.config/gamectl/remote_host"
+                    log_msg "INFO" "CONFIG" "Cleared remote companion host"
+                    if [ -n "$env_rhost" ]; then
+                        tui_modal_notice "Remote Companion Host" "Cleared saved remote host (~/.config/gamectl/remote_host).\n\nNote: environment variable override is still active:\n$env_rhost" || return $?
+                    else
+                        tui_modal_notice "Remote Companion Host" "Cleared remote companion host." || return $?
+                    fi
+                elif [[ "$new_rhost" == -* ]]; then
+                    tui_modal_notice "Invalid Remote Host" "Remote host cannot start with '-':\n$new_rhost" || return $?
+                    continue
+                elif [ -n "$new_rhost" ]; then
+                    mkdir -p "$HOME/.config/gamectl" || return 1
+                    printf '%s\n' "$new_rhost" > "$HOME/.config/gamectl/remote_host"
+                    log_msg "INFO" "CONFIG" "Saved remote companion host: $new_rhost"
+                    if [ -n "$env_rhost" ] && [ "$env_rhost" != "$new_rhost" ]; then
+                        tui_modal_notice "Remote Companion Host" "Saved remote companion host:\n$new_rhost\n\nNote: environment variable override is currently active:\n$env_rhost" || return $?
+                    else
+                        tui_modal_notice "Remote Companion Host" "Saved remote companion host:\n$new_rhost" || return $?
+                    fi
+                fi
+                ;;
+        esac
+    done
+}
+
 # Main Library View
 library_menu() {
     if [ ! -t 0 ] || [ ! -t 1 ]; then
@@ -1171,10 +1247,8 @@ library_menu() {
 
         case "$trigger_key" in
             ctrl-d)
-                if create_desktop_entry "$sel_dir" "$sel_title"; then
+                if tui_run_engine --fail-title "Desktop Shortcut Failed" "Create Desktop Shortcut (${sel_title:-$sel_dir})" create_desktop_entry "$sel_dir" "$sel_title"; then
                     tui_modal_notice "Desktop Shortcut Created" "Created application launcher for:\n${sel_title:-$sel_dir}\nSaved to ~/.local/share/applications/" || return $?
-                else
-                    tui_modal_notice "Desktop Shortcut Failed" "Failed to create desktop shortcut for:\n${sel_title:-$sel_dir}" || return $?
                 fi
                 continue
                 ;;
@@ -1189,27 +1263,20 @@ library_menu() {
                 continue
                 ;;
             ctrl-i)
-                if inject_game "$sel_dir" "$sel_appid" --no-sync; then
+                if tui_run_engine --fail-title "GBE Injection Failed" "GBE Injection (${sel_title:-$sel_dir})" inject_game "$sel_dir" "$sel_appid" --no-sync; then
                     tui_modal_notice "Standalone GBE Injection" "Successfully injected GBE Fork for:\n${sel_title:-$sel_dir}" || return $?
-                else
-                    tui_modal_notice "GBE Injection Failed" "Failed to prepare standalone runtime for:\n${sel_title:-$sel_dir}" || return $?
                 fi
                 invalidate_scan_cache
                 continue
                 ;;
             ctrl-s)
-                if sync_save_remote "$sel_dir" "$sel_title"; then
-                    tui_modal_notice "Remote Sync" "Savegames synchronized with remote companion host for:\n${sel_title:-$sel_dir}" || return $?
-                else
-                    tui_modal_notice "Remote Sync Error" "Failed to synchronize savegames for:\n${sel_title:-$sel_dir}" || return $?
-                fi
+                remote_sync_interactive "$sel_dir" "$sel_title" || return $?
+                invalidate_scan_cache
                 continue
                 ;;
             ctrl-b)
-                if backup_save "$sel_dir"; then
+                if tui_run_engine --fail-title "Save Backup Error" "Save Backup (${sel_title:-$sel_dir})" backup_save "$sel_dir"; then
                     tui_modal_notice "Save Backup" "Savegame snapshot created in slot for:\n${sel_title:-$sel_dir}" || return $?
-                else
-                    tui_modal_notice "Save Backup Error" "Failed to create savegame snapshot for:\n${sel_title:-$sel_dir}" || return $?
                 fi
                 continue
                 ;;
@@ -1242,10 +1309,8 @@ library_menu() {
                             chosen_slot=$(echo "$pick" | cut -f1)
                             chosen_slot="${chosen_slot#slot}"
                         fi
-                        if restore_save "$sel_dir" "$chosen_slot"; then
+                        if tui_run_engine --fail-title "Save Restore Error" "Save Restore slot${chosen_slot} (${sel_title:-$sel_dir})" restore_save "$sel_dir" "$chosen_slot"; then
                             tui_modal_notice "Save Restore" "Savegame restored successfully from slot${chosen_slot} for:\n${sel_title:-$sel_dir}" || return $?
-                        else
-                            tui_modal_notice "Save Restore Error" "Failed to restore savegame from slot${chosen_slot} for:\n${sel_title:-$sel_dir}" || return $?
                         fi
                     else
                         tui_modal_notice "Save Restore" "No snapshot recovery slots found for:\n${sel_title:-$sel_dir}" || return $?
@@ -1536,11 +1601,10 @@ search_steam() {
                 gbin=$(find_game_binary "$gdir" 2>/dev/null || echo "")
                 if [ -n "$gbin" ]; then
                     local launch_rc=0
-                    launch_game "$gdir" "$gbin" "$sel_name" || launch_rc=$?
+                    tui_run_engine "Launch $sel_name" launch_game "$gdir" "$gbin" "$sel_name" || launch_rc=$?
                     if [ "$launch_rc" -eq 10 ]; then
                         break
                     fi
-                    check_fzf_status "$launch_rc" || return $?
                 else
                     log_msg "ERROR" "LAUNCH" "Binary executable not found in $gdir for $sel_name"
                     tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir" || return $?
@@ -1583,11 +1647,10 @@ EOF
                         gbin=$(find_game_binary "$gdir" 2>/dev/null || echo "")
                         if [ -n "$gbin" ]; then
                             local launch_rc=0
-                            launch_game "$gdir" "$gbin" "$sel_name" || launch_rc=$?
+                            tui_run_engine "Launch $sel_name" launch_game "$gdir" "$gbin" "$sel_name" || launch_rc=$?
                             if [ "$launch_rc" -eq 10 ]; then
                                 break
                             fi
-                            check_fzf_status "$launch_rc" || return $?
                         else
                             log_msg "ERROR" "LAUNCH" "Binary executable not found in $gdir for $sel_name"
                             tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir" || return $?
