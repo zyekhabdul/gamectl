@@ -1224,6 +1224,127 @@ test_runner_ssot_timeouts_and_downloader_dedup_contract() {
 }
 run_test "Runner SSoT & Network Guard (WP32 Packet 32C): list_runner_dirs, proton_remove XDG, timeouts & dedup" test_runner_ssot_timeouts_and_downloader_dedup_contract
 
+# Test 20: WP32.1 Hardening — Newline Guard, Multi-Arch SHA512, Tarball Symlink Audit & List Priority
+test_wp32_1_hardening_contracts() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp32_1_XXXXXX")
+    mkdir -p "$t_dir/home/.local/share/Steam/compatibilitytools.d/GE-Proton-Dup" \
+             "$t_dir/xdg_data/gamectl/runners/GE-Proton-Dup" \
+             "$t_dir/game" \
+             "$t_dir/runtime"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_DATA_HOME="$t_dir/xdg_data"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/runners/40_wrappers.sh"
+        source "$REPO_ROOT/src/runners/50_launcher.sh"
+
+        # 1. Reject embedded newline/CR in atomic_set_kv_file & atomic_prepend_line
+        printf 'key=safe\n' > "$t_dir/kv.ini"
+        local nl_val=$'bad\ninjected=1'
+        ! atomic_set_kv_file "$t_dir/kv.ini" "key" "$nl_val" "=" 2>/dev/null || exit 1
+        [ "$(cat "$t_dir/kv.ini")" = "key=safe" ] || exit 1
+        ! atomic_prepend_line "$t_dir/kv.ini" $'line1\nline2' 2>/dev/null || exit 1
+        [ "$(cat "$t_dir/kv.ini")" = "key=safe" ] || exit 1
+
+        # 2. setup_onlinefix propagates failure when atomic_set_kv_file fails
+        printf '[Main]\nPlayerName = Old\n' > "$t_dir/game/OnlineFix.ini"
+        printf 'MZ\x00' > "$t_dir/game/OnlineFix64.dll"
+        atomic_set_kv_file() { return 1; }
+        local of_out="" of_rc=0
+        of_out=$(setup_onlinefix "$t_dir/game" --yes 2>&1) || of_rc=$?
+        [ "$of_rc" -ne 0 ] || exit 1
+        ! printf '%s\n' "$of_out" | grep -q '\[SUCCESS\]' || exit 1
+        unset -f atomic_set_kv_file
+
+        # 3. proton_install selects arch-matching .sha512sum when opposite arch is listed first
+        local compat_dir="$t_dir/home/.local/share/Steam/compatibilitytools.d"
+        local arch_sfx="x86_64" other_sfx="aarch64"
+        if [ "$(uname -m 2>/dev/null || echo x86_64)" = "aarch64" ]; then
+            arch_sfx="aarch64"; other_sfx="x86_64"
+        fi
+        mkdir -p "$t_dir/tar_ok/GE-Proton9-99/files/lib" "$t_dir/tar_ok/GE-Proton9-99/files/share"
+        printf '"compatibilitytools"\n{}\n' > "$t_dir/tar_ok/GE-Proton9-99/compatibilitytool.vdf"
+        printf '#!/bin/sh\nexit 0\n' > "$t_dir/tar_ok/GE-Proton9-99/proton"
+        printf 'shared\n' > "$t_dir/tar_ok/GE-Proton9-99/files/share/b"
+        ln -s '../share/b' "$t_dir/tar_ok/GE-Proton9-99/files/lib/a"
+        tar -czf "$t_dir/GE-Proton9-99-${arch_sfx}.tar.gz" -C "$t_dir/tar_ok" GE-Proton9-99
+        local ok_hash
+        ok_hash=$(sha512sum "$t_dir/GE-Proton9-99-${arch_sfx}.tar.gz" | awk '{print $1}')
+        printf '%s  GE-Proton9-99-%s.tar.gz\n' "$ok_hash" "$arch_sfx" > "$t_dir/ok.sha512sum"
+        printf '%0128d  GE-Proton9-99-%s.tar.gz\n' 0 "$other_sfx" > "$t_dir/other.sha512sum"
+
+        # Build tarball with escaping symlink (GE-Proton9-99/evil -> ../../etc/passwd)
+        python3 - "$t_dir/sym_escape.tar.gz" <<'PY'
+import sys, tarfile
+with tarfile.open(sys.argv[1], "w:gz") as tf:
+    ti = tarfile.TarInfo("GE-Proton9-99/evil")
+    ti.type = tarfile.SYMTYPE
+    ti.linkname = "../../etc/passwd"
+    tf.addfile(ti)
+PY
+        local sym_escape_hash
+        sym_escape_hash=$(sha512sum "$t_dir/sym_escape.tar.gz" | awk '{print $1}')
+        printf '%s  GE-Proton9-99-%s.tar.gz\n' "$sym_escape_hash" "$arch_sfx" > "$t_dir/sym_escape.sha512sum"
+
+        export TEST_TAR_VARIANT="ok"
+        curl() {
+            local out_file="" url=""
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    -o) shift; out_file="${1:-}" ;;
+                    https://*|http://*) url="$1" ;;
+                esac
+                shift || true
+            done
+            case "$url" in
+                *api.github.com*)
+                    printf '{"tag_name":"GE-Proton9-99","assets":[{"name":"GE-Proton9-99-%s.sha512sum","browser_download_url":"https://example.invalid/other.sha512sum"},{"name":"GE-Proton9-99-%s.tar.gz","browser_download_url":"https://example.invalid/GE-Proton9-99-%s.tar.gz"},{"name":"GE-Proton9-99-%s.sha512sum","browser_download_url":"https://example.invalid/ok.sha512sum"}]}' "$other_sfx" "$arch_sfx" "$arch_sfx" "$arch_sfx"
+                    ;;
+                *other.sha512sum)
+                    cp -f "$t_dir/other.sha512sum" "$out_file"
+                    ;;
+                *ok.sha512sum)
+                    if [ "$TEST_TAR_VARIANT" = "ok" ]; then
+                        cp -f "$t_dir/ok.sha512sum" "$out_file"
+                    else
+                        cp -f "$t_dir/sym_escape.sha512sum" "$out_file"
+                    fi
+                    ;;
+                *.tar.gz)
+                    if [ "$TEST_TAR_VARIANT" = "ok" ]; then
+                        cp -f "$t_dir/GE-Proton9-99-${arch_sfx}.tar.gz" "$out_file"
+                    else
+                        cp -f "$t_dir/sym_escape.tar.gz" "$out_file"
+                    fi
+                    ;;
+            esac
+        }
+
+        # Escaping symlink tarball must be rejected with zero installed/stage residue
+        TEST_TAR_VARIANT="escape"
+        ! proton_install "GE-Proton9-99" --yes >/dev/null 2>&1 || exit 1
+        [ ! -d "$compat_dir/GE-Proton9-99" ] || exit 1
+        ! find "$compat_dir" -maxdepth 1 -name '.proton_stage.*' | grep -q . || exit 1
+
+        # Multi-arch checksum + internal relative symlink succeeds cleanly
+        TEST_TAR_VARIANT="ok"
+        proton_install "GE-Proton9-99" --yes >/dev/null || exit 1
+        [ -L "$compat_dir/GE-Proton9-99/files/lib/a" ] || exit 1
+        ! find "$compat_dir" -maxdepth 1 -name '.proton_stage.*' | grep -q . || exit 1
+
+        # 4. proton_list preserves XDG priority over Steam on duplicate tag name
+        local list_out
+        list_out=$(proton_list) || exit 1
+        printf '%s\n' "$list_out" | grep 'GE-Proton-Dup' | grep -q "$t_dir/xdg_data/gamectl/runners/GE-Proton-Dup" || exit 1
+    )
+}
+run_test "Hardening (WP32.1): newline guard, multi-arch SHA512, tarball symlink audit & list priority" test_wp32_1_hardening_contracts
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"
