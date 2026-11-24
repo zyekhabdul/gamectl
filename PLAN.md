@@ -1,8 +1,70 @@
+# WORK PACKET 37: MODULAR RUNNERS & TUI SPLIT (PRASYARAT WP38)
+
+- **Track**: Long-Term Maintainability / Domain Modularization (`runners/` & `tui/`)
+- **Status**: PENDING [0/4 PACKETS]
+- **Riwayat Selesai**: WP33..WP36 (`9a1be91..15e95bc`), CI/Dual-License/Hygiene (`5ea7948..a678046`), Modular Core & Steam Split (`a73bfc5..085327b`), RFC Multi-Store v2.0 (`2af9c4c`), CLI Alias/CI Gates & Clean Debian 13 `depot-dl` (`75c168a..8f10dbe`) — seluruhnya COMPLETED & terverifikasi.
+- **Basis**: `docs/SOVEREIGN_ORIGINAL_PURPOSE.md` dan pola sibling loader `a73bfc5` (`GAMECTL_BUNDLED`).
+- **Target Files**: `src/runners/{40_wrappers,41_proton_prefix,42_graphics_isolation}.sh`, `src/runners/{50_launcher,51_remote_sync,52_inject_runtime}.sh`, `src/tui/{70_dashboard,71_previews}.sh`, `scripts/build.sh`, `tests/test_cli.sh`, `tests/test_remediation.sh`, `bin/gamectl`
+
+---
+
+## 1. Tujuan & Batasan WP37
+
+1. **Zero Behavior Change**: Pemecahan murni struktural untuk menyeimbangkan ukuran modul `runners/` dan `tui/` agar setara dengan `core/` & `steam/` sebelum `70_dashboard.sh` dimodifikasi pada WP38D.
+2. **Backward-Compatible `source`**: Setiap file induk (`40_wrappers.sh`, `50_launcher.sh`, `70_dashboard.sh`) menyertakan sibling auto-loader `[ -z "${GAMECTL_BUNDLED:-}" ]` sehingga pemanggil test eksisting tetap bekerja tanpa perubahan signature.
+
+---
+
+## 2. Rencana Eksekusi Detail (Packet 37A - 37D)
+
+### [ ] Packet 37A: Split `src/runners/40_wrappers.sh` (2.072 LOC -> 3 Modul)
+- **Target Files**: `src/runners/40_wrappers.sh`, `src/runners/41_proton_prefix.sh`, `src/runners/42_graphics_isolation.sh`, `scripts/build.sh`
+- **Langkah Teknis**:
+  1. Pertahankan di `40_wrappers.sh` (~722 LOC): `load_wrapper_config`, `resolve_dev_profiler_env`, `configure_dev_profile`, `build_wrapper_command`, `configure_wrappers`, `configure_global`, ditambah sibling auto-loader (`41_proton_prefix.sh`, `42_graphics_isolation.sh`).
+  2. Pindahkan ke `41_proton_prefix.sh` (~981 LOC): `detect_dll_overrides`, `list_runner_dirs`, `find_runner`, `get_wineserver_bin`, `get_compat_dir`, `proton_list`, `proton_install`, `proton_remove`, `prepare_windows_runner_env`, `manage_prefix`.
+  3. Pindahkan ke `42_graphics_isolation.sh` (~380 LOC): `is_haswell_gpu`, `detect_vulkan_capability`, `resolve_graphics_renderer`, `get_native_resolution`, `get_default_gamescope_args`, `check_systemd_scope_support`, `detect_dgpu_vendor`, `build_sandbox_command`.
+  4. Daftarkan `41_proton_prefix.sh` dan `42_graphics_isolation.sh` di `MODULES=(...)` `scripts/build.sh` tepat setelah `40_wrappers.sh`.
+- **Definition of Done (DoD)**:
+  - `source src/runners/40_wrappers.sh` memuat seluruh fungsi runner, prefix, dan isolasi tanpa error; `./scripts/build.sh` lulus `bash -n`.
+
+### [ ] Packet 37B: Split `src/runners/50_launcher.sh` (1.572 LOC -> 3 Modul)
+- **Target Files**: `src/runners/50_launcher.sh`, `src/runners/51_remote_sync.sh`, `src/runners/52_inject_runtime.sh`, `scripts/build.sh`
+- **Langkah Teknis**:
+  1. Pertahankan di `50_launcher.sh` (~794 LOC): `preview_process_log`, `game_controller_hud`, `launch_game`, `cli_launch`, ditambah sibling auto-loader (`51_remote_sync.sh`, `52_inject_runtime.sh`).
+  2. Pindahkan ke `51_remote_sync.sh` (~423 LOC): `probe_ssh_remote_home`, `resolve_ssh_remote_base`, `resolve_rclone_remote_saves`, `sync_save_remote`, `pull_save_remote`, `sync_to_companion`, `sync_to_tuf`, `pull_from_companion`, `pull_from_tuf`.
+  3. Pindahkan ke `52_inject_runtime.sh` (~366 LOC): `setup_onlinefix`, `inject_game`.
+  4. Daftarkan `51_remote_sync.sh` dan `52_inject_runtime.sh` di `MODULES=(...)` `scripts/build.sh` tepat setelah `50_launcher.sh`.
+- **Definition of Done (DoD)**:
+  - `source src/runners/50_launcher.sh` memuat seluruh fungsi sync & inject secara transparan; `./scripts/build.sh` lulus `bash -n`.
+
+### [ ] Packet 37C: Split `src/tui/70_dashboard.sh` (1.728 LOC -> 2 Modul)
+- **Target Files**: `src/tui/70_dashboard.sh`, `src/tui/71_previews.sh`, `scripts/build.sh`
+- **Langkah Teknis**:
+  1. Pertahankan di `70_dashboard.sh` (~865 LOC): `view_logs_interactive`, `manage_active_processes_interactive`, `dashboard_menu`, `remote_sync_interactive`, `library_menu`, `search_steam`, ditambah sibling auto-loader (`71_previews.sh`).
+  2. Pindahkan ke `71_previews.sh` (~874 LOC): `preview_game`, `preview_dashboard`, `preview_search_game`, `preview_log_entry` (renderer preview read-only, zero side-effect).
+  3. Daftarkan `71_previews.sh` di `MODULES=(...)` `scripts/build.sh` tepat setelah `70_dashboard.sh`.
+- **Definition of Done (DoD)**:
+  - `source src/tui/70_dashboard.sh` memuat seluruh preview renderer; seluruh `--expect` dan `download_game.*--os` tetap utuh di `70_dashboard.sh`.
+
+### [ ] Packet 37D: Update Static Test Paths, Rebuild & Full Verification di `serv`
+- **Target Files**: `tests/test_cli.sh`, `tests/test_remediation.sh`, `bin/gamectl`
+- **Langkah Teknis**:
+  1. Perbarui path assertions statis yang mereferensikan lokasi fungsi yang dipindah:
+     - `tests/test_cli.sh`: `manage_prefix()` -> `src/runners/41_proton_prefix.sh`; `pull_save_remote()` -> `src/runners/51_remote_sync.sh`.
+     - `tests/test_remediation.sh`: audit `/run/user/` mencakup `41_proton_prefix.sh` & `42_graphics_isolation.sh`; `Bridge (Opt)` -> `src/tui/71_previews.sh`.
+  2. Kompilasi ulang `bin/gamectl` (`./scripts/build.sh && ./scripts/build.sh --check`).
+  3. Sync ke `serv:~/Projects/gamectl-build/` dan jalankan full verification gate (`STRICT_LINT=1 make lint`, `make test`, `cargo test --manifest-path crates/depot-dl/Cargo.toml`).
+- **Definition of Done (DoD)**:
+  - `STRICT_LINT=1 make lint` Exit `0`, `./scripts/build.sh --check` `[PASS]`, `make test` (`test_cli.sh` 147/147, `test_remediation.sh` 31/31, `test_tui_ergonomics.sh`, `test_depot_filter.sh`) dan `cargo test` 40/40 lulus Exit `0` tanpa regresi.
+
+---
+
 # WORK PACKET 38: MULTI-STORE PHASE 1 (STORE INTERFACE, STEAM ADAPTER, SCANNER V3 & FILTER)
 
 - **Track**: Multi-Store Architecture / Discovery Schema v3 / TUI Filter
 - **Status**: PENDING [0/4 PACKETS]
-- **Riwayat Selesai**: WP33..WP36 (`9a1be91..15e95bc`), CI/Dual-License/Hygiene (`5ea7948..a678046`), Modular Core & Steam Split (`a73bfc5..085327b`), RFC Multi-Store v2.0 (`2af9c4c`) — seluruhnya COMPLETED & terverifikasi.
+- **Prasyarat**: WP37 (Modular Runners & TUI Split)
+- **Riwayat Selesai**: WP33..WP36 (`9a1be91..15e95bc`), CI/Dual-License/Hygiene (`5ea7948..a678046`), Modular Core & Steam Split (`a73bfc5..085327b`), RFC Multi-Store v2.0 (`2af9c4c`), CLI Alias/CI Gates & Clean Debian 13 `depot-dl` (`75c168a..8f10dbe`).
 - **Basis**: `docs/RFC_MULTISTORE_SUPPORT.md` (v2.0) dan `docs/SOVEREIGN_ORIGINAL_PURPOSE.md`.
 - **Target Files**: `src/stores/00_store_interface.sh`, `src/stores/10_store_steam.sh`, `src/steam/20_discovery.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `scripts/build.sh`, `tests/test_remediation.sh`, `bin/gamectl`
 
