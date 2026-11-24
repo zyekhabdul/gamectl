@@ -132,7 +132,9 @@ list_runner_dirs() {
     local s_dyn_root
     s_dyn_root="$(get_steam_root 2>/dev/null || true)"
     local xdg_runners="${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners"
-    local -a raw_dirs=("$xdg_runners")
+    local -a raw_dirs=()
+    [ -n "${GAMECTL_RUNNER_DIR:-}" ] && raw_dirs+=("$GAMECTL_RUNNER_DIR")
+    raw_dirs+=("$xdg_runners")
     [ -n "$s_dyn_root" ] && raw_dirs+=("$s_dyn_root/compatibilitytools.d")
     raw_dirs+=(
         "$HOME/.local/share/Steam/compatibilitytools.d"
@@ -297,8 +299,12 @@ get_wineserver_bin() {
     return 1
 }
 
-# Resolve active Steam compatibility tools directory
+# Resolve active runner compatibility tools directory (standalone XDG fallback when Steam is absent)
 get_compat_dir() {
+    if [ -n "${GAMECTL_RUNNER_DIR:-}" ]; then
+        echo "$GAMECTL_RUNNER_DIR"
+        return 0
+    fi
     local s_dyn_root
     s_dyn_root="$(get_steam_root 2>/dev/null || true)"
     if [ -n "$s_dyn_root" ] && [ -d "$s_dyn_root" ]; then
@@ -306,7 +312,7 @@ get_compat_dir() {
     elif [ -d "$HOME/.steam/root" ]; then
         echo "$HOME/.steam/root/compatibilitytools.d"
     else
-        echo "$HOME/.local/share/Steam/compatibilitytools.d"
+        echo "${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners"
     fi
 }
 

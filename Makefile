@@ -31,7 +31,15 @@ test:
 lint:
 	@set -e; for file in src/*.sh src/*/*.sh bin/gamectl install.sh scripts/*.sh packaging/debian/*.sh packaging/scripts/*.sh tests/*.sh completions/*.bash; do \
 		bash -n "$$file"; \
-	done
+	done; \
+	if command -v shellcheck >/dev/null 2>&1; then \
+		shellcheck -S error src/*.sh src/*/*.sh scripts/*.sh; \
+	elif [ "$${STRICT_LINT:-0}" = "1" ]; then \
+		echo "[FAIL] STRICT_LINT=1 requires shellcheck in PATH" >&2; \
+		exit 1; \
+	else \
+		echo "[INFO] shellcheck not found (syntax-only lint passed)"; \
+	fi
 
 pkg-deb:
 	bash packaging/debian/build-deb.sh
