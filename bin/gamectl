@@ -1178,6 +1178,303 @@ restore_save() (
     return 0
 )
 
+# Internal helper: check whether a prefix folder name is OS/driver/runtime noise
+_is_prefix_save_noise() {
+    local name_lc="${1,,}"
+    case "$name_lc" in
+        microsoft|temp|packages|crashdumps|d3dscache|nvidia|amd|intel|wine|steam|\
+        "goldberg steamemu saves"|"gse saves"|mesa_shader_cache|vulkan|windows|\
+        "internet explorer"|mozilla|google|chromium|cache|shaders|dxvk_state_cache|nv_cache)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+# Internal helper: verify deepest existing ancestor of a target path stays within a root
+_check_confined_ancestor() {
+    local probe="$1"
+    local root="$2"
+    while [ "$probe" != "/" ] && [ "$probe" != "." ] && [ ! -e "$probe" ] && [ ! -L "$probe" ]; do
+        probe=$(dirname "$probe")
+    done
+    local probe_real
+    probe_real=$(realpath -e -- "$probe" 2>/dev/null || true)
+    [ -n "$probe_real" ] || return 1
+    if [ "$probe_real" = "$root" ] || [[ "$probe_real" == "$root"/* ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# Discover savegame directories inside a Wine/Proton prefix (strictly read-only)
+discover_prefix_saves() {
+    local game_dir="${1:-}"
+    if [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
+        echo "[ERROR] Target game directory not found: ${game_dir:-<empty>}" >&2
+        return 1
+    fi
+
+    local pfx_path="$game_dir/pfx"
+    local users_path="$pfx_path/drive_c/users"
+    if [ ! -e "$users_path" ] && [ ! -L "$users_path" ]; then
+        return 0
+    fi
+
+    local pfx_root users_root
+    pfx_root=$(realpath -e -- "$pfx_path" 2>/dev/null || true)
+    users_root=$(realpath -e -- "$users_path" 2>/dev/null || true)
+    if [ -z "$pfx_root" ] || [ -z "$users_root" ] || [[ "$users_root" != "$pfx_root"/* ]]; then
+        echo "[ERROR] Wine prefix users directory escapes prefix root: $users_path" >&2
+        return 1
+    fi
+    [ -d "$users_root" ] || return 0
+
+    local -a save_roots=(
+        "AppData/Local"
+        "AppData/LocalLow"
+        "AppData/Roaming"
+        "Documents/My Games"
+        "My Documents/My Games"
+        "Saved Games"
+    )
+    local -A seen_reals=()
+    local -a discovered=()
+
+    local user_dir user_real rel_root root_path root_real cand cand_name cand_real
+    local sym sym_real escaped has_file rel_out
+    for user_dir in "$users_root"/*; do
+        [ -e "$user_dir" ] || [ -L "$user_dir" ] || continue
+        user_real=$(realpath -e -- "$user_dir" 2>/dev/null || true)
+        if [ -z "$user_real" ] || [[ "$user_real" != "$users_root"/* ]] || [ ! -d "$user_real" ]; then
+            continue
+        fi
+
+        for rel_root in "${save_roots[@]}"; do
+            root_path="$user_real/$rel_root"
+            [ -e "$root_path" ] || [ -L "$root_path" ] || continue
+            root_real=$(realpath -e -- "$root_path" 2>/dev/null || true)
+            if [ -z "$root_real" ] || [[ "$root_real" != "$users_root"/* ]]; then
+                echo "[WARN] Rejected escaping prefix save root: $root_path" >&2
+                continue
+            fi
+            [ -d "$root_real" ] || continue
+
+            for cand in "$root_real"/*; do
+                [ -e "$cand" ] || [ -L "$cand" ] || continue
+                cand_name="${cand##*/}"
+                if [[ "$cand_name" == *$'\n'* ]] || [[ "$cand_name" == *$'\r'* ]]; then
+                    echo "[WARN] Rejected prefix save directory with control character" >&2
+                    continue
+                fi
+                if _is_prefix_save_noise "$cand_name"; then
+                    continue
+                fi
+
+                cand_real=$(realpath -e -- "$cand" 2>/dev/null || true)
+                if [ -z "$cand_real" ] || [[ "$cand_real" != "$users_root"/* ]]; then
+                    echo "[WARN] Rejected escaping prefix save candidate: $cand" >&2
+                    continue
+                fi
+                [ -d "$cand_real" ] || continue
+
+                escaped=0
+                while IFS= read -r -d '' sym; do
+                    sym_real=$(realpath -e -- "$sym" 2>/dev/null || true)
+                    if [ -z "$sym_real" ] || [[ "$sym_real" != "$users_root"/* ]]; then
+                        echo "[WARN] Rejected prefix save with escaping symlink: $sym" >&2
+                        escaped=1
+                        break
+                    fi
+                done < <(find "$cand_real" -type l -print0 2>/dev/null)
+                [ "$escaped" -eq 1 ] && continue
+
+                has_file=$(find "$cand_real" -type f -print -quit 2>/dev/null || true)
+                [ -n "$has_file" ] || continue
+
+                if [ -n "${seen_reals[$cand_real]:-}" ]; then
+                    continue
+                fi
+                seen_reals["$cand_real"]=1
+
+                rel_out="${cand_real#"$users_root"/}"
+                discovered+=("$rel_out")
+            done
+        done
+    done
+
+    if [ ${#discovered[@]} -gt 0 ]; then
+        printf '%s\n' "${discovered[@]}" | LC_ALL=C sort -u
+    fi
+    return 0
+}
+
+# Collect discovered Wine prefix saves non-destructively into <game_dir>/saves/_prefix_saves/
+collect_prefix_saves() {
+    local game_dir="${1:-}"
+    local is_quiet="${2:-false}"
+
+    if [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
+        [ "$is_quiet" = true ] || echo "[ERROR] Target game directory not found: ${game_dir:-<empty>}" >&2
+        return 1
+    fi
+
+    local active_pid=""
+    if active_pid=$(is_game_active_for_dir "$game_dir" 2>/dev/null); then
+        [ "$is_quiet" = true ] || echo "[ERROR] Cannot collect prefix saves while game process is active (PID: $active_pid)." >&2
+        log_msg "ERROR" "SAVE" "Prefix save collect blocked while active PID $active_pid running for $(basename "$game_dir")"
+        return 1
+    fi
+
+    local -a rels=()
+    local line
+    while IFS= read -r line; do
+        [ -n "$line" ] && rels+=("$line")
+    done < <(discover_prefix_saves "$game_dir")
+
+    if [ ${#rels[@]} -eq 0 ]; then
+        [ "$is_quiet" = true ] || echo "[INFO] No Wine prefix save directories found in: $game_dir"
+        return 0
+    fi
+
+    local save_dir="$game_dir/saves"
+    if [ -L "$save_dir" ]; then
+        local target_path
+        target_path=$(readlink -f "$save_dir" 2>/dev/null || true)
+        if [ -z "$target_path" ] || [ ! -d "$target_path" ]; then
+            [ "$is_quiet" = true ] || echo "[ERROR] Portable saves symlink points to invalid directory: $save_dir" >&2
+            return 1
+        fi
+    elif [ -e "$save_dir" ] && [ ! -d "$save_dir" ]; then
+        [ "$is_quiet" = true ] || echo "[ERROR] Portable saves path is not a directory: $save_dir" >&2
+        return 1
+    fi
+
+    local stage_root="$save_dir/_prefix_saves"
+    mkdir -p -m 700 "$stage_root" || return 1
+
+    local users_root
+    users_root=$(realpath -e -- "$game_dir/pfx/drive_c/users" 2>/dev/null || true)
+    [ -n "$users_root" ] || return 1
+
+    local rel src src_real tmp_dir dst dst_parent count=0
+    for rel in "${rels[@]}"; do
+        case "$rel" in
+            /*|..|../*|*/..|*/../*)
+                echo "[WARN] Skipping unsafe relative save path: $rel" >&2
+                continue
+                ;;
+        esac
+        src="$users_root/$rel"
+        src_real=$(realpath -e -- "$src" 2>/dev/null || true)
+        if [ -z "$src_real" ] || [[ "$src_real" != "$users_root"/* ]] || [ ! -d "$src_real" ]; then
+            echo "[WARN] Skipping invalid prefix save source: $rel" >&2
+            continue
+        fi
+
+        dst="$stage_root/$rel"
+        dst_parent=$(dirname "$dst")
+        mkdir -p "$dst_parent" || return 1
+        tmp_dir=$(mktemp -d "$stage_root/.stage_collect.XXXXXX") || return 1
+        mkdir "$tmp_dir/payload" || { rm -rf -- "$tmp_dir"; return 1; }
+
+        if ! cp -a -- "$src_real/." "$tmp_dir/payload/" 2>/dev/null; then
+            rm -rf -- "$tmp_dir"
+            [ "$is_quiet" = true ] || echo "[ERROR] Failed to stage prefix saves from $src_real" >&2
+            return 1
+        fi
+
+        if [ -e "$dst" ] || [ -L "$dst" ]; then
+            if ! mv -T -- "$dst" "$tmp_dir/old"; then
+                rm -rf -- "$tmp_dir"
+                return 1
+            fi
+        fi
+        if ! mv -T -- "$tmp_dir/payload" "$dst"; then
+            [ -e "$tmp_dir/old" ] && mv -T -- "$tmp_dir/old" "$dst" 2>/dev/null || true
+            rm -rf -- "$tmp_dir"
+            return 1
+        fi
+        rm -rf -- "$tmp_dir"
+        count=$((count + 1))
+    done
+
+    [ "$is_quiet" = true ] || echo "[VERIFIED] Collected $count Wine prefix save directory(ies) into $stage_root"
+    log_msg "INFO" "SAVE" "Collected $count Wine prefix save directory(ies) for $(basename "$game_dir")"
+    return 0
+}
+
+# Opt-in restore of staged Wine prefix saves from <game_dir>/saves/_prefix_saves/ -> pfx/drive_c/users/
+restore_prefix_saves() {
+    local game_dir="${1:-}"
+    local is_quiet="${2:-false}"
+
+    if [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
+        [ "$is_quiet" = true ] || echo "[ERROR] Target game directory not found: ${game_dir:-<empty>}" >&2
+        return 1
+    fi
+
+    local active_pid=""
+    if active_pid=$(is_game_active_for_dir "$game_dir" 2>/dev/null); then
+        [ "$is_quiet" = true ] || echo "[ERROR] Cannot restore prefix saves while game process is active (PID: $active_pid)." >&2
+        return 1
+    fi
+
+    local stage_root="$game_dir/saves/_prefix_saves"
+    if [ ! -d "$stage_root" ]; then
+        [ "$is_quiet" = true ] || echo "[INFO] No staged Wine prefix saves found in: $stage_root"
+        return 0
+    fi
+
+    local pfx_root users_root
+    pfx_root=$(realpath -e -- "$game_dir/pfx" 2>/dev/null || true)
+    users_root=$(realpath -e -- "$game_dir/pfx/drive_c/users" 2>/dev/null || true)
+    if [ -z "$pfx_root" ] || [ -z "$users_root" ] || [[ "$users_root" != "$pfx_root"/* ]]; then
+        [ "$is_quiet" = true ] || echo "[ERROR] Target Wine prefix users directory missing or invalid." >&2
+        return 1
+    fi
+
+    local bad_sym
+    bad_sym=$(find "$stage_root" -type l -print -quit 2>/dev/null || true)
+    if [ -n "$bad_sym" ]; then
+        echo "[ERROR] Staged prefix saves contain disallowed symlink: $bad_sym" >&2
+        return 1
+    fi
+
+    local file rel dst_file dst_parent dst_parent_real count=0
+    while IFS= read -r -d '' file; do
+        rel="${file#"$stage_root"/}"
+        case "$rel" in
+            /*|..|../*|*/..|*/../*)
+                echo "[ERROR] Unsafe staged prefix save path: $rel" >&2
+                return 1
+                ;;
+        esac
+        dst_file="$users_root/$rel"
+        dst_parent=$(dirname "$dst_file")
+        if ! _check_confined_ancestor "$dst_parent" "$users_root"; then
+            echo "[ERROR] Prefix restore destination escapes users root: $dst_parent" >&2
+            return 1
+        fi
+        mkdir -p -- "$dst_parent" || return 1
+        dst_parent_real=$(realpath -e -- "$dst_parent" 2>/dev/null || true)
+        if [ -z "$dst_parent_real" ] || { [ "$dst_parent_real" != "$users_root" ] && [[ "$dst_parent_real" != "$users_root"/* ]]; }; then
+            echo "[ERROR] Prefix restore destination resolved outside users root: $dst_parent" >&2
+            return 1
+        fi
+        if [ -L "$dst_file" ]; then
+            echo "[ERROR] Refusing to overwrite symlink in Wine prefix: $dst_file" >&2
+            return 1
+        fi
+        cp -a -- "$file" "$dst_file" || return 1
+        count=$((count + 1))
+    done < <(find "$stage_root" -type f -print0 2>/dev/null)
+
+    [ "$is_quiet" = true ] || echo "[VERIFIED] Restored $count Wine prefix save file(s) from $stage_root"
+    log_msg "INFO" "SAVE" "Restored $count Wine prefix save file(s) for $(basename "$game_dir")"
+    return 0
+}
+
 # Dynamic executable finder for game directory
 find_game_binary() {
     local dir="$1"
@@ -8327,6 +8624,10 @@ load_wrapper_config() {
     GAMECTL_CFG_SANDBOX=0
     GAMECTL_CFG_RENDERER="auto"
     GAMECTL_CFG_GAMESCOPE_ARGS=""
+    GAMECTL_CFG_AUTO_LOCATE_SAVES=0
+    GAMECTL_CFG_DEV_WINEDEBUG="0"
+    GAMECTL_CFG_DEV_VK_DEBUG="0"
+    GAMECTL_CFG_DEV_GBE_LOG="0"
 
     local w_cfgs=("$HOME/.config/gamectl/wrappers")
     [ -n "$gdir" ] && w_cfgs+=("$gdir/.wrappers")
@@ -8354,6 +8655,10 @@ load_wrapper_config() {
                 sandbox) GAMECTL_CFG_SANDBOX="$v" ;;
                 renderer) GAMECTL_CFG_RENDERER="$v" ;;
                 gamescope_args) GAMECTL_CFG_GAMESCOPE_ARGS="$v" ;;
+                auto_locate_saves) GAMECTL_CFG_AUTO_LOCATE_SAVES="$v" ;;
+                dev_winedebug) GAMECTL_CFG_DEV_WINEDEBUG="$v" ;;
+                dev_vk_debug) GAMECTL_CFG_DEV_VK_DEBUG="$v" ;;
+                dev_gbe_log) GAMECTL_CFG_DEV_GBE_LOG="$v" ;;
             esac
         done < "$w_cfg"
     done
@@ -8374,7 +8679,125 @@ load_wrapper_config() {
             [ "$PROTON_USE_WINED3D" = "0" ] && GAMECTL_CFG_RENDERER="dxvk"
         fi
         [ -n "${GAMECTL_GAMESCOPE_ARGS:-}" ] && GAMECTL_CFG_GAMESCOPE_ARGS="$GAMECTL_GAMESCOPE_ARGS"
+        [ -n "${GAMECTL_AUTO_LOCATE_SAVES:-}" ] && GAMECTL_CFG_AUTO_LOCATE_SAVES="$GAMECTL_AUTO_LOCATE_SAVES"
+        [ -n "${GAMECTL_DEV_WINEDEBUG:-}" ] && GAMECTL_CFG_DEV_WINEDEBUG="$GAMECTL_DEV_WINEDEBUG"
+        [ -n "${GAMECTL_DEV_VK_DEBUG:-}" ] && GAMECTL_CFG_DEV_VK_DEBUG="$GAMECTL_DEV_VK_DEBUG"
+        [ -n "${GAMECTL_DEV_GBE_LOG:-}" ] && GAMECTL_CFG_DEV_GBE_LOG="$GAMECTL_DEV_GBE_LOG"
     fi
+}
+
+# Canonical developer profiler environment resolver (SSoT; zero pollution when OFF)
+resolve_dev_profiler_env() {
+    local gdir="${1:-}"
+    local apply_env="${2:-1}"
+
+    load_wrapper_config "$gdir" "$apply_env"
+
+    GAMECTL_DEV_ACTIVE=0
+    GAMECTL_DEV_RESOLVED_WINEDEBUG=""
+    GAMECTL_DEV_RESOLVED_VK_DEBUG=""
+    GAMECTL_DEV_RESOLVED_GBE_LOG=0
+    GAMECTL_DEV_TRACE_LOG=""
+    GAMECTL_DEV_RESPECTED_USER_WINEDEBUG=0
+    GAMECTL_DEV_RESPECTED_USER_VK_DEBUG=0
+
+    local wd_raw="${GAMECTL_CFG_DEV_WINEDEBUG:-0}"
+    local wd_lc="${wd_raw,,}"
+    local mapped_wd=""
+    case "$wd_lc" in
+        ""|0|off|false) mapped_wd="" ;;
+        basic) mapped_wd="+loaddll,+seh" ;;
+        full)  mapped_wd="+relay,+seh,+loaddll" ;;
+        *)
+            mapped_wd=$(printf '%s' "$wd_raw" | tr -cd 'A-Za-z0-9_+,=-')
+            if [ -z "$mapped_wd" ]; then
+                echo "[WARN] Ignored invalid dev_winedebug setting." >&2
+            fi
+            ;;
+    esac
+
+    if [ -n "$mapped_wd" ]; then
+        GAMECTL_DEV_ACTIVE=1
+        if [ -n "${WINEDEBUG:-}" ]; then
+            GAMECTL_DEV_RESPECTED_USER_WINEDEBUG=1
+        else
+            GAMECTL_DEV_RESOLVED_WINEDEBUG="$mapped_wd"
+        fi
+    fi
+
+    local vk_lc="${GAMECTL_CFG_DEV_VK_DEBUG:-0}"
+    vk_lc="${vk_lc,,}"
+    if [ "$vk_lc" = "1" ] || [ "$vk_lc" = "true" ]; then
+        GAMECTL_DEV_ACTIVE=1
+        if [ -n "${VK_LOADER_DEBUG:-}" ]; then
+            GAMECTL_DEV_RESPECTED_USER_VK_DEBUG=1
+        else
+            GAMECTL_DEV_RESOLVED_VK_DEBUG="all"
+        fi
+    fi
+
+    local gbe_lc="${GAMECTL_CFG_DEV_GBE_LOG:-0}"
+    gbe_lc="${gbe_lc,,}"
+    if [ "$gbe_lc" = "1" ] || [ "$gbe_lc" = "true" ]; then
+        GAMECTL_DEV_ACTIVE=1
+        GAMECTL_DEV_RESOLVED_GBE_LOG=1
+    fi
+
+    if [ "$GAMECTL_DEV_ACTIVE" -eq 1 ]; then
+        local base_slug hash_part
+        base_slug=$(basename "${gdir:-global}" | tr -cd '[:alnum:]_-')
+        [ -z "$base_slug" ] && base_slug="game"
+        hash_part=$(printf '%s' "${gdir:-global}" | cksum | awk '{print $1}')
+        GAMECTL_DEV_TRACE_LOG="$(get_runtime_dir)/dev_traces/${base_slug}_${hash_part}.log"
+    fi
+}
+
+# CLI helper for per-game developer profiler configuration
+configure_dev_profile() {
+    local gdir="${1:-}"
+    local mode="${2:-status}"
+
+    if [ -z "$gdir" ] || [ ! -d "$gdir" ]; then
+        echo "[ERROR] Game directory not found: ${gdir:-<empty>}" >&2
+        echo "Usage: gamectl dev-profile <game_dir> [status|basic|full|off]" >&2
+        return 1
+    fi
+
+    local w_file="$gdir/.wrappers"
+    case "$mode" in
+        status)
+            resolve_dev_profiler_env "$gdir" 1
+            echo "dev_winedebug=${GAMECTL_CFG_DEV_WINEDEBUG:-0}"
+            echo "dev_vk_debug=${GAMECTL_CFG_DEV_VK_DEBUG:-0}"
+            echo "dev_gbe_log=${GAMECTL_CFG_DEV_GBE_LOG:-0}"
+            echo "active=$GAMECTL_DEV_ACTIVE"
+            echo "resolved_winedebug=$GAMECTL_DEV_RESOLVED_WINEDEBUG"
+            echo "resolved_vk_debug=$GAMECTL_DEV_RESOLVED_VK_DEBUG"
+            echo "trace_log=$GAMECTL_DEV_TRACE_LOG"
+            ;;
+        basic)
+            atomic_set_kv_file "$w_file" "dev_winedebug" "basic" && \
+            atomic_set_kv_file "$w_file" "dev_vk_debug" "0" && \
+            atomic_set_kv_file "$w_file" "dev_gbe_log" "1" || return 1
+            echo "[VERIFIED] Developer profiler set to 'basic' in $w_file"
+            ;;
+        full)
+            atomic_set_kv_file "$w_file" "dev_winedebug" "full" && \
+            atomic_set_kv_file "$w_file" "dev_vk_debug" "1" && \
+            atomic_set_kv_file "$w_file" "dev_gbe_log" "1" || return 1
+            echo "[VERIFIED] Developer profiler set to 'full' in $w_file"
+            ;;
+        off)
+            atomic_set_kv_file "$w_file" "dev_winedebug" "0" && \
+            atomic_set_kv_file "$w_file" "dev_vk_debug" "0" && \
+            atomic_set_kv_file "$w_file" "dev_gbe_log" "0" || return 1
+            echo "[VERIFIED] Developer profiler disabled in $w_file"
+            ;;
+        *)
+            echo "Usage: gamectl dev-profile <game_dir> [status|basic|full|off]" >&2
+            return 1
+            ;;
+    esac
 }
 
 # Resolve and build wrapper prefix command array (gamemoderun, mangohud, gamescope)
@@ -8468,6 +8891,7 @@ build_wrapper_command() {
     GAMECTL_ACTIVE_PRIME_VENDOR="$dgpu_vendor"
     GAMECTL_ACTIVE_SANDBOX="$use_sandbox"
     GAMECTL_ACTIVE_ALLOW_UNSHIELDED="${opt_allow_unshielded:-0}"
+    GAMECTL_ACTIVE_AUTO_LOCATE_SAVES="${GAMECTL_CFG_AUTO_LOCATE_SAVES:-0}"
 
     local prefix=()
     if [ "$use_gm" = "1" ]; then
@@ -8528,17 +8952,30 @@ configure_wrappers() {
     load_wrapper_config "${gdir:-}" 0
     local gm="$GAMECTL_CFG_GM" hud="$GAMECTL_CFG_HUD" scope="$GAMECTL_CFG_SCOPE"
     local fsr="$GAMECTL_CFG_FSR" glt="$GAMECTL_CFG_GLTHREAD" renderer="${GAMECTL_CFG_RENDERER:-auto}"
+    local auto_saves="${GAMECTL_CFG_AUTO_LOCATE_SAVES:-0}"
+    local dev_wd="${GAMECTL_CFG_DEV_WINEDEBUG:-0}" dev_vk="${GAMECTL_CFG_DEV_VK_DEBUG:-0}" dev_gbe="${GAMECTL_CFG_DEV_GBE_LOG:-0}"
     local gscope_args="${GAMECTL_CFG_GAMESCOPE_ARGS:-}"
     [ -z "$gscope_args" ] && gscope_args=$(get_default_gamescope_args)
 
     while true; do
         local b_gm="${UI_DIM}[OFF]${UI_RST}" b_hud="${UI_DIM}[OFF]${UI_RST}"
         local b_scope="${UI_DIM}[OFF]${UI_RST}" b_fsr="${UI_DIM}[OFF]${UI_RST}" b_glt="${UI_DIM}[OFF]${UI_RST}"
+        local b_autosaves="${UI_DIM}[OFF]${UI_RST}" b_devwd="${UI_DIM}[OFF]${UI_RST}"
+        local b_devvk="${UI_DIM}[OFF]${UI_RST}" b_devgbe="${UI_DIM}[OFF]${UI_RST}"
         [ "$gm" = 1 ] && b_gm="${UI_GREEN}[ACTIVE]${UI_RST}"
         [ "$hud" = 1 ] && b_hud="${UI_GREEN}[ACTIVE]${UI_RST}"
         [ "$scope" = 1 ] && b_scope="${UI_GREEN}[ACTIVE]${UI_RST}"
         [ "$fsr" = 1 ] && b_fsr="${UI_GREEN}[ACTIVE]${UI_RST}"
         [ "$glt" = 1 ] && b_glt="${UI_GREEN}[ACTIVE]${UI_RST}"
+        [ "$auto_saves" = 1 ] && b_autosaves="${UI_GREEN}[ACTIVE]${UI_RST}"
+        case "${dev_wd,,}" in
+            ""|0|off|false) ;;
+            basic) b_devwd="${UI_AMBER}[BASIC]${UI_RST}" ;;
+            full)  b_devwd="${UI_RED}[FULL]${UI_RST}" ;;
+            *)     b_devwd="${UI_CYAN}[$dev_wd]${UI_RST}" ;;
+        esac
+        [ "$dev_vk" = 1 ] && b_devvk="${UI_AMBER}[ACTIVE]${UI_RST}"
+        [ "$dev_gbe" = 1 ] && b_devgbe="${UI_AMBER}[ACTIVE]${UI_RST}"
 
         local eff_rend b_rend
         eff_rend="$(resolve_graphics_renderer "$renderer" 0)"
@@ -8564,6 +9001,10 @@ configure_wrappers() {
 4	Gamescope FSR Upscaling	$b_fsr
 5	Mesa GL Threading (mesa_gl)	$b_glt $glt_hint
 r	Graphics Renderer (DXVK/WineD3D)	$b_rend
+s	Auto-Locate Wine Prefix Saves	$b_autosaves
+d	Dev Profiler: WINEDEBUG	$b_devwd
+v	Dev Profiler: Vulkan Debug	$b_devvk
+g	Dev Profiler: GBE Callback Log	$b_devgbe
 6	Preset: Balanced Performance	GameMode + MangoHud
 7	Preset: Handheld / FSR	GameMode + MangoHud + Gamescope FSR
 8	Reset: Safe Defaults	All Disabled (Renderer: Auto)
@@ -8606,9 +9047,19 @@ EOF
                     *)       renderer="auto" ;;
                 esac
                 ;;
+            s|S) auto_saves=$((1 - auto_saves)) ;;
+            d|D)
+                case "${dev_wd,,}" in
+                    ""|0|off|false) dev_wd="basic" ;;
+                    basic) dev_wd="full" ;;
+                    *)     dev_wd="0" ;;
+                esac
+                ;;
+            v|V) dev_vk=$((1 - dev_vk)) ;;
+            g|G) dev_gbe=$((1 - dev_gbe)) ;;
             6) gm=1; hud=1; scope=0; fsr=0; glt=0 ;;
             7) gm=1; hud=1; scope=1; fsr=1; glt=0 ;;
-            8) gm=0; hud=0; scope=0; fsr=0; glt=0; renderer="auto" ;;
+            8) gm=0; hud=0; scope=0; fsr=0; glt=0; renderer="auto"; auto_saves=0; dev_wd="0"; dev_vk=0; dev_gbe=0 ;;
             9)
                 cat <<EOF > "$w_file"
 # Runtime wrappers for $title
@@ -8619,8 +9070,12 @@ fsr=$fsr
 glthread=$glt
 renderer=$renderer
 gamescope_args=$gscope_args
+auto_locate_saves=$auto_saves
+dev_winedebug=$dev_wd
+dev_vk_debug=$dev_vk
+dev_gbe_log=$dev_gbe
 EOF
-                log_msg "INFO" "WRAPPERS" "Saved wrapper configuration for $title -> $w_file (gm=$gm,hud=$hud,scope=$scope,fsr=$fsr,glt=$glt,renderer=$renderer)"
+                log_msg "INFO" "WRAPPERS" "Saved wrapper configuration for $title -> $w_file (gm=$gm,hud=$hud,scope=$scope,fsr=$fsr,glt=$glt,renderer=$renderer,auto_saves=$auto_saves,dev_wd=$dev_wd,dev_vk=$dev_vk,dev_gbe=$dev_gbe)"
                 break
                 ;;
             0|q|Q|cancel)
@@ -9188,6 +9643,13 @@ launch_game() {
 
     _launch_echo "[INFO] Preparing launch: $title..."
     log_msg "INFO" "LAUNCH" "Preparing launch: $title ($gdir/$gbin)"
+    load_wrapper_config "$gdir" 1
+    if [ "${GAMECTL_CFG_AUTO_LOCATE_SAVES:-0}" = "1" ] && [ -d "$gdir/pfx" ]; then
+        if ! collect_prefix_saves "$gdir" true; then
+            _launch_err "[WARN] Pre-launch prefix save collection failed for '$title'. Proceeding with launch."
+            log_msg "WARN" "LAUNCH" "Pre-launch prefix save collection failed for $title"
+        fi
+    fi
     if [ -d "$gdir/saves" ] || [ -L "$gdir/saves" ]; then
         if ! backup_save "$gdir" true; then
             _launch_err "[WARN] Pre-launch save snapshot backup failed for '$title'. Proceeding with launch."
@@ -9202,6 +9664,23 @@ launch_game() {
     build_wrapper_command "$gdir" "$@"
     local wrappers=("${GAMECTL_WRAPPER_PREFIX[@]}")
     local game_args=("${GAMECTL_REMAINING_ARGS[@]}")
+
+    # Resolve Developer Mode & Engine Profiler (default OFF -> zero env pollution)
+    resolve_dev_profiler_env "$gdir" 1
+    local dev_trace_log=""
+    if [ "${GAMECTL_DEV_ACTIVE:-0}" -eq 1 ] && [ -n "${GAMECTL_DEV_TRACE_LOG:-}" ]; then
+        dev_trace_log="$GAMECTL_DEV_TRACE_LOG"
+        mkdir -p -m 700 "$(dirname "$dev_trace_log")" 2>/dev/null || true
+        {
+            printf '=== gamectl dev-trace [%s] ===\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+            printf 'Title=%s\nDir=%s\nBin=%s\n' "$title" "$gdir" "$gbin"
+            printf 'WINEDEBUG=%s (user_override=%s)\n' "${GAMECTL_DEV_RESOLVED_WINEDEBUG:-<unset>}" "${GAMECTL_DEV_RESPECTED_USER_WINEDEBUG:-0}"
+            printf 'VK_LOADER_DEBUG=%s (user_override=%s)\n' "${GAMECTL_DEV_RESOLVED_VK_DEBUG:-<unset>}" "${GAMECTL_DEV_RESPECTED_USER_VK_DEBUG:-0}"
+            printf 'GBE_LOG=%s\nMainLog=%s\n' "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" "$log_file"
+        } > "$dev_trace_log" 2>/dev/null || true
+        _launch_echo "[INFO] Developer Profiler active. Trace log: $dev_trace_log"
+        log_msg "INFO" "LAUNCH" "Developer Profiler active for $title (Trace: $dev_trace_log)"
+    fi
 
     # Set Mesa performance env safely (only enable glthread if explicitly opted in)
     if [ "${GAMECTL_ACTIVE_GLTHREAD:-0}" = "1" ]; then
@@ -9517,6 +9996,9 @@ launch_game() {
                         WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
                         PROTON_USE_WINED3D="$GAMECTL_WIN_PROTON_WINED3D"
                     [ "$GAMECTL_WIN_DISABLE_PROTONFIXES" = "1" ] && export PROTONFIXES_DISABLE=1
+                    [ -n "${GAMECTL_DEV_RESOLVED_WINEDEBUG:-}" ] && export WINEDEBUG="$GAMECTL_DEV_RESOLVED_WINEDEBUG"
+                    [ -n "${GAMECTL_DEV_RESOLVED_VK_DEBUG:-}" ] && export VK_LOADER_DEBUG="$GAMECTL_DEV_RESOLVED_VK_DEBUG"
+                    [ "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" = "1" ] && export GAMECTL_GBE_LOG=1 GBE_LOG_FILE="$dev_trace_log"
                     _exec_in_scope "${wrappers[@]}" "$runner_bin" "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
@@ -9533,6 +10015,9 @@ launch_game() {
                         WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}" \
                         PROTON_USE_WINED3D="$GAMECTL_WIN_PROTON_WINED3D"
                     [ "$GAMECTL_WIN_DISABLE_PROTONFIXES" = "1" ] && export PROTONFIXES_DISABLE=1
+                    [ -n "${GAMECTL_DEV_RESOLVED_WINEDEBUG:-}" ] && export WINEDEBUG="$GAMECTL_DEV_RESOLVED_WINEDEBUG"
+                    [ -n "${GAMECTL_DEV_RESOLVED_VK_DEBUG:-}" ] && export VK_LOADER_DEBUG="$GAMECTL_DEV_RESOLVED_VK_DEBUG"
+                    [ "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" = "1" ] && export GAMECTL_GBE_LOG=1 GBE_LOG_FILE="$dev_trace_log"
                     _exec_in_scope "${wrappers[@]}" "$runner_bin" waitforexitandrun "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
@@ -9544,6 +10029,9 @@ launch_game() {
                         SteamAppId="$GAMECTL_WIN_APPID" \
                         SteamGameId="$GAMECTL_WIN_APPID" \
                         WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-}"
+                    [ -n "${GAMECTL_DEV_RESOLVED_WINEDEBUG:-}" ] && export WINEDEBUG="$GAMECTL_DEV_RESOLVED_WINEDEBUG"
+                    [ -n "${GAMECTL_DEV_RESOLVED_VK_DEBUG:-}" ] && export VK_LOADER_DEBUG="$GAMECTL_DEV_RESOLVED_VK_DEBUG"
+                    [ "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" = "1" ] && export GAMECTL_GBE_LOG=1 GBE_LOG_FILE="$dev_trace_log"
                     _exec_in_scope "${wrappers[@]}" "$runner_bin" "$gdir/$gbin" "${game_args[@]}"
                 ) > "$log_file" 2>&1 &
                 game_pid=$!
@@ -9554,6 +10042,9 @@ launch_game() {
         _launch_echo "[INFO] Log stream: $log_file"
         (
             export LD_LIBRARY_PATH=".:$gdir:${LD_LIBRARY_PATH:-}"
+            [ -n "${GAMECTL_DEV_RESOLVED_WINEDEBUG:-}" ] && export WINEDEBUG="$GAMECTL_DEV_RESOLVED_WINEDEBUG"
+            [ -n "${GAMECTL_DEV_RESOLVED_VK_DEBUG:-}" ] && export VK_LOADER_DEBUG="$GAMECTL_DEV_RESOLVED_VK_DEBUG"
+            [ "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" = "1" ] && export GAMECTL_GBE_LOG=1 GBE_LOG_FILE="$dev_trace_log"
             _exec_in_scope "${wrappers[@]}" ./"$gbin" "${game_args[@]}"
         ) > "$log_file" 2>&1 &
         game_pid=$!
@@ -9597,6 +10088,21 @@ EOF
             [ -n "$ws_bin" ] && WINEPREFIX="$pfx_dir" "$ws_bin" -w 2>/dev/null || true
         fi
         rm -f "$info_file" 2>/dev/null || true
+        if [ "$is_win" = true ] && [ "${GAMECTL_ACTIVE_AUTO_LOCATE_SAVES:-0}" = "1" ] && [ -d "$gdir/pfx" ]; then
+            collect_prefix_saves "$gdir" true || true
+        fi
+        if [ "${GAMECTL_DEV_ACTIVE:-0}" -eq 1 ] && [ -n "${dev_trace_log:-}" ]; then
+            {
+                if [ -s "$log_file" ]; then
+                    printf '\n--- Runner Output (%s) ---\n' "$log_file"
+                    cat "$log_file"
+                fi
+                if [ "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" = "1" ] && [ -s "$gdir/STEAM_LOG.txt" ]; then
+                    printf '\n--- GBE STEAM_LOG.txt ---\n'
+                    cat "$gdir/STEAM_LOG.txt"
+                fi
+            } >> "$dev_trace_log" 2>/dev/null || true
+        fi
         log_msg "INFO" "LAUNCH" "Game '$title' (PID: $game_pid) exited"
         _restore_launch_state
     }
@@ -12517,6 +13023,7 @@ export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_compa
 
 export -f require_tui check_fzf_status validate_tui_fields store_search_items tui_exec_action tui_run_engine tui_prompt_input tui_action_palette remote_sync_interactive manage_active_processes_interactive login_luatools_interactive resolve_game_drm_status install_tui_screen_traps get_desktop_runtime_dir detect_vulkan_capability resolve_graphics_renderer inspect_game_log_hint resolve_game_appid get_game_log_file load_wrapper_config prepare_windows_runner_env
 export -f is_gbe_library install_gbe_library get_config_value set_config_value get_hubcap_api_key atomic_set_kv_file atomic_prepend_line audit_zip_safety list_runner_dirs is_game_active_for_dir parse_remote_sync_target probe_ssh_remote_home resolve_ssh_remote_base resolve_rclone_remote_saves
+export -f _is_prefix_save_noise _check_confined_ancestor discover_prefix_saves collect_prefix_saves restore_prefix_saves resolve_dev_profiler_env configure_dev_profile
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -12782,6 +13289,38 @@ case "${1:-}" in
             exit 1
         fi
         ;;
+    dev-profile)
+        if [ -n "${2:-}" ]; then
+            configure_dev_profile "$2" "${3:-status}"
+        else
+            echo "Usage: gamectl dev-profile <game_dir> [status|basic|full|off]" >&2
+            exit 1
+        fi
+        ;;
+    scan-saves|discover-saves)
+        if [ -n "${2:-}" ]; then
+            discover_prefix_saves "$2"
+        else
+            echo "Usage: gamectl scan-saves <game_dir>" >&2
+            exit 1
+        fi
+        ;;
+    collect-saves)
+        if [ -n "${2:-}" ]; then
+            collect_prefix_saves "$2"
+        else
+            echo "Usage: gamectl collect-saves <game_dir>" >&2
+            exit 1
+        fi
+        ;;
+    restore-prefix-saves)
+        if [ -n "${2:-}" ]; then
+            restore_prefix_saves "$2"
+        else
+            echo "Usage: gamectl restore-prefix-saves <game_dir>" >&2
+            exit 1
+        fi
+        ;;
     inject|--inject)
         if [ -n "${2:-}" ]; then
             inject_game "$2" "${3:-}" "${4:---no-sync}"
@@ -12972,6 +13511,14 @@ Usage:
                       Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]
                       Configure per-game wrappers (GameMode/MangoHud/Gamescope FSR/MesaGL)
+  gamectl dev-profile <dir> [status|basic|full|off]
+                      Inspect or toggle developer profiler (WINEDEBUG/VK_LOADER_DEBUG/GBE log)
+  gamectl scan-saves <dir>
+                      Discover savegame directories inside a Wine/Proton prefix (read-only)
+  gamectl collect-saves <dir>
+                      Collect discovered Wine prefix saves into <dir>/saves/_prefix_saves/
+  gamectl restore-prefix-saves <dir>
+                      Restore staged Wine prefix saves back into <dir>/pfx/drive_c/users/
   gamectl download <appid> [dir] [title] [--source <auto|...>] [--standalone|--sls] [--raw|--inject-only]
                       Download game via native Valve CDN (default: Pure Standalone zero-client)
   gamectl downloads   Monitor active & recent downloads (Interactive TUI)
