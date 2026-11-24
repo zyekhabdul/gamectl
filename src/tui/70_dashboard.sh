@@ -403,7 +403,9 @@ preview_dashboard() {
 
             local c_dir="$HOME/.cache/gamectl"
             local c_size="0B" c_steam=0 c_pdb=0
-            local c_cache="$run_dir/cache_stat.cache"
+            local c_hash
+            c_hash=$(printf '%s' "$c_dir" | md5sum 2>/dev/null | cut -c1-12 || echo "default")
+            local c_cache="$run_dir/cache_stat_${c_hash}.cache"
             if [ -f "$c_cache" ] && [ $(($(date +%s) - $(stat -c%Y "$c_cache" 2>/dev/null || echo 0))) -lt 60 ]; then
                 read -r c_size c_steam c_pdb < "$c_cache"
             elif [ -d "$c_dir" ]; then

@@ -867,7 +867,7 @@ deploy_sls_manifest() {
     if [ -n "$staged_lua" ] && [ -f "$staged_lua" ]; then
         cp -f "$staged_lua" "$target_lua"
         if ! grep -Eq "^[[:space:]]*addappid[[:space:]]*\([[:space:]]*${appid}[[:space:]]*\)" "$target_lua"; then
-            atomic_prepend_line "$target_lua" "addappid(${appid})"
+            atomic_prepend_line "$target_lua" "addappid(${appid})" || return 1
         fi
         chmod 600 "$target_lua"
         echo "[VERIFIED] Stplug-in Lua deployed from archive: $target_lua" >&2
@@ -2221,7 +2221,7 @@ except Exception as e:
         local target_lua="$stplug_dir/${appid}.lua"
         if [ -f "$target_lua" ]; then
             if ! grep -Eq "^[[:space:]]*addappid[[:space:]]*\([[:space:]]*${appid}[[:space:]]*\)" "$target_lua"; then
-                atomic_prepend_line "$target_lua" "addappid(${appid})"
+                atomic_prepend_line "$target_lua" "addappid(${appid})" || echo "[WARN] Failed to update entitlement in $target_lua" >&2
             fi
         else
             printf "addappid(%s)\n" "$appid" > "$target_lua"

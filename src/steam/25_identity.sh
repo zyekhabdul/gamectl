@@ -188,8 +188,8 @@ EOF
 
         local ini_file="$target_dir/steam_settings/configs.user.ini"
         if [ -f "$ini_file" ]; then
-            atomic_set_kv_file "$ini_file" "account_name" "$player_name" "="
-            atomic_set_kv_file "$ini_file" "account_steamid" "$steamid" "="
+            atomic_set_kv_file "$ini_file" "account_name" "$player_name" "=" || return 1
+            atomic_set_kv_file "$ini_file" "account_steamid" "$steamid" "=" || return 1
         else
             cat <<EOF > "$ini_file"
 [user::general]

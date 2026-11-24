@@ -103,7 +103,7 @@ doctor_audit() {
         echo "    • $(printf '%-10s' "GE-Proton") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($ge_proton)${UI_RST}"
         r_found=1
     else
-        echo "    • $(printf '%-10s' "GE-Proton") : ${UI_DIM}[N/A]${UI_RST} (In compatibilitytools.d/)"
+        echo "    • $(printf '%-10s' "GE-Proton") : ${UI_DIM}[N/A]${UI_RST} (In gamectl/runners/ or compatibilitytools.d/)"
     fi
 
     if command -v wine >/dev/null 2>&1; then

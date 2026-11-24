@@ -266,8 +266,12 @@ setup_onlinefix() {
             fi
 
             if [ "$should_sync" = true ]; then
-                atomic_set_kv_file "$ini_file" "PlayerName" "$persona_name" " = "
-                echo "       ${UI_GREEN}[SUCCESS] PlayerName in OnlineFix.ini synchronized to: $persona_name${UI_RST}"
+                if atomic_set_kv_file "$ini_file" "PlayerName" "$persona_name" " = "; then
+                    echo "       ${UI_GREEN}[SUCCESS] PlayerName in OnlineFix.ini synchronized to: $persona_name${UI_RST}"
+                else
+                    echo "[ERROR] Failed to update PlayerName in $ini_file" >&2
+                    return 1
+                fi
             fi
         fi
     fi

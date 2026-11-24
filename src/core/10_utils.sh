@@ -1806,6 +1806,10 @@ atomic_set_kv_file() {
     local val="${3:-}"
     local sep="${4:-=}"
     [ -n "$file" ] && [ -n "$key" ] || return 1
+    if [[ "$key" == *[$'\n\r']* ]] || [[ "$val" == *[$'\n\r']* ]]; then
+        echo "[ERROR] Key/value mutation rejected: newline/CR not permitted." >&2
+        return 1
+    fi
     mkdir -p "$(dirname "$file")" || return 1
 
     local tmp
@@ -1862,6 +1866,10 @@ atomic_prepend_line() {
     local file="${1:-}"
     local line="${2:-}"
     [ -n "$file" ] || return 1
+    if [[ "$line" == *[$'\n\r']* ]]; then
+        echo "[ERROR] Line prepend rejected: newline/CR not permitted." >&2
+        return 1
+    fi
     mkdir -p "$(dirname "$file")" || return 1
 
     local tmp
