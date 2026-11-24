@@ -830,6 +830,38 @@ backup_save() (
     return 0
 )
 
+# Check if any active game PID in runtime active_games matches game_dir
+is_game_active_for_dir() {
+    local game_dir="$1"
+    [ -n "$game_dir" ] || return 1
+    local active_dir
+    active_dir="$(get_runtime_dir)/active_games"
+    [ -d "$active_dir" ] || return 1
+
+    local canon_target
+    canon_target=$(realpath -m -- "$game_dir" 2>/dev/null || (cd "$game_dir" 2>/dev/null && pwd -P) || printf '%s' "$game_dir")
+    canon_target="${canon_target%/}"
+    [ -n "$canon_target" ] || canon_target="/"
+
+    local inf a_pid a_dir canon_a_dir
+    for inf in "$active_dir"/*.info; do
+        [ -f "$inf" ] || continue
+        a_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2- | tr -dc '0-9')
+        [ -n "$a_pid" ] || continue
+        kill -0 "$a_pid" 2>/dev/null || continue
+        a_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
+        [ -n "$a_dir" ] || continue
+        canon_a_dir=$(realpath -m -- "$a_dir" 2>/dev/null || (cd "$a_dir" 2>/dev/null && pwd -P) || printf '%s' "$a_dir")
+        canon_a_dir="${canon_a_dir%/}"
+        [ -n "$canon_a_dir" ] || canon_a_dir="/"
+        if [ "$canon_a_dir" = "$canon_target" ]; then
+            printf '%s\n' "$a_pid"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # Restore savegame snapshot from recovery slot (slot1, slot2, or slot3)
 restore_save() (
     local game_dir="$1"
@@ -838,6 +870,13 @@ restore_save() (
 
     if [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
         [ "$is_quiet" = true ] || echo "[ERROR] Target game directory not found: ${game_dir:-<empty>}" >&2
+        return 1
+    fi
+
+    local active_pid=""
+    if active_pid=$(is_game_active_for_dir "$game_dir" 2>/dev/null); then
+        [ "$is_quiet" = true ] || echo "[ERROR] Cannot restore saves while game process is active (PID: $active_pid). Close the game first." >&2
+        log_msg "ERROR" "SAVE" "Restore blocked while active game PID $active_pid running for $(basename "$game_dir")"
         return 1
     fi
 
