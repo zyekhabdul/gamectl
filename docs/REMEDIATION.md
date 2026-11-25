@@ -195,7 +195,7 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 - **Target Files**: `src/steam/31_manifests.sh`
 - **Langkah Teknis**:
   1. Tambah `format_app_type_badge <raw_type>` untuk merender token `[GAME]`, `[DLC]`, `[DEMO]`, `[MOD]`, `[OST]`, `[TOOL]`, `[APP]` secara konsisten.
-  2. Tambah `classify_steam_app_types <appid1> [appid2 ...]` yang memanggil `IStoreBrowseService/GetItems/v1` dalam 1 batch HTTP (`--connect-timeout 5 --max-time 10`), memetakan enum Valve (`0->GAME`, `4->DLC`, `1->DEMO`, `2->MOD`, `6->VIDEO`, `11->SOUNDTRACK`), memvalidasi output lewat `validate_tui_fields`, dan mengembalikan `<APPID>\t<TYPE>\t<PARENT_APPID>` dengan fallback aman `APP` saat offline/gagal.
+  2. Tambah `classify_steam_app_types <appid1> [appid2 ...]` yang memanggil `IStoreBrowseService/GetItems/v1` dalam 1 batch HTTP (`--connect-timeout 5 --max-time 10`), memetakan enum Valve (`0->GAME`, `4->DLC`, `1->DEMO`, `2->MOD`, `6->APP`, `11->SOUNDTRACK`), memvalidasi output lewat `validate_tui_fields`, dan mengembalikan `<APPID>\t<TYPE>\t<PARENT_APPID>` dengan fallback aman `APP` saat offline/gagal.
   3. Tambah `fetch_steam_app_details <appid>` (`appdetails?appids=${appid}&filters=basic,platforms,genres` memakai cache key `steam_details_${appid}`) dan `resolve_steam_app_type <appid>` yang mengembalikan `<TYPE>\t<PARENT_APPID>\t<PARENT_NAME>` tanpa memaksa panggilan jaringan bila fixture cache lokal tidak memiliki field `type`.
 - **Definition of Done (DoD)**:
   - Seluruh caller membaca kosakata tipe kanonik dan tuple terstruktur dari satu SSoT tanpa parser `appdetails`/`IStoreBrowseService` duplikat.
@@ -205,7 +205,7 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 - **Langkah Teknis**:
   1. Perbarui `search_steam()` (`70_dashboard.sh`) untuk memperkaya hasil `storesearch` via `classify_steam_app_types`, menyusun baris `APPID\tBADGE\tTITLE\tSTATUS\tRAW_TYPE\tPARENT_APPID` dengan `--with-nth=1,2,3,4`, serta menambah toggle filter `Tab` (`ALL -> GAME -> DLC -> ALL`) tanpa mengganggu `ctrl-a/u/s/d/f`.
   2. Saat user memilih item `DLC` yang memiliki `PARENT_APPID` untuk diunduh di `search_steam()`, tampilkan prompt pilihan untuk mengunduh Base Game (`PARENT_APPID`) yang sudah mencakup depot DLC.
-  3. Perbarui `preview_search_game()` (`71_previews.sh`) memakai `fetch_steam_app_details` agar menampilkan baris `Type : [BASE GAME]` atau `Type : [DLC] (Base: <name> • <parent_appid>)`.
+  3. Perbarui `preview_search_game()` (`71_previews.sh`) memakai `fetch_steam_app_details` agar menampilkan baris `Type : [GAME]` atau `Type : [DLC] (Base: <name> • <parent_appid>)`.
   4. Perbarui `unlock_interactive()` (`32_steam_bridge.sh`) menampilkan badge tipe dari `classify_steam_app_types` pada picker adopsi.
 - **Definition of Done (DoD)**:
   - Pengguna langsung membedakan `[GAME]` vs `[DLC]` pada list kiri dan preview kanan, serta terhindar dari unduhan DLC tunggal tanpa sengaja.
@@ -226,3 +226,69 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
   2. Kompilasi ulang `bin/gamectl` (`./scripts/build.sh && ./scripts/build.sh --check`), jalankan `STRICT_LINT=1 make lint` dan `make test`, serta tandai seluruh packet R2A–R2D selesai di `docs/REMEDIATION.md`.
 - **Definition of Done (DoD)**:
   - Seluruh lint, bundle check, suite Bash (`test_cli.sh`, `test_remediation.sh`, dkk.), dan Python safety tests lulus Exit Code `0` tanpa melemahkan assertion eksisting.
+
+---
+
+# REMEDIATION WORK PACKET 2.1: STRUCTURAL SSoT HARDENING & TEST INVARIANT CLOSURE
+
+- **Track**: Remediation / Structural SSoT Deduplication & Test Contract Closure
+- **Status**: [ COMPLETED & VERIFIED ] [4/4 PACKETS]
+- **Prasyarat**: Work Packet 2 R2A–R2D (`COMPLETED & VERIFIED`, `dbd262c..457001c`)
+- **Basis**: Audit forensik DoD Packet R2, `docs/SOVEREIGN_ORIGINAL_PURPOSE.md`, dan prinsip anti-monkeypatch (SSoT + YAGNI)
+- **Target Files**: `src/steam/31_manifests.sh`, `src/steam/30_downloader.sh`, `src/tui/70_dashboard.sh`, `src/tui/71_previews.sh`, `completions/gamectl.bash`, `tests/test_remediation.sh`, `docs/REMEDIATION.md`, `bin/gamectl`
+
+---
+
+## 1. Tujuan & Batas YAGNI
+
+1. **Eliminasi Monkeypatch Duplikasi Preflight Provider**:
+   - Satukan pengecekan cache/stash manifest + validasi kredensial provider gated (`luatools`, `hubcap`) ke satu fungsi domain `preflight_manifest_source <appid> <source>` di `src/steam/31_manifests.sh`, menggantikan logika duplikat di `download_game()` (`src/steam/30_downloader.sh`) dan `fetch_manifest()`.
+2. **Eliminasi Duplikasi Parser JSON Steam di Layer TUI**:
+   - Ekstrak satu parser SSoT `parse_steam_app_type_json <details_json>` di `src/steam/31_manifests.sh` untuk dipakai oleh `resolve_steam_app_type()` dan `preview_search_game()` (`src/tui/71_previews.sh`), serta arahkan `_prepare_download_target()` (`src/tui/70_dashboard.sh`) ke `resolve_steam_app_type` tanpa parser `jq` ad-hoc.
+3. **Penutupan Celah Invarian Test 37**:
+   - Ubah counter subshell mati `batch_calls` menjadi file counter + assert `== 1`, tambah sentinel zero-network untuk fixture cache lokal tanpa `.type` (`555555`), dan uji seluruh 3 cabang `_prepare_download_target` (`base`, `dlc` + `--allow-dlc`, `cancel`).
+4. **Sinkronisasi Permukaan CLI & Spek**:
+   - Tambahkan `--allow-dlc` dan `--os` ke `download_opts` di `completions/gamectl.bash` serta sinkronkan teks spek Packet 2 (`6->APP`, `Type : [GAME]`) dengan kosakata tertutup 7 token.
+5. **Batas YAGNI Eksplisit**:
+   - Pertahankan `steam_basic_${appid}` (`tests/test_cli.sh:2125`) dan `steam_basic_dlc_${appid}` secara terpisah; jangan menambah abstraksi wrapper di luar `preflight_manifest_source` dan `parse_steam_app_type_json`.
+
+---
+
+## 2. Rencana Eksekusi Detail (Packet R2.1A - R2.1D)
+
+### [x] Packet R2.1A: SSoT Preflight Manifest Provider (`src/steam/31_manifests.sh`, `src/steam/30_downloader.sh`)
+- **Target Files**: `src/steam/31_manifests.sh`, `src/steam/30_downloader.sh`
+- **Langkah Teknis**:
+  1. Tambahkan `preflight_manifest_source <appid> [source]` di `src/steam/31_manifests.sh` untuk memvalidasi kesiapan kredensial provider explicit (`luatools`, `hubcap`) saat arsip manifest lokal (`cache`/`stash`) belum ada, termasuk pesan error instruksional terstruktur.
+  2. Ganti blok preflight duplikat di `download_game()` (`src/steam/30_downloader.sh`) dan `fetch_manifest()` (`src/steam/31_manifests.sh`) agar memanggil `preflight_manifest_source`.
+- **Definition of Done (DoD)**:
+  - Nol duplikasi path `manifests/${appid}.zip` atau pesan error auth `luatools`/`hubcap` di `30_downloader.sh`; `test_luatools_without_session_explains_download_failure` dan `test_hubcap.sh` tetap lulus 0 network call.
+
+### [x] Packet R2.1B: SSoT App-Type JSON Parser & TUI Decoupling (`src/steam/31_manifests.sh`, `src/tui/71_previews.sh`, `src/tui/70_dashboard.sh`)
+- **Target Files**: `src/steam/31_manifests.sh`, `src/tui/71_previews.sh`, `src/tui/70_dashboard.sh`
+- **Langkah Teknis**:
+  1. Tambahkan `parse_steam_app_type_json <details_json>` di `src/steam/31_manifests.sh` yang mengeluarkan TSV tervalidasi `<HAS_TYPE>\t<TYPE>\t<PARENT_APPID>\t<PARENT_NAME>` (1 pass `jq` + `normalize_steam_app_type` + `validate_tui_fields`).
+  2. Panggil `parse_steam_app_type_json` dari `resolve_steam_app_type()` dan `preview_search_game()` (`src/tui/71_previews.sh`), sehingga `71_previews.sh` tidak mem-fork `jq` 3x untuk `.type`/`.fullgame` dan `parent_name` terjamin bersih dari `[\t\r\n]`.
+  3. Di `_prepare_download_target()` (`src/tui/70_dashboard.sh`), resolusi `parent_id` & `parent_name` selalu melalui `resolve_steam_app_type "$sel_id"` (fallback ke `sel_parent` bila kosong), tanpa query `jq` ad-hoc di layer TUI.
+- **Definition of Done (DoD)**:
+  - Nol parser skema `.type` / `.fullgame` di `src/tui/`; semua field yang masuk ke `tui_action_palette` dan preview tervalidasi lewat satu SSoT.
+
+### [x] Packet R2.1C: Shell Completion & Spec Parity (`completions/gamectl.bash`, `docs/REMEDIATION.md`)
+- **Target Files**: `completions/gamectl.bash`, `docs/REMEDIATION.md`
+- **Langkah Teknis**:
+  1. Tambahkan `--allow-dlc` dan `--os` ke `download_opts` di `completions/gamectl.bash`.
+  2. Sinkronkan 2 catatan spek Packet 2 di `docs/REMEDIATION.md` (`6->APP`, `Type : [GAME]`) dengan implementasi kosakata kanonik 7 token.
+- **Definition of Done (DoD)**:
+  - Tab-completion `gamectl download` sinkron dengan flag `download_game()`; dokumentasi bebas drift.
+
+### [x] Packet R2.1D: Test Invariant Closure, Rebuild & Full Verification
+- **Target Files**: `tests/test_remediation.sh`, `bin/gamectl`, `docs/REMEDIATION.md`
+- **Langkah Teknis**:
+  1. Perbarui Test 37 di `tests/test_remediation.sh`:
+     - Ganti `batch_calls` dengan file counter dan assert `[ "$(wc -l < "$t_dir/batch.calls")" -eq 1 ]`.
+     - Tambah sentinel zero-network (`[ ! -e "$t_dir/unexpected_net" ]`) saat menguji `resolve_steam_app_type 555555`.
+     - Tambahkan skenario cabang `dlc` (`--allow-dlc` diteruskan ke `download_game`) dan `cancel` (`download_game` tidak dipanggil) pada `_prepare_download_target`.
+  2. Tambahkan assertion completion `--allow-dlc` di Test 38 (`tests/test_remediation.sh`).
+  3. Rebuild `bin/gamectl` (`./scripts/build.sh && ./scripts/build.sh --check`), jalankan `STRICT_LINT=1 make lint` dan `make test`, tandai Packet R2.1A–R2.1D `[x]` / `[ COMPLETED & VERIFIED ]` di `docs/REMEDIATION.md`, dan bersihkan `.deb`.
+- **Definition of Done (DoD)**:
+  - Seluruh suite Bash (`test_cli.sh`, `test_remediation.sh`, `test_tui_ergonomics.sh`, `test_depot_filter.sh`, `test_hubcap.sh`), Python (`42/42`), lint, dan bundle check lulus Exit Code `0`.
