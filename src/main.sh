@@ -142,6 +142,9 @@ case "${1:-}" in
     gog)
         gog_cli "${2:-status}" "${@:3}"
         ;;
+    epic)
+        epic_cli "${2:-status}" "${@:3}"
+        ;;
     check-scope|systemd-scope)
         if check_systemd_scope_support; then
             echo "[INFO] cgroups v2 / systemd-run user scope isolation is supported and active."
@@ -493,6 +496,8 @@ Usage:
                       Inspect registered store adapters and offline readiness
   gamectl gog <status|auth|search|download|sync> [args...]
                       Optional DRM-free GOG adapter (delegates to gogdl / lgogdownloader)
+  gamectl epic <status|auth|search|download|sync|launch> [args...]
+                      Optional Epic Games adapter (delegates to legendary)
   gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread] [--scope|--no-scope] [--prime|--no-prime] [--sandbox|--no-sandbox]
                       Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]

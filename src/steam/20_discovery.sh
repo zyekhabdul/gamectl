@@ -143,6 +143,10 @@ scan_installed_games() {
     cache_dir="$(get_runtime_dir)"
     local cache_file="$cache_dir/scancache.tab"
 
+    local epic_cfg_dir="${LEGENDARY_CONFIG_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/legendary}"
+    declare -F _epic_config_dir >/dev/null 2>&1 && epic_cfg_dir="$(_epic_config_dir)"
+    local epic_installed="$epic_cfg_dir/installed.json"
+
     # Fast-path: Check cache validity (TTL: 60s, invalidated if candidate library directories are newer)
     local use_cached=false
     if [ "$force_refresh" = false ] && [ -f "$cache_file" ] &&
@@ -159,6 +163,9 @@ scan_installed_games() {
                     break
                 fi
             done
+            if [ "$use_cached" = true ] && [ -f "$epic_installed" ] && [ "$epic_installed" -nt "$cache_file" ]; then
+                use_cached=false
+            fi
         fi
     fi
 
@@ -217,6 +224,62 @@ scan_installed_games() {
                 printf "%s\t%s\t%s\t%s\t%s\tSTEAM\n" "$appid" "$name" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
             done
         done < <(get_steam_libraries)
+
+        # 1b. Scan Epic Games (Legendary installed.json) before custom dirs to deduplicate ~/Games/
+        if [ -f "$epic_installed" ] && command -v jq >/dev/null 2>&1; then
+            local epic_rows=""
+            if epic_rows=$(jq -r '
+                (if type == "object" then . else error("invalid") end) |
+                to_entries[] |
+                (.key | tostring) as $k |
+                if (.value | type) != "object" then
+                    "ERR\t" + ($k | gsub("[\\t\\r\\n]"; "_"))
+                else
+                    ((.value.app_name // $k) | tostring) as $id |
+                    ((.value.title // $id) | tostring) as $title |
+                    ((.value.install_path // "") | tostring) as $ipath |
+                    ((.value.executable // "") | tostring) as $exe |
+                    if ($id | test("[\\t\\r\\n]")) or ($title | test("[\\t\\r\\n]")) or
+                       ($ipath | test("[\\t\\r\\n]")) or ($exe | test("[\\t\\r\\n]")) or
+                       ($id == "") or ($ipath == "") then
+                        "ERR\t" + ($k | gsub("[\\t\\r\\n]"; "_"))
+                    else
+                        ["OK", $id, $title, $ipath, $exe] | @tsv
+                    end
+                end' "$epic_installed" 2>/dev/null); then
+                local e_kind e_id e_title e_path e_exe
+                while IFS=$'\t' read -r e_kind e_id e_title e_path e_exe; do
+                    [ -n "$e_kind" ] || continue
+                    if [ "$e_kind" = "ERR" ]; then
+                        printf '[ERROR] Invalid Epic metadata entry (%s) in %s\n' "${e_id:-unknown}" "$epic_installed" >&2
+                        continue
+                    fi
+                    [ -d "$e_path" ] || continue
+                    local canon_edir
+                    canon_edir=$(realpath -e "$e_path" 2>/dev/null || echo "$e_path")
+                    [[ -v seen_dirs["$canon_edir"] ]] && continue
+                    [[ -v seen_dirs["$e_path"] ]] && continue
+                    seen_dirs["$canon_edir"]=1
+                    seen_dirs["$e_path"]=1
+
+                    local e_gbin=""
+                    if [ -n "$e_exe" ] && [[ "$e_exe" != /* ]] && [[ "$e_exe" != *".."* ]] && [ -f "$e_path/$e_exe" ]; then
+                        e_gbin="$e_exe"
+                    else
+                        e_gbin=$(find_game_binary "$e_path") || continue
+                    fi
+                    [ -n "$e_gbin" ] || continue
+                    validate_tui_fields "$e_id" "$e_title" "$e_path" "$e_gbin" || continue
+
+                    local e_status
+                    e_status=$(resolve_game_drm_status "$e_path" "" "$e_gbin")
+                    [ "$e_status" = "STANDALONE" ] && e_status="EPIC"
+                    printf "%s\t%s\t%s\t%s\t%s\tEPIC\n" "$e_id" "$e_title" "$e_status" "$e_path" "$e_gbin" >> "$cache_file.tmp"
+                done <<< "$epic_rows"
+            else
+                printf '[ERROR] Invalid Epic installed.json payload in %s\n' "$epic_installed" >&2
+            fi
+        fi
 
         # 2. Scan Custom & Standalone Directories
         local custom_search_dirs=(
@@ -337,6 +400,7 @@ scan_installed_games() {
                 *VALVE_SO*)   c_badge="${UI_AMBER}[VALVE_SO]  ${UI_RST}" ;;
                 *VALVE_DLL*)  c_badge="${UI_CYAN}[VALVE_DLL] ${UI_RST}" ;;
                 *GOG*)        c_badge="${UI_PURPLE}[GOG]       ${UI_RST}" ;;
+                *EPIC*)       c_badge="${UI_CYAN}[EPIC]      ${UI_RST}" ;;
                 *)            c_badge="${UI_ICE}[STANDALONE]${UI_RST}" ;;
             esac
             printf "%s\t%s\t%s\t%s\t%s\t%s\n" "${UI_DIM}${c_appid}${UI_RST}" "${UI_BOLD}${c_title}${UI_RST}" "$c_badge" "$c_gdir" "$c_gbin" "$c_store"

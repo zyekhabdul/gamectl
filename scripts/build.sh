@@ -25,6 +25,7 @@ MODULES=(
     "$REPO_ROOT/src/stores/00_store_interface.sh"
     "$REPO_ROOT/src/stores/10_store_steam.sh"
     "$REPO_ROOT/src/stores/20_store_gog.sh"
+    "$REPO_ROOT/src/stores/30_store_epic.sh"
     "$REPO_ROOT/src/runners/40_wrappers.sh"
     "$REPO_ROOT/src/runners/41_proton_prefix.sh"
     "$REPO_ROOT/src/runners/42_graphics_isolation.sh"
