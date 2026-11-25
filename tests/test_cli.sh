@@ -496,7 +496,10 @@ run_test "Debian Packaging: Valid .deb construction and control metadata" test_d
 test_nix_flake_validation() {
     [ -f "$REPO_ROOT/flake.nix" ] && \
     grep -q 'pname = "gamectl"' "$REPO_ROOT/flake.nix" && \
-    grep -q 'mainProgram = "gamectl"' "$REPO_ROOT/flake.nix"
+    grep -q 'mainProgram = "gamectl"' "$REPO_ROOT/flake.nix" && \
+    grep -q 'rustPlatform.buildRustPackage' "$REPO_ROOT/flake.nix" && \
+    grep -q 'lockFile = ./crates/depot-dl/Cargo.lock' "$REPO_ROOT/flake.nix" && \
+    ! grep -q 'cp bin/gamectl-depot-dl' "$REPO_ROOT/flake.nix"
 }
 run_test "Nix Flake: Valid flake schema and package definition" test_nix_flake_validation
 
