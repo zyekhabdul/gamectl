@@ -1126,6 +1126,61 @@ test_native_depot_dl_binary_and_compiler_contract() {
 }
 run_test "Native Depot Downloader: Compiler verification & binary CLI contract" test_native_depot_dl_binary_and_compiler_contract
 
+test_depot_dl_untracked_and_release_contract() {
+    # 1. bin/gamectl-depot-dl must NOT be tracked in Git and must be gitignored
+    ! git -C "$REPO_ROOT" ls-files --error-unmatch bin/gamectl-depot-dl >/dev/null 2>&1 || return 1
+    grep -Fxq 'bin/gamectl-depot-dl' "$REPO_ROOT/.gitignore" || return 1
+
+    # 2. install.sh uses arch-qualified GitHub Release Assets rather than raw GitHub
+    ! grep -Fq '$REPO_RAW_URL/bin/gamectl-depot-dl' "$REPO_ROOT/install.sh" || return 1
+    grep -Fq 'GAMECTL_RELEASE_URL' "$REPO_ROOT/install.sh" || return 1
+    grep -Fq 'gamectl-depot-dl-linux-x86_64' "$REPO_ROOT/install.sh" || return 1
+    grep -Fq 'gamectl-depot-dl-linux-aarch64' "$REPO_ROOT/install.sh" || return 1
+
+    # 3. packaging/debian/build-deb.sh compiles depot-dl from source when needed
+    grep -Fq 'scripts/build-depot-dl.sh' "$REPO_ROOT/packaging/debian/build-deb.sh" || return 1
+
+    # 4. release.yml builds multi-arch (x86_64 + aarch64) with --locked and SHA256SUMS
+    python3 -c "
+import yaml
+with open('$REPO_ROOT/.github/workflows/release.yml') as f:
+    rel = yaml.safe_load(f)
+jobs = rel['jobs']
+assert 'build-depot-dl' in jobs and 'build-release' in jobs
+arches = {item['arch'] for item in jobs['build-depot-dl']['strategy']['matrix']['include']}
+assert arches == {'x86_64', 'aarch64'}, f'Unexpected arches: {arches}'
+" || return 1
+    grep -Fq -- '--locked' "$REPO_ROOT/.github/workflows/release.yml" || return 1
+    grep -Fq 'gamectl-depot-dl-linux-x86_64' "$REPO_ROOT/.github/workflows/release.yml" || return 1
+    grep -Fq 'gamectl-depot-dl-linux-aarch64' "$REPO_ROOT/.github/workflows/release.yml" || return 1
+
+    # 5. Offline piped install.sh e2e via file:// verifies valid & rejects corrupted SHA256SUMS
+    local tmp_dir
+    tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_rel_inst.XXXXXX")
+    (
+        trap 'rm -rf "$tmp_dir"' EXIT
+        mkdir -p "$tmp_dir/home_ok" "$tmp_dir/home_bad" "$tmp_dir/rel"
+        printf '#!/bin/sh\necho mock-depot-dl\n' > "$tmp_dir/rel/gamectl-depot-dl-linux-x86_64"
+        chmod +x "$tmp_dir/rel/gamectl-depot-dl-linux-x86_64"
+        (cd "$tmp_dir/rel" && sha256sum gamectl-depot-dl-linux-x86_64 > SHA256SUMS)
+
+        HOME="$tmp_dir/home_ok" GAMECTL_RAW_URL="file://$REPO_ROOT" \
+            GAMECTL_RELEASE_URL="file://$tmp_dir/rel" GAMECTL_ARCH="x86_64" \
+            bash -s < "$REPO_ROOT/install.sh" >/dev/null 2>&1 || exit 1
+        [ -x "$tmp_dir/home_ok/.local/bin/gamectl-depot-dl" ] || exit 1
+
+        printf '%064d  gamectl-depot-dl-linux-x86_64\n' 0 > "$tmp_dir/rel/SHA256SUMS"
+        local bad_rc=0
+        HOME="$tmp_dir/home_bad" GAMECTL_RAW_URL="file://$REPO_ROOT" \
+            GAMECTL_RELEASE_URL="file://$tmp_dir/rel" GAMECTL_ARCH="x86_64" \
+            bash -s < "$REPO_ROOT/install.sh" >/dev/null 2>&1 || bad_rc=$?
+        [ "$bad_rc" -ne 0 ] || exit 1
+        [ ! -e "$tmp_dir/home_bad/.local/bin/gamectl-depot-dl" ] || exit 1
+    ) || return 1
+    return 0
+}
+run_test "Release Assets: Untracked ELF, multi-arch release, and installer SHA256 contract" test_depot_dl_untracked_and_release_contract
+
 test_acf_telemetry_state_parsing() {
     source "$REPO_ROOT/src/steam/30_downloader.sh"
     local test_dir="${TEST_TMP_DIR:-/tmp}/acf_test_$$"
