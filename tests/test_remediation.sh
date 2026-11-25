@@ -3175,6 +3175,345 @@ EOF
 }
 run_test "Epic Discovery, Deduplication & TUI Filter (WP40B/40C)" test_wp40_epic_discovery_and_tui_filter_contract
 
+# Test 37: Remediation Packet 2 (R2A/R2B) — Steam App-Type SSoT, Badges, Filter & Redirect
+test_r2_steam_app_type_ssot_and_tui_contracts() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_r2_ssot_XXXXXX")
+    mkdir -p "$t_dir/home/.cache/gamectl" "$t_dir/home/Games" "$t_dir/bin" "$t_dir/runtime"
+
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_CACHE_HOME="$t_dir/home/.cache"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/core/12_tui_primitives.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/steam/30_downloader.sh"
+        source "$REPO_ROOT/src/steam/31_manifests.sh"
+        source "$REPO_ROOT/src/steam/32_steam_bridge.sh"
+        source "$REPO_ROOT/src/tui/70_dashboard.sh"
+        source "$REPO_ROOT/src/tui/71_previews.sh"
+
+        # 1. Closed 7-token canonical taxonomy and badge formatting
+        [ "$(normalize_steam_app_type 0)" = "GAME" ] || exit 1
+        [ "$(normalize_steam_app_type game)" = "GAME" ] || exit 1
+        [ "$(normalize_steam_app_type 4)" = "DLC" ] || exit 1
+        [ "$(normalize_steam_app_type dlc)" = "DLC" ] || exit 1
+        [ "$(normalize_steam_app_type 1)" = "DEMO" ] || exit 1
+        [ "$(normalize_steam_app_type 2)" = "MOD" ] || exit 1
+        [ "$(normalize_steam_app_type 11)" = "SOUNDTRACK" ] || exit 1
+        [ "$(normalize_steam_app_type music)" = "SOUNDTRACK" ] || exit 1
+        [ "$(normalize_steam_app_type 3)" = "TOOL" ] || exit 1
+        [ "$(normalize_steam_app_type 6)" = "APP" ] || exit 1
+        [ "$(normalize_steam_app_type unknown)" = "APP" ] || exit 1
+
+        local b_game b_dlc b_ost
+        b_game=$(format_app_type_badge GAME | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+        b_dlc=$(format_app_type_badge 4 | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+        b_ost=$(format_app_type_badge music | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+        [ "$b_game" = "[GAME]" ] || exit 1
+        [ "$b_dlc" = "[DLC]" ] || exit 1
+        [ "$b_ost" = "[OST]" ] || exit 1
+
+        # 2. Single-batch classify_steam_app_types + offline fallback + separator rejection
+        local batch_calls=0
+        curl() {
+            local url="${@: -1}"
+            if [[ "$url" == *IStoreBrowseService/GetItems* ]]; then
+                batch_calls=$((batch_calls + 1))
+                printf '%s' '{"response":{"store_items":[{"appid":1245620,"type":0},{"appid":2778580,"type":4,"related_items":{"parent_appid":1245620}},{"appid":1001,"type":1},{"appid":1002,"type":2},{"appid":1003,"type":11},{"appid":1004,"type":6}]}}'
+                return 0
+            fi
+            return 1
+        }
+
+        local cls_out
+        cls_out=$(classify_steam_app_types 1245620 2778580 1001 1002 1003 1004 99999 1245620) || exit 1
+        [ "$(printf '%s\n' "$cls_out" | wc -l)" -eq 7 ] || exit 1
+        printf '%s\n' "$cls_out" | grep -Fxq $'1245620\tGAME\t' || exit 1
+        printf '%s\n' "$cls_out" | grep -Fxq $'2778580\tDLC\t1245620' || exit 1
+        printf '%s\n' "$cls_out" | grep -Fxq $'1001\tDEMO\t' || exit 1
+        printf '%s\n' "$cls_out" | grep -Fxq $'1002\tMOD\t' || exit 1
+        printf '%s\n' "$cls_out" | grep -Fxq $'1003\tSOUNDTRACK\t' || exit 1
+        printf '%s\n' "$cls_out" | grep -Fxq $'1004\tAPP\t' || exit 1
+        printf '%s\n' "$cls_out" | grep -Fxq $'99999\tAPP\t' || exit 1
+
+        # Malformed/tab-injected batch response degrades safely to APP
+        curl() { printf '%s' '{"response":{"store_items":[{"appid":777,"type":"bad\tval"}]}}'; }
+        [ "$(classify_steam_app_types 777)" = $'777\tAPP\t' ] || exit 1
+        curl() { return 1; }
+        [ "$(classify_steam_app_types 1245620 2778580)" = $'1245620\tAPP\t\n2778580\tAPP\t' ] || exit 1
+
+        # 3. fetch_steam_app_details & resolve_steam_app_type reuse steam_details_<appid>
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/steam_details_1245620.json"
+{"1245620":{"success":true,"data":{"type":"game","name":"ELDEN RING","platforms":{"windows":true,"linux":false},"genres":[{"description":"Action"}]}}}
+EOF
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/steam_details_2778580.json"
+{"2778580":{"success":true,"data":{"type":"dlc","name":"Shadow of the Erdtree","fullgame":{"appid":"1245620","name":"ELDEN RING"},"platforms":{"windows":true,"linux":false},"genres":[{"description":"RPG"}]}}}
+EOF
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/steam_details_555555.json"
+{"555555":{"success":true,"data":{"platforms":{"windows":true,"linux":true},"genres":[{"description":"Indie"}]}}}
+EOF
+
+        [ "$(resolve_steam_app_type 1245620)" = $'GAME\t\t' ] || exit 1
+        [ "$(resolve_steam_app_type 2778580)" = $'DLC\t1245620\tELDEN RING' ] || exit 1
+        [ "$(resolve_steam_app_type 555555)" = $'APP\t\t' ] || exit 1
+
+        # 4. preview_search_game renders Type for GAME and DLC Base info
+        local prev_game prev_dlc
+        prev_game=$(preview_search_game 1245620 "ELDEN RING" "[NOT INSTALLED]" | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+        prev_dlc=$(preview_search_game 2778580 "Shadow of the Erdtree" "[NOT INSTALLED]" | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+        grep -Fq "Type        : [GAME]" <<< "$prev_game" || exit 1
+        grep -Fq "Type        : [DLC] (Base: ELDEN RING • 1245620)" <<< "$prev_dlc" || exit 1
+
+        # 5. search_steam Tab filter + DLC redirect + unlock_interactive classification (offline PTY mock)
+        local dl_log="$t_dir/dl.calls"
+        cat <<'MOCK_FZF' > "$t_dir/bin/fzf"
+#!/usr/bin/env bash
+step_file="${FZF_STEP_FILE}"
+idx=0
+[ -f "${step_file}.idx" ] && idx=$(cat "${step_file}.idx")
+echo $((idx + 1)) > "${step_file}.idx"
+input_data=$(cat)
+printf '%s\n' "$input_data" > "${FZF_DUMP_DIR}/dump_${idx}.tsv"
+case "$idx" in
+    0)
+        printf 'tab\n'
+        exit 0
+        ;;
+    1)
+        printf 'tab\n'
+        exit 0
+        ;;
+    2)
+        printf 'ctrl-a\n'
+        printf '%s\n' "$input_data" | grep -F '2778580' | head -n 1
+        exit 0
+        ;;
+    3)
+        printf 'base\tDownload Base Game\n'
+        exit 0
+        ;;
+    *)
+        exit 130
+        ;;
+esac
+MOCK_FZF
+        chmod +x "$t_dir/bin/fzf"
+        export PATH="$t_dir/bin:$PATH"
+        export FZF_STEP_FILE="$t_dir/fzf_step"
+        export FZF_DUMP_DIR="$t_dir"
+        export REPO_ROOT dl_log
+
+        cat <<'PTY_SEARCH' > "$t_dir/pty_search.sh"
+#!/usr/bin/env bash
+source "$REPO_ROOT/src/core/00_header.sh"
+source "$REPO_ROOT/src/core/10_utils.sh"
+source "$REPO_ROOT/src/core/12_tui_primitives.sh"
+source "$REPO_ROOT/src/steam/20_discovery.sh"
+source "$REPO_ROOT/src/steam/30_downloader.sh"
+source "$REPO_ROOT/src/steam/31_manifests.sh"
+source "$REPO_ROOT/src/steam/32_steam_bridge.sh"
+source "$REPO_ROOT/src/tui/70_dashboard.sh"
+source "$REPO_ROOT/src/tui/71_previews.sh"
+curl() {
+    local u="${@: -1}"
+    if [[ "$u" == *storesearch* ]]; then
+        printf '%s' '{"items":[{"id":1245620,"name":"ELDEN RING"},{"id":2778580,"name":"Shadow of the Erdtree"}]}'
+    elif [[ "$u" == *IStoreBrowseService/GetItems* ]]; then
+        printf '%s' '{"response":{"store_items":[{"appid":1245620,"type":0},{"appid":2778580,"type":4,"related_items":{"parent_appid":1245620}}]}}'
+    fi
+}
+scan_installed_games() { return 0; }
+tui_exec_action() { shift; "$@"; }
+download_game() { printf '%s\n' "$*" >> "$dl_log"; }
+flush_tty_input() { :; }
+search_steam "elden" false
+PTY_SEARCH
+        chmod +x "$t_dir/pty_search.sh"
+
+        python3 - "$t_dir/pty_search.sh" <<'PY_PTY' >/dev/null 2>&1 || true
+import os, pty, select, subprocess, sys
+m, s = pty.openpty()
+p = subprocess.Popen(["bash", sys.argv[1]], stdin=s, stdout=s, stderr=s, close_fds=True)
+os.close(s)
+while True:
+    r, _, _ = select.select([m], [], [], 1.0)
+    if r:
+        try:
+            if not os.read(m, 4096):
+                break
+        except OSError:
+            break
+    elif p.poll() is not None:
+        break
+os.close(m)
+p.wait()
+PY_PTY
+
+        # dump_0 = ALL (both 1245620 and 2778580), dump_1 = GAME (only 1245620), dump_2 = DLC (only 2778580)
+        awk -F'\t' '$1 == "1245620" {ok=1} END {exit !ok}' "$t_dir/dump_0.tsv" || exit 1
+        awk -F'\t' '$1 == "2778580" {ok=1} END {exit !ok}' "$t_dir/dump_0.tsv" || exit 1
+        awk -F'\t' '$1 == "1245620" {ok=1} END {exit !ok}' "$t_dir/dump_1.tsv" || exit 1
+        awk -F'\t' '$1 == "2778580" {bad=1} END {exit bad}' "$t_dir/dump_1.tsv" || exit 1
+        awk -F'\t' '$1 == "2778580" {ok=1} END {exit !ok}' "$t_dir/dump_2.tsv" || exit 1
+        awk -F'\t' '$1 == "1245620" {bad=1} END {exit bad}' "$t_dir/dump_2.tsv" || exit 1
+        # Redirected DLC 2778580 -> Base Game 1245620
+        grep -Fq '1245620 ' "$dl_log" || exit 1
+        ! grep -Fq -- '--allow-dlc' "$dl_log" || exit 1
+
+        # Verify unlock_interactive enriches picker rows with classify_steam_app_types badges
+        rm -f "${FZF_STEP_FILE}.idx"
+        cat <<'MOCK_FZF_ADOPT' > "$t_dir/bin/fzf"
+#!/usr/bin/env bash
+step_file="${FZF_STEP_FILE}"
+idx=0
+[ -f "${step_file}.idx" ] && idx=$(cat "${step_file}.idx")
+echo $((idx + 1)) > "${step_file}.idx"
+input_data=$(cat)
+printf '%s\n' "$input_data" > "${FZF_DUMP_DIR}/adopt_${idx}.tsv"
+case "$idx" in
+    0) printf 'elden\n'; exit 0 ;;
+    1) printf '%s\n' "$input_data" | grep -F '1245620' | head -n 1; exit 0 ;;
+    *) exit 130 ;;
+esac
+MOCK_FZF_ADOPT
+        chmod +x "$t_dir/bin/fzf"
+
+        cat <<'PTY_ADOPT' > "$t_dir/pty_adopt.sh"
+#!/usr/bin/env bash
+source "$REPO_ROOT/src/core/00_header.sh"
+source "$REPO_ROOT/src/core/10_utils.sh"
+source "$REPO_ROOT/src/core/12_tui_primitives.sh"
+source "$REPO_ROOT/src/steam/20_discovery.sh"
+source "$REPO_ROOT/src/steam/30_downloader.sh"
+source "$REPO_ROOT/src/steam/31_manifests.sh"
+source "$REPO_ROOT/src/steam/32_steam_bridge.sh"
+curl() {
+    local u="${@: -1}"
+    if [[ "$u" == *storesearch* ]]; then
+        printf '%s' '{"items":[{"id":1245620,"name":"ELDEN RING"},{"id":2778580,"name":"Shadow of the Erdtree"}]}'
+    elif [[ "$u" == *IStoreBrowseService/GetItems* ]]; then
+        printf '%s' '{"response":{"store_items":[{"appid":1245620,"type":0},{"appid":2778580,"type":4,"related_items":{"parent_appid":1245620}}]}}'
+    fi
+}
+scan_installed_games() { return 0; }
+flush_tty_input() { :; }
+unlock_interactive
+PTY_ADOPT
+        chmod +x "$t_dir/pty_adopt.sh"
+
+        python3 - "$t_dir/pty_adopt.sh" <<'PY_PTY' >/dev/null 2>&1 || true
+import os, pty, select, subprocess, sys
+m, s = pty.openpty()
+p = subprocess.Popen(["bash", sys.argv[1]], stdin=s, stdout=s, stderr=s, close_fds=True)
+os.close(s)
+while True:
+    r, _, _ = select.select([m], [], [], 1.0)
+    if r:
+        try:
+            if not os.read(m, 4096):
+                break
+        except OSError:
+            break
+    elif p.poll() is not None:
+        break
+os.close(m)
+p.wait()
+PY_PTY
+        grep -Fq '[GAME]' "$t_dir/adopt_1.tsv" || exit 1
+        grep -Fq '[DLC]' "$t_dir/adopt_1.tsv" || exit 1
+    )
+}
+run_test "Steam App-Type SSoT, Preview, Filter & DLC Redirect (R2A/R2B)" test_r2_steam_app_type_ssot_and_tui_contracts
+
+# Test 38: Remediation Packet 2 (R2C) — Engine-Level DLC Guard in download_game()
+test_r2_engine_level_dlc_guard_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_r2_dlc_guard_XXXXXX")
+    mkdir -p "$t_dir/home/.cache/gamectl/manifests" "$t_dir/game" "$t_dir/runtime"
+
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_CACHE_HOME="$t_dir/home/.cache"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/steam/30_downloader.sh"
+        source "$REPO_ROOT/src/steam/31_manifests.sh"
+
+        local mock_dl="$t_dir/mock_depot_dl"
+        cat <<'EOF' > "$mock_dl"
+#!/usr/bin/env bash
+touch "${HOME}/depot_dl.invoked"
+exit 0
+EOF
+        chmod +x "$mock_dl"
+        export GAMECTL_DEPOT_DL_BIN="$mock_dl"
+
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/steam_details_2778580.json"
+{"2778580":{"success":true,"data":{"type":"dlc","name":"Shadow of the Erdtree","fullgame":{"appid":"1245620","name":"ELDEN RING"}}}}
+EOF
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/steam_details_1245620.json"
+{"1245620":{"success":true,"data":{"type":"game","name":"ELDEN RING"}}}
+EOF
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/steam_details_555555.json"
+{"555555":{"success":true,"data":{"platforms":{"windows":true,"linux":true}}}}
+EOF
+
+        local manifest_called=0
+        fetch_manifest() {
+            manifest_called=$((manifest_called + 1))
+            local aid="$1"
+            local stage="$t_dir/stage_$aid"
+            mkdir -p "$stage"
+            printf '\xd0\x17\xf6\x71' > "$stage/${aid}_1.manifest"
+            printf 'addappid(%s, 1, "%064d")\n' "$aid" 0 > "$stage/${aid}.lua"
+            local out_zip="$t_dir/m_${aid}.zip"
+            (cd "$stage" && zip -q -0 "$out_zip" "${aid}_1.manifest" "${aid}.lua")
+            printf '%s\n' "$out_zip"
+        }
+        harvest_dlc_manifests() { :; }
+        inject_game() { :; }
+
+        # 1. DLC rejected by default before fetch_manifest / depot-dl
+        local err_out rc=0
+        err_out=$(download_game 2778580 "$t_dir/game" "Shadow of the Erdtree" 2>&1) || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+        grep -Fq 'gamectl download 1245620' <<< "$err_out" || exit 1
+        grep -Fq -- '--allow-dlc' <<< "$err_out" || exit 1
+        [ "$manifest_called" -eq 0 ] || exit 1
+        [ ! -e "$HOME/depot_dl.invoked" ] || exit 1
+
+        # 2. Same DLC succeeds with explicit --allow-dlc
+        rc=0
+        download_game 2778580 "$t_dir/game" "Shadow of the Erdtree" --allow-dlc --raw >/dev/null 2>&1 || rc=$?
+        [ "$rc" -eq 0 ] || exit 1
+        [ -f "$HOME/depot_dl.invoked" ] || exit 1
+
+        # 3. GAME, legacy cache without type, and offline uncached AppID are NOT blocked
+        rm -f "$HOME/depot_dl.invoked"
+        download_game 1245620 "$t_dir/game" "ELDEN RING" --raw >/dev/null 2>&1 || exit 1
+        [ -f "$HOME/depot_dl.invoked" ] || exit 1
+
+        rm -f "$HOME/depot_dl.invoked"
+        download_game 555555 "$t_dir/game" "LegacyCached" --raw >/dev/null 2>&1 || exit 1
+        [ -f "$HOME/depot_dl.invoked" ] || exit 1
+
+        rm -f "$HOME/depot_dl.invoked"
+        curl() { return 1; }
+        download_game 888999 "$t_dir/game" "OfflineUncached" --raw >/dev/null 2>&1 || exit 1
+        [ -f "$HOME/depot_dl.invoked" ] || exit 1
+    )
+}
+run_test "Engine-Level DLC Guard in download_game() (R2C)" test_r2_engine_level_dlc_guard_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"
