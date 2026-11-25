@@ -37,6 +37,7 @@ MODULES=(
     "$REPO_ROOT/src/diagnostics/60_doctor.sh"
     "$REPO_ROOT/src/tui/70_dashboard.sh"
     "$REPO_ROOT/src/tui/71_previews.sh"
+    "$REPO_ROOT/src/tui/72_store_tui.sh"
     "$REPO_ROOT/src/main.sh"
 )
 
