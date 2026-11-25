@@ -351,3 +351,18 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
   2. Perbarui peta modul di `DEVELOPMENT.md`, tandai Packet R3A–R3D `[x]` / `[ COMPLETED & VERIFIED ]` di `docs/REMEDIATION.md`, rebuild `bin/gamectl` (`./scripts/build.sh && ./scripts/build.sh --check`), dan jalankan `STRICT_LINT=1 make lint` + `make test`.
 - **Definition of Done (DoD)**:
   - Seluruh lint, LOC budget gate, bundle check, suite Bash, dan Python safety suite (42/42) lulus Exit Code `0`.
+
+---
+
+# REMEDIATION WORK PACKET 3.1: STATIC-GREP TEST DECOUPLING & CRITICAL MODULE SPLITS
+
+- **Track**: Remediation / Static-Grep Test Decoupling & Sub-600 LOC Decomposition (`30_downloader.sh`, `70_dashboard.sh`)
+- **Status**: [ COMPLETED & VERIFIED ] [4/4 PACKETS]
+- **Prasyarat**: Remediation Work Packet 3 (`5a10509`)
+- **Target Files**: `tests/test_cli.sh`, `tests/test_depot_filter.sh`, `tests/test_remediation.sh`, `src/steam/{30_downloader,33_download_telemetry,34_download_monitor}.sh`, `src/tui/{70_dashboard,73_search_tui}.sh`, `scripts/build.sh`, `scripts/check_loc_budget.sh`, `DEVELOPMENT.md`, `bin/gamectl`, `docs/REMEDIATION.md`
+
+## Rencana & Status Eksekusi (`R3.1A` - `R3.1D`)
+- `[x] Packet R3.1A`: Migrasi 69+ assertion static file-path grep di `tests/test_cli.sh`, `tests/test_depot_filter.sh`, dan `tests/test_remediation.sh` ke domain globs (`src/tui/*.sh`, `src/steam/3[034]_*.sh`) tanpa melemahkan invarian.
+- `[x] Packet R3.1B`: Split `src/steam/30_downloader.sh` (1.249 LOC) menjadi `30_downloader.sh` (594 LOC), `33_download_telemetry.sh` (264 LOC), dan `34_download_monitor.sh` (399 LOC) via sibling auto-loader `GAMECTL_BUNDLED`, plus promosi keluar dari `LEGACY_CEILING`.
+- `[x] Packet R3.1C`: Split `src/tui/70_dashboard.sh` (1.018 LOC) menjadi `70_dashboard.sh` (556 LOC) dan `73_search_tui.sh` (464 LOC) via sibling auto-loader `GAMECTL_BUNDLED`, plus promosi keluar dari `LEGACY_CEILING`.
+- `[x] Packet R3.1D`: Perketat Test 41 (auto-loader `30_downloader.sh`/`70_dashboard.sh` & 0 modul >1.000 LOC), perbarui `DEVELOPMENT.md`, rebuild `bin/gamectl`, dan lulus `STRICT_LINT=1 make lint`, `./scripts/build.sh --check`, serta `make test`.

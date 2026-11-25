@@ -32,6 +32,8 @@ src/
 │   ├── 30_downloader.sh        # Standalone native CDN downloader, depot OS filtering, local library routing
 │   ├── 31_manifests.sh         # Multi-provider manifest harvester, DLC extractor, LuaTools auth session
 │   ├── 32_steam_bridge.sh      # Explicit opt-in Steam Client & SLSsteam compatibility bridge
+│   ├── 33_download_telemetry.sh # ACF download state, bytes formatter & depot-dl progress parser
+│   ├── 34_download_monitor.sh  # Interactive download monitor TUI & telemetry preview
 │   └── 35_fixes.sh             # Community & Online-Fix harvester, backup snapshot, atomic revert
 ├── stores/
 │   ├── 00_store_interface.sh   # Unified store adapter registry, capability probe & store_dispatch()
@@ -49,9 +51,10 @@ src/
 ├── diagnostics/
 │   └── 60_doctor.sh            # 8-layer system & GPU health diagnostics and cached query_protondb
 ├── tui/
-│   ├── 70_dashboard.sh         # Interactive dashboard hub, library menu, Steam Store search, remote sync palette
+│   ├── 70_dashboard.sh         # Interactive dashboard hub, library menu, remote sync palette
 │   ├── 71_previews.sh          # Read-only FZF preview renderers (game, dashboard, store search, logs)
-│   └── 72_store_tui.sh         # Multi-store TUI views & cross-store search switcher (search_stores_interactive)
+│   ├── 72_store_tui.sh         # Multi-store TUI views & cross-store search switcher (search_stores_interactive)
+│   └── 73_search_tui.sh        # Live Steam Store search & actionable TUI picker (search_steam)
 └── main.sh                     # Subshell exports (export -f) and top-level CLI command dispatcher
 ```
 
