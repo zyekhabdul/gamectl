@@ -62,9 +62,9 @@
 # WORK PACKET 38: MULTI-STORE PHASE 1 (STORE INTERFACE, STEAM ADAPTER, SCANNER V3 & FILTER)
 
 - **Track**: Multi-Store Architecture / Discovery Schema v3 / TUI Filter
-- **Status**: PENDING [0/4 PACKETS]
+- **Status**: COMPLETED [4/4 PACKETS]
 - **Prasyarat**: WP37 (Modular Runners & TUI Split)
-- **Riwayat Selesai**: WP33..WP36 (`9a1be91..15e95bc`), CI/Dual-License/Hygiene (`5ea7948..a678046`), Modular Core & Steam Split (`a73bfc5..085327b`), RFC Multi-Store v2.0 (`2af9c4c`), CLI Alias/CI Gates & Clean Debian 13 `depot-dl` (`75c168a..8f10dbe`).
+- **Riwayat Selesai**: WP33..WP36 (`9a1be91..15e95bc`), CI/Dual-License/Hygiene (`5ea7948..a678046`), Modular Core & Steam Split (`a73bfc5..085327b`), RFC Multi-Store v2.0 (`2af9c4c`), CLI Alias/CI Gates & Clean Debian 13 `depot-dl` (`75c168a..8f10dbe`), WP37 (`2655748..505b758`).
 - **Basis**: `docs/RFC_MULTISTORE_SUPPORT.md` (v2.0) dan `docs/SOVEREIGN_ORIGINAL_PURPOSE.md`.
 - **Target Files**: `src/stores/00_store_interface.sh`, `src/stores/10_store_steam.sh`, `src/steam/20_discovery.sh`, `src/tui/70_dashboard.sh`, `src/main.sh`, `scripts/build.sh`, `tests/test_remediation.sh`, `bin/gamectl`
 
@@ -83,7 +83,7 @@
 
 ## 2. Rencana Eksekusi Detail (Packet 38A - 38D)
 
-### [ ] Packet 38A: Unified Store Interface (`src/stores/00_store_interface.sh`)
+### [x] Packet 38A: Unified Store Interface (`src/stores/00_store_interface.sh`)
 - **Target Files**: `src/stores/00_store_interface.sh`, `scripts/build.sh`
 - **Langkah Teknis**:
   1. Buat `src/stores/00_store_interface.sh`:
@@ -96,7 +96,7 @@
   - `store_dispatch` menolak store/op invalid dengan exit non-zero dan pesan `stderr`.
   - `./scripts/build.sh` dan `STRICT_LINT=1 make lint` lulus.
 
-### [ ] Packet 38B: Built-in Steam Store Adapter (`src/stores/10_store_steam.sh`)
+### [x] Packet 38B: Built-in Steam Store Adapter (`src/stores/10_store_steam.sh`)
 - **Target Files**: `src/stores/10_store_steam.sh`, `src/main.sh`
 - **Langkah Teknis**:
   1. Implementasikan adapter tipis yang membungkus `src/steam/{30_downloader,31_manifests}.sh`:
@@ -111,7 +111,7 @@
   - Zero regresi pada perintah standalone (`download`, `inject`, `search`, `sync-steam`).
   - Seluruh output katalog lolos `validate_tui_fields`.
 
-### [ ] Packet 38C: Backward-Compatible Scanner v3 (`src/steam/20_discovery.sh`)
+### [x] Packet 38C: Backward-Compatible Scanner v3 (`src/steam/20_discovery.sh`)
 - **Target Files**: `src/steam/20_discovery.sh`
 - **Langkah Teknis**:
   1. Naikkan header cache dari `# gamectl scanner v2` -> `# gamectl scanner v3` agar cache v2 lama otomatis ter-refresh.
@@ -121,7 +121,7 @@
   - Cache `# gamectl scanner v2` ditolak/di-refresh ke v3.
   - Seluruh consumer 5 kolom dan test discovery eksisting tetap 100% PASS.
 
-### [ ] Packet 38D: TUI Store Switcher, Regression Contracts & Full Verification
+### [x] Packet 38D: TUI Store Switcher, Regression Contracts & Full Verification
 - **Target Files**: `src/tui/70_dashboard.sh`, `tests/test_remediation.sh`, `bin/gamectl`
 - **Langkah Teknis**:
   1. Tambahkan state filter store aktif di `library_menu()` (`ALL` -> `STEAM` -> `STANDALONE`) yang di-cycle lewat `Tab` dan dipilih langsung lewat `Alt-S` (tanpa menyentuh `Ctrl-S` Remote Sync).
