@@ -261,7 +261,7 @@ login_luatools() {
             -X POST "https://lua.tools/api/auth/code/redeem" \
             -H "Content-Type: application/json" \
             -H "User-Agent: discord(dot)gg/luatools" \
-            -d "{"code":"$code"}" 2>/dev/null || true)
+            -d "$(jq -nc --arg code "$code" '{code:$code}')" 2>/dev/null || true)
 
         local token_hash
         token_hash=$(echo "$redeem_resp" | jq -r '.token // empty' 2>/dev/null || true)
@@ -277,7 +277,7 @@ login_luatools() {
             -H "Content-Type: application/json" \
             -H "apikey: $supabase_key" \
             -H "User-Agent: discord(dot)gg/luatools" \
-            -d "{"type":"magiclink","token_hash":"$token_hash"}" 2>/dev/null || true)
+            -d "$(jq -nc --arg th "$token_hash" '{type:"magiclink",token_hash:$th}')" 2>/dev/null || true)
 
         local access_token refresh_token expires_in
         access_token=$(echo "$verify_resp" | jq -r '.access_token // empty' 2>/dev/null || true)
@@ -319,7 +319,7 @@ login_luatools() {
             -H "Content-Type: application/json" \
             -H "apikey: $supabase_key" \
             -H "User-Agent: discord(dot)gg/luatools" \
-            -d "{"refresh_token":"$input"}" 2>/dev/null || true)
+            -d "$(jq -nc --arg rt "$input" '{refresh_token:$rt}')" 2>/dev/null || true)
 
         local access_token new_refresh expires_in
         access_token=$(echo "$refresh_resp" | jq -r '.access_token // empty' 2>/dev/null || true)

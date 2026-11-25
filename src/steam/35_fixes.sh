@@ -483,7 +483,7 @@ revert_game_fix() {
             done < "$installed_list"
         elif [ -d "$backup_files_dir" ]; then
             (
-                cd "$backup_files_dir"
+                cd "$backup_files_dir" || exit 1
                 find . -type f | while read -r f; do
                     echo "  • [RESTORE] ${f#./} (original file from backup)"
                 done
@@ -512,9 +512,9 @@ revert_game_fix() {
         done < "$installed_list"
     elif [ -d "$backup_files_dir" ]; then
         (
-            cd "$backup_files_dir"
+            cd "$backup_files_dir" || exit 1
             find . -type f -exec cp -pv {} "$resolved_dir/{}" \;
-        )
+        ) || return 1
     fi
 
     invalidate_scan_cache

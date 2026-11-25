@@ -415,7 +415,7 @@ preview_dashboard() {
                     local fname="${f##*/}"
                     case "$fname" in
                         *steam*|store_*) c_steam=$((c_steam + 1)) ;;
-                        *proton*|protondb_*) c_pdb=$((c_pdb + 1)) ;;
+                        *proton*) c_pdb=$((c_pdb + 1)) ;;
                     esac
                 done
                 printf "%s %s %s\n" "$c_size" "$c_steam" "$c_pdb" > "$c_cache" 2>/dev/null || true
@@ -509,7 +509,7 @@ preview_dashboard() {
             echo "  • Live real-time download log streaming"
             echo "  • Interactive pause/resume and process cancellation (${UI_CYAN}Ctrl-K${UI_RST})"
             ;;
-        *4*|*UNLOCK*|*ENTITLE*|*ENTITLEMENT*|*ACF*|*ADOPT*)
+        *4*|*UNLOCK*|*ENTITLE*|*ACF*|*ADOPT*)
             echo "${UI_BOX}╭─ SELECTED MODULE: [04] STEAM ACF ADOPTION ────────────╮${UI_RST}"
             echo "│ ${UI_BOLD}PHYSICAL DISCOVERY & ASSET ADOPTION MANAGER${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
@@ -705,7 +705,7 @@ preview_dashboard() {
             echo
             echo "  ${UI_DIM}Full Audit: Press Enter to launch interactive 7-layer doctor_audit${UI_RST}"
             ;;
-        *7*|*LOG*|*LOGS*|*ACTIVITY*|*RIWAYAT*)
+        *7*|*LOG*|*ACTIVITY*|*RIWAYAT*)
             echo "${UI_BOX}╭─ SELECTED MODULE: [07] ACTIVITY & RUNTIME LOGS ───────╮${UI_RST}"
             echo "│ ${UI_BOLD}CENTRALIZED OPERATIONAL TELEMETRY & AUDIT${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
@@ -847,14 +847,14 @@ preview_log_entry() {
             *LAUNCH*|*RUNNER*)
                 advice="Windows runner missing or crashed. Run 'gamectl doctor' or install Proton-GE/Wine."
                 ;;
+            *SAVE*|*BACKUP*|*RESTORE*)
+                advice="Savegame snapshot error. Verify disk space in target directory or storage quota."
+                ;;
             *STORE*|*DOWNLOAD*|*DEPOT*)
                 advice="Network or CDN timeout. Check connectivity to Steam Store or CDN endpoints."
                 ;;
             *GBE*|*INJECT*)
                 advice="GBE injection failure. Check file permissions or verify 32-bit vs 64-bit architecture."
-                ;;
-            *SAVE*|*BACKUP*|*RESTORE*)
-                advice="Savegame snapshot error. Verify disk space in target directory or storage quota."
                 ;;
             *DRM*|*STEAMSTUB*)
                 advice="SteamStub DRM detected. Run 'gamectl unpack <exe>' using Steamless CLI."

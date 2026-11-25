@@ -292,7 +292,9 @@ parse_remote_sync_target() {
             echo "[ERROR] Remote target '$raw' requires rclone, which is not installed in PATH." >&2
             return 1
         fi
-        if ! rclone listremotes 2>/dev/null | grep -Fqx "${r_name}:"; then
+        local rclone_remotes
+        rclone_remotes=$(rclone listremotes 2>/dev/null || true)
+        if ! grep -Fqx "${r_name}:" <<< "$rclone_remotes"; then
             echo "[ERROR] rclone remote '${r_name}:' not found (check 'rclone listremotes')." >&2
             return 1
         fi
@@ -317,6 +319,10 @@ parse_remote_sync_target() {
             echo "[ERROR] Invalid remote sync target '$raw': missing host or remote name." >&2
             return 1
         fi
+        local rclone_remotes=""
+        if command -v rclone >/dev/null 2>&1; then
+            rclone_remotes=$(rclone listremotes 2>/dev/null || true)
+        fi
         if [[ "$lhs" == *@* ]] || [[ "$lhs" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             if [ -z "$rhs" ]; then
                 echo "[ERROR] SSH target '$raw' has empty path after ':'. Omit ':' or specify a path (e.g. ${lhs}:~/gamectl-saves)." >&2
@@ -325,7 +331,7 @@ parse_remote_sync_target() {
             REMOTE_TARGET_BACKEND="ssh"
             REMOTE_TARGET_ENDPOINT="$lhs"
             REMOTE_TARGET_BASE="$rhs"
-        elif command -v rclone >/dev/null 2>&1 && rclone listremotes 2>/dev/null | grep -Fqx "${lhs}:"; then
+        elif [ -n "$rclone_remotes" ] && grep -Fqx "${lhs}:" <<< "$rclone_remotes"; then
             while [[ "$rhs" == /* ]]; do rhs="${rhs#/}"; done
             while [[ "$rhs" == */ ]]; do rhs="${rhs%/}"; done
             REMOTE_TARGET_BACKEND="rclone"
@@ -555,7 +561,7 @@ find_game_binary() {
         fname="${f##*/}"
         validate_tui_fields "$fname" || continue
         case "$fname" in
-            UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|vcredist*|dotnet*|vc_redist*|*CrashReport*)
+            UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|dotnet*|*CrashReport*)
                 continue
                 ;;
             *)
@@ -574,7 +580,7 @@ find_game_binary() {
                 fname="${f##*/}"
                 validate_tui_fields "$fname" || continue
                 case "$fname" in
-                    UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|vcredist*|dotnet*|vc_redist*|*CrashReport*)
+                    UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|dotnet*|*CrashReport*)
                         continue
                         ;;
                     *)
@@ -878,7 +884,9 @@ audit_zip_safety() {
         echo "[ERROR] Security violation: unsafe path traversal detected in archive payload." >&2
         return 1
     fi
-    if unzip -Z "$zip_file" 2>/dev/null | grep -Eq '^l[-rwxstST]{6,9}[[:space:]]'; then
+    local zip_details
+    zip_details=$(unzip -Z "$zip_file" 2>/dev/null) || return 1
+    if grep -Eq '^l[-rwxstST]{6,9}[[:space:]]' <<< "$zip_details"; then
         echo "[ERROR] Security violation: symlink entry detected in archive payload." >&2
         return 1
     fi

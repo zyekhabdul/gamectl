@@ -94,7 +94,7 @@ DEST_DIR="$(dirname "$OUTPUT_BIN")"
 mkdir -p "$DEST_DIR"
 DEST_TMP="$(mktemp "${DEST_DIR}/.gamectl.tmp.XXXXXX")"
 cp "$TMP_OUT" "$DEST_TMP"
-chmod +x "$DEST_TMP"
+chmod 0755 "$DEST_TMP"
 mv -f "$DEST_TMP" "$OUTPUT_BIN"
 
 # Synchronize python runner bundled binary (pure script only; never bundle native ELF)
