@@ -38,22 +38,12 @@ preview_game() {
     local is_running=false
     local run_pid=""
     local run_log=""
-    if [ -d "$run_dir/active_games" ]; then
-        for inf in "$run_dir/active_games"/*.info; do
-            [ -f "$inf" ] || continue
-            local inf_dir
-            inf_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-            if [ "$inf_dir" = "$gdir" ]; then
-                local check_pid
-                check_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2)
-                if [ -n "$check_pid" ] && kill -0 "$check_pid" 2>/dev/null; then
-                    is_running=true
-                    run_pid="$check_pid"
-                    run_log=$(grep -E '^LOG=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)
-                    break
-                fi
-            fi
-        done
+    local active_row=""
+    active_row=$(find_active_game_for_dir "$gdir" 2>/dev/null || true)
+    if [ -n "$active_row" ]; then
+        local _r_title _r_dir _r_bin _r_inf _r_scope _r_sep=$'\x1f'
+        IFS="$_r_sep" read -r run_pid _r_title _r_dir _r_bin run_log _r_inf _r_scope <<< "$active_row"
+        is_running=true
     fi
     if [ "$is_running" = true ]; then
         status_badge="${UI_GREEN}[RUNNING PID:$run_pid]${UI_RST}"
@@ -228,7 +218,11 @@ preview_game() {
 
     echo
     echo "${UI_BOX}╭─ KEYBOARD SHORTCUTS ─────────────────────────────────╮${UI_RST}"
-    echo "  ${UI_PILL_ENTER} ${UI_BOLD}Launch Game${UI_RST}       ${UI_PILL_CTRLI} ${UI_BOLD}Inject GBE Fork${UI_RST}"
+    if [ "$is_running" = true ]; then
+        echo "  ${UI_PILL_ENTER} ${UI_BOLD}Manage Running Game${UI_RST} ${UI_PILL_CTRLI} ${UI_BOLD}Inject GBE Fork${UI_RST}"
+    else
+        echo "  ${UI_PILL_ENTER} ${UI_BOLD}Launch Game${UI_RST}       ${UI_PILL_CTRLI} ${UI_BOLD}Inject GBE Fork${UI_RST}"
+    fi
     echo "  ${UI_PILL_CTRLO} ${UI_BOLD}Setup Wrappers${UI_RST}    ${UI_PILL_CTRLP} ${UI_BOLD}Configure LAN Persona${UI_RST}"
     local rhost
     rhost=$(get_remote_host)
@@ -296,20 +290,12 @@ preview_dashboard() {
     run_dir="$(get_runtime_dir)"
     local active_count=0
     local active_titles=()
-    if [ -d "$run_dir/active_games" ]; then
-        for inf in "$run_dir/active_games"/*.info; do
-            [ -f "$inf" ] || continue
-            local a_pid a_title
-            a_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2)
-            a_title=$(grep -E '^TITLE=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2)
-            if [ -n "$a_pid" ] && kill -0 "$a_pid" 2>/dev/null; then
-                active_count=$((active_count + 1))
-                active_titles+=("$a_title [PID:$a_pid]")
-            else
-                rm -f "$inf" 2>/dev/null || true
-            fi
-        done
-    fi
+    local a_pid a_title _a_rest _a_sep=$'\x1f'
+    while IFS="$_a_sep" read -r a_pid a_title _a_rest; do
+        [ -n "$a_pid" ] || continue
+        active_count=$((active_count + 1))
+        active_titles+=("$a_title [PID:$a_pid]")
+    done < <(list_active_games)
     local active_desc="${UI_DIM}None${UI_RST}"
     if [ "$active_count" -gt 0 ]; then
         active_desc="${UI_GREEN}$active_count running${UI_RST} ${UI_DIM}(${active_titles[*]})${UI_RST}"

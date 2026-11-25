@@ -562,100 +562,6 @@ fetch_cached_json() {
     return 1
 }
 
-# Dynamic executable finder for game directory
-find_game_binary() {
-    local dir="$1"
-    local base
-    base=$(basename "$dir")
-    local clean_base="${base// /}"
-    local lower_base="${base,,}"
-    local lower_clean="${clean_base,,}"
-
-    # Priority 1: Common launch scripts or matching names
-    local candidates=(
-        "start.sh" "run.sh" "launch.sh" "start" "run"
-        "$base" "$clean_base" "$lower_base" "$lower_clean"
-    )
-    for c in "${candidates[@]}"; do
-        if [ -x "$dir/$c" ] && [ ! -d "$dir/$c" ]; then
-            validate_tui_fields "$c" || continue
-            echo "$c"
-            return 0
-        fi
-    done
-
-    # Priority 2: Any root executable file excluding assets/libs/runtime dumps
-    local f fname
-    for f in "$dir"/*; do
-        if [ -x "$f" ] && [ ! -d "$f" ]; then
-            fname="${f##*/}"
-            validate_tui_fields "$fname" || continue
-            case "$fname" in
-                *.so|*.so.*|*.dll|*.dylib|installscript.vdf|*.png|*.bmp|*.txt|*.pkg|createdump|monoconfig|monomachineconfig)
-                    continue
-                    ;;
-                *)
-                    echo "$fname"
-                    return 0
-                    ;;
-            esac
-        fi
-    done
-
-    # Priority 3: Windows executables matching title/folder name
-    local win_candidates=(
-        "$base.exe" "$clean_base.exe" "$lower_base.exe" "$lower_clean.exe"
-    )
-    for c in "${win_candidates[@]}"; do
-        if [ -f "$dir/$c" ] && [ ! -d "$dir/$c" ]; then
-            validate_tui_fields "$c" || continue
-            chmod +x "$dir/$c" 2>/dev/null || true
-            echo "$c"
-            return 0
-        fi
-    done
-
-    # Priority 4: Any root .exe excluding setup/redist/crash handlers
-    for f in "$dir"/*.exe "$dir"/*.EXE; do
-        [ -f "$f" ] || continue
-        fname="${f##*/}"
-        validate_tui_fields "$fname" || continue
-        case "$fname" in
-            UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|dotnet*|*CrashReport*)
-                continue
-                ;;
-            *)
-                chmod +x "$f" 2>/dev/null || true
-                echo "$fname"
-                return 0
-                ;;
-        esac
-    done
-
-    # Priority 5: Subdirectory .exe in standard game binary folders
-    for sub in "bin" "bin/x64" "bin/Win64" "Binaries/Win64" "Binaries/Win32" "x64"; do
-        if [ -d "$dir/$sub" ]; then
-            for f in "$dir/$sub"/*.exe "$dir/$sub"/*.EXE; do
-                [ -f "$f" ] || continue
-                fname="${f##*/}"
-                validate_tui_fields "$fname" || continue
-                case "$fname" in
-                    UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|dotnet*|*CrashReport*)
-                        continue
-                        ;;
-                    *)
-                        chmod +x "$f" 2>/dev/null || true
-                        echo "$sub/$fname"
-                        return 0
-                        ;;
-                esac
-            done
-        fi
-    done
-
-    return 1
-}
-
 # Resolve sovereign library path prioritizing explicit arg, env, config, and default $HOME/Games
 resolve_standalone_library_dir() {
     local safe_title="${1:-}"
@@ -762,25 +668,6 @@ resolve_game_drm_status() {
         esac
     else
         echo "STANDALONE"
-    fi
-    return 0
-}
-
-# Extract an actionable 1-line diagnostic hint from a game's recent launch log
-inspect_game_log_hint() {
-    local log_file="${1:-}"
-    [ -n "$log_file" ] && [ -f "$log_file" ] || return 0
-
-    local tail_log
-    tail_log=$(tail -n 60 "$log_file" 2>/dev/null || true)
-    [ -n "$tail_log" ] || return 0
-
-    if echo "$tail_log" | grep -qiE '0x887a0002|DXGI_ERROR|Vulkan support is incomplete|dxvk.*(failed|error|unable)|vkCreateInstance'; then
-        echo "Graphics API error detected -> switch Renderer to WineD3D (<CTRL-O> or --wined3d)"
-    elif echo "$tail_log" | grep -qiE 'err:module:import_dll|cannot open shared object file|error while loading shared libraries|libGL\.so\.1'; then
-        echo "Missing runtime DLL/library -> run Community Fixes (<CTRL-X>) or install 32-bit multilib"
-    elif echo "$tail_log" | grep -qiE 'SteamStub|Application load error|steamclient.*fail'; then
-        echo "SteamStub/DRM signature detected -> run unpack-stub or Inject GBE (<CTRL-I>)"
     fi
     return 0
 }
@@ -1009,7 +896,7 @@ get_hubcap_api_key() {
 # Standalone-source compatibility: load split core submodules when sourced directly outside bin/gamectl
 if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
     _core_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-    for _core_sub in 12_tui_primitives.sh 14_saves.sh 16_steamstub.sh; do
+    for _core_sub in 12_tui_primitives.sh 14_saves.sh 16_steamstub.sh 18_process_runtime.sh; do
         if [ -f "$_core_dir/$_core_sub" ]; then
             # shellcheck source=/dev/null
             source "$_core_dir/$_core_sub"
@@ -2519,6 +2406,362 @@ cli_unpack_stub() {
 }
 
 
+# --- [MODULE] src/core/18_process_runtime.sh ---
+# Binary Resolution, Shebang Detection & Active Process SSoT Helpers
+
+# Check if a regular file begins with a POSIX shebang (#!)
+_is_shebang_script() {
+    local f="${1:-}" magic=""
+    [ -s "$f" ] && [ ! -d "$f" ] || return 1
+    IFS= read -r -n 2 magic < "$f" 2>/dev/null || true
+    [ "$magic" = "#!" ]
+}
+
+# Print ELF class ("64", "32", or "0") if non-empty regular file starts with ELF magic
+_read_elf_class() {
+    local f="${1:-}" hdr=""
+    [ -s "$f" ] && [ ! -d "$f" ] || return 1
+    hdr=$(od -An -tx1 -N5 "$f" 2>/dev/null | tr -d ' \n' || true)
+    case "$hdr" in
+        7f454c4602) echo "64"; return 0 ;;
+        7f454c4601) echo "32"; return 0 ;;
+        7f454c46*)  echo "0";  return 0 ;;
+    esac
+    return 1
+}
+
+# Check if filename is an ignorable non-launcher artifact
+_is_ignored_binary_name() {
+    case "${1:-}" in
+        *.so|*.so.*|*.dll|*.dylib|*.exe|*.EXE|*.lock|*.log|installscript.vdf|*.png|*.bmp|*.txt|*.pkg|\
+        createdump|monoconfig|monomachineconfig|*.vdf|*.json|*.cfg|*.ini|*.xml|*.md|*.README|*.config|*.orig)
+            return 0 ;;
+    esac
+    return 1
+}
+
+# Select best native Linux executable from directory prioritizing host architecture
+_pick_native_linux_binary() {
+    local dir="$1"
+    local host_arch
+    host_arch="$(uname -m 2>/dev/null || echo x86_64)"
+    local is_64bit=false
+    case "$host_arch" in
+        x86_64|amd64|aarch64) is_64bit=true ;;
+    esac
+
+    local f fname elf_cls is_script preferred_bin="" fallback_bin=""
+    for f in "$dir"/*; do
+        [ -x "$f" ] && [ -s "$f" ] && [ ! -d "$f" ] || continue
+        fname="${f##*/}"
+        validate_tui_fields "$fname" || continue
+        _is_ignored_binary_name "$fname" && continue
+
+        elf_cls=""
+        is_script=false
+        if _is_shebang_script "$f"; then
+            is_script=true
+        elif ! elf_cls=$(_read_elf_class "$f"); then
+            continue
+        fi
+
+        if [ "$is_64bit" = true ]; then
+            if [ "$is_script" = true ] || [ "$elf_cls" = "64" ] || \
+               [[ "$fname" == *.x86_64 || "$fname" == *.x64 || "$fname" == *_64 || "$fname" == *64 ]]; then
+                preferred_bin="$fname"
+                break
+            fi
+            [ -z "$fallback_bin" ] && fallback_bin="$fname"
+        else
+            if [ "$is_script" = true ] || [ "$elf_cls" = "32" ] || \
+               [[ "$fname" == *.x86 || "$fname" == *32 ]]; then
+                preferred_bin="$fname"
+                break
+            fi
+            [ -z "$fallback_bin" ] && fallback_bin="$fname"
+        fi
+    done
+
+    if [ -n "$preferred_bin" ]; then
+        echo "$preferred_bin"
+        return 0
+    fi
+    if [ -n "$fallback_bin" ]; then
+        echo "$fallback_bin"
+        return 0
+    fi
+    return 1
+}
+
+# Dynamic executable finder for game directory
+find_game_binary() {
+    local dir="$1"
+    local base
+    base=$(basename "$dir")
+    local clean_base="${base// /}"
+    local lower_base="${base,,}"
+    local lower_clean="${clean_base,,}"
+
+    # Priority 1: Common launch scripts or matching names (auto-+x shebang scripts)
+    local candidates=(
+        "start.sh" "run.sh" "launch.sh" "start" "run"
+        "$base" "$clean_base" "$lower_base" "$lower_clean"
+    )
+    local c
+    for c in "${candidates[@]}"; do
+        if [ -f "$dir/$c" ] && [ ! -d "$dir/$c" ]; then
+            validate_tui_fields "$c" || continue
+            if [ ! -x "$dir/$c" ] && _is_shebang_script "$dir/$c"; then
+                chmod +x "$dir/$c" 2>/dev/null || true
+            fi
+            if [ -x "$dir/$c" ]; then
+                echo "$c"
+                return 0
+            fi
+        fi
+    done
+
+    # Priority 2: Native Linux executables matching host architecture
+    local native_bin
+    if native_bin=$(_pick_native_linux_binary "$dir"); then
+        echo "$native_bin"
+        return 0
+    fi
+
+    # Priority 3: Windows executables matching title/folder name
+    local win_candidates=(
+        "$base.exe" "$clean_base.exe" "$lower_base.exe" "$lower_clean.exe"
+    )
+    for c in "${win_candidates[@]}"; do
+        if [ -f "$dir/$c" ] && [ ! -d "$dir/$c" ]; then
+            validate_tui_fields "$c" || continue
+            chmod +x "$dir/$c" 2>/dev/null || true
+            echo "$c"
+            return 0
+        fi
+    done
+
+    # Priority 4: Any root .exe excluding setup/redist/crash handlers
+    local f fname
+    for f in "$dir"/*.exe "$dir"/*.EXE; do
+        [ -f "$f" ] || continue
+        fname="${f##*/}"
+        validate_tui_fields "$fname" || continue
+        case "$fname" in
+            UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|dotnet*|*CrashReport*)
+                continue
+                ;;
+            *)
+                chmod +x "$f" 2>/dev/null || true
+                echo "$fname"
+                return 0
+                ;;
+        esac
+    done
+
+    # Priority 5: Subdirectory .exe in standard game binary folders
+    local sub
+    for sub in "bin" "bin/x64" "bin/Win64" "Binaries/Win64" "Binaries/Win32" "x64"; do
+        if [ -d "$dir/$sub" ]; then
+            for f in "$dir/$sub"/*.exe "$dir/$sub"/*.EXE; do
+                [ -f "$f" ] || continue
+                fname="${f##*/}"
+                validate_tui_fields "$fname" || continue
+                case "$fname" in
+                    UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|dotnet*|*CrashReport*)
+                        continue
+                        ;;
+                    *)
+                        chmod +x "$f" 2>/dev/null || true
+                        echo "$sub/$fname"
+                        return 0
+                        ;;
+                esac
+            done
+        fi
+    done
+
+    # Priority 6: Unrecognized +x files when no native ELF/shebang or Windows PE exists
+    for f in "$dir"/*; do
+        [ -x "$f" ] && [ ! -d "$f" ] || continue
+        fname="${f##*/}"
+        validate_tui_fields "$fname" || continue
+        _is_ignored_binary_name "$fname" && continue
+        echo "$fname"
+        return 0
+    done
+
+    return 1
+}
+
+# Extract an actionable 1-line diagnostic hint from a game's recent launch log
+inspect_game_log_hint() {
+    local log_file="${1:-}"
+    [ -n "$log_file" ] && [ -f "$log_file" ] || return 0
+
+    local tail_log
+    tail_log=$(tail -n 60 "$log_file" 2>/dev/null || true)
+    [ -n "$tail_log" ] || return 0
+
+    if echo "$tail_log" | grep -qiE '0x887a0002|DXGI_ERROR|Vulkan support is incomplete|dxvk.*(failed|error|unable)|vkCreateInstance'; then
+        echo "Graphics API error detected -> switch Renderer to WineD3D (<CTRL-O> or --wined3d)"
+    elif echo "$tail_log" | grep -qiE 'err:module:import_dll|cannot open shared object file|error while loading shared libraries|libGL\.so\.1|System\.DllNotFoundException|DllNotFoundException|Unable to load shared library'; then
+        echo "Missing runtime DLL/library -> run Community Fixes (<CTRL-X>) or install 32-bit multilib"
+    elif echo "$tail_log" | grep -qiE 'Exec format error|cannot execute binary file|Permission denied'; then
+        echo "Executable architecture or permission mismatch -> verify 64-bit binary / chmod +x"
+    elif echo "$tail_log" | grep -qiE 'SteamStub|Application load error|steamclient.*fail'; then
+        echo "SteamStub/DRM signature detected -> run unpack-stub or Inject GBE (<CTRL-I>)"
+    fi
+    return 0
+}
+
+# Emit active running game rows (FS=\x1f: PID, TITLE, DIR, BIN, LOG, INFO_FILE, SCOPE_UNIT) and prune stale info files
+list_active_games() {
+    local run_dir
+    run_dir="$(get_runtime_dir)"
+    local active_dir="$run_dir/active_games"
+    [ -d "$active_dir" ] || return 0
+
+    local inf p_pid p_title p_dir p_bin p_log p_scope
+    local sep=$'\x1f'
+    local had_nullglob=0
+    shopt -q nullglob && had_nullglob=1
+    shopt -s nullglob
+    for inf in "$active_dir"/*.info; do
+        [ -f "$inf" ] || continue
+        p_pid="" p_title="" p_dir="" p_bin="" p_log="" p_scope=""
+        local k v
+        while IFS='=' read -r k v; do
+            case "$k" in
+                PID) p_pid="$v" ;;
+                TITLE) p_title="$v" ;;
+                DIR) p_dir="$v" ;;
+                BIN) p_bin="$v" ;;
+                LOG) p_log="$v" ;;
+                SCOPE_UNIT) p_scope="$v" ;;
+            esac
+        done < "$inf"
+        if [ -n "$p_pid" ] && kill -0 "$p_pid" 2>/dev/null; then
+            printf '%s%s%s%s%s%s%s%s%s%s%s%s%s\n' \
+                "$p_pid" "$sep" "$p_title" "$sep" "$p_dir" "$sep" "$p_bin" "$sep" "$p_log" "$sep" "$inf" "$sep" "$p_scope"
+        else
+            rm -f "$inf" 2>/dev/null || true
+        fi
+    done
+    [ "$had_nullglob" -eq 0 ] && shopt -u nullglob
+    return 0
+}
+
+# Find active game row matching target directory (exact or realpath canonical)
+find_active_game_for_dir() {
+    local gdir="${1:-}"
+    [ -n "$gdir" ] || return 1
+    local canon_gdir
+    canon_gdir=$(realpath -e "$gdir" 2>/dev/null || echo "$gdir")
+
+    local sep=$'\x1f'
+    local r_pid r_title r_dir r_bin r_log r_inf r_scope r_canon
+    while IFS="$sep" read -r r_pid r_title r_dir r_bin r_log r_inf r_scope; do
+        [ -n "$r_pid" ] || continue
+        if [ "$r_dir" = "$gdir" ]; then
+            printf '%s%s%s%s%s%s%s%s%s%s%s%s%s\n' \
+                "$r_pid" "$sep" "$r_title" "$sep" "$r_dir" "$sep" "$r_bin" "$sep" "$r_log" "$sep" "$r_inf" "$sep" "$r_scope"
+            return 0
+        fi
+        r_canon=$(realpath -e "$r_dir" 2>/dev/null || echo "$r_dir")
+        if [ "$r_canon" = "$canon_gdir" ]; then
+            printf '%s%s%s%s%s%s%s%s%s%s%s%s%s\n' \
+                "$r_pid" "$sep" "$r_title" "$sep" "$r_dir" "$sep" "$r_bin" "$sep" "$r_log" "$sep" "$r_inf" "$sep" "$r_scope"
+            return 0
+        fi
+    done < <(list_active_games)
+    return 1
+}
+
+# Return active game summary as "COUNT\x1fTITLE1, TITLE2"
+get_active_games_summary() {
+    local count=0 titles="" sep=$'\x1f'
+    local r_pid r_title _rest
+    while IFS="$sep" read -r r_pid r_title _rest; do
+        [ -n "$r_pid" ] || continue
+        count=$((count + 1))
+        if [ -z "$titles" ]; then
+            titles="$r_title"
+        else
+            titles="$titles, $r_title"
+        fi
+    done < <(list_active_games)
+    printf '%d%s%s\n' "$count" "$sep" "$titles"
+}
+
+# Probe newly launched game across startup window to catch early crashes cleanly
+verify_launched_game_startup() {
+    local gdir="${1:-}"
+    local gbin="${2:-}"
+    local title="${3:-}"
+    local probe_ticks="${GAMECTL_LAUNCH_PROBE_TICKS:-10}"
+    [[ "$probe_ticks" =~ ^[0-9]+$ ]] && [ "$probe_ticks" -ge 1 ] || probe_ticks=10
+
+    GAMECTL_VERIFY_PID=""
+    GAMECTL_VERIFY_LOG=""
+    GAMECTL_VERIFY_INFO=""
+    GAMECTL_VERIFY_SUMMARY=""
+
+    local row=""
+    row=$(find_active_game_for_dir "$gdir" 2>/dev/null || true)
+    if [ -z "$row" ]; then
+        sleep 0.1
+        row=$(find_active_game_for_dir "$gdir" 2>/dev/null || true)
+    fi
+
+    local sep=$'\x1f'
+    local v_pid="" v_title="" v_dir="" v_bin="" v_log="" v_inf="" v_scope=""
+    if [ -n "$row" ]; then
+        IFS="$sep" read -r v_pid v_title v_dir v_bin v_log v_inf v_scope <<< "$row"
+    fi
+
+    local alive=false
+    if [ -n "$v_pid" ]; then
+        alive=true
+        local tick=0
+        while [ "$tick" -lt "$probe_ticks" ]; do
+            if ! kill -0 "$v_pid" 2>/dev/null; then
+                alive=false
+                break
+            fi
+            tick=$((tick + 1))
+            [ "$tick" -lt "$probe_ticks" ] && sleep 0.1
+        done
+    fi
+
+    if [ "$alive" = true ]; then
+        GAMECTL_VERIFY_PID="$v_pid"
+        GAMECTL_VERIFY_LOG="$v_log"
+        GAMECTL_VERIFY_INFO="$v_inf"
+        export GAMECTL_VERIFY_PID GAMECTL_VERIFY_LOG GAMECTL_VERIFY_INFO
+        return 0
+    fi
+
+    [ -n "$v_inf" ] && rm -f "$v_inf" 2>/dev/null || true
+    [ -z "$v_log" ] && v_log="$(get_game_log_file "$gdir" "$gbin")"
+    GAMECTL_VERIFY_LOG="$v_log"
+    export GAMECTL_VERIFY_LOG
+
+    local v_hint="" v_tail=""
+    v_hint=$(inspect_game_log_hint "$v_log" 2>/dev/null || true)
+    if [ -s "$v_log" ]; then
+        v_tail=$(tail -n 12 "$v_log" 2>/dev/null || true)
+    else
+        v_tail="(No diagnostic output recorded in log file.)"
+    fi
+
+    GAMECTL_VERIFY_SUMMARY="Game '$title' exited immediately after launch."
+    [ -n "$v_hint" ] && GAMECTL_VERIFY_SUMMARY+=$'\n\n'"[HINT] $v_hint"
+    GAMECTL_VERIFY_SUMMARY+=$'\n\n'"Recent Log Output:"$'\n'"$v_tail"$'\n\n'"Full log:"$'\n'"$v_log"
+    export GAMECTL_VERIFY_SUMMARY
+    return 1
+}
+
 # --- [MODULE] src/steam/20_discovery.sh ---
 
 # Discover active Steam root directory across standard, custom, Flatpak, and Snap installations
@@ -2906,6 +3149,16 @@ scan_installed_games() {
 
     # Render formatted or raw tab entries (6-column v3 TSV: APPID, TITLE, STATUS, GAME_DIR, GAME_BIN, STORE)
     if [ "$is_formatted" = true ]; then
+        declare -A _running_dirs=()
+        if declare -F list_active_games >/dev/null 2>&1; then
+            local _r_pid _r_title _r_dir _r_rest _r_canon _r_sep=$'\x1f'
+            while IFS="$_r_sep" read -r _r_pid _r_title _r_dir _r_rest; do
+                [ -n "$_r_pid" ] && [ -n "$_r_dir" ] || continue
+                _running_dirs["$_r_dir"]=1
+                _r_canon=$(realpath -e "$_r_dir" 2>/dev/null || echo "$_r_dir")
+                _running_dirs["$_r_canon"]=1
+            done < <(list_active_games)
+        fi
         while IFS=$'\t' read -r c_appid c_title c_status c_gdir c_gbin c_store; do
             [[ "$c_appid" == \#* ]] && continue
             [ -z "$c_gdir" ] && continue
@@ -2921,6 +3174,17 @@ scan_installed_games() {
                 *AMAZON*)     c_badge="${UI_AMBER}[AMAZON]    ${UI_RST}" ;;
                 *)            c_badge="${UI_ICE}[STANDALONE]${UI_RST}" ;;
             esac
+            local _c_canon=""
+            if [ ${#_running_dirs[@]} -gt 0 ]; then
+                if [[ -v _running_dirs["$c_gdir"] ]]; then
+                    c_badge="${UI_GREEN}[RUNNING]${UI_RST} $c_badge"
+                else
+                    _c_canon=$(realpath -e "$c_gdir" 2>/dev/null || echo "$c_gdir")
+                    if [[ -v _running_dirs["$_c_canon"] ]]; then
+                        c_badge="${UI_GREEN}[RUNNING]${UI_RST} $c_badge"
+                    fi
+                fi
+            fi
             printf "%s\t%s\t%s\t%s\t%s\t%s\n" "${UI_DIM}${c_appid}${UI_RST}" "${UI_BOLD}${c_title}${UI_RST}" "$c_badge" "$c_gdir" "$c_gbin" "$c_store"
         done < "$cache_file"
     else
@@ -3972,7 +4236,7 @@ ensure_linux_binaries_executable() {
         [ -f "$f_cand" ] || continue
         local sig
         sig=$(od -An -tx1 -N4 "$f_cand" 2>/dev/null | tr -d " \n" || true)
-        if [ "$sig" = "7f454c46" ]; then
+        if [ "$sig" = "7f454c46" ] || [[ "$sig" == 2321* ]]; then
             if [ ! -x "$f_cand" ]; then
                 chmod +x "$f_cand" 2>/dev/null || true
                 elf_count=$((elf_count + 1))
@@ -12685,21 +12949,12 @@ manage_active_processes_interactive() {
 
     local running_list=""
     local count=0
-    for inf in "$run_dir/active_games"/*.info; do
-        [ -f "$inf" ] || continue
-        local p_pid p_title p_dir p_bin p_log
-        p_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        p_title=$(grep -E '^TITLE=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        p_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        p_bin=$(grep -E '^BIN=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        p_log=$(grep -E '^LOG=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        if [ -n "$p_pid" ] && kill -0 "$p_pid" 2>/dev/null; then
-            count=$((count + 1))
-            running_list+="${p_pid}\t${p_title}\t${p_dir}\t${p_bin}\t${p_log}\t${inf}\n"
-        else
-            rm -f "$inf" 2>/dev/null || true
-        fi
-    done
+    local p_pid p_title p_dir p_bin p_log p_inf _p_scope _p_sep=$'\x1f'
+    while IFS="$_p_sep" read -r p_pid p_title p_dir p_bin p_log p_inf _p_scope; do
+        [ -n "$p_pid" ] || continue
+        count=$((count + 1))
+        running_list+="${p_pid}\t${p_title}\t${p_dir}\t${p_bin}\t${p_log}\t${p_inf}\n"
+    done < <(list_active_games)
 
     if [ "$count" -eq 0 ] || [ -z "$running_list" ]; then
         tui_modal_notice "Process Controller" "No games currently running."
@@ -12955,17 +13210,30 @@ library_menu() {
 
     export GAMECTL_PREVIEW_BIN="$SELF_BIN"
     local active_store="ALL"
+    local last_status_banner=""
 
     while true; do
         flush_tty_input
+        local active_summary active_cnt=0 active_names="" _a_sep=$'\x1f'
+        active_summary=$(get_active_games_summary)
+        IFS="$_a_sep" read -r active_cnt active_names <<< "$active_summary"
+        local lib_label="  ╢ gamectl :: Game Library [Store: $active_store] ╟  "
+        [ "${active_cnt:-0}" -gt 0 ] && lib_label="  ╢ gamectl :: Game Library [Store: $active_store] [Running: $active_cnt] ╟  "
+        local lib_header="Enter: Launch/Manage │ Tab/Alt-S: Store │ Ctrl-I: Inject GBE │ Ctrl-F: Search │ Esc: Dashboard"
+        if [ -n "$last_status_banner" ]; then
+            lib_header+=$'\n'"$last_status_banner"
+            last_status_banner=""
+        elif [ "${active_cnt:-0}" -gt 0 ]; then
+            lib_header+=$'\n'"[RUNNING ($active_cnt)] $active_names — Press Enter on a running game to Stop / View Logs"
+        fi
         local fzf_out fzf_rc=0
         fzf_out=$(scan_installed_games --formatted --store "$active_store" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
             --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x,tab,alt-s \
-            --border-label="  ╢ gamectl :: Game Library [Store: $active_store] ╟  " \
+            --border-label="$lib_label" \
             --border-label-pos=2 \
-            --header="Enter: Launch/Manage │ Tab/Alt-S: Store │ Ctrl-I: Inject GBE │ Ctrl-F: Search │ Esc: Dashboard" \
+            --header="$lib_header" \
             --prompt="Library > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview {1} {2} {3} {4} {5}' \
             --preview-window=right:55%:border-rounded:wrap \
@@ -13126,30 +13394,15 @@ library_menu() {
                     fi
                 fi
                 # Check if game is already active / running
-                local active_inf="" active_pid=""
-                local run_dir
-                run_dir="$(get_runtime_dir)"
-                if [ -d "$run_dir/active_games" ]; then
-                    for inf in "$run_dir/active_games"/*.info; do
-                        [ -f "$inf" ] || continue
-                        local inf_dir
-                        inf_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-                        if [ "$inf_dir" = "$sel_dir" ]; then
-                            local check_pid
-                            check_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2)
-                            if [ -n "$check_pid" ] && kill -0 "$check_pid" 2>/dev/null; then
-                                active_inf="$inf"
-                                active_pid="$check_pid"
-                                break
-                            fi
-                        fi
-                    done
+                local active_row="" active_pid="" active_log="" active_inf=""
+                active_row=$(find_active_game_for_dir "$sel_dir" 2>/dev/null || true)
+                if [ -n "$active_row" ]; then
+                    local _a_title _a_dir _a_bin _a_scope _a_sep=$'\x1f'
+                    IFS="$_a_sep" read -r active_pid _a_title _a_dir _a_bin active_log active_inf _a_scope <<< "$active_row"
                 fi
 
                 if [ -n "$active_pid" ]; then
                     # Game is already running: open In-Dashboard Process Controller
-                    local active_log
-                    active_log=$(grep -E '^LOG=' "$active_inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
                     local hud_rc=0
                     game_controller_hud "$active_pid" "$sel_title" "$active_log" "$sel_dir" "$sel_bin" "$active_inf" "Running Process" || hud_rc=$?
                     invalidate_scan_cache
@@ -13163,7 +13416,18 @@ library_menu() {
                 # Engine failures are already logged and surfaced via tui_run_engine modal; do not conflate with fzf status
                 tui_run_engine "Launch $sel_title" launch_game "$sel_dir" "$sel_bin" "$sel_title" || launch_rc=$?
                 invalidate_scan_cache
-                [ "$launch_rc" -ne 0 ] && log_msg "WARN" "LIBRARY" "Launch returned exit code $launch_rc for $sel_title"
+                if [ "$launch_rc" -eq 0 ]; then
+                    if verify_launched_game_startup "$sel_dir" "$sel_bin" "$sel_title"; then
+                        last_status_banner="[RUNNING] $sel_title (PID $GAMECTL_VERIFY_PID) — Press Enter on it to Stop / View Logs"
+                    else
+                        log_msg "ERROR" "LIBRARY" "Game '$sel_title' exited immediately after launch (Log: ${GAMECTL_VERIFY_LOG:-unknown})"
+                        tui_modal_notice "Launch Failed ($sel_title)" "$GAMECTL_VERIFY_SUMMARY" || true
+                        last_status_banner="[FAILED] $sel_title exited immediately — Log: ${GAMECTL_VERIFY_LOG:-unknown}"
+                    fi
+                else
+                    log_msg "WARN" "LIBRARY" "Launch returned exit code $launch_rc for $sel_title"
+                    last_status_banner="[FAILED] $sel_title failed to launch (exit code $launch_rc)"
+                fi
                 ;;
         esac
     done
@@ -13225,22 +13489,12 @@ preview_game() {
     local is_running=false
     local run_pid=""
     local run_log=""
-    if [ -d "$run_dir/active_games" ]; then
-        for inf in "$run_dir/active_games"/*.info; do
-            [ -f "$inf" ] || continue
-            local inf_dir
-            inf_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-            if [ "$inf_dir" = "$gdir" ]; then
-                local check_pid
-                check_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2)
-                if [ -n "$check_pid" ] && kill -0 "$check_pid" 2>/dev/null; then
-                    is_running=true
-                    run_pid="$check_pid"
-                    run_log=$(grep -E '^LOG=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)
-                    break
-                fi
-            fi
-        done
+    local active_row=""
+    active_row=$(find_active_game_for_dir "$gdir" 2>/dev/null || true)
+    if [ -n "$active_row" ]; then
+        local _r_title _r_dir _r_bin _r_inf _r_scope _r_sep=$'\x1f'
+        IFS="$_r_sep" read -r run_pid _r_title _r_dir _r_bin run_log _r_inf _r_scope <<< "$active_row"
+        is_running=true
     fi
     if [ "$is_running" = true ]; then
         status_badge="${UI_GREEN}[RUNNING PID:$run_pid]${UI_RST}"
@@ -13415,7 +13669,11 @@ preview_game() {
 
     echo
     echo "${UI_BOX}╭─ KEYBOARD SHORTCUTS ─────────────────────────────────╮${UI_RST}"
-    echo "  ${UI_PILL_ENTER} ${UI_BOLD}Launch Game${UI_RST}       ${UI_PILL_CTRLI} ${UI_BOLD}Inject GBE Fork${UI_RST}"
+    if [ "$is_running" = true ]; then
+        echo "  ${UI_PILL_ENTER} ${UI_BOLD}Manage Running Game${UI_RST} ${UI_PILL_CTRLI} ${UI_BOLD}Inject GBE Fork${UI_RST}"
+    else
+        echo "  ${UI_PILL_ENTER} ${UI_BOLD}Launch Game${UI_RST}       ${UI_PILL_CTRLI} ${UI_BOLD}Inject GBE Fork${UI_RST}"
+    fi
     echo "  ${UI_PILL_CTRLO} ${UI_BOLD}Setup Wrappers${UI_RST}    ${UI_PILL_CTRLP} ${UI_BOLD}Configure LAN Persona${UI_RST}"
     local rhost
     rhost=$(get_remote_host)
@@ -13483,20 +13741,12 @@ preview_dashboard() {
     run_dir="$(get_runtime_dir)"
     local active_count=0
     local active_titles=()
-    if [ -d "$run_dir/active_games" ]; then
-        for inf in "$run_dir/active_games"/*.info; do
-            [ -f "$inf" ] || continue
-            local a_pid a_title
-            a_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2)
-            a_title=$(grep -E '^TITLE=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2)
-            if [ -n "$a_pid" ] && kill -0 "$a_pid" 2>/dev/null; then
-                active_count=$((active_count + 1))
-                active_titles+=("$a_title [PID:$a_pid]")
-            else
-                rm -f "$inf" 2>/dev/null || true
-            fi
-        done
-    fi
+    local a_pid a_title _a_rest _a_sep=$'\x1f'
+    while IFS="$_a_sep" read -r a_pid a_title _a_rest; do
+        [ -n "$a_pid" ] || continue
+        active_count=$((active_count + 1))
+        active_titles+=("$a_title [PID:$a_pid]")
+    done < <(list_active_games)
     local active_desc="${UI_DIM}None${UI_RST}"
     if [ "$active_count" -gt 0 ]; then
         active_desc="${UI_GREEN}$active_count running${UI_RST} ${UI_DIM}(${active_titles[*]})${UI_RST}"

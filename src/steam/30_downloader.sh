@@ -162,7 +162,7 @@ ensure_linux_binaries_executable() {
         [ -f "$f_cand" ] || continue
         local sig
         sig=$(od -An -tx1 -N4 "$f_cand" 2>/dev/null | tr -d " \n" || true)
-        if [ "$sig" = "7f454c46" ]; then
+        if [ "$sig" = "7f454c46" ] || [[ "$sig" == 2321* ]]; then
             if [ ! -x "$f_cand" ]; then
                 chmod +x "$f_cand" 2>/dev/null || true
                 elf_count=$((elf_count + 1))

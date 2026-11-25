@@ -502,100 +502,6 @@ fetch_cached_json() {
     return 1
 }
 
-# Dynamic executable finder for game directory
-find_game_binary() {
-    local dir="$1"
-    local base
-    base=$(basename "$dir")
-    local clean_base="${base// /}"
-    local lower_base="${base,,}"
-    local lower_clean="${clean_base,,}"
-
-    # Priority 1: Common launch scripts or matching names
-    local candidates=(
-        "start.sh" "run.sh" "launch.sh" "start" "run"
-        "$base" "$clean_base" "$lower_base" "$lower_clean"
-    )
-    for c in "${candidates[@]}"; do
-        if [ -x "$dir/$c" ] && [ ! -d "$dir/$c" ]; then
-            validate_tui_fields "$c" || continue
-            echo "$c"
-            return 0
-        fi
-    done
-
-    # Priority 2: Any root executable file excluding assets/libs/runtime dumps
-    local f fname
-    for f in "$dir"/*; do
-        if [ -x "$f" ] && [ ! -d "$f" ]; then
-            fname="${f##*/}"
-            validate_tui_fields "$fname" || continue
-            case "$fname" in
-                *.so|*.so.*|*.dll|*.dylib|installscript.vdf|*.png|*.bmp|*.txt|*.pkg|createdump|monoconfig|monomachineconfig)
-                    continue
-                    ;;
-                *)
-                    echo "$fname"
-                    return 0
-                    ;;
-            esac
-        fi
-    done
-
-    # Priority 3: Windows executables matching title/folder name
-    local win_candidates=(
-        "$base.exe" "$clean_base.exe" "$lower_base.exe" "$lower_clean.exe"
-    )
-    for c in "${win_candidates[@]}"; do
-        if [ -f "$dir/$c" ] && [ ! -d "$dir/$c" ]; then
-            validate_tui_fields "$c" || continue
-            chmod +x "$dir/$c" 2>/dev/null || true
-            echo "$c"
-            return 0
-        fi
-    done
-
-    # Priority 4: Any root .exe excluding setup/redist/crash handlers
-    for f in "$dir"/*.exe "$dir"/*.EXE; do
-        [ -f "$f" ] || continue
-        fname="${f##*/}"
-        validate_tui_fields "$fname" || continue
-        case "$fname" in
-            UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|dotnet*|*CrashReport*)
-                continue
-                ;;
-            *)
-                chmod +x "$f" 2>/dev/null || true
-                echo "$fname"
-                return 0
-                ;;
-        esac
-    done
-
-    # Priority 5: Subdirectory .exe in standard game binary folders
-    for sub in "bin" "bin/x64" "bin/Win64" "Binaries/Win64" "Binaries/Win32" "x64"; do
-        if [ -d "$dir/$sub" ]; then
-            for f in "$dir/$sub"/*.exe "$dir/$sub"/*.EXE; do
-                [ -f "$f" ] || continue
-                fname="${f##*/}"
-                validate_tui_fields "$fname" || continue
-                case "$fname" in
-                    UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|dotnet*|*CrashReport*)
-                        continue
-                        ;;
-                    *)
-                        chmod +x "$f" 2>/dev/null || true
-                        echo "$sub/$fname"
-                        return 0
-                        ;;
-                esac
-            done
-        fi
-    done
-
-    return 1
-}
-
 # Resolve sovereign library path prioritizing explicit arg, env, config, and default $HOME/Games
 resolve_standalone_library_dir() {
     local safe_title="${1:-}"
@@ -702,25 +608,6 @@ resolve_game_drm_status() {
         esac
     else
         echo "STANDALONE"
-    fi
-    return 0
-}
-
-# Extract an actionable 1-line diagnostic hint from a game's recent launch log
-inspect_game_log_hint() {
-    local log_file="${1:-}"
-    [ -n "$log_file" ] && [ -f "$log_file" ] || return 0
-
-    local tail_log
-    tail_log=$(tail -n 60 "$log_file" 2>/dev/null || true)
-    [ -n "$tail_log" ] || return 0
-
-    if echo "$tail_log" | grep -qiE '0x887a0002|DXGI_ERROR|Vulkan support is incomplete|dxvk.*(failed|error|unable)|vkCreateInstance'; then
-        echo "Graphics API error detected -> switch Renderer to WineD3D (<CTRL-O> or --wined3d)"
-    elif echo "$tail_log" | grep -qiE 'err:module:import_dll|cannot open shared object file|error while loading shared libraries|libGL\.so\.1'; then
-        echo "Missing runtime DLL/library -> run Community Fixes (<CTRL-X>) or install 32-bit multilib"
-    elif echo "$tail_log" | grep -qiE 'SteamStub|Application load error|steamclient.*fail'; then
-        echo "SteamStub/DRM signature detected -> run unpack-stub or Inject GBE (<CTRL-I>)"
     fi
     return 0
 }
@@ -949,7 +836,7 @@ get_hubcap_api_key() {
 # Standalone-source compatibility: load split core submodules when sourced directly outside bin/gamectl
 if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
     _core_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-    for _core_sub in 12_tui_primitives.sh 14_saves.sh 16_steamstub.sh; do
+    for _core_sub in 12_tui_primitives.sh 14_saves.sh 16_steamstub.sh 18_process_runtime.sh; do
         if [ -f "$_core_dir/$_core_sub" ]; then
             # shellcheck source=/dev/null
             source "$_core_dir/$_core_sub"

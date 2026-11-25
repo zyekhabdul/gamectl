@@ -384,6 +384,16 @@ scan_installed_games() {
 
     # Render formatted or raw tab entries (6-column v3 TSV: APPID, TITLE, STATUS, GAME_DIR, GAME_BIN, STORE)
     if [ "$is_formatted" = true ]; then
+        declare -A _running_dirs=()
+        if declare -F list_active_games >/dev/null 2>&1; then
+            local _r_pid _r_title _r_dir _r_rest _r_canon _r_sep=$'\x1f'
+            while IFS="$_r_sep" read -r _r_pid _r_title _r_dir _r_rest; do
+                [ -n "$_r_pid" ] && [ -n "$_r_dir" ] || continue
+                _running_dirs["$_r_dir"]=1
+                _r_canon=$(realpath -e "$_r_dir" 2>/dev/null || echo "$_r_dir")
+                _running_dirs["$_r_canon"]=1
+            done < <(list_active_games)
+        fi
         while IFS=$'\t' read -r c_appid c_title c_status c_gdir c_gbin c_store; do
             [[ "$c_appid" == \#* ]] && continue
             [ -z "$c_gdir" ] && continue
@@ -399,6 +409,17 @@ scan_installed_games() {
                 *AMAZON*)     c_badge="${UI_AMBER}[AMAZON]    ${UI_RST}" ;;
                 *)            c_badge="${UI_ICE}[STANDALONE]${UI_RST}" ;;
             esac
+            local _c_canon=""
+            if [ ${#_running_dirs[@]} -gt 0 ]; then
+                if [[ -v _running_dirs["$c_gdir"] ]]; then
+                    c_badge="${UI_GREEN}[RUNNING]${UI_RST} $c_badge"
+                else
+                    _c_canon=$(realpath -e "$c_gdir" 2>/dev/null || echo "$c_gdir")
+                    if [[ -v _running_dirs["$_c_canon"] ]]; then
+                        c_badge="${UI_GREEN}[RUNNING]${UI_RST} $c_badge"
+                    fi
+                fi
+            fi
             printf "%s\t%s\t%s\t%s\t%s\t%s\n" "${UI_DIM}${c_appid}${UI_RST}" "${UI_BOLD}${c_title}${UI_RST}" "$c_badge" "$c_gdir" "$c_gbin" "$c_store"
         done < "$cache_file"
     else

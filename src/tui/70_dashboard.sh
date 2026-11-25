@@ -56,21 +56,12 @@ manage_active_processes_interactive() {
 
     local running_list=""
     local count=0
-    for inf in "$run_dir/active_games"/*.info; do
-        [ -f "$inf" ] || continue
-        local p_pid p_title p_dir p_bin p_log
-        p_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        p_title=$(grep -E '^TITLE=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        p_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        p_bin=$(grep -E '^BIN=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        p_log=$(grep -E '^LOG=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-        if [ -n "$p_pid" ] && kill -0 "$p_pid" 2>/dev/null; then
-            count=$((count + 1))
-            running_list+="${p_pid}\t${p_title}\t${p_dir}\t${p_bin}\t${p_log}\t${inf}\n"
-        else
-            rm -f "$inf" 2>/dev/null || true
-        fi
-    done
+    local p_pid p_title p_dir p_bin p_log p_inf _p_scope _p_sep=$'\x1f'
+    while IFS="$_p_sep" read -r p_pid p_title p_dir p_bin p_log p_inf _p_scope; do
+        [ -n "$p_pid" ] || continue
+        count=$((count + 1))
+        running_list+="${p_pid}\t${p_title}\t${p_dir}\t${p_bin}\t${p_log}\t${p_inf}\n"
+    done < <(list_active_games)
 
     if [ "$count" -eq 0 ] || [ -z "$running_list" ]; then
         tui_modal_notice "Process Controller" "No games currently running."
@@ -326,17 +317,30 @@ library_menu() {
 
     export GAMECTL_PREVIEW_BIN="$SELF_BIN"
     local active_store="ALL"
+    local last_status_banner=""
 
     while true; do
         flush_tty_input
+        local active_summary active_cnt=0 active_names="" _a_sep=$'\x1f'
+        active_summary=$(get_active_games_summary)
+        IFS="$_a_sep" read -r active_cnt active_names <<< "$active_summary"
+        local lib_label="  ╢ gamectl :: Game Library [Store: $active_store] ╟  "
+        [ "${active_cnt:-0}" -gt 0 ] && lib_label="  ╢ gamectl :: Game Library [Store: $active_store] [Running: $active_cnt] ╟  "
+        local lib_header="Enter: Launch/Manage │ Tab/Alt-S: Store │ Ctrl-I: Inject GBE │ Ctrl-F: Search │ Esc: Dashboard"
+        if [ -n "$last_status_banner" ]; then
+            lib_header+=$'\n'"$last_status_banner"
+            last_status_banner=""
+        elif [ "${active_cnt:-0}" -gt 0 ]; then
+            lib_header+=$'\n'"[RUNNING ($active_cnt)] $active_names — Press Enter on a running game to Stop / View Logs"
+        fi
         local fzf_out fzf_rc=0
         fzf_out=$(scan_installed_games --formatted --store "$active_store" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
             --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x,tab,alt-s \
-            --border-label="  ╢ gamectl :: Game Library [Store: $active_store] ╟  " \
+            --border-label="$lib_label" \
             --border-label-pos=2 \
-            --header="Enter: Launch/Manage │ Tab/Alt-S: Store │ Ctrl-I: Inject GBE │ Ctrl-F: Search │ Esc: Dashboard" \
+            --header="$lib_header" \
             --prompt="Library > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview {1} {2} {3} {4} {5}' \
             --preview-window=right:55%:border-rounded:wrap \
@@ -497,30 +501,15 @@ library_menu() {
                     fi
                 fi
                 # Check if game is already active / running
-                local active_inf="" active_pid=""
-                local run_dir
-                run_dir="$(get_runtime_dir)"
-                if [ -d "$run_dir/active_games" ]; then
-                    for inf in "$run_dir/active_games"/*.info; do
-                        [ -f "$inf" ] || continue
-                        local inf_dir
-                        inf_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-                        if [ "$inf_dir" = "$sel_dir" ]; then
-                            local check_pid
-                            check_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2)
-                            if [ -n "$check_pid" ] && kill -0 "$check_pid" 2>/dev/null; then
-                                active_inf="$inf"
-                                active_pid="$check_pid"
-                                break
-                            fi
-                        fi
-                    done
+                local active_row="" active_pid="" active_log="" active_inf=""
+                active_row=$(find_active_game_for_dir "$sel_dir" 2>/dev/null || true)
+                if [ -n "$active_row" ]; then
+                    local _a_title _a_dir _a_bin _a_scope _a_sep=$'\x1f'
+                    IFS="$_a_sep" read -r active_pid _a_title _a_dir _a_bin active_log active_inf _a_scope <<< "$active_row"
                 fi
 
                 if [ -n "$active_pid" ]; then
                     # Game is already running: open In-Dashboard Process Controller
-                    local active_log
-                    active_log=$(grep -E '^LOG=' "$active_inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
                     local hud_rc=0
                     game_controller_hud "$active_pid" "$sel_title" "$active_log" "$sel_dir" "$sel_bin" "$active_inf" "Running Process" || hud_rc=$?
                     invalidate_scan_cache
@@ -534,7 +523,18 @@ library_menu() {
                 # Engine failures are already logged and surfaced via tui_run_engine modal; do not conflate with fzf status
                 tui_run_engine "Launch $sel_title" launch_game "$sel_dir" "$sel_bin" "$sel_title" || launch_rc=$?
                 invalidate_scan_cache
-                [ "$launch_rc" -ne 0 ] && log_msg "WARN" "LIBRARY" "Launch returned exit code $launch_rc for $sel_title"
+                if [ "$launch_rc" -eq 0 ]; then
+                    if verify_launched_game_startup "$sel_dir" "$sel_bin" "$sel_title"; then
+                        last_status_banner="[RUNNING] $sel_title (PID $GAMECTL_VERIFY_PID) — Press Enter on it to Stop / View Logs"
+                    else
+                        log_msg "ERROR" "LIBRARY" "Game '$sel_title' exited immediately after launch (Log: ${GAMECTL_VERIFY_LOG:-unknown})"
+                        tui_modal_notice "Launch Failed ($sel_title)" "$GAMECTL_VERIFY_SUMMARY" || true
+                        last_status_banner="[FAILED] $sel_title exited immediately — Log: ${GAMECTL_VERIFY_LOG:-unknown}"
+                    fi
+                else
+                    log_msg "WARN" "LIBRARY" "Launch returned exit code $launch_rc for $sel_title"
+                    last_status_banner="[FAILED] $sel_title failed to launch (exit code $launch_rc)"
+                fi
                 ;;
         esac
     done
