@@ -17,6 +17,7 @@ MODULES=(
     "$REPO_ROOT/src/core/14_saves.sh"
     "$REPO_ROOT/src/core/16_steamstub.sh"
     "$REPO_ROOT/src/steam/20_discovery.sh"
+    "$REPO_ROOT/src/steam/21_shortcuts_artwork.sh"
     "$REPO_ROOT/src/steam/25_identity.sh"
     "$REPO_ROOT/src/steam/30_downloader.sh"
     "$REPO_ROOT/src/steam/31_manifests.sh"
