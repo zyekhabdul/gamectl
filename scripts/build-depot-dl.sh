@@ -6,8 +6,6 @@
 set -euo pipefail
 
 export RUST_MIN_STACK="${RUST_MIN_STACK:-67108864}"
-export CFLAGS="${CFLAGS:-} -Dunsignee=unsigned"
-export CXXFLAGS="${CXXFLAGS:-} -Dunsignee=unsigned"
 if command -v clang >/dev/null 2>&1; then
     export CC="${CC:-clang}"
     export CXX="${CXX:-clang++}"
@@ -96,7 +94,7 @@ if ! command -v "$CARGO_BIN" >/dev/null 2>&1; then
     exit 1
 fi
 
-CARGO_ARGS=("build" "--bin" "gamectl-depot-dl")
+CARGO_ARGS=("build" "--locked" "--bin" "gamectl-depot-dl")
 [ -n "$PROFILE_FLAG" ] && CARGO_ARGS+=("$PROFILE_FLAG")
 
 if [ -n "$TARGET_TRIPLE" ]; then
@@ -122,7 +120,7 @@ build_status=0
 
 if [ $build_status -ne 0 ] && [ "$BUILD_PROFILE" = "release" ]; then
     echo "[WARN] Release build failed (exit code $build_status), attempting unoptimized dev build fallback..." >&2
-    FALLBACK_ARGS=("build" "--bin" "gamectl-depot-dl")
+    FALLBACK_ARGS=("build" "--locked" "--bin" "gamectl-depot-dl")
     [ -n "$TARGET_TRIPLE" ] && FALLBACK_ARGS+=(--target "$TARGET_TRIPLE")
     build_status=0
     (
@@ -161,7 +159,7 @@ fi
 
 mkdir -p "$OUTPUT_DIR"
 cp -f "$TARGET_BIN" "$OUTPUT_DIR/$OUTPUT_NAME"
-chmod +x "$OUTPUT_DIR/$OUTPUT_NAME" 2>/dev/null || true
+chmod 0755 "$OUTPUT_DIR/$OUTPUT_NAME" 2>/dev/null || true
 
 if command -v strip >/dev/null 2>&1; then
     strip "$OUTPUT_DIR/$OUTPUT_NAME" 2>/dev/null || true

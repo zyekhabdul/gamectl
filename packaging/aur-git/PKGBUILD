@@ -3,7 +3,7 @@ pkgname=gamectl-git
 pkgver=1.4.0
 pkgrel=1
 pkgdesc="Sovereign TUI Game Manager & Launcher for Linux (Zero-Bloat, VCS development branch)"
-arch=('x86_64')
+arch=('x86_64' 'aarch64')
 url="https://github.com/zyekhabdul/gamectl"
 license=('MIT' 'GPL-2.0-only')
 depends=(
@@ -18,7 +18,7 @@ depends=(
     'unzip'
     'zip'
 )
-makedepends=('git')
+makedepends=('git' 'cargo')
 optdepends=(
     'bubblewrap: Rootless security sandbox isolation profile (--sandbox)'
     'gamemode: Performance optimizations during gameplay'
@@ -44,12 +44,25 @@ pkgver() {
     printf "%s.r%s.g%s" "$tag" "$count" "$hash"
 }
 
+prepare() {
+    cd "$srcdir/gamectl/crates/depot-dl"
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "$srcdir/gamectl"
+    ./scripts/build.sh
+    cd crates/depot-dl
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release --bin gamectl-depot-dl
+}
+
 package() {
     cd "$srcdir/gamectl"
 
     # Install standalone executable and shorthand alias
     install -Dm755 bin/gamectl "$pkgdir/usr/bin/gamectl"
-    [ -f bin/gamectl-depot-dl ] && install -Dm755 bin/gamectl-depot-dl "$pkgdir/usr/bin/gamectl-depot-dl"
+    install -Dm755 crates/depot-dl/target/release/gamectl-depot-dl "$pkgdir/usr/bin/gamectl-depot-dl"
     ln -sf gamectl "$pkgdir/usr/bin/game"
 
     # Install shell autocompletion
