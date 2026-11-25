@@ -178,6 +178,13 @@ doctor_audit() {
         echo "    • $(printf '%-18s' "Epic Store CLI") : ${UI_DIM}[OPT]${UI_RST} Optional (Install legendary for Epic Games support)"
     fi
 
+    if command -v nile >/dev/null 2>&1; then
+        echo "    • $(printf '%-18s' "Amazon Store CLI") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(command -v nile))${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "    • $(printf '%-18s' "Amazon Store CLI") : ${UI_DIM}[OPT]${UI_RST} Optional (Install nile for Amazon Games support)"
+    fi
+
     # Layer 7: Steam Client & SLSsteam Integration
     echo
     echo "  ${UI_PURPLE}[LAYER 7] Steam Client & Secondary Bridge Integration${UI_RST}"

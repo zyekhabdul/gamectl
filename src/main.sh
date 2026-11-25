@@ -145,6 +145,9 @@ case "${1:-}" in
     epic)
         epic_cli "${2:-status}" "${@:3}"
         ;;
+    amazon)
+        amazon_cli "${2:-status}" "${@:3}"
+        ;;
     check-scope|systemd-scope)
         if check_systemd_scope_support; then
             echo "[INFO] cgroups v2 / systemd-run user scope isolation is supported and active."
@@ -498,6 +501,8 @@ Usage:
                       Optional DRM-free GOG adapter (delegates to gogdl / lgogdownloader)
   gamectl epic <status|auth|search|download|sync|launch> [args...]
                       Optional Epic Games adapter (delegates to legendary)
+  gamectl amazon <status|auth|search|download|sync> [args...]
+                      Optional Amazon Prime Gaming adapter (delegates to nile)
   gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread] [--scope|--no-scope] [--prime|--no-prime] [--sandbox|--no-sandbox]
                       Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]

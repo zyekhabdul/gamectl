@@ -147,6 +147,10 @@ scan_installed_games() {
     declare -F _epic_config_dir >/dev/null 2>&1 && epic_cfg_dir="$(_epic_config_dir)"
     local epic_installed="$epic_cfg_dir/installed.json"
 
+    local amazon_cfg_dir="${NILE_CONFIG_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/nile}"
+    declare -F _amazon_config_dir >/dev/null 2>&1 && amazon_cfg_dir="$(_amazon_config_dir)"
+    local amazon_installed="$amazon_cfg_dir/installed.json"
+
     # Fast-path: Check cache validity (TTL: 60s, invalidated if candidate library directories are newer)
     local use_cached=false
     if [ "$force_refresh" = false ] && [ -f "$cache_file" ] &&
@@ -164,6 +168,9 @@ scan_installed_games() {
                 fi
             done
             if [ "$use_cached" = true ] && [ -f "$epic_installed" ] && [ "$epic_installed" -nt "$cache_file" ]; then
+                use_cached=false
+            fi
+            if [ "$use_cached" = true ] && [ -f "$amazon_installed" ] && [ "$amazon_installed" -nt "$cache_file" ]; then
                 use_cached=false
             fi
         fi
@@ -278,6 +285,56 @@ scan_installed_games() {
                 done <<< "$epic_rows"
             else
                 printf '[ERROR] Invalid Epic installed.json payload in %s\n' "$epic_installed" >&2
+            fi
+        fi
+
+        # 1c. Scan Amazon Games (Nile installed.json) before custom dirs to deduplicate ~/Games/
+        if [ -f "$amazon_installed" ] && command -v jq >/dev/null 2>&1; then
+            local amazon_rows=""
+            if amazon_rows=$(jq -r '
+                (if type == "array" then to_entries | map({k:(.key|tostring), v:.value})
+                 elif type == "object" then to_entries | map({k:.key, v:.value})
+                 else error("invalid") end)[] |
+                (.k | tostring) as $k |
+                if (.v | type) != "object" then "ERR\t" + ($k | gsub("[\\t\\r\\n]"; "_"))
+                else
+                    ((.v.id // .v.product.id // (if ($k | test("^[0-9]+$")) then "" else $k end)) | tostring) as $id |
+                    ((.v.title // .v.product.title // $id) | tostring) as $title |
+                    ((.v.path // .v.install_path // "") | tostring) as $ipath |
+                    ((.v.executable // "") | tostring) as $exe |
+                    if ($id == "") or ($ipath == "") or ($id | test("[\\t\\r\\n]")) or ($title | test("[\\t\\r\\n]")) or ($ipath | test("[\\t\\r\\n]")) or ($exe | test("[\\t\\r\\n]")) then
+                        "ERR\t" + ($k | gsub("[\\t\\r\\n]"; "_"))
+                    else ["OK", $id, $title, $ipath, $exe] | @tsv end
+                end' "$amazon_installed" 2>/dev/null); then
+                local a_kind a_id a_title a_path a_exe
+                while IFS=$'\t' read -r a_kind a_id a_title a_path a_exe; do
+                    [ -n "$a_kind" ] || continue
+                    if [ "$a_kind" = "ERR" ]; then
+                        printf '[ERROR] Invalid Amazon metadata entry (%s) in %s\n' "${a_id:-unknown}" "$amazon_installed" >&2
+                        continue
+                    fi
+                    [ -d "$a_path" ] || continue
+                    local canon_adir
+                    canon_adir=$(realpath -e "$a_path" 2>/dev/null || echo "$a_path")
+                    [[ -v seen_dirs["$canon_adir"] ]] && continue
+                    [[ -v seen_dirs["$a_path"] ]] && continue
+                    seen_dirs["$canon_adir"]=1
+                    seen_dirs["$a_path"]=1
+                    local a_gbin=""
+                    if [ -n "$a_exe" ] && [[ "$a_exe" != /* ]] && [[ "$a_exe" != *".."* ]] && [ -f "$a_path/$a_exe" ]; then
+                        a_gbin="$a_exe"
+                    else
+                        a_gbin=$(find_game_binary "$a_path") || continue
+                    fi
+                    [ -n "$a_gbin" ] || continue
+                    validate_tui_fields "$a_id" "$a_title" "$a_path" "$a_gbin" || continue
+                    local a_status
+                    a_status=$(resolve_game_drm_status "$a_path" "" "$a_gbin")
+                    [ "$a_status" = "STANDALONE" ] && a_status="AMAZON"
+                    printf "%s\t%s\t%s\t%s\t%s\tAMAZON\n" "$a_id" "$a_title" "$a_status" "$a_path" "$a_gbin" >> "$cache_file.tmp"
+                done <<< "$amazon_rows"
+            else
+                printf '[ERROR] Invalid Amazon installed.json payload in %s\n' "$amazon_installed" >&2
             fi
         fi
 
@@ -401,6 +458,7 @@ scan_installed_games() {
                 *VALVE_DLL*)  c_badge="${UI_CYAN}[VALVE_DLL] ${UI_RST}" ;;
                 *GOG*)        c_badge="${UI_PURPLE}[GOG]       ${UI_RST}" ;;
                 *EPIC*)       c_badge="${UI_CYAN}[EPIC]      ${UI_RST}" ;;
+                *AMAZON*)     c_badge="${UI_AMBER}[AMAZON]    ${UI_RST}" ;;
                 *)            c_badge="${UI_ICE}[STANDALONE]${UI_RST}" ;;
             esac
             printf "%s\t%s\t%s\t%s\t%s\t%s\n" "${UI_DIM}${c_appid}${UI_RST}" "${UI_BOLD}${c_title}${UI_RST}" "$c_badge" "$c_gdir" "$c_gbin" "$c_store"
