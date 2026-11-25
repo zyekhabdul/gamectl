@@ -7,6 +7,10 @@ PKG_VER="1.4.0"
 DIST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$DIST_DIR/../.." && pwd)"
 
+if [ -f "$PROJECT_ROOT/scripts/build-depot-dl.sh" ] && [ -d "$PROJECT_ROOT/crates/depot-dl" ]; then
+    "$PROJECT_ROOT/scripts/build-depot-dl.sh" --check >/dev/null 2>&1 || "$PROJECT_ROOT/scripts/build-depot-dl.sh"
+fi
+
 PKG_ARCH="all"
 if [ -f "$PROJECT_ROOT/bin/gamectl-depot-dl" ]; then
     elf_info="$(file -Lb "$PROJECT_ROOT/bin/gamectl-depot-dl" 2>/dev/null || true)"

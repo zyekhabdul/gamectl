@@ -15,6 +15,7 @@ COMPLETION_DIR="$HOME/.local/share/bash-completion/completions"
 APP_DIR="$HOME/.local/share/applications"
 
 REPO_RAW_URL="${GAMECTL_RAW_URL:-https://raw.githubusercontent.com/zyekhabdul/gamectl/main}"
+RELEASE_BASE_URL="${GAMECTL_RELEASE_URL:-https://github.com/zyekhabdul/gamectl/releases/latest/download}"
 
 DRY_RUN=false
 FORCE=false
@@ -271,6 +272,26 @@ EOF
     fi
 fi
 
+detect_depot_dl_asset() {
+    local arch="${GAMECTL_ARCH:-$(uname -m 2>/dev/null || echo unknown)}"
+    case "$arch" in
+        x86_64|amd64) printf '%s\n' "gamectl-depot-dl-linux-x86_64" ;;
+        aarch64|arm64) printf '%s\n' "gamectl-depot-dl-linux-aarch64" ;;
+        *) return 1 ;;
+    esac
+}
+
+verify_release_sha256() {
+    local asset_name="$1" local_file="$2" sums_file="$3"
+    [ -s "$sums_file" ] || return 0
+    command -v sha256sum >/dev/null 2>&1 || return 0
+    local expected actual
+    expected=$(awk -v f="$asset_name" '$2 == f || $2 == ("*" f) { print $1; exit }' "$sums_file" 2>/dev/null || true)
+    [ -n "$expected" ] || return 0
+    actual=$(sha256sum "$local_file" 2>/dev/null | awk '{print $1}')
+    [ "$actual" = "$expected" ]
+}
+
 # Install standalone binary and aliases
 if [ "$DRY_RUN" = true ]; then
     echo "[INFO] [DRY-RUN] Would install executable to: $BIN_DIR/gamectl"
@@ -280,7 +301,12 @@ if [ "$DRY_RUN" = true ]; then
             echo "[INFO] [DRY-RUN] Would install native depot downloader to: $BIN_DIR/gamectl-depot-dl"
         fi
     else
-        echo "[INFO] [DRY-RUN] Would download native depot downloader to: $BIN_DIR/gamectl-depot-dl"
+        dry_asset="$(detect_depot_dl_asset 2>/dev/null || true)"
+        if [ -n "$dry_asset" ]; then
+            echo "[INFO] [DRY-RUN] Would download native depot downloader ($dry_asset) to: $BIN_DIR/gamectl-depot-dl"
+        else
+            echo "[INFO] [DRY-RUN] No prebuilt gamectl-depot-dl asset for host arch; would build from source or skip."
+        fi
     fi
 else
     mkdir -p "$BIN_DIR"
@@ -298,11 +324,36 @@ else
         curl -fsSL "$REPO_RAW_URL/bin/gamectl" -o "$BIN_DIR/gamectl"
         chmod +x "$BIN_DIR/gamectl"
         ln -sf "$BIN_DIR/gamectl" "$BIN_DIR/game"
-        if curl -fsSL -I "$REPO_RAW_URL/bin/gamectl-depot-dl" >/dev/null 2>&1; then
-            echo "[INFO] Downloading native depot downloader from $REPO_RAW_URL/bin/gamectl-depot-dl..."
-            curl -fsSL "$REPO_RAW_URL/bin/gamectl-depot-dl" -o "$BIN_DIR/gamectl-depot-dl"
-            chmod +x "$BIN_DIR/gamectl-depot-dl"
-            echo "[VERIFIED] Depot downloader installed: $BIN_DIR/gamectl-depot-dl"
+        depot_asset="$(detect_depot_dl_asset 2>/dev/null || true)"
+        if [ -z "$depot_asset" ]; then
+            echo "[WARN] No prebuilt gamectl-depot-dl release asset for architecture $(uname -m). Clone repo and run ./scripts/build-depot-dl.sh." >&2
+        else
+            depot_candidates=("$depot_asset")
+            [ "$depot_asset" = "gamectl-depot-dl-linux-x86_64" ] && depot_candidates+=("gamectl-depot-dl")
+            depot_tmp="$(mktemp "$BIN_DIR/.gamectl-depot-dl.tmp.XXXXXX")"
+            sums_tmp="$(mktemp "${TMPDIR:-/tmp}/.gamectl-sums.tmp.XXXXXX")"
+            trap 'rm -f "$depot_tmp" "$sums_tmp"' EXIT
+            curl -fsSL "$RELEASE_BASE_URL/SHA256SUMS" -o "$sums_tmp" 2>/dev/null || rm -f "$sums_tmp"
+            dl_ok=false
+            for cand in "${depot_candidates[@]}"; do
+                if curl -fsSL "$RELEASE_BASE_URL/$cand" -o "$depot_tmp" 2>/dev/null; then
+                    if ! verify_release_sha256 "$cand" "$depot_tmp" "$sums_tmp"; then
+                        echo "[ERROR] SHA256 mismatch for $cand from $RELEASE_BASE_URL" >&2
+                        rm -f "$depot_tmp" "$sums_tmp"
+                        exit 1
+                    fi
+                    chmod 0755 "$depot_tmp"
+                    mv -f "$depot_tmp" "$BIN_DIR/gamectl-depot-dl"
+                    echo "[VERIFIED] Depot downloader installed ($cand): $BIN_DIR/gamectl-depot-dl"
+                    dl_ok=true
+                    break
+                fi
+            done
+            rm -f "$depot_tmp" "$sums_tmp"
+            trap - EXIT
+            if [ "$dl_ok" = false ]; then
+                echo "[WARN] Could not fetch prebuilt gamectl-depot-dl from $RELEASE_BASE_URL; build from source with ./scripts/build-depot-dl.sh." >&2
+            fi
         fi
     fi
     echo "[VERIFIED] Binary installed: $BIN_DIR/gamectl (alias: $BIN_DIR/game)"

@@ -10,9 +10,17 @@ permissions:
   contents: write
 
 jobs:
-  build-release:
-    name: Build & Publish Release Assets
-    runs-on: ubuntu-latest
+  build-depot-dl:
+    name: Build Multi-Arch Release Assets (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,14 +29,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            fzf \
-            jq \
-            file \
-            rsync \
-            zip \
-            unzip \
-            p7zip-full \
-            dpkg-dev
+            fzf jq file rsync zip unzip p7zip-full dpkg-dev binutils
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -40,20 +41,54 @@ jobs:
 
       - name: Compile native Rust depot downloader
         run: |
-          cargo build --release --manifest-path crates/depot-dl/Cargo.toml
+          cargo build --locked --release --manifest-path crates/depot-dl/Cargo.toml --bin gamectl-depot-dl
           mkdir -p bin
           cp -f crates/depot-dl/target/release/gamectl-depot-dl bin/gamectl-depot-dl
           chmod +x bin/gamectl-depot-dl
+          strip bin/gamectl-depot-dl || true
 
       - name: Build Debian (.deb) package
         run: bash packaging/debian/build-deb.sh
 
+      - name: Stage arch-specific artifacts
+        run: |
+          mkdir -p dist-arch
+          cp -f bin/gamectl-depot-dl "dist-arch/gamectl-depot-dl-linux-${{ matrix.arch }}"
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            cp -f bin/gamectl-depot-dl dist-arch/gamectl-depot-dl
+          fi
+          cp -f packaging/debian/*.deb dist-arch/
+
+      - name: Upload arch artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.arch }}
+          path: dist-arch/*
+
+  build-release:
+    name: Stage Checksums & Publish GitHub Release
+    needs: build-depot-dl
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compile standalone gamectl bundle
+        run: |
+          chmod +x ./scripts/build.sh
+          ./scripts/build.sh
+
+      - name: Download multi-arch artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          path: dist
+          merge-multiple: true
+
       - name: Stage release artifacts & generate SHA256 checksums
         run: |
-          mkdir -p dist
           cp -f bin/gamectl dist/gamectl
-          cp -f bin/gamectl-depot-dl dist/gamectl-depot-dl
-          cp -f packaging/debian/*.deb dist/
+          rm -f dist/SHA256SUMS
           cd dist
           sha256sum * > SHA256SUMS
           echo "Generated SHA256SUMS:"
@@ -65,6 +100,8 @@ jobs:
           files: |
             dist/gamectl
             dist/gamectl-depot-dl
+            dist/gamectl-depot-dl-linux-x86_64
+            dist/gamectl-depot-dl-linux-aarch64
             dist/*.deb
             dist/SHA256SUMS
           generate_release_notes: true
