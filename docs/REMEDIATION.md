@@ -298,7 +298,7 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 # REMEDIATION WORK PACKET 3: MODULE SIZE DISCIPLINE, SAFE STRUCTURAL SPLIT & LOC RATCHET GUARD
 
 - **Track**: Remediation / Module Size Discipline, Safe Structural Decomposition & LOC Ratchet Guard
-- **Status**: IN PROGRESS [1/4 PACKETS]
+- **Status**: IN PROGRESS [2/4 PACKETS]
 - **Prasyarat**: Remediation Work Packet 2.1 (`8aa0e35`) & WP41 Multi-Store Phase 4 (`1bff087`)
 - **Basis**: Audit empiris post-WP41 (12/26 modul >600 LOC; `30_downloader.sh` 1.249, `70_dashboard.sh` 1.057, `20_discovery.sh` 991, `31_manifests.sh` 989, `35_fixes.sh` 981, `41_proton_prefix.sh` 980, `10_utils.sh` 959), audit static-grep coupling (`tests/test_cli.sh`: 45 ref `30_downloader.sh`, 24 ref `70_dashboard.sh`; `20_discovery.sh`: 0 static-grep), dan standar 150–600 LOC di `DEVELOPMENT.md`
 - **Target Files**: `scripts/check_loc_budget.sh`, `Makefile`, `src/steam/20_discovery.sh`, `src/steam/21_shortcuts_artwork.sh`, `src/tui/70_dashboard.sh`, `src/tui/72_store_tui.sh`, `scripts/build.sh`, `tests/test_remediation.sh`, `DEVELOPMENT.md`, `bin/gamectl`, `docs/REMEDIATION.md`
@@ -328,7 +328,7 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 - **Definition of Done (DoD)**:
   - `make lint` dan `STRICT_LINT=1 make lint` gagal deterministik bila ada modul baru >600 LOC atau modul legacy melampaui ceiling-nya.
 
-### [ ] Packet R3B: Zero-Breakage Split `src/steam/21_shortcuts_artwork.sh`
+### [x] Packet R3B: Zero-Breakage Split `src/steam/21_shortcuts_artwork.sh`
 - **Target Files**: `src/steam/20_discovery.sh`, `src/steam/21_shortcuts_artwork.sh`, `scripts/build.sh`, `scripts/check_loc_budget.sh`
 - **Langkah Teknis**:
   1. Pindahkan `create_desktop_entry`, `get_steam_grid_dir`, `fetch_steam_artwork`, `get_steam_shortcuts_vdf`, `check_steam_active`, dan `add_steam_shortcut` (~511 LOC) ke `src/steam/21_shortcuts_artwork.sh`.

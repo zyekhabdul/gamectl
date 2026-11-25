@@ -2998,6 +2998,23 @@ scan_installed_games() {
     fi
 }
 
+# Standalone-source compatibility: load split discovery submodules when sourced directly outside bin/gamectl
+if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
+    _disc_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    for _disc_sub in 21_shortcuts_artwork.sh; do
+        if [ -f "$_disc_dir/$_disc_sub" ]; then
+            # shellcheck source=/dev/null
+            source "$_disc_dir/$_disc_sub"
+        fi
+    done
+    unset _disc_dir _disc_sub
+fi
+
+# --- [MODULE] src/steam/21_shortcuts_artwork.sh ---
+# ==============================================================================
+# Desktop Entries, Steam Grid Artwork & Steam Deck Shortcuts (Split from 20_discovery.sh)
+# ==============================================================================
+
 # Generate FreeDesktop .desktop application shortcut (Chunk 5)
 create_desktop_entry() {
     local game_dir="${1:-}"
