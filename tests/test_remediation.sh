@@ -2786,7 +2786,7 @@ cnt_p.write_text(str(idx + 1))
 with log.open("a") as fh:
     fh.write(" ".join(sys.argv[1:]) + "\n")
 sys.stdin.read()
-if idx < 4:
+if idx < 5:
     sys.stdout.write("tab\n")
     sys.exit(0)
 sys.exit(130)
@@ -2821,6 +2821,7 @@ PY
         grep -Fq '[Store: STEAM]' "$t_dir/fzf_args.log" || exit 1
         grep -Fq '[Store: GOG]' "$t_dir/fzf_args.log" || exit 1
         grep -Fq '[Store: EPIC]' "$t_dir/fzf_args.log" || exit 1
+        grep -Fq '[Store: AMAZON]' "$t_dir/fzf_args.log" || exit 1
         grep -Fq '[Store: STANDALONE]' "$t_dir/fzf_args.log" || exit 1
     )
 }
@@ -3558,6 +3559,108 @@ EOF
     )
 }
 run_test "Engine-Level DLC Guard in download_game() (R2C)" test_r2_engine_level_dlc_guard_contract
+
+# Test 39: WP41A/41B — Optional Amazon Adapter (nile), Discovery, Deduplication & TUI Filter
+test_wp41_amazon_adapter_and_discovery_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp41_amazon_XXXXXX")
+    mkdir -p "$t_dir/home/.config/gamectl" "$t_dir/home/.config/nile" "$t_dir/home/Games/AmzGame" \
+             "$t_dir/home/Games/SoloAmz" "$t_dir/home/AmzBad" "$t_dir/runtime" "$t_dir/game/saves" \
+             "$t_dir/no_amz_bin" "$t_dir/amz_bin"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home" XDG_CONFIG_HOME="$t_dir/home/.config" XDG_RUNTIME_DIR="$t_dir/runtime"
+        export NILE_CONFIG_PATH="$t_dir/home/.config/nile"
+        echo "amz_save" > "$t_dir/game/saves/slot.dat"
+        local cmd_tool tool_path
+        for cmd_tool in bash sh env cat mkdir rm cp mv grep awk sed jq curl file zip unzip rsync ssh python3 fzf dirname basename readlink head tail date stat touch tr wc cut find chmod mktemp uname pgrep id realpath; do
+            tool_path="$(command -v "$cmd_tool" 2>/dev/null || true)"
+            [ -n "$tool_path" ] && ln -sf "$tool_path" "$t_dir/no_amz_bin/$cmd_tool"
+        done
+
+        PATH="$t_dir/no_amz_bin" bash -c '
+            set -e
+            source "$1/src/core/10_utils.sh"; source "$1/src/core/14_saves.sh"; source "$1/src/steam/20_discovery.sh"
+            source "$1/src/runners/40_wrappers.sh"; source "$1/src/stores/00_store_interface.sh"; source "$1/src/diagnostics/60_doctor.sh"
+            store_list_registered | grep -Fxq "amazon"
+            ! store_amazon_available
+            curl() { touch "$2/net_hit"; return 99; }
+            st=$(store_dispatch amazon status); [ ! -e "$2/net_hit" ]
+            printf "%s\n" "$st" | grep -Fq "store=amazon"
+            printf "%s\n" "$st" | grep -Fq "missing"
+            store_dispatch amazon search "control" 2>/dev/null && exit 1 || true
+            store_dispatch amazon download "Amz1" "$2/dl" 2>/dev/null && exit 1 || true
+            doc_out=$(doctor_audit || true)
+            printf "%s\n" "$doc_out" | grep -Fq "Amazon Store CLI"
+            printf "%s\n" "$doc_out" | grep -Fq "[OPT]"
+        ' _ "$REPO_ROOT" "$t_dir" || exit 1
+
+        cat <<'EOF' > "$t_dir/amz_bin/nile"
+#!/usr/bin/env bash
+case "$1" in
+    library|list-games)
+        [ "${AMZ_MODE:-ok}" = "bad_json" ] && { printf 'NOT_JSON\n'; exit 0; }
+        [ "${AMZ_MODE:-ok}" = "evil_tab" ] && { printf '[{"id":"BadId","title":"Evil\\tTitle"}]\n'; exit 0; }
+        printf '[{"product":{"id":"AmzCtrl","title":"Control Ultimate"},"platforms":["windows"]},{"product":{"id":"AmzInd","title":"Indie Gem"}}]\n' ;;
+    install)
+        id="$2"; shift 2; p=""
+        while [ $# -gt 0 ]; do [ "$1" = "--path" ] && { p="$2"; shift 2; continue; }; shift; done
+        mkdir -p "$p"; printf 'installed %s\n' "$id" > "$p/amz.ok" ;;
+    verify)
+        id="$2"; shift 2; p=""
+        while [ $# -gt 0 ]; do [ "$1" = "--path" ] && { p="$2"; shift 2; continue; }; shift; done
+        printf 'verified %s %s\n' "$id" "$p" > "$p/verify.ok" ;;
+    auth) printf 'nile auth ok\n' ;;
+esac
+EOF
+        chmod +x "$t_dir/amz_bin/nile"
+        printf '{"token":"SECRET_AMZ_TOKEN"}\n' > "$t_dir/home/.config/nile/user.json"
+        for b in "$t_dir/home/Games/AmzGame/game.exe" "$t_dir/home/Games/SoloAmz/solo.bin" "$t_dir/home/AmzBad/bad.bin"; do
+            printf '\x7fELF' > "$b"; chmod +x "$b"
+        done
+        cat <<EOF > "$t_dir/home/.config/nile/installed.json"
+[
+  {"id":"AmzCtrl","title":"Control Ultimate","path":"$t_dir/home/Games/AmzGame","executable":"game.exe"},
+  {"id":"AmzBad","title":"Bad\\tTitle","path":"$t_dir/home/AmzBad","executable":"bad.bin"}
+]
+EOF
+        PATH="$t_dir/amz_bin:$PATH" bash -c '
+            set -e
+            source "$1/src/core/10_utils.sh"; source "$1/src/core/14_saves.sh"; source "$1/src/steam/20_discovery.sh"; source "$1/src/stores/00_store_interface.sh"
+            store_amazon_available
+            st_out=$(store_dispatch amazon status)
+            printf "%s\n" "$st_out" | grep -Fq "session present"
+            ! printf "%s\n" "$st_out" | grep -Fq "SECRET_AMZ_TOKEN"
+            store_dispatch amazon search "" 2>/dev/null && exit 1 || true
+            s_out=$(store_dispatch amazon search "control")
+            printf "%s\n" "$s_out" | grep -Fq $'\''AMAZON\tAmzCtrl\tControl Ultimate\twindows\tINSTALLED'\''
+            AMZ_MODE=bad_json store_dispatch amazon search "x" 2>/dev/null && exit 1 || true
+            AMZ_MODE=evil_tab store_dispatch amazon search "x" 2>/dev/null && exit 1 || true
+            store_dispatch amazon download "AmzInd" "$2/dl_amz" >/dev/null
+            grep -Fq "installed AmzInd" "$2/dl_amz/amz.ok"
+            store_dispatch amazon sync "AmzCtrl" "$2/game" >/dev/null
+            [ -d "$2/game/.save_snapshots/slot1" ]
+            grep -Fq "verified AmzCtrl $2/game" "$2/game/verify.ok"
+
+            err_log="$2/scan.err"; all_out=$(scan_installed_games --refresh 2>"$err_log")
+            grep -Fq "[ERROR]" "$err_log"
+            ! printf "%s\n" "$all_out" | grep -Fq "AmzBad"
+            [ "$(printf "%s\n" "$all_out" | grep -c "AmzGame")" -eq 1 ]
+            printf "%s\n" "$all_out" | awk -F"\t" '\''$1 ~ /^AmzCtrl/ && $6 == "AMAZON" {ok=1} END {exit !ok}'\''
+            store_dispatch amazon list_installed | grep -Fq "AmzCtrl"
+            scan_installed_games --formatted --store AMAZON | grep -Fq "[AMAZON]"
+            ! scan_installed_games --store STANDALONE | grep -Fq "Control Ultimate"
+            grep -Fq "AMAZON\tAmazon Games Library" "$1/src/tui/70_dashboard.sh"
+            grep -Fq "amazon)" "$1/completions/gamectl.bash"
+            "$1/bin/gamectl" amazon --help | grep -Fq "gamectl amazon"
+            "$1/bin/gamectl" amazon status | grep -Fq "ready (nile:"
+            "$1/bin/gamectl" amazon search "indie" | grep -Fq "AmzInd"
+            "$1/bin/gamectl" amazon auth | grep -Fq "nile auth ok"
+            "$1/bin/gamectl" amazon bogus 2>/dev/null && exit 1 || true
+        ' _ "$REPO_ROOT" "$t_dir" || exit 1
+    )
+}
+run_test "Optional Amazon Adapter, Discovery & CLI (WP41A/41B)" test_wp41_amazon_adapter_and_discovery_contract
 
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
