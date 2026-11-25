@@ -2726,7 +2726,7 @@ run_test "System Diagnostics (Chunk 6): Layer 8 Security Sandboxing & Process Is
 test_tui_game_fixes_exposure_contract() {
     # 1. Verify library_menu hotkey and header exposure
     grep -q -- '--expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
-    grep -F -q 'Community Fixes' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
+    cat "$REPO_ROOT"/src/tui/*.sh | grep -F -q 'Community Fixes' || return 1
     grep -F -q 'manage_game_fixes_interactive "$sel_appid" "$sel_title" "$sel_dir"' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
 
     # 2. Verify search_steam action palette exposure for installed and uninstalled games

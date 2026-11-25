@@ -3772,7 +3772,7 @@ test_r3_loc_budget_and_submodule_autoloader_contract() {
         rm -rf "$t_dir/src" && mkdir -p "$t_dir/src"
         ! bash "$REPO_ROOT/scripts/check_loc_budget.sh" "$t_dir" 2>/dev/null || exit 1
 
-        # Unbundled sibling auto-loaders load 21_shortcuts_artwork.sh and 72_store_tui.sh
+        # Unbundled sibling auto-loaders load 21_shortcuts_artwork.sh, 33/34, and 72/73
         bash -c '
             set -e
             unset GAMECTL_BUNDLED
@@ -3782,15 +3782,24 @@ test_r3_loc_budget_and_submodule_autoloader_contract() {
             declare -F create_desktop_entry >/dev/null
             declare -F fetch_steam_artwork >/dev/null
             declare -F add_steam_shortcut >/dev/null
+            source "$1/src/steam/30_downloader.sh"
+            declare -F list_downloads >/dev/null
+            declare -F preview_download >/dev/null
+            declare -F list_downloads_interactive >/dev/null
             source "$1/src/tui/70_dashboard.sh"
+            declare -F search_steam >/dev/null
             declare -F search_stores_interactive >/dev/null
         ' _ "$REPO_ROOT" || exit 1
 
         grep -Fq '_scan_json_store_entries' "$REPO_ROOT/src/steam/20_discovery.sh" || exit 1
         ! grep -Fq 'src/steam/20_discovery.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
-        local dash_cap
-        dash_cap=$(sed -n 's/.*\["src\/tui\/70_dashboard\.sh"\]=\([0-9]*\).*/\1/p' "$REPO_ROOT/scripts/check_loc_budget.sh")
-        [ -z "$dash_cap" ] || [ "$dash_cap" -le 1020 ] || exit 1
+        ! grep -Fq 'src/steam/30_downloader.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
+        ! grep -Fq 'src/tui/70_dashboard.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
+        local f f_loc
+        for f in "$REPO_ROOT"/src/*/*.sh; do
+            f_loc=$(wc -l < "$f")
+            [ "$f_loc" -le 1000 ] || exit 1
+        done
     )
 }
 run_test "Module LOC Budget & Submodule Auto-Loaders (R3A-R3D)" test_r3_loc_budget_and_submodule_autoloader_contract
