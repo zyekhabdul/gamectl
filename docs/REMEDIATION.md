@@ -167,7 +167,7 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 # REMEDIATION WORK PACKET 2: STEAM CATALOG APP-TYPE SSoT & DLC GUARD
 
 - **Track**: Remediation / Steam Catalog App-Type SSoT & Engine-Level DLC Guard
-- **Status**: PENDING [0/4 PACKETS]
+- **Status**: [ COMPLETED & VERIFIED ] [4/4 PACKETS]
 - **Prasyarat**: Remediation Chunks 1–7 (COMPLETED) & WP40 Epic Adapter (COMPLETED, `76a0630`)
 - **Basis**: `docs/SOVEREIGN_ORIGINAL_PURPOSE.md`, `docs/REMEDIATION.md` (SoC), dan temuan empiris API Valve (`storesearch` vs `IStoreBrowseService/GetItems/v1` & `appdetails`)
 - **Target Files**: `src/steam/31_manifests.sh`, `src/steam/30_downloader.sh`, `src/steam/32_steam_bridge.sh`, `src/tui/70_dashboard.sh`, `src/tui/71_previews.sh`, `tests/test_remediation.sh`, `bin/gamectl`
@@ -191,7 +191,7 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 
 ## 2. Rencana Eksekusi Detail (Packet R2A - R2D)
 
-### [ ] Packet R2A: Steam App-Type SSoT & Metadata Helpers (`src/steam/31_manifests.sh`)
+### [x] Packet R2A: Steam App-Type SSoT & Metadata Helpers (`src/steam/31_manifests.sh`)
 - **Target Files**: `src/steam/31_manifests.sh`
 - **Langkah Teknis**:
   1. Tambah `format_app_type_badge <raw_type>` untuk merender token `[GAME]`, `[DLC]`, `[DEMO]`, `[MOD]`, `[OST]`, `[TOOL]`, `[APP]` secara konsisten.
@@ -200,7 +200,7 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 - **Definition of Done (DoD)**:
   - Seluruh caller membaca kosakata tipe kanonik dan tuple terstruktur dari satu SSoT tanpa parser `appdetails`/`IStoreBrowseService` duplikat.
 
-### [ ] Packet R2B: TUI Catalog Badges, Filter Toggle & Preview Metadata
+### [x] Packet R2B: TUI Catalog Badges, Filter Toggle & Preview Metadata
 - **Target Files**: `src/tui/70_dashboard.sh`, `src/tui/71_previews.sh`, `src/steam/32_steam_bridge.sh`
 - **Langkah Teknis**:
   1. Perbarui `search_steam()` (`70_dashboard.sh`) untuk memperkaya hasil `storesearch` via `classify_steam_app_types`, menyusun baris `APPID\tBADGE\tTITLE\tSTATUS\tRAW_TYPE\tPARENT_APPID` dengan `--with-nth=1,2,3,4`, serta menambah toggle filter `Tab` (`ALL -> GAME -> DLC -> ALL`) tanpa mengganggu `ctrl-a/u/s/d/f`.
@@ -210,7 +210,7 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 - **Definition of Done (DoD)**:
   - Pengguna langsung membedakan `[GAME]` vs `[DLC]` pada list kiri dan preview kanan, serta terhindar dari unduhan DLC tunggal tanpa sengaja.
 
-### [ ] Packet R2C: Engine-Level DLC Guard (`src/steam/30_downloader.sh`)
+### [x] Packet R2C: Engine-Level DLC Guard (`src/steam/30_downloader.sh`)
 - **Target Files**: `src/steam/30_downloader.sh`
 - **Langkah Teknis**:
   1. Tambah flag opt-in `--allow-dlc` pada `download_game()`.
@@ -219,7 +219,7 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 - **Definition of Done (DoD)**:
   - Baik jalur CLI (`gamectl download <dlc_appid>`) maupun TUI dilindungi satu guard domain yang konsisten dan aman offline.
 
-### [ ] Packet R2D: Offline Contract Tests, Rebuild & Full Verification
+### [x] Packet R2D: Offline Contract Tests, Rebuild & Full Verification
 - **Target Files**: `tests/test_remediation.sh`, `bin/gamectl`, `docs/REMEDIATION.md`
 - **Langkah Teknis**:
   1. Tambah contract test di `tests/test_remediation.sh` dengan mock `IStoreBrowseService` dan `appdetails` offline untuk memverifikasi klasifikasi `[GAME]` vs `[DLC]`, `Tab` filter `ALL/GAME/DLC`, preview `Type` & `Base Game`, serta guard `download_game()` (`DLC` ditolak default, lolos dengan `--allow-dlc`, aman saat offline).
