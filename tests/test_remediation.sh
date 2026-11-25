@@ -3804,6 +3804,119 @@ test_r3_loc_budget_and_submodule_autoloader_contract() {
 }
 run_test "Module LOC Budget & Submodule Auto-Loaders (R3A-R3D)" test_r3_loc_budget_and_submodule_autoloader_contract
 
+# Test 42: Linux Shebang/Arch Binary Detection, Running List Badges & Startup Crash Probe
+test_process_runtime_binary_and_ux_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_proc_ux_XXXXXX")
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        export XDG_CACHE_HOME="$t_dir/cache"
+        mkdir -p "$HOME/Games" "$XDG_RUNTIME_DIR/active_games" "$XDG_CACHE_HOME/gamectl"
+        unset GAMECTL_BUNDLED
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/steam/25_identity.sh"
+        source "$REPO_ROOT/src/steam/30_downloader.sh"
+        source "$REPO_ROOT/src/runners/40_wrappers.sh"
+        source "$REPO_ROOT/src/runners/42_graphics_isolation.sh"
+        source "$REPO_ROOT/src/tui/71_previews.sh"
+
+        # 1. ensure_linux_binaries_executable +x on #! script and ELF, leaves .txt/.pak alone
+        local d_perm="$t_dir/perm_check"
+        mkdir -p "$d_perm"
+        printf '#!/bin/bash\nexec true\n' > "$d_perm/Celeste"
+        printf '\x7f\x45\x4c\x46dummy' > "$d_perm/game.x86_64"
+        printf 'notes' > "$d_perm/readme.txt"
+        chmod 644 "$d_perm/Celeste" "$d_perm/game.x86_64" "$d_perm/readme.txt"
+        ensure_linux_binaries_executable "$d_perm" 2>/dev/null
+        [ -x "$d_perm/Celeste" ] && [ -x "$d_perm/game.x86_64" ] && [ ! -x "$d_perm/readme.txt" ] || exit 1
+
+        # 2. find_game_binary: prefers #! wrapper Celeste (auto-+x), else x86_64 over x86 and .exe
+        local d_cel="$HOME/Games/Celeste"
+        mkdir -p "$d_cel"
+        printf '#!/bin/bash\nexit 0\n' > "$d_cel/Celeste"
+        chmod 644 "$d_cel/Celeste"
+        printf '\x7f\x45\x4c\x46\x01\x01\x01' > "$d_cel/Celeste.bin.x86"
+        printf '\x7f\x45\x4c\x46\x02\x01\x01' > "$d_cel/Celeste.bin.x86_64"
+        printf 'MZ' > "$d_cel/Celeste.exe"
+        chmod 755 "$d_cel/Celeste.bin.x86" "$d_cel/Celeste.bin.x86_64" "$d_cel/Celeste.exe"
+        [ "$(find_game_binary "$d_cel")" = "Celeste" ] && [ -x "$d_cel/Celeste" ] || exit 1
+
+        if [ "$(uname -m)" = "x86_64" ]; then
+            rm -f "$d_cel/Celeste"
+            [ "$(find_game_binary "$d_cel")" = "Celeste.bin.x86_64" ] || exit 1
+        fi
+        printf '#!/bin/bash\nexit 0\n' > "$d_cel/Celeste"
+        chmod 755 "$d_cel/Celeste"
+
+        # 32-bit-only and Windows-only fallbacks remain intact (even with +x 0-byte pfx.lock)
+        local d_32="$HOME/Games/Teleglitch" d_win="$HOME/Games/Downwell"
+        mkdir -p "$d_32" "$d_win"
+        printf '\x7f\x45\x4c\x46\x01\x01\x01' > "$d_32/teleglitch32"
+        chmod 755 "$d_32/teleglitch32"
+        : > "$d_win/pfx.lock"
+        chmod 755 "$d_win/pfx.lock"
+        printf 'MZ' > "$d_win/Downwell.exe"
+        [ "$(find_game_binary "$d_32")" = "teleglitch32" ] || exit 1
+        [ "$(find_game_binary "$d_win")" = "Downwell.exe" ] || exit 1
+
+        # 3. inspect_game_log_hint recognizes DllNotFoundException & Exec format error
+        local l_dll="$t_dir/dll.log" l_exec="$t_dir/exec.log"
+        printf 'System.DllNotFoundException: libFNA3D.so.0\n' > "$l_dll"
+        printf 'bash: ./game: Exec format error\n' > "$l_exec"
+        inspect_game_log_hint "$l_dll" | grep -Fq 'Missing runtime DLL/library' || exit 1
+        inspect_game_log_hint "$l_exec" | grep -Fq 'Executable architecture or permission mismatch' || exit 1
+
+        # 4. Active process SSoT, stale pruning, [RUNNING] formatted row, and preview label
+        sleep 5 &
+        local live_pid=$!
+        trap 'kill "$live_pid" 2>/dev/null || true; rm -rf "$t_dir"' EXIT
+        local live_log="$XDG_RUNTIME_DIR/celeste_live.log"
+        printf 'ok running\n' > "$live_log"
+        printf 'PID=%s\nTITLE=Celeste\nDIR=%s\nBIN=Celeste\nLOG=%s\nSCOPE_UNIT=\n' "$live_pid" "$d_cel" "$live_log" > "$XDG_RUNTIME_DIR/active_games/${live_pid}.info"
+        printf 'PID=999999\nTITLE=StaleGame\nDIR=/tmp/nonexistent_stale\nBIN=x\nLOG=/tmp/x.log\n' > "$XDG_RUNTIME_DIR/active_games/999999.info"
+
+        local active_out
+        active_out=$(list_active_games)
+        grep -Fq "$live_pid" <<< "$active_out" || exit 1
+        [ ! -e "$XDG_RUNTIME_DIR/active_games/999999.info" ] || exit 1
+        [ "$(get_active_games_summary)" = $'1\x1fCeleste' ] || exit 1
+
+        local fmt_rows
+        fmt_rows=$(scan_installed_games --refresh --formatted)
+        grep -F 'Celeste' <<< "$fmt_rows" | grep -Fq '[RUNNING]' || exit 1
+        ! grep -F 'Downwell' <<< "$fmt_rows" | grep -Fq '[RUNNING]' || exit 1
+
+        local prev_out
+        prev_out=$(preview_game "504230" "Celeste" "[GBE_FORK]" "$d_cel" "Celeste" 2>/dev/null)
+        grep -Fq "[RUNNING PID:$live_pid]" <<< "$prev_out" || exit 1
+        grep -Fq "Manage Running Game" <<< "$prev_out" || exit 1
+
+        # 5. verify_launched_game_startup: pass on live process, fail + summarize on early exit
+        GAMECTL_LAUNCH_PROBE_TICKS=2 verify_launched_game_startup "$d_cel" "Celeste" "Celeste" || exit 1
+        [ "$GAMECTL_VERIFY_PID" = "$live_pid" ] || exit 1
+
+        kill "$live_pid" 2>/dev/null || true
+        wait "$live_pid" 2>/dev/null || true
+        local d_crash="$HOME/Games/CrashApp"
+        mkdir -p "$d_crash"
+        local c_log
+        c_log="$(get_game_log_file "$d_crash" "CrashApp.bin")"
+        printf 'System.DllNotFoundException: libFNA3D.so.0\n' > "$c_log"
+        printf 'PID=999998\nTITLE=CrashApp\nDIR=%s\nBIN=CrashApp.bin\nLOG=%s\n' "$d_crash" "$c_log" > "$XDG_RUNTIME_DIR/active_games/999998.info"
+        if GAMECTL_LAUNCH_PROBE_TICKS=2 verify_launched_game_startup "$d_crash" "CrashApp.bin" "CrashApp"; then
+            exit 1
+        fi
+        [ ! -e "$XDG_RUNTIME_DIR/active_games/999998.info" ] || exit 1
+        grep -Fq '[HINT] Missing runtime DLL/library' <<< "$GAMECTL_VERIFY_SUMMARY" || exit 1
+        grep -Fq 'System.DllNotFoundException: libFNA3D.so.0' <<< "$GAMECTL_VERIFY_SUMMARY" || exit 1
+    )
+}
+run_test "Runtime Binary Detection, Running List Badges & Startup Probe" test_process_runtime_binary_and_ux_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"
