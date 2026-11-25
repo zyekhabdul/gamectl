@@ -36,7 +36,14 @@ lint:
 		bash -n "$$file"; \
 	done; \
 	if command -v shellcheck >/dev/null 2>&1; then \
-		shellcheck -s bash -S error src/*.sh src/*/*.sh scripts/*.sh; \
+		jobs="$${LINT_JOBS:-$$(nproc 2>/dev/null || echo 1)}"; \
+		if command -v xargs >/dev/null 2>&1; then \
+			printf '%s\0' src/*.sh src/*/*.sh scripts/*.sh | xargs -0 -n 1 -P "$$jobs" shellcheck -s bash -S error; \
+		else \
+			for file in src/*.sh src/*/*.sh scripts/*.sh; do \
+				shellcheck -s bash -S error "$$file"; \
+			done; \
+		fi; \
 	elif [ "$${STRICT_LINT:-0}" = "1" ]; then \
 		echo "[FAIL] STRICT_LINT=1 requires shellcheck in PATH" >&2; \
 		exit 1; \
