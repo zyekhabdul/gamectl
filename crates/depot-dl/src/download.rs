@@ -352,7 +352,9 @@ impl DownloadEngine {
                 depot_downloaded: Arc::new(AtomicU64::new(0)),
                 depot_bytes_total: bytes_total,
                 downloads_sem: Arc::new(Semaphore::new(self.request.max_downloads)),
-                files_sem: Arc::new(Semaphore::new((self.request.max_downloads * 4).max(32).min(64))),
+                files_sem: Arc::new(Semaphore::new(
+                    (self.request.max_downloads * 4).clamp(32, 64),
+                )),
             };
 
             let mut tasks = FuturesUnordered::new();
@@ -362,15 +364,15 @@ impl DownloadEngine {
 
             let mut first_error: Option<Error> = None;
             while let Some(result) = tasks.next().await {
-                if let Err(error) = result {
-                    if first_error.is_none() {
-                        first_error = Some(error);
-                        // Point every other file task at the exit; they observe the token at their
-                        // next chunk/plan boundary and unwind quickly.
-                        ctx.depot_cancel.cancel();
-                    }
-                    // Keep draining so all in-flight futures settle before we return.
+                if let Err(error) = result
+                    && first_error.is_none()
+                {
+                    first_error = Some(error);
+                    // Point every other file task at the exit; they observe the token at their
+                    // next chunk/plan boundary and unwind quickly.
+                    ctx.depot_cancel.cancel();
                 }
+                // Keep draining so all in-flight futures settle before we return.
             }
             if let Some(error) = first_error {
                 return Err(error);
@@ -789,12 +791,11 @@ fn plan_file(input: PlanInput) -> Result<FilePlan> {
     // Chunk-id reuse: when we know what the previous version looked like, reuse every on-disk
     // chunk whose (id, adler) matches a chunk of the new manifest. Reused chunks are copied
     // into a staging file (offsets may have moved), the rest is downloaded.
-    if !verify_all {
-        if let Some(old_chunks) = &old_chunks {
-            if !old_chunks.is_empty() {
-                return plan_reuse_from_old(&final_path, size, chunks, old_chunks, existing_len);
-            }
-        }
+    if !verify_all
+        && let Some(old_chunks) = &old_chunks
+        && !old_chunks.is_empty()
+    {
+        return plan_reuse_from_old(&final_path, size, chunks, old_chunks, existing_len);
     }
 
     // Steam-style verification: read every chunk position and check it against the manifest.

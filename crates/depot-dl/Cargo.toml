@@ -2,7 +2,7 @@
 name = "steam-depot-downloader-mod"
 version = "0.1.2"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.89"
 description = "Rust library for downloading Steam depot content with user-supplied depot keys and manifest files - embeddable in GUIs, CLIs and services alike."
 license = "GPL-2.0-only"
 repository = "https://github.com/enXov/steam-depot-downloader-mod"
@@ -28,7 +28,7 @@ adler2 = "2"
 base64 = "0.22"
 zstd = "0.13"
 lzma-rs = { version = "0.3", features = ["raw_decoder"] }
-zip = { version = "7", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

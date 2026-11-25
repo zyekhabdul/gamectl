@@ -165,13 +165,23 @@ mod tests {
                 .is_some_and(|p| p == std::path::Path::new("evil.txt"))
         );
         assert!(safe_relative_path("").is_none());
-        assert!(safe_relative_path("..").is_none_or(|p| p.as_os_str() != ".."));
+        assert!(safe_relative_path(".").is_none());
+        assert!(safe_relative_path("..").is_none());
+        assert!(safe_relative_path("/").is_none());
+        assert!(safe_relative_path("\\").is_none());
+        assert!(safe_relative_path("///..///").is_none());
     }
 
     #[test]
     fn sanitize_ntfs_component_replaces_illegal_characters() {
-        assert_eq!(sanitize_ntfs_component("normal_file.txt"), "normal_file.txt");
-        assert_eq!(sanitize_ntfs_component("foo:bar?baz*qux"), "foo_bar_baz_qux");
+        assert_eq!(
+            sanitize_ntfs_component("normal_file.txt"),
+            "normal_file.txt"
+        );
+        assert_eq!(
+            sanitize_ntfs_component("foo:bar?baz*qux"),
+            "foo_bar_baz_qux"
+        );
         assert_eq!(sanitize_ntfs_component("a<b\"c>d|e"), "a_b_c_d_e");
     }
 }

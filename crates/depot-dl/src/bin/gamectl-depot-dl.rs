@@ -114,18 +114,15 @@ where
                 i += 1;
             }
             other => {
-                return Err(CliError::InvalidArg(format!(
-                    "Unknown argument: {other}"
-                )));
+                return Err(CliError::InvalidArg(format!("Unknown argument: {other}")));
             }
         }
     }
 
     let app_id =
         app_id.ok_or_else(|| CliError::InvalidArg("Missing required --app <appid>".to_string()))?;
-    let dir = dir.ok_or_else(|| {
-        CliError::InvalidArg("Missing required --dir <output_dir>".to_string())
-    })?;
+    let dir =
+        dir.ok_or_else(|| CliError::InvalidArg("Missing required --dir <output_dir>".to_string()))?;
     if depots.is_empty() {
         return Err(CliError::InvalidArg(
             "At least one --depot <manifest>:<key> is required".to_string(),
@@ -177,7 +174,10 @@ async fn main() {
 
     for (manifest, key) in depots {
         if !manifest.exists() {
-            eprintln!("Error: Manifest file does not exist: {}", manifest.display());
+            eprintln!(
+                "Error: Manifest file does not exist: {}",
+                manifest.display()
+            );
             process::exit(1);
         }
         builder = builder.depots([(manifest, key)]);
@@ -209,19 +209,41 @@ async fn main() {
                     println!("[INFO] Connected to Valve CDN. Edge servers: {}", servers);
                 }
             }
-            ProgressEvent::ManifestLoaded { depot_id, manifest_gid, .. } => {
+            ProgressEvent::ManifestLoaded {
+                depot_id,
+                manifest_gid,
+                ..
+            } => {
                 if !quiet {
-                    println!("[INFO] Depot {} manifest loaded (GID: {})", depot_id, manifest_gid);
+                    println!(
+                        "[INFO] Depot {} manifest loaded (GID: {})",
+                        depot_id, manifest_gid
+                    );
                 }
             }
-            ProgressEvent::DepotStarted { depot_id, files_total, bytes_total, .. } => {
+            ProgressEvent::DepotStarted {
+                depot_id,
+                files_total,
+                bytes_total,
+                ..
+            } => {
                 if !quiet {
                     let mb = bytes_total as f64 / (1024.0 * 1024.0);
-                    println!("[DEPOT_START] Depot {}: {} files ({:.2} MB)", depot_id, files_total, mb);
+                    println!(
+                        "[DEPOT_START] Depot {}: {} files ({:.2} MB)",
+                        depot_id, files_total, mb
+                    );
                 }
             }
-            ProgressEvent::FileVerifying { depot_id: _, path: _ } => {}
-            ProgressEvent::FileStarted { depot_id: _, path: _, size: _ } => {}
+            ProgressEvent::FileVerifying {
+                depot_id: _,
+                path: _,
+            } => {}
+            ProgressEvent::FileStarted {
+                depot_id: _,
+                path: _,
+                size: _,
+            } => {}
             ProgressEvent::ChunkCompleted {
                 depot_id: _,
                 path: _,
@@ -238,24 +260,42 @@ async fn main() {
                     if !quiet {
                         let dl_mb = total_downloaded as f64 / (1024.0 * 1024.0);
                         let un_mb = total_uncompressed as f64 / (1024.0 * 1024.0);
-                        println!("[PROGRESS] Transferred: {:.2} MB | Uncompressed: {:.2} MB", dl_mb, un_mb);
+                        println!(
+                            "[PROGRESS] Transferred: {:.2} MB | Uncompressed: {:.2} MB",
+                            dl_mb, un_mb
+                        );
                     }
                 }
             }
-            ProgressEvent::FileCompleted { depot_id, path, depot_bytes_completed, depot_bytes_total } => {
+            ProgressEvent::FileCompleted {
+                depot_id,
+                path,
+                depot_bytes_completed,
+                depot_bytes_total,
+            } => {
                 if verbose {
-                    let pct = if depot_bytes_total > 0 {
-                        (depot_bytes_completed * 100) / depot_bytes_total
-                    } else {
-                        100
-                    };
-                    println!("[FILE] {} (Depot {} progress: {}%)", path.display(), depot_id, pct);
+                    let pct = (depot_bytes_completed * 100)
+                        .checked_div(depot_bytes_total)
+                        .unwrap_or(100);
+                    println!(
+                        "[FILE] {} (Depot {} progress: {}%)",
+                        path.display(),
+                        depot_id,
+                        pct
+                    );
                 }
             }
-            ProgressEvent::DepotCompleted { depot_id, downloaded_bytes, .. } => {
+            ProgressEvent::DepotCompleted {
+                depot_id,
+                downloaded_bytes,
+                ..
+            } => {
                 if !quiet {
                     let mb = downloaded_bytes as f64 / (1024.0 * 1024.0);
-                    println!("[DEPOT_COMPLETE] Depot {} completed ({:.2} MB transferred)", depot_id, mb);
+                    println!(
+                        "[DEPOT_COMPLETE] Depot {} completed ({:.2} MB transferred)",
+                        depot_id, mb
+                    );
                 }
             }
             ProgressEvent::DepotFailed { depot_id, error } => {
@@ -265,12 +305,22 @@ async fn main() {
                 if report.is_ok() {
                     let dl_mb = report.downloaded_bytes as f64 / (1024.0 * 1024.0);
                     let un_mb = report.uncompressed_bytes as f64 / (1024.0 * 1024.0);
-                    println!("[SUCCESS] Download finished in {:.1}s", report.duration.as_secs_f64());
-                    println!("[SUCCESS] Network payload: {:.2} MB, Extracted files: {:.2} MB", dl_mb, un_mb);
+                    println!(
+                        "[SUCCESS] Download finished in {:.1}s",
+                        report.duration.as_secs_f64()
+                    );
+                    println!(
+                        "[SUCCESS] Network payload: {:.2} MB, Extracted files: {:.2} MB",
+                        dl_mb, un_mb
+                    );
                 } else {
                     eprintln!("[ERROR] Download finished with failures:");
                     for f in report.failed() {
-                        eprintln!("  - Depot {:?}: {}", f.depot_id, f.error.as_deref().unwrap_or("unknown error"));
+                        eprintln!(
+                            "  - Depot {:?}: {}",
+                            f.depot_id,
+                            f.error.as_deref().unwrap_or("unknown error")
+                        );
                     }
                 }
                 break;
@@ -316,8 +366,14 @@ mod tests {
         assert_eq!(
             cfg.depots,
             vec![
-                (PathBuf::from("/tmp/48001.manifest"), "deadbeef01".to_string()),
-                (PathBuf::from("/tmp/48002.manifest"), "deadbeef02".to_string()),
+                (
+                    PathBuf::from("/tmp/48001.manifest"),
+                    "deadbeef01".to_string()
+                ),
+                (
+                    PathBuf::from("/tmp/48002.manifest"),
+                    "deadbeef02".to_string()
+                ),
             ]
         );
         assert_eq!(cfg.max_downloads, 8);
@@ -370,7 +426,10 @@ mod tests {
 
     #[test]
     fn help_and_empty_args_return_help_requested() {
-        assert_eq!(parse_cli_args(Vec::<String>::new()), Err(CliError::HelpRequested));
+        assert_eq!(
+            parse_cli_args(Vec::<String>::new()),
+            Err(CliError::HelpRequested)
+        );
         assert_eq!(parse_cli_args(["-h"]), Err(CliError::HelpRequested));
         assert_eq!(parse_cli_args(["--help"]), Err(CliError::HelpRequested));
         assert_eq!(
@@ -455,7 +514,9 @@ mod tests {
             Err(CliError::InvalidArg(_))
         ));
         assert!(matches!(
-            parse_cli_args(["--app", "48000", "--dir", "/tmp/x", "--depot", "m:k", "extra"]),
+            parse_cli_args([
+                "--app", "48000", "--dir", "/tmp/x", "--depot", "m:k", "extra"
+            ]),
             Err(CliError::InvalidArg(_))
         ));
     }

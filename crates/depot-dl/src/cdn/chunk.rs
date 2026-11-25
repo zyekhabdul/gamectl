@@ -40,7 +40,7 @@ pub(crate) fn process_chunk(
         reason,
     };
 
-    if raw.len() < 32 || (raw.len() - 16) % 16 != 0 {
+    if raw.len() < 32 || !(raw.len() - 16).is_multiple_of(16) {
         return Err(chunk_err(format!(
             "downloaded {} bytes; not a valid encrypted chunk",
             raw.len()
@@ -264,7 +264,7 @@ pub(crate) mod tests {
         {
             let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut zipped));
             writer
-                .start_file::<_, ()>("chunk", zip::write::FileOptions::default())
+                .start_file("chunk", zip::write::SimpleFileOptions::default())
                 .expect("zip entry");
             writer.write_all(content).expect("zip write");
             writer.finish().expect("zip finish");
