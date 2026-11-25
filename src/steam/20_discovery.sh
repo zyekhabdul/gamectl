@@ -232,111 +232,49 @@ scan_installed_games() {
             done
         done < <(get_steam_libraries)
 
-        # 1b. Scan Epic Games (Legendary installed.json) before custom dirs to deduplicate ~/Games/
-        if [ -f "$epic_installed" ] && command -v jq >/dev/null 2>&1; then
-            local epic_rows=""
-            if epic_rows=$(jq -r '
-                (if type == "object" then . else error("invalid") end) |
-                to_entries[] |
-                (.key | tostring) as $k |
-                if (.value | type) != "object" then
-                    "ERR\t" + ($k | gsub("[\\t\\r\\n]"; "_"))
-                else
-                    ((.value.app_name // $k) | tostring) as $id |
-                    ((.value.title // $id) | tostring) as $title |
-                    ((.value.install_path // "") | tostring) as $ipath |
-                    ((.value.executable // "") | tostring) as $exe |
-                    if ($id | test("[\\t\\r\\n]")) or ($title | test("[\\t\\r\\n]")) or
-                       ($ipath | test("[\\t\\r\\n]")) or ($exe | test("[\\t\\r\\n]")) or
-                       ($id == "") or ($ipath == "") then
-                        "ERR\t" + ($k | gsub("[\\t\\r\\n]"; "_"))
-                    else
-                        ["OK", $id, $title, $ipath, $exe] | @tsv
-                    end
-                end' "$epic_installed" 2>/dev/null); then
-                local e_kind e_id e_title e_path e_exe
-                while IFS=$'\t' read -r e_kind e_id e_title e_path e_exe; do
-                    [ -n "$e_kind" ] || continue
-                    if [ "$e_kind" = "ERR" ]; then
-                        printf '[ERROR] Invalid Epic metadata entry (%s) in %s\n' "${e_id:-unknown}" "$epic_installed" >&2
-                        continue
-                    fi
-                    [ -d "$e_path" ] || continue
-                    local canon_edir
-                    canon_edir=$(realpath -e "$e_path" 2>/dev/null || echo "$e_path")
-                    [[ -v seen_dirs["$canon_edir"] ]] && continue
-                    [[ -v seen_dirs["$e_path"] ]] && continue
-                    seen_dirs["$canon_edir"]=1
-                    seen_dirs["$e_path"]=1
-
-                    local e_gbin=""
-                    if [ -n "$e_exe" ] && [[ "$e_exe" != /* ]] && [[ "$e_exe" != *".."* ]] && [ -f "$e_path/$e_exe" ]; then
-                        e_gbin="$e_exe"
-                    else
-                        e_gbin=$(find_game_binary "$e_path") || continue
-                    fi
-                    [ -n "$e_gbin" ] || continue
-                    validate_tui_fields "$e_id" "$e_title" "$e_path" "$e_gbin" || continue
-
-                    local e_status
-                    e_status=$(resolve_game_drm_status "$e_path" "" "$e_gbin")
-                    [ "$e_status" = "STANDALONE" ] && e_status="EPIC"
-                    printf "%s\t%s\t%s\t%s\t%s\tEPIC\n" "$e_id" "$e_title" "$e_status" "$e_path" "$e_gbin" >> "$cache_file.tmp"
-                done <<< "$epic_rows"
-            else
-                printf '[ERROR] Invalid Epic installed.json payload in %s\n' "$epic_installed" >&2
-            fi
-        fi
-
-        # 1c. Scan Amazon Games (Nile installed.json) before custom dirs to deduplicate ~/Games/
-        if [ -f "$amazon_installed" ] && command -v jq >/dev/null 2>&1; then
-            local amazon_rows=""
-            if amazon_rows=$(jq -r '
-                (if type == "array" then to_entries | map({k:(.key|tostring), v:.value})
-                 elif type == "object" then to_entries | map({k:.key, v:.value})
-                 else error("invalid") end)[] |
-                (.k | tostring) as $k |
+        # 1b/1c. Scan Epic & Amazon JSON manifests before custom dirs to deduplicate ~/Games/
+        _scan_json_store_entries() {
+            local s_label="$1" s_tag="$2" s_file="$3" allow_arr="${4:-0}" j_rows=""
+            [ -f "$s_file" ] && command -v jq >/dev/null 2>&1 || return 0
+            if j_rows=$(jq -r --arg aa "$allow_arr" '
+                (if type == "object" then to_entries | map({k:.key, v:.value})
+                 elif ($aa == "1" and type == "array") then to_entries | map({k:(.key|tostring), v:.value})
+                 else error("invalid") end)[] | (.k | tostring) as $k |
                 if (.v | type) != "object" then "ERR\t" + ($k | gsub("[\\t\\r\\n]"; "_"))
                 else
-                    ((.v.id // .v.product.id // (if ($k | test("^[0-9]+$")) then "" else $k end)) | tostring) as $id |
+                    ((.v.app_name // .v.id // .v.product.id // (if ($aa == "1" and ($k | test("^[0-9]+$"))) then "" else $k end)) | tostring) as $id |
                     ((.v.title // .v.product.title // $id) | tostring) as $title |
                     ((.v.path // .v.install_path // "") | tostring) as $ipath |
                     ((.v.executable // "") | tostring) as $exe |
                     if ($id == "") or ($ipath == "") or ($id | test("[\\t\\r\\n]")) or ($title | test("[\\t\\r\\n]")) or ($ipath | test("[\\t\\r\\n]")) or ($exe | test("[\\t\\r\\n]")) then
                         "ERR\t" + ($k | gsub("[\\t\\r\\n]"; "_"))
                     else ["OK", $id, $title, $ipath, $exe] | @tsv end
-                end' "$amazon_installed" 2>/dev/null); then
-                local a_kind a_id a_title a_path a_exe
-                while IFS=$'\t' read -r a_kind a_id a_title a_path a_exe; do
-                    [ -n "$a_kind" ] || continue
-                    if [ "$a_kind" = "ERR" ]; then
-                        printf '[ERROR] Invalid Amazon metadata entry (%s) in %s\n' "${a_id:-unknown}" "$amazon_installed" >&2
-                        continue
+                end' "$s_file" 2>/dev/null); then
+                local j_kind j_id j_title j_path j_exe
+                while IFS=$'\t' read -r j_kind j_id j_title j_path j_exe; do
+                    [ -n "$j_kind" ] || continue
+                    if [ "$j_kind" = "ERR" ]; then
+                        printf '[ERROR] Invalid %s metadata entry (%s) in %s\n' "$s_label" "${j_id:-unknown}" "$s_file" >&2; continue
                     fi
-                    [ -d "$a_path" ] || continue
-                    local canon_adir
-                    canon_adir=$(realpath -e "$a_path" 2>/dev/null || echo "$a_path")
-                    [[ -v seen_dirs["$canon_adir"] ]] && continue
-                    [[ -v seen_dirs["$a_path"] ]] && continue
-                    seen_dirs["$canon_adir"]=1
-                    seen_dirs["$a_path"]=1
-                    local a_gbin=""
-                    if [ -n "$a_exe" ] && [[ "$a_exe" != /* ]] && [[ "$a_exe" != *".."* ]] && [ -f "$a_path/$a_exe" ]; then
-                        a_gbin="$a_exe"
-                    else
-                        a_gbin=$(find_game_binary "$a_path") || continue
-                    fi
-                    [ -n "$a_gbin" ] || continue
-                    validate_tui_fields "$a_id" "$a_title" "$a_path" "$a_gbin" || continue
-                    local a_status
-                    a_status=$(resolve_game_drm_status "$a_path" "" "$a_gbin")
-                    [ "$a_status" = "STANDALONE" ] && a_status="AMAZON"
-                    printf "%s\t%s\t%s\t%s\t%s\tAMAZON\n" "$a_id" "$a_title" "$a_status" "$a_path" "$a_gbin" >> "$cache_file.tmp"
-                done <<< "$amazon_rows"
+                    [ -d "$j_path" ] || continue
+                    local canon_jdir; canon_jdir=$(realpath -e "$j_path" 2>/dev/null || echo "$j_path")
+                    [[ -v seen_dirs["$canon_jdir"] ]] || [[ -v seen_dirs["$j_path"] ]] && continue
+                    seen_dirs["$canon_jdir"]=1; seen_dirs["$j_path"]=1
+                    local j_gbin=""
+                    if [ -n "$j_exe" ] && [[ "$j_exe" != /* ]] && [[ "$j_exe" != *".."* ]] && [ -f "$j_path/$j_exe" ]; then j_gbin="$j_exe"
+                    else j_gbin=$(find_game_binary "$j_path") || continue; fi
+                    [ -n "$j_gbin" ] || continue
+                    validate_tui_fields "$j_id" "$j_title" "$j_path" "$j_gbin" || continue
+                    local j_status; j_status=$(resolve_game_drm_status "$j_path" "" "$j_gbin")
+                    [ "$j_status" = "STANDALONE" ] && j_status="$s_tag"
+                    printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$j_id" "$j_title" "$j_status" "$j_path" "$j_gbin" "$s_tag" >> "$cache_file.tmp"
+                done <<< "$j_rows"
             else
-                printf '[ERROR] Invalid Amazon installed.json payload in %s\n' "$amazon_installed" >&2
+                printf '[ERROR] Invalid %s installed.json payload in %s\n' "$s_label" "$s_file" >&2
             fi
-        fi
+        }
+        _scan_json_store_entries "Epic" "EPIC" "$epic_installed" "0"
+        _scan_json_store_entries "Amazon" "AMAZON" "$amazon_installed" "1"
 
         # 2. Scan Custom & Standalone Directories
         local custom_search_dirs=(
