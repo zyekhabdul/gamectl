@@ -383,7 +383,7 @@ proton_list() {
 
     if [ -n "$parsed_releases" ]; then
         local idx=0
-        while IFS=$'\t' read -r r_tag r_asset r_size r_url; do
+        while IFS=$'\t' read -r r_tag _ r_size _; do
             [ -z "$r_tag" ] && continue
             idx=$((idx + 1))
             local status_badge="${UI_CYAN}[AVAILABLE]${UI_RST}"

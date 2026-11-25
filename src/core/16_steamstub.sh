@@ -131,17 +131,16 @@ unpack_steamstub_pe() {
     pfx_dir="${pfx_dir:-$gdir/pfx}"
 
     echo "  ${UI_CYAN:-}[INFO] Invoking Steamless CLI: $steamless_bin on $gbin...${UI_RST:-}"
-    local unpack_rc=0
     if [ -x "$steamless_bin" ] && ! echo "$steamless_bin" | grep -qi '\.exe$'; then
-        "$steamless_bin" "$target_exe" >/dev/null 2>&1 || unpack_rc=$?
+        "$steamless_bin" "$target_exe" >/dev/null 2>&1 || true
     elif command -v mono >/dev/null 2>&1; then
-        mono "$steamless_bin" "$target_exe" >/dev/null 2>&1 || unpack_rc=$?
+        mono "$steamless_bin" "$target_exe" >/dev/null 2>&1 || true
     elif command -v dotnet >/dev/null 2>&1; then
-        dotnet "$steamless_bin" "$target_exe" >/dev/null 2>&1 || unpack_rc=$?
+        dotnet "$steamless_bin" "$target_exe" >/dev/null 2>&1 || true
     elif [ -n "$runner_bin" ] && [ -x "$runner_bin" ]; then
-        WINEPREFIX="${pfx_dir:-$gdir/pfx}" "$runner_bin" "$steamless_bin" "$target_exe" >/dev/null 2>&1 || unpack_rc=$?
+        WINEPREFIX="${pfx_dir:-$gdir/pfx}" "$runner_bin" "$steamless_bin" "$target_exe" >/dev/null 2>&1 || true
     elif command -v wine >/dev/null 2>&1; then
-        WINEPREFIX="${pfx_dir:-$gdir/pfx}" wine "$steamless_bin" "$target_exe" >/dev/null 2>&1 || unpack_rc=$?
+        WINEPREFIX="${pfx_dir:-$gdir/pfx}" wine "$steamless_bin" "$target_exe" >/dev/null 2>&1 || true
     else
         return 1
     fi
