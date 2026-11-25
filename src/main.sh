@@ -4,6 +4,7 @@ export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_compa
 export -f require_tui check_fzf_status validate_tui_fields store_search_items tui_exec_action tui_run_engine tui_prompt_input tui_action_palette remote_sync_interactive manage_active_processes_interactive login_luatools_interactive resolve_game_drm_status install_tui_screen_traps get_desktop_runtime_dir detect_vulkan_capability resolve_graphics_renderer inspect_game_log_hint resolve_game_appid get_game_log_file load_wrapper_config prepare_windows_runner_env
 export -f is_gbe_library install_gbe_library get_config_value set_config_value get_hubcap_api_key atomic_set_kv_file atomic_prepend_line audit_zip_safety list_runner_dirs is_game_active_for_dir parse_remote_sync_target probe_ssh_remote_home resolve_ssh_remote_base resolve_rclone_remote_saves
 export -f _is_prefix_save_noise _check_confined_ancestor discover_prefix_saves collect_prefix_saves restore_prefix_saves resolve_dev_profiler_env configure_dev_profile
+export -f store_list_registered store_list_available store_dispatch stores_cli store_steam_available store_steam_status store_steam_search store_steam_list_installed store_steam_download store_steam_sync
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -139,6 +140,9 @@ case "${1:-}" in
         ;;
     doctor|audit)
         doctor_audit
+        ;;
+    stores|store)
+        stores_cli "${2:-status}" "${@:3}"
         ;;
     check-scope|systemd-scope)
         if check_systemd_scope_support; then
@@ -487,6 +491,8 @@ Usage:
   gamectl config [set <k> <v>|get <k>|list]
                       Open global configuration menu or read/write settings (~/.config/gamectl/config)
   gamectl doctor      Run 7-layer system & GPU health diagnostics (alias: audit)
+  gamectl stores [list|status]
+                      Inspect registered store adapters and offline readiness
   gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread] [--scope|--no-scope] [--prime|--no-prime] [--sandbox|--no-sandbox]
                       Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]

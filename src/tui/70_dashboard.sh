@@ -325,17 +325,18 @@ library_menu() {
     clean_stale_locks
 
     export GAMECTL_PREVIEW_BIN="$SELF_BIN"
+    local active_store="ALL"
 
     while true; do
         flush_tty_input
         local fzf_out fzf_rc=0
-        fzf_out=$(scan_installed_games --formatted | fzf \
+        fzf_out=$(scan_installed_games --formatted --store "$active_store" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
-            --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x \
-            --border-label="  ╢ gamectl :: Game Library ╟  " \
+            --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x,tab,alt-s \
+            --border-label="  ╢ gamectl :: Game Library [Store: $active_store] ╟  " \
             --border-label-pos=2 \
-            --header="Enter: Launch/Manage │ Ctrl-I: Inject GBE │ Ctrl-D: Make Desktop │ Ctrl-F: Search │ Esc: Dashboard" \
+            --header="Enter: Launch/Manage │ Tab/Alt-S: Store │ Ctrl-I: Inject GBE │ Ctrl-F: Search │ Esc: Dashboard" \
             --prompt="Library > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview {1} {2} {3} {4} {5}' \
             --preview-window=right:55%:border-rounded:wrap \
@@ -359,6 +360,28 @@ library_menu() {
         elif [ "$trigger_key" = "ctrl-f" ]; then
             search_steam "" false || hk_rc=$?
             invalidate_scan_cache
+        elif [ "$trigger_key" = "tab" ]; then
+            case "$active_store" in
+                ALL) active_store="STEAM" ;;
+                STEAM) active_store="STANDALONE" ;;
+                *) active_store="ALL" ;;
+            esac
+            continue
+        elif [ "$trigger_key" = "alt-s" ]; then
+            local store_pick=""
+            store_pick=$(tui_action_palette \
+                "Store Filter" \
+                "Select Store View (Enter: Apply │ Esc: Cancel)" \
+                "$(printf 'ALL\tAll Stores (Unified)\nSTEAM\tSteam Library\nSTANDALONE\tStandalone / Portable\n')" \
+                "" \
+                "Store > ") || hk_rc=$?
+            if [ "$hk_rc" -ne 0 ] && [ "$hk_rc" -ne 1 ] && [ "$hk_rc" -ne 130 ]; then
+                return "$hk_rc"
+            fi
+            if [ "$hk_rc" -eq 0 ] && [ -n "$store_pick" ]; then
+                active_store=$(printf '%s' "$store_pick" | cut -f1)
+            fi
+            continue
         fi
         if [ "$hk_rc" -ne 0 ] && [ "$hk_rc" -ne 1 ] && [ "$hk_rc" -ne 130 ]; then
             return "$hk_rc"

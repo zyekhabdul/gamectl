@@ -116,17 +116,28 @@ get_steam_libraries() {
     done
 }
 
-# Scan installed games dynamically in standard & custom paths
+# Scan installed games dynamically in standard & custom paths (v3 6-column schema)
 scan_installed_games() {
     local is_formatted=false
     local force_refresh=false
+    local store_filter="ALL"
 
-    for arg in "$@"; do
-        case "$arg" in
+    while [ $# -gt 0 ]; do
+        case "$1" in
             --formatted|-f) is_formatted=true ;;
             --refresh|--no-cache|-r) force_refresh=true ;;
+            --store)
+                shift
+                store_filter="${1:-ALL}"
+                ;;
+            --store=*)
+                store_filter="${1#--store=}"
+                ;;
         esac
+        shift || true
     done
+    store_filter="${store_filter^^}"
+    [ -n "$store_filter" ] || store_filter="ALL"
 
     local cache_dir
     cache_dir="$(get_runtime_dir)"
@@ -135,7 +146,7 @@ scan_installed_games() {
     # Fast-path: Check cache validity (TTL: 60s, invalidated if candidate library directories are newer)
     local use_cached=false
     if [ "$force_refresh" = false ] && [ -f "$cache_file" ] &&
-       [ "$(head -n 1 "$cache_file")" = "# gamectl scanner v2" ]; then
+       [ "$(head -n 1 "$cache_file")" = "# gamectl scanner v3" ]; then
         local now mtime
         now=$(date +%s)
         mtime=$(stat -c%Y "$cache_file" 2>/dev/null || echo 0)
@@ -152,7 +163,7 @@ scan_installed_games() {
     fi
 
     if [ "$use_cached" = false ]; then
-        printf '%s\n' '# gamectl scanner v2' > "$cache_file.tmp"
+        printf '%s\n' '# gamectl scanner v3' > "$cache_file.tmp"
         declare -A seen_dirs=()
         declare -A seen_appids=()
 
@@ -203,7 +214,7 @@ scan_installed_games() {
                 status=$(resolve_game_drm_status "$gdir" "" "$gbin")
 
                 [ -z "$appid" ] && appid="STANDALONE"
-                printf "%s\t%s\t%s\t%s\t%s\n" "$appid" "$name" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
+                printf "%s\t%s\t%s\t%s\t%s\tSTEAM\n" "$appid" "$name" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
             done
         done < <(get_steam_libraries)
 
@@ -276,16 +287,19 @@ scan_installed_games() {
                 local status
                 status=$(resolve_game_drm_status "$gdir" "" "$gbin")
 
-                printf "%s\t%s\t%s\t%s\t%s\n" "$appid" "$title" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
+                printf "%s\t%s\t%s\t%s\t%s\tSTANDALONE\n" "$appid" "$title" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
             done
         done
         mv -f "$cache_file.tmp" "$cache_file"
     fi
 
-    # Render formatted or raw tab entries
+    # Render formatted or raw tab entries (6-column v3 TSV: APPID, TITLE, STATUS, GAME_DIR, GAME_BIN, STORE)
     if [ "$is_formatted" = true ]; then
-        while IFS=$'\t' read -r c_appid c_title c_status c_gdir c_gbin; do
+        while IFS=$'\t' read -r c_appid c_title c_status c_gdir c_gbin c_store; do
+            [[ "$c_appid" == \#* ]] && continue
             [ -z "$c_gdir" ] && continue
+            c_store="${c_store:-STANDALONE}"
+            [ "$store_filter" != "ALL" ] && [ "${c_store^^}" != "$store_filter" ] && continue
             local c_badge=""
             case "$c_status" in
                 *GBE_FORK*)   c_badge="${UI_GREEN}[GBE_FORK]  ${UI_RST}" ;;
@@ -293,14 +307,17 @@ scan_installed_games() {
                 *VALVE_DLL*)  c_badge="${UI_CYAN}[VALVE_DLL] ${UI_RST}" ;;
                 *)            c_badge="${UI_ICE}[STANDALONE]${UI_RST}" ;;
             esac
-            printf "%s\t%s\t%s\t%s\t%s\n" "${UI_DIM}${c_appid}${UI_RST}" "${UI_BOLD}${c_title}${UI_RST}" "$c_badge" "$c_gdir" "$c_gbin"
+            printf "%s\t%s\t%s\t%s\t%s\t%s\n" "${UI_DIM}${c_appid}${UI_RST}" "${UI_BOLD}${c_title}${UI_RST}" "$c_badge" "$c_gdir" "$c_gbin" "$c_store"
         done < "$cache_file"
     else
-        while IFS=$'\t' read -r c_appid c_title c_status c_gdir c_gbin; do
+        while IFS=$'\t' read -r c_appid c_title c_status c_gdir c_gbin c_store; do
+            [[ "$c_appid" == \#* ]] && continue
             [ -z "$c_gdir" ] && continue
+            c_store="${c_store:-STANDALONE}"
+            [ "$store_filter" != "ALL" ] && [ "${c_store^^}" != "$store_filter" ] && continue
             local clean_stat="$c_status"
             [[ "$clean_stat" != \[*\] ]] && clean_stat="[$clean_stat]"
-            printf "%-8s\t%-22s\t%-12s\t%s\t%s\n" "$c_appid" "$c_title" "$clean_stat" "$c_gdir" "$c_gbin"
+            printf "%-8s\t%-22s\t%-12s\t%s\t%s\t%s\n" "$c_appid" "$c_title" "$clean_stat" "$c_gdir" "$c_gbin" "$c_store"
         done < "$cache_file"
     fi
 }

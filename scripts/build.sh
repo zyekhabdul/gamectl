@@ -22,6 +22,8 @@ MODULES=(
     "$REPO_ROOT/src/steam/31_manifests.sh"
     "$REPO_ROOT/src/steam/32_steam_bridge.sh"
     "$REPO_ROOT/src/steam/35_fixes.sh"
+    "$REPO_ROOT/src/stores/00_store_interface.sh"
+    "$REPO_ROOT/src/stores/10_store_steam.sh"
     "$REPO_ROOT/src/runners/40_wrappers.sh"
     "$REPO_ROOT/src/runners/41_proton_prefix.sh"
     "$REPO_ROOT/src/runners/42_graphics_isolation.sh"
