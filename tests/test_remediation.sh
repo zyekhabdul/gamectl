@@ -3219,11 +3219,11 @@ test_r2_steam_app_type_ssot_and_tui_contracts() {
         [ "$b_ost" = "[OST]" ] || exit 1
 
         # 2. Single-batch classify_steam_app_types + offline fallback + separator rejection
-        local batch_calls=0
+        : > "$t_dir/batch.calls"
         curl() {
             local url="${@: -1}"
             if [[ "$url" == *IStoreBrowseService/GetItems* ]]; then
-                batch_calls=$((batch_calls + 1))
+                printf '1\n' >> "$t_dir/batch.calls"
                 printf '%s' '{"response":{"store_items":[{"appid":1245620,"type":0},{"appid":2778580,"type":4,"related_items":{"parent_appid":1245620}},{"appid":1001,"type":1},{"appid":1002,"type":2},{"appid":1003,"type":11},{"appid":1004,"type":6}]}}'
                 return 0
             fi
@@ -3232,6 +3232,7 @@ test_r2_steam_app_type_ssot_and_tui_contracts() {
 
         local cls_out
         cls_out=$(classify_steam_app_types 1245620 2778580 1001 1002 1003 1004 99999 1245620) || exit 1
+        [ "$(wc -l < "$t_dir/batch.calls")" -eq 1 ] || exit 1
         [ "$(printf '%s\n' "$cls_out" | wc -l)" -eq 7 ] || exit 1
         printf '%s\n' "$cls_out" | grep -Fxq $'1245620\tGAME\t' || exit 1
         printf '%s\n' "$cls_out" | grep -Fxq $'2778580\tDLC\t1245620' || exit 1
@@ -3247,7 +3248,12 @@ test_r2_steam_app_type_ssot_and_tui_contracts() {
         curl() { return 1; }
         [ "$(classify_steam_app_types 1245620 2778580)" = $'1245620\tAPP\t\n2778580\tAPP\t' ] || exit 1
 
-        # 3. fetch_steam_app_details & resolve_steam_app_type reuse steam_details_<appid>
+        # 3. parse_steam_app_type_json, fetch_steam_app_details & resolve_steam_app_type (zero-network for cached fixtures)
+        [ "$(parse_steam_app_type_json '{"type":"game","name":"ELDEN RING"}')" = $'1\tGAME\t\t' ] || exit 1
+        [ "$(parse_steam_app_type_json '{"type":"dlc","fullgame":{"appid":"1245620","name":"ELDEN RING"}}')" = $'1\tDLC\t1245620\tELDEN RING' ] || exit 1
+        [ "$(parse_steam_app_type_json '{"platforms":{"windows":true}}')" = $'0\tAPP\t\t' ] || exit 1
+        [ "$(parse_steam_app_type_json '{"type":"dlc","fullgame":{"appid":"1245620","name":"ELDEN\tRING"}}')" = $'1\tDLC\t1245620\tELDEN RING' ] || exit 1
+
         cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/steam_details_1245620.json"
 {"1245620":{"success":true,"data":{"type":"game","name":"ELDEN RING","platforms":{"windows":true,"linux":false},"genres":[{"description":"Action"}]}}}
 EOF
@@ -3258,9 +3264,12 @@ EOF
 {"555555":{"success":true,"data":{"platforms":{"windows":true,"linux":true},"genres":[{"description":"Indie"}]}}}
 EOF
 
+        curl() { touch "$t_dir/unexpected_net"; return 1; }
         [ "$(resolve_steam_app_type 1245620)" = $'GAME\t\t' ] || exit 1
         [ "$(resolve_steam_app_type 2778580)" = $'DLC\t1245620\tELDEN RING' ] || exit 1
         [ "$(resolve_steam_app_type 555555)" = $'APP\t\t' ] || exit 1
+        [ ! -e "$t_dir/unexpected_net" ] || exit 1
+        curl() { return 1; }
 
         # 4. preview_search_game renders Type for GAME and DLC Base info
         local prev_game prev_dlc
@@ -3295,6 +3304,24 @@ case "$idx" in
         ;;
     3)
         printf 'base\tDownload Base Game\n'
+        exit 0
+        ;;
+    4)
+        printf 'ctrl-a\n'
+        printf '%s\n' "$input_data" | grep -F '2778580' | head -n 1
+        exit 0
+        ;;
+    5)
+        printf 'dlc\tDownload DLC Only\n'
+        exit 0
+        ;;
+    6)
+        printf 'ctrl-a\n'
+        printf '%s\n' "$input_data" | grep -F '2778580' | head -n 1
+        exit 0
+        ;;
+    7)
+        printf 'cancel\tCancel / Return\n'
         exit 0
         ;;
     *)
@@ -3361,9 +3388,12 @@ PY_PTY
         awk -F'\t' '$1 == "2778580" {bad=1} END {exit bad}' "$t_dir/dump_1.tsv" || exit 1
         awk -F'\t' '$1 == "2778580" {ok=1} END {exit !ok}' "$t_dir/dump_2.tsv" || exit 1
         awk -F'\t' '$1 == "1245620" {bad=1} END {exit bad}' "$t_dir/dump_2.tsv" || exit 1
-        # Redirected DLC 2778580 -> Base Game 1245620
-        grep -Fq '1245620 ' "$dl_log" || exit 1
-        ! grep -Fq -- '--allow-dlc' "$dl_log" || exit 1
+        # Redirected DLC 2778580 -> Base Game 1245620 (branch 1), --allow-dlc (branch 2), cancel (branch 3)
+        [ "$(wc -l < "$dl_log")" -eq 2 ] || exit 1
+        sed -n '1p' "$dl_log" | grep -Fq '1245620 ' || exit 1
+        ! sed -n '1p' "$dl_log" | grep -Fq -- '--allow-dlc' || exit 1
+        sed -n '2p' "$dl_log" | grep -Fq '2778580 ' || exit 1
+        sed -n '2p' "$dl_log" | grep -Fq -- '--allow-dlc' || exit 1
 
         # Verify unlock_interactive enriches picker rows with classify_steam_app_types badges
         rm -f "${FZF_STEP_FILE}.idx"
@@ -3510,6 +3540,21 @@ EOF
         curl() { return 1; }
         download_game 888999 "$t_dir/game" "OfflineUncached" --raw >/dev/null 2>&1 || exit 1
         [ -f "$HOME/depot_dl.invoked" ] || exit 1
+
+        # 4. SSoT preflight_manifest_source offline checks & deduplication + completion sync
+        curl() { touch "$t_dir/preflight_net"; return 90; }
+        get_valid_luatools_token() { return 1; }
+        get_hubcap_api_key() { echo ""; }
+        ! preflight_manifest_source 999999 luatools true 2>/dev/null || exit 1
+        ! preflight_manifest_source 999999 hubcap true 2>/dev/null || exit 1
+        preflight_manifest_source 999999 auto true || exit 1
+        [ ! -e "$t_dir/preflight_net" ] || exit 1
+        ! grep -Fq 'manifests/${appid}.zip' "$REPO_ROOT/src/steam/30_downloader.sh" || exit 1
+
+        local comp_dl_opts
+        comp_dl_opts=$(grep -F 'download_opts=' "$REPO_ROOT/completions/gamectl.bash")
+        grep -Fq -- '--allow-dlc' <<< "$comp_dl_opts" || exit 1
+        grep -Fq -- '--os' <<< "$comp_dl_opts" || exit 1
     )
 }
 run_test "Engine-Level DLC Guard in download_game() (R2C)" test_r2_engine_level_dlc_guard_contract
