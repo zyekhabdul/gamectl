@@ -3979,7 +3979,7 @@ download_game() {
     # Strip ANSI escape sequences & non-digits
     appid=$(strip_ansi "$appid" | tr -dc "0-9")
     if [ -z "$appid" ]; then
-        echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|manifesthub|ryuu|sushi|luatools>] [--os <linux|windows|macos|all>] [--raw|--inject-only|--all|--standalone|--sls]" >&2
+        echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|manifesthub|ryuu|sushi|luatools>] [--os <linux|windows|macos|all>] [--allow-dlc] [--raw|--inject-only|--all|--standalone|--sls]" >&2
         return 1
     fi
     shift
@@ -3991,9 +3991,13 @@ download_game() {
     local source="auto"         # "auto", "ryuu", "sushi", "luatools"
     local engine="standalone"   # Default to Pure Standalone CDN engine (Zero Steam Client)
     local is_strict_standalone=true
+    local allow_dlc=false
 
     while [ $# -gt 0 ]; do
         case "$1" in
+            --allow-dlc)
+                allow_dlc=true
+                ;;
             --engine)
                 shift
                 case "${1:-}" in
@@ -4084,13 +4088,6 @@ download_game() {
         esac
     fi
 
-    if [ -z "$title" ]; then
-        title=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" "steam_basic_${appid}" 3600 2>/dev/null | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
-        [ -z "$title" ] && title="AppID_${appid}"
-    fi
-
-    log_msg "INFO" "DOWNLOAD" "Starting download for $title (AppID: $appid, Action: $action, Source: $source)"
-
     # Auto-resolve engine preference
     if [ "$engine" = "auto" ]; then
         if [ "$action" = "inject" ]; then
@@ -4116,7 +4113,43 @@ download_game() {
             echo "[WARN] Standalone downloader binary (gamectl-depot-dl) not found. Falling back to SLSsteam engine." >&2
             engine="sls"
         fi
+
+        # Fail-fast offline credential preflight for explicit gated sources before metadata HTTP lookups
+        local dl_cache_zip="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl/manifests/${appid}.zip"
+        local dl_stash_zip="$HOME/.local/share/gamectl/manifests/${appid}.zip"
+        if [ ! -f "$dl_cache_zip" ] && [ ! -f "$dl_stash_zip" ]; then
+            if [ "${source,,}" = "luatools" ] && ! get_valid_luatools_token >/dev/null 2>&1; then
+                echo "[ERROR] LuaTools session unavailable. Authenticate with 'gamectl login-luatools <code | session.json>' and retry." >&2
+                return 1
+            elif [ "${source,,}" = "hubcap" ] && [ -z "$(get_hubcap_api_key 2>/dev/null || true)" ]; then
+                echo "[ERROR] Hubcap API key is not configured. Run 'gamectl config set hubcap_key <smm_key>' and retry." >&2
+                return 1
+            fi
+        fi
     fi
+
+    # Engine-level DLC guard (consistent across CLI and TUI)
+    if [ "$allow_dlc" != true ] && declare -F resolve_steam_app_type >/dev/null 2>&1; then
+        local app_type_info="" app_type="" parent_appid="" parent_name=""
+        app_type_info=$(resolve_steam_app_type "$appid" 2>/dev/null || true)
+        IFS=$'\t' read -r app_type parent_appid parent_name <<< "$app_type_info"
+        if [ "$app_type" = "DLC" ] && [[ "$parent_appid" =~ ^[0-9]+$ ]]; then
+            local dlc_label="${title:+ ($title)}"
+            local parent_label="${parent_name:+${parent_name} }($parent_appid)"
+            echo "[ERROR] AppID ${appid}${dlc_label} is a DLC for Base Game ${parent_label}." >&2
+            echo "[ERROR] Base game downloads already include associated DLC depots. Run: gamectl download $parent_appid" >&2
+            echo "[ERROR] To download this DLC AppID explicitly anyway, re-run with --allow-dlc." >&2
+            log_msg "WARN" "DOWNLOAD" "Blocked direct DLC download for AppID $appid (base game: $parent_appid)"
+            return 1
+        fi
+    fi
+
+    if [ -z "$title" ]; then
+        title=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" "steam_basic_${appid}" 3600 2>/dev/null | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
+        [ -z "$title" ] && title="AppID_${appid}"
+    fi
+
+    log_msg "INFO" "DOWNLOAD" "Starting download for $title (AppID: $appid, Action: $action, Source: $source)"
 
     # Route 1: Standalone Native Steam CDN Engine (Zero Steam Client required)
     if [ "$engine" = "standalone" ]; then
@@ -5762,6 +5795,190 @@ harvest_dlc_manifests() {
     return 0
 }
 
+# Normalize Steam app type values (IStoreBrowseService integer enum or appdetails string)
+# into closed 7-token canonical vocabulary: GAME, DLC, DEMO, MOD, SOUNDTRACK, TOOL, APP.
+normalize_steam_app_type() {
+    local raw="${1:-}"
+    raw="${raw,,}"
+    raw="${raw//[[:space:]]/}"
+    case "$raw" in
+        0|game)
+            printf 'GAME\n'
+            ;;
+        4|dlc)
+            printf 'DLC\n'
+            ;;
+        1|demo)
+            printf 'DEMO\n'
+            ;;
+        2|mod)
+            printf 'MOD\n'
+            ;;
+        11|music|soundtrack|ost)
+            printf 'SOUNDTRACK\n'
+            ;;
+        3|10|tool|application|software)
+            printf 'TOOL\n'
+            ;;
+        *)
+            printf 'APP\n'
+            ;;
+    esac
+}
+
+# Render standardized ANSI badge from canonical Steam app type token.
+format_app_type_badge() {
+    local norm_type
+    norm_type="$(normalize_steam_app_type "${1:-APP}")"
+    case "$norm_type" in
+        GAME)       printf '%s\n' "${UI_GREEN:-}[GAME]${UI_RST:-}" ;;
+        DLC)        printf '%s\n' "${UI_AMBER:-}[DLC]${UI_RST:-}" ;;
+        DEMO)       printf '%s\n' "${UI_CYAN:-}[DEMO]${UI_RST:-}" ;;
+        MOD)        printf '%s\n' "${UI_PURPLE:-}[MOD]${UI_RST:-}" ;;
+        SOUNDTRACK) printf '%s\n' "${UI_ICE:-}[OST]${UI_RST:-}" ;;
+        TOOL)       printf '%s\n' "${UI_DIM:-}[TOOL]${UI_RST:-}" ;;
+        *)          printf '%s\n' "${UI_DIM:-}[APP]${UI_RST:-}" ;;
+    esac
+}
+
+# Batch-classify Steam AppIDs via IStoreBrowseService/GetItems/v1 (single HTTP call).
+# Emits sanitized TSV rows: <APPID><TAB><TYPE><TAB><PARENT_APPID> (offline fallback: APP).
+classify_steam_app_types() {
+    local -a unique_ids=()
+    declare -A seen_ids=()
+    local arg
+    for arg in "$@"; do
+        arg="${arg//[[:space:]]/}"
+        [[ "$arg" =~ ^[0-9]+$ ]] || continue
+        [[ -v seen_ids["$arg"] ]] && continue
+        seen_ids["$arg"]=1
+        unique_ids+=("$arg")
+    done
+
+    [ "${#unique_ids[@]}" -eq 0 ] && return 0
+
+    declare -A type_map=()
+    declare -A parent_map=()
+
+    local ids_json req_json resp parsed_rows
+    ids_json=$(printf '%s\n' "${unique_ids[@]}" | jq -Rc '{appid: tonumber}' | jq -sc '.') || ids_json=""
+    if [ -n "$ids_json" ] && [ "$ids_json" != "[]" ]; then
+        req_json=$(jq -nc --argjson ids "$ids_json" \
+            '{ids:$ids, context:{language:"english",country_code:"US"}, data_request:{include_basic_info:true}}')
+        resp=$(curl -s --connect-timeout 5 --max-time 10 --get \
+            --data-urlencode "input_json=${req_json}" \
+            "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/" 2>/dev/null || true)
+
+        if [ -n "$resp" ]; then
+            parsed_rows=$(printf '%s' "$resp" | jq -r '
+                .response.store_items[]? |
+                [
+                    (.appid // "-" | tostring),
+                    ((.type // "-") | tostring | if length == 0 then "-" else . end),
+                    ((.related_items.parent_appid // "-") | tostring | if length == 0 then "-" else . end)
+                ] |
+                if any(.[]; test("[\\t\\r\\n]")) then empty else @tsv end
+            ' 2>/dev/null || true)
+
+            local r_id r_raw_type r_parent
+            while IFS=$'\t' read -r r_id r_raw_type r_parent; do
+                [[ "$r_id" =~ ^[0-9]+$ ]] || continue
+                [ "$r_raw_type" = "-" ] && r_raw_type=""
+                [ "$r_parent" = "-" ] && r_parent=""
+                type_map["$r_id"]="$(normalize_steam_app_type "$r_raw_type")"
+                if [[ "$r_parent" =~ ^[0-9]+$ ]]; then
+                    parent_map["$r_id"]="$r_parent"
+                else
+                    parent_map["$r_id"]=""
+                fi
+            done <<< "$parsed_rows"
+        fi
+    fi
+
+    local id out_type out_parent
+    for id in "${unique_ids[@]}"; do
+        out_type="${type_map[$id]:-APP}"
+        out_parent="${parent_map[$id]:-}"
+        if declare -F validate_tui_fields >/dev/null 2>&1; then
+            validate_tui_fields "$id" "$out_type" "$out_parent" 2>/dev/null || {
+                out_type="APP"
+                out_parent=""
+            }
+        elif [[ "$id$out_type$out_parent" == *[$'\t\r\n']* ]]; then
+            out_type="APP"
+            out_parent=""
+        fi
+        printf '%s\t%s\t%s\n' "$id" "$out_type" "$out_parent"
+    done
+    return 0
+}
+
+# Fetch and unwrap Steam appdetails data object using canonical cache key steam_details_<appid>.
+fetch_steam_app_details() {
+    local appid="${1:-}"
+    appid="${appid//[[:space:]]/}"
+    [[ "$appid" =~ ^[0-9]+$ ]] || return 1
+
+    local raw_json details
+    raw_json=$(fetch_cached_json \
+        "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic,platforms,genres" \
+        "steam_details_${appid}" 3600 2>/dev/null || true)
+    [ -n "$raw_json" ] || return 1
+
+    details=$(printf '%s' "$raw_json" | jq -ce --arg id "$appid" \
+        'if type == "object" and (.[$id] | type == "object") and (.[$id].data | type == "object") then .[$id].data else empty end' \
+        2>/dev/null || true)
+    [ -n "$details" ] || return 1
+
+    printf '%s\n' "$details"
+    return 0
+}
+
+# Resolve canonical type and parent base game metadata for a single AppID.
+# Emits sanitized TSV: <TYPE><TAB><PARENT_APPID><TAB><PARENT_NAME>
+resolve_steam_app_type() {
+    local appid="${1:-}"
+    appid="${appid//[[:space:]]/}"
+    if ! [[ "$appid" =~ ^[0-9]+$ ]]; then
+        printf 'APP\t\t\n'
+        return 0
+    fi
+
+    local details
+    details=$(fetch_steam_app_details "$appid" 2>/dev/null || true)
+    if [ -z "$details" ]; then
+        printf 'APP\t\t\n'
+        return 0
+    fi
+
+    local parsed raw_type="" parent_id="" parent_name=""
+    parsed=$(printf '%s' "$details" | jq -r '
+        [
+            (.type // "-" | tostring | gsub("[\\t\\r\\n]"; "") | if length == 0 then "-" else . end),
+            (.fullgame.appid // "-" | tostring | gsub("[^0-9]"; "") | if length == 0 then "-" else . end),
+            (.fullgame.name // "" | tostring | gsub("[\\t\\r\\n]"; " "))
+        ] | @tsv
+    ' 2>/dev/null || true)
+    IFS=$'\t' read -r raw_type parent_id parent_name <<< "$parsed"
+    [ "$raw_type" = "-" ] && raw_type=""
+    [ "$parent_id" = "-" ] && parent_id=""
+
+    local norm_type
+    norm_type="$(normalize_steam_app_type "$raw_type")"
+    [[ "$parent_id" =~ ^[0-9]+$ ]] || parent_id=""
+
+    if declare -F validate_tui_fields >/dev/null 2>&1; then
+        validate_tui_fields "$norm_type" "$parent_id" "$parent_name" 2>/dev/null || {
+            norm_type="APP"
+            parent_id=""
+            parent_name=""
+        }
+    fi
+
+    printf '%s\t%s\t%s\n' "$norm_type" "$parent_id" "$parent_name"
+    return 0
+}
+
 
 # --- [MODULE] src/steam/32_steam_bridge.sh ---
 # Deploy manifest archive into SLSsteam manifests, stplug-in Lua, and config.yaml
@@ -6312,16 +6529,47 @@ unlock_interactive() {
             return 1
         fi
 
+        local -a adopt_ids=()
+        local aid aname
+        while IFS=$'\t' read -r aid aname; do
+            aid="${aid//[[:space:]]/}"
+            [[ "$aid" =~ ^[0-9]+$ ]] && adopt_ids+=("$aid")
+        done <<< "$search_items"
+
+        declare -A adopt_type_map=() adopt_parent_map=()
+        if [ "${#adopt_ids[@]}" -gt 0 ] && declare -F classify_steam_app_types >/dev/null 2>&1; then
+            local c_out c_id c_type c_parent
+            c_out=$(classify_steam_app_types "${adopt_ids[@]}" 2>/dev/null || true)
+            while IFS=$'\t' read -r c_id c_type c_parent; do
+                [ -n "$c_id" ] || continue
+                adopt_type_map["$c_id"]="${c_type:-APP}"
+                adopt_parent_map["$c_id"]="${c_parent:-}"
+            done <<< "$c_out"
+        fi
+
+        local adopt_items=""
+        while IFS=$'\t' read -r aid aname; do
+            [ -n "$aid" ] || continue
+            local raw_type="${adopt_type_map[$aid]:-APP}"
+            local parent_id="${adopt_parent_map[$aid]:-}"
+            local type_badge="[$raw_type]"
+            if declare -F format_app_type_badge >/dev/null 2>&1; then
+                type_badge="$(format_app_type_badge "$raw_type")"
+            fi
+            validate_tui_fields "$aid" "$aname" "$raw_type" "$parent_id" || continue
+            adopt_items+="${aid}"$'\t'"${type_badge}"$'\t'"${aname}"$'\t'"${raw_type}"$'\t'"${parent_id}"$'\n'
+        done <<< "$search_items"
+
         local sel_item fzf_sel_rc=0
         export GAMECTL_PREVIEW_BIN="$SELF_BIN"
-        sel_item=$(echo "$search_items" | fzf \
+        sel_item=$(printf '%s' "$adopt_items" | fzf \
             --delimiter=$'\t' \
-            --with-nth=1,2 \
+            --with-nth=1,2,3 \
             --border-label="  ╢ Steam Store Search :: Pick Target Game ╟  " \
             --border-label-pos=2 \
             --header="SELECT GAME FOR ACF ADOPTION (Enter: Select │ Esc: Cancel)" \
             --prompt="Adopt Game > " \
-            --preview='"$GAMECTL_PREVIEW_BIN" --preview-adopt {1} {2}' \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-adopt {1} {3}' \
             --preview-window=down:45%:border-rounded \
             --reverse 2>/dev/null) || fzf_sel_rc=$?
 
@@ -6334,8 +6582,15 @@ unlock_interactive() {
         fi
         [ -z "$sel_item" ] && return 0
 
-        u_appid=$(echo "$sel_item" | awk -F'\t' '{print $1}')
-        u_title=$(echo "$sel_item" | awk -F'\t' '{print $2}')
+        local _a1="" _a2="" _a3=""
+        IFS=$'\t' read -r _a1 _a2 _a3 _ <<< "$sel_item"
+        if [ -n "$_a3" ]; then
+            u_appid="$_a1"
+            u_title="$_a3"
+        else
+            u_appid="$_a1"
+            u_title="$_a2"
+        fi
     fi
 
     [ -z "$u_appid" ] && return 0
@@ -12626,9 +12881,32 @@ search_steam() {
 
     # Build list with local installed status across all libraries via scan_installed_games
     local results=""
+    local type_filter="ALL"
     declare -A installed_by_id=()
     declare -A installed_by_title=()
     declare -A installed_dir=()
+    declare -A item_type_map=()
+    declare -A item_parent_map=()
+
+    _classify_current_items() {
+        item_type_map=()
+        item_parent_map=()
+        local -a batch_ids=()
+        local c_id c_name
+        while IFS=$'\t' read -r c_id c_name; do
+            c_id="${c_id//[[:space:]]/}"
+            [[ "$c_id" =~ ^[0-9]+$ ]] && batch_ids+=("$c_id")
+        done <<< "$items"
+        [ "${#batch_ids[@]}" -eq 0 ] && return 0
+
+        local c_out c_type c_parent
+        c_out=$(classify_steam_app_types "${batch_ids[@]}" 2>/dev/null || true)
+        while IFS=$'\t' read -r c_id c_type c_parent; do
+            [ -n "$c_id" ] || continue
+            item_type_map["$c_id"]="${c_type:-APP}"
+            item_parent_map["$c_id"]="${c_parent:-}"
+        done <<< "$c_out"
+    }
 
     _refresh_search_results() {
         results=""
@@ -12662,10 +12940,24 @@ search_steam() {
             fi
             local status="${UI_DIM}[NOT INSTALLED]${UI_RST}"
             [ "$is_installed" -eq 1 ] && status="${UI_GREEN}[INSTALLED]    ${UI_RST}"
-            results+="${appid}"$'\t'"${name}"$'\t'"${status}"$'\n'
+            local raw_type="${item_type_map[$appid]:-APP}"
+            local parent_appid="${item_parent_map[$appid]:-}"
+            local type_badge
+            type_badge="$(format_app_type_badge "$raw_type")"
+            validate_tui_fields "$appid" "$name" "$raw_type" "$parent_appid" || continue
+            results+="${appid}"$'\t'"${type_badge}"$'\t'"${name}"$'\t'"${status}"$'\t'"${raw_type}"$'\t'"${parent_appid}"$'\n'
         done <<< "$items"
     }
 
+    _filtered_search_results() {
+        if [ "$type_filter" = "ALL" ]; then
+            printf '%s' "$results"
+        else
+            printf '%s' "$results" | awk -F'\t' -v tf="$type_filter" '$5 == tf'
+        fi
+    }
+
+    _classify_current_items
     _refresh_search_results
 
     export GAMECTL_PREVIEW_BIN="$SELF_BIN"
@@ -12673,17 +12965,17 @@ search_steam() {
     while true; do
         flush_tty_input
         local fzf_out fzf_rc=0
-        local fzf_header="Enter: Actions │ Ctrl-F: New Search │ Esc: Dashboard"
-        fzf_out=$(echo -n "$results" | fzf \
+        local fzf_header="Enter: Actions │ Tab: Type ($type_filter) │ Ctrl-F: New Search │ Esc: Dashboard"
+        fzf_out=$(_filtered_search_results | fzf \
             --delimiter=$'\t' \
-            --with-nth=1,2,3 \
-            --expect=ctrl-a,ctrl-u,ctrl-s,ctrl-d,ctrl-f \
-            --bind="ctrl-a:accept,ctrl-u:accept,ctrl-s:accept,ctrl-d:accept,ctrl-f:accept" \
-            --border-label="  ╢ gamectl :: Steam Store Catalog ╟  " \
+            --with-nth=1,2,3,4 \
+            --expect=tab,ctrl-a,ctrl-u,ctrl-s,ctrl-d,ctrl-f \
+            --bind="tab:accept,ctrl-a:accept,ctrl-u:accept,ctrl-s:accept,ctrl-d:accept,ctrl-f:accept" \
+            --border-label="  ╢ gamectl :: Steam Store Catalog [Type: $type_filter] ╟  " \
             --border-label-pos=2 \
             --header="$fzf_header" \
             --prompt="Filter Results > " \
-            --preview='"$GAMECTL_PREVIEW_BIN" --preview-search {1} {2} {3}' \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-search {1} {3} {4}' \
             --preview-window=right:52%:border-rounded:wrap \
         ) || fzf_rc=$?
 
@@ -12697,6 +12989,15 @@ search_steam() {
         local trigger_key selection
         trigger_key=$(echo "$fzf_out" | sed -n '1p')
         selection=$(echo "$fzf_out" | sed -n '2,$p')
+
+        if [ "$trigger_key" = "tab" ]; then
+            case "$type_filter" in
+                ALL)  type_filter="GAME" ;;
+                GAME) type_filter="DLC" ;;
+                *)    type_filter="ALL" ;;
+            esac
+            continue
+        fi
 
         if [ "$trigger_key" = "ctrl-f" ]; then
             local new_q n_rc=0
@@ -12728,16 +13029,28 @@ search_steam() {
 
             query="$new_q"
             items="$new_items"
+            type_filter="ALL"
+            _classify_current_items
             _refresh_search_results
             continue
         fi
 
         [ -z "$selection" ] && continue
 
-        local sel_id sel_name sel_status
-        sel_id=$(echo "$selection" | awk -F'\t' '{print $1}')
-        sel_name=$(echo "$selection" | awk -F'\t' '{print $2}')
-        sel_status=$(echo "$selection" | awk -F'\t' '{print $3}')
+        local sel_id="" sel_name="" sel_status="" sel_type="" sel_parent=""
+        local _c1="" _c2="" _c3="" _c4="" _c5="" _c6=""
+        IFS=$'\t' read -r _c1 _c2 _c3 _c4 _c5 _c6 <<< "$selection"
+        if [ -n "$_c4" ]; then
+            sel_id="$_c1"
+            sel_name="$_c3"
+            sel_status="$_c4"
+            sel_type="$_c5"
+            sel_parent="$_c6"
+        else
+            sel_id="$_c1"
+            sel_name="$_c2"
+            sel_status="$_c3"
+        fi
 
         local gdir=""
         local clean_sel_name="${sel_name,,}"
@@ -12753,10 +13066,57 @@ search_steam() {
 
         # Resolve optimal destination library and target OS platform for uninstalled games
         local dest_dir target_os="linux"
+        local -a dl_extra_args=()
         if [[ ! "$sel_status" =~ INSTALLED ]] || [[ "$sel_status" =~ NOT ]]; then
             dest_dir="$(resolve_target_library_dir "$sel_name")"
             target_os="$(detect_app_platform_os "$sel_id")"
         fi
+
+        _prepare_download_target() {
+            dl_extra_args=()
+            [ "$sel_type" = "DLC" ] || return 0
+
+            local parent_id="$sel_parent" parent_name=""
+            if [ -z "$parent_id" ] && declare -F resolve_steam_app_type >/dev/null 2>&1; then
+                local r_info="" r_type=""
+                r_info=$(resolve_steam_app_type "$sel_id" 2>/dev/null || true)
+                IFS=$'\t' read -r r_type parent_id parent_name <<< "$r_info"
+            elif [[ "$parent_id" =~ ^[0-9]+$ ]] && declare -F fetch_steam_app_details >/dev/null 2>&1; then
+                parent_name=$(fetch_steam_app_details "$parent_id" 2>/dev/null | jq -r '.name // empty' 2>/dev/null || true)
+            fi
+            [[ "$parent_id" =~ ^[0-9]+$ ]] || return 0
+
+            local dlc_choice="" dlc_rc=0
+            local base_label="${parent_name:-AppID $parent_id}"
+            dlc_choice=$(tui_action_palette \
+                "DLC Selected" \
+                "AppID $sel_id ($sel_name) is a DLC. Base game downloads already include associated DLC depots." \
+                "$(printf 'base\tDownload Base Game (%s • %s) [Recommended]\ndlc\tDownload DLC Only (%s • %s) [--allow-dlc]\ncancel\tCancel / Return\n' "$base_label" "$parent_id" "$sel_name" "$sel_id")" \
+                "" \
+                "DLC Action > ") || dlc_rc=$?
+            [ "$dlc_rc" -eq 130 ] && return 130
+            if [ "$dlc_rc" -ne 0 ] && [ "$dlc_rc" -ne 1 ]; then
+                return "$dlc_rc"
+            fi
+            local dlc_opt="${dlc_choice%%$'\t'*}"
+            case "$dlc_opt" in
+                base)
+                    sel_id="$parent_id"
+                    sel_name="${parent_name:-AppID_${parent_id}}"
+                    dest_dir="$(resolve_target_library_dir "$sel_name")"
+                    target_os="$(detect_app_platform_os "$sel_id")"
+                    dl_extra_args=()
+                    return 0
+                    ;;
+                dlc)
+                    dl_extra_args=("--allow-dlc")
+                    return 0
+                    ;;
+                *)
+                    return 130
+                    ;;
+            esac
+        }
 
         # Direct hotkey triggers
         if [ "$trigger_key" = "ctrl-a" ]; then
@@ -12764,8 +13124,12 @@ search_steam() {
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Injecting standalone GBE for $sel_name ($sel_id)"
                 tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$gdir" "$sel_id"
             else
+                local prep_rc=0
+                _prepare_download_target || prep_rc=$?
+                [ "$prep_rc" -eq 130 ] && continue
+                [ "$prep_rc" -ne 0 ] && return "$prep_rc"
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-A>: Starting All-in-One Download for $sel_name ($target_os)"
-                tui_exec_action "All-in-One Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
+                tui_exec_action "All-in-One Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os" ${dl_extra_args[@]+"${dl_extra_args[@]}"}
             fi
         elif [ "$trigger_key" = "ctrl-u" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
@@ -12780,8 +13144,12 @@ search_steam() {
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Injecting Standalone GBE Fork for $sel_name ($sel_id)"
                 tui_exec_action "Inject Standalone GBE ($sel_name)" inject_game "$gdir" "$sel_id" --no-sync
             else
+                local prep_rc=0
+                _prepare_download_target || prep_rc=$?
+                [ "$prep_rc" -eq 130 ] && continue
+                [ "$prep_rc" -ne 0 ] && return "$prep_rc"
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-S>: Starting Standalone Download for $sel_name ($target_os)"
-                tui_exec_action "Standalone Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --inject-only --os "$target_os"
+                tui_exec_action "Standalone Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --inject-only --os "$target_os" ${dl_extra_args[@]+"${dl_extra_args[@]}"}
             fi
         elif [ "$trigger_key" = "ctrl-d" ]; then
             if [[ "$sel_status" =~ INSTALLED ]] && [[ ! "$sel_status" =~ NOT ]]; then
@@ -12798,8 +13166,12 @@ search_steam() {
                     tui_modal_notice "Executable Not Found" "Binary executable not found in directory:\n$gdir" || return $?
                 fi
             else
+                local prep_rc=0
+                _prepare_download_target || prep_rc=$?
+                [ "$prep_rc" -eq 130 ] && continue
+                [ "$prep_rc" -ne 0 ] && return "$prep_rc"
                 log_msg "INFO" "HOTKEY" "Shortcut <Ctrl-D>: Starting Live Stream Download for $sel_name ($target_os)"
-                tui_exec_action "Live Stream Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
+                tui_exec_action "Live Stream Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os" ${dl_extra_args[@]+"${dl_extra_args[@]}"}
             fi
         else
             # Enter key: Open Modal Action Palette
@@ -12885,7 +13257,11 @@ EOF
                 opt=$(echo "$pkg_sel" | awk -F'\t' '{print $1}')
                 case "$opt" in
                     1)
-                        tui_exec_action "Sovereign Standalone Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os"
+                        local prep_rc=0
+                        _prepare_download_target || prep_rc=$?
+                        [ "$prep_rc" -eq 130 ] && continue
+                        [ "$prep_rc" -ne 0 ] && return "$prep_rc"
+                        tui_exec_action "Sovereign Standalone Download ($sel_name)" download_game "$sel_id" "$dest_dir" "$sel_name" --all --os "$target_os" ${dl_extra_args[@]+"${dl_extra_args[@]}"}
                         ;;
                     2)
                         tui_exec_action "Adopt Steam Entitlement ($sel_name)" unlock_game "$sel_id" "$sel_name"
@@ -13689,9 +14065,26 @@ preview_search_game() {
 
     if [ -n "$appid" ] && [[ "$appid" =~ ^[0-9]+$ ]]; then
         local details
-        details=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=platforms,genres" "steam_details_${appid}" 3600 2>/dev/null | jq -r ".\"${appid}\".data // empty" 2>/dev/null || true)
+        details=$(fetch_steam_app_details "$appid" 2>/dev/null || true)
         if [ -n "$details" ] && [ "$details" != "null" ]; then
-            local is_linux is_win genres
+            local raw_type parent_id parent_name is_linux is_win genres
+            raw_type=$(echo "$details" | jq -r '.type // empty' 2>/dev/null || true)
+            parent_id=$(echo "$details" | jq -r '.fullgame.appid // empty' 2>/dev/null || true)
+            parent_name=$(echo "$details" | jq -r '.fullgame.name // empty' 2>/dev/null || true)
+            if [ -n "$raw_type" ]; then
+                local norm_type type_badge
+                norm_type="$(normalize_steam_app_type "$raw_type")"
+                type_badge="$(format_app_type_badge "$norm_type")"
+                if [ "$norm_type" = "DLC" ] && [[ "$parent_id" =~ ^[0-9]+$ ]]; then
+                    if [ -n "$parent_name" ]; then
+                        printf "  %sType       %s : %s %s(Base: %s • %s)%s\n" "${UI_CYAN}" "${UI_RST}" "$type_badge" "${UI_DIM}" "$parent_name" "$parent_id" "${UI_RST}"
+                    else
+                        printf "  %sType       %s : %s %s(Base: %s)%s\n" "${UI_CYAN}" "${UI_RST}" "$type_badge" "${UI_DIM}" "$parent_id" "${UI_RST}"
+                    fi
+                else
+                    printf "  %sType       %s : %s\n" "${UI_CYAN}" "${UI_RST}" "$type_badge"
+                fi
+            fi
             is_linux=$(echo "$details" | jq -r ".platforms.linux // false" 2>/dev/null || echo "false")
             is_win=$(echo "$details" | jq -r ".platforms.windows // false" 2>/dev/null || echo "false")
             genres=$(echo "$details" | jq -r "[.genres[]?.description] | join(\", \")" 2>/dev/null || true)
@@ -14310,7 +14703,7 @@ Usage:
                       Collect discovered Wine prefix saves into <dir>/saves/_prefix_saves/
   gamectl restore-prefix-saves <dir>
                       Restore staged Wine prefix saves back into <dir>/pfx/drive_c/users/
-  gamectl download <appid> [dir] [title] [--source <auto|...>] [--standalone|--sls] [--raw|--inject-only]
+  gamectl download <appid> [dir] [title] [--source <auto|...>] [--allow-dlc] [--standalone|--sls] [--raw|--inject-only]
                       Download game via native Valve CDN (default: Pure Standalone zero-client)
   gamectl downloads   Monitor active & recent downloads (Interactive TUI)
   gamectl download-status
