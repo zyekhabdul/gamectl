@@ -298,7 +298,7 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 # REMEDIATION WORK PACKET 3: MODULE SIZE DISCIPLINE, SAFE STRUCTURAL SPLIT & LOC RATCHET GUARD
 
 - **Track**: Remediation / Module Size Discipline, Safe Structural Decomposition & LOC Ratchet Guard
-- **Status**: IN PROGRESS [2/4 PACKETS]
+- **Status**: [ COMPLETED & VERIFIED ] [4/4 PACKETS]
 - **Prasyarat**: Remediation Work Packet 2.1 (`8aa0e35`) & WP41 Multi-Store Phase 4 (`1bff087`)
 - **Basis**: Audit empiris post-WP41 (12/26 modul >600 LOC; `30_downloader.sh` 1.249, `70_dashboard.sh` 1.057, `20_discovery.sh` 991, `31_manifests.sh` 989, `35_fixes.sh` 981, `41_proton_prefix.sh` 980, `10_utils.sh` 959), audit static-grep coupling (`tests/test_cli.sh`: 45 ref `30_downloader.sh`, 24 ref `70_dashboard.sh`; `20_discovery.sh`: 0 static-grep), dan standar 150–600 LOC di `DEVELOPMENT.md`
 - **Target Files**: `scripts/check_loc_budget.sh`, `Makefile`, `src/steam/20_discovery.sh`, `src/steam/21_shortcuts_artwork.sh`, `src/tui/70_dashboard.sh`, `src/tui/72_store_tui.sh`, `scripts/build.sh`, `tests/test_remediation.sh`, `DEVELOPMENT.md`, `bin/gamectl`, `docs/REMEDIATION.md`
@@ -336,7 +336,7 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 - **Definition of Done (DoD)**:
   - `20_discovery.sh` dan `21_shortcuts_artwork.sh` masing-masing <= 550 LOC; seluruh test yang me-`source 20_discovery.sh` tetap pass tanpa mutasi file test.
 
-### [ ] Packet R3C: Dedicated Multi-Store TUI Module (`72_store_tui.sh`) & Scanner Helper
+### [x] Packet R3C: Dedicated Multi-Store TUI Module (`72_store_tui.sh`) & Scanner Helper
 - **Target Files**: `src/tui/70_dashboard.sh`, `src/tui/72_store_tui.sh`, `src/steam/20_discovery.sh`, `scripts/build.sh`, `scripts/check_loc_budget.sh`
 - **Langkah Teknis**:
   1. Pindahkan definisi `search_stores_interactive()` dari `70_dashboard.sh` ke `src/tui/72_store_tui.sh` (pemanggilan di `70_dashboard.sh:717` tetap menjaga Test 40 lulus), daftarkan di sibling auto-loader `70_dashboard.sh` serta `scripts/build.sh`, dan turunkan ceiling `70_dashboard.sh` (`1057 -> 1020`).
@@ -344,7 +344,7 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 - **Definition of Done (DoD)**:
   - Fitur lintas-store TUI terisolasi di `72_store_tui.sh` (<= 150 LOC) dan duplikasi loop discovery Epic/Amazon tereliminasi.
 
-### [ ] Packet R3D: Contract Test, Docs, Rebuild & Full Verification
+### [x] Packet R3D: Contract Test, Docs, Rebuild & Full Verification
 - **Target Files**: `tests/test_remediation.sh`, `DEVELOPMENT.md`, `docs/REMEDIATION.md`, `bin/gamectl`
 - **Langkah Teknis**:
   1. Tambahkan Test 41 di `tests/test_remediation.sh`: uji `check_loc_budget.sh` pass/fail deterministik di tempdir serta uji sibling auto-loader unbundled `21_shortcuts_artwork.sh` dan `72_store_tui.sh`.

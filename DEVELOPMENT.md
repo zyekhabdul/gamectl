@@ -26,7 +26,8 @@ src/
 │   ├── 14_saves.sh             # 3-slot savegame snapshot rotation, rollback recovery, Wine prefix save collector
 │   └── 16_steamstub.sh         # SteamStub (.bind ELF & PE) forensic detector and unpacker
 ├── steam/
-│   ├── 20_discovery.sh         # Multi-path Steam & standalone scanner, active process guard, desktop launcher
+│   ├── 20_discovery.sh         # Multi-path Steam, Epic, Amazon & standalone scanner, active process guard
+│   ├── 21_shortcuts_artwork.sh # FreeDesktop .desktop generator, Steam Grid artwork & shortcuts.vdf writer
 │   ├── 25_identity.sh          # SteamID64 generation, active SteamID resolution, persona configuration, set-id
 │   ├── 30_downloader.sh        # Standalone native CDN downloader, depot OS filtering, local library routing
 │   ├── 31_manifests.sh         # Multi-provider manifest harvester, DLC extractor, LuaTools auth session
@@ -49,7 +50,8 @@ src/
 │   └── 60_doctor.sh            # 8-layer system & GPU health diagnostics and cached query_protondb
 ├── tui/
 │   ├── 70_dashboard.sh         # Interactive dashboard hub, library menu, Steam Store search, remote sync palette
-│   └── 71_previews.sh          # Read-only FZF preview renderers (game, dashboard, store search, logs)
+│   ├── 71_previews.sh          # Read-only FZF preview renderers (game, dashboard, store search, logs)
+│   └── 72_store_tui.sh         # Multi-store TUI views & cross-store search switcher (search_stores_interactive)
 └── main.sh                     # Subshell exports (export -f) and top-level CLI command dispatcher
 ```
 
