@@ -2786,7 +2786,7 @@ cnt_p.write_text(str(idx + 1))
 with log.open("a") as fh:
     fh.write(" ".join(sys.argv[1:]) + "\n")
 sys.stdin.read()
-if idx < 3:
+if idx < 4:
     sys.stdout.write("tab\n")
     sys.exit(0)
 sys.exit(130)
@@ -2820,6 +2820,7 @@ PY
         grep -Fq '[Store: ALL]' "$t_dir/fzf_args.log" || exit 1
         grep -Fq '[Store: STEAM]' "$t_dir/fzf_args.log" || exit 1
         grep -Fq '[Store: GOG]' "$t_dir/fzf_args.log" || exit 1
+        grep -Fq '[Store: EPIC]' "$t_dir/fzf_args.log" || exit 1
         grep -Fq '[Store: STANDALONE]' "$t_dir/fzf_args.log" || exit 1
     )
 }
@@ -2976,6 +2977,203 @@ test_wp39_gog_discovery_and_tui_filter_contract() {
     )
 }
 run_test "GOG Discovery & TUI Store Filter (WP39B/39C)" test_wp39_gog_discovery_and_tui_filter_contract
+
+# Test 35: WP40A/40C — Optional Epic Adapter (legendary), Offline Status, Search/Sync & CLI
+test_wp40_epic_adapter_and_cli_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp40_epic_XXXXXX")
+    mkdir -p "$t_dir/home/.config/gamectl" "$t_dir/home/.config/legendary" "$t_dir/home/.local/share/gbe-fork/regular/x64" \
+             "$t_dir/home/.local/share/gbe-fork/windows/release/regular/x64" "$t_dir/runtime" "$t_dir/game/saves" \
+             "$t_dir/no_epic_bin" "$t_dir/epic_bin"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home" XDG_CONFIG_HOME="$t_dir/home/.config" XDG_RUNTIME_DIR="$t_dir/runtime"
+        export LEGENDARY_CONFIG_PATH="$t_dir/home/.config/legendary"
+        touch "$t_dir/home/.local/share/gbe-fork/regular/x64/libsteam_api.so" \
+              "$t_dir/home/.local/share/gbe-fork/windows/release/regular/x64/steam_api64.dll"
+        echo "epic_save" > "$t_dir/game/saves/slot.dat"
+
+        local cmd_tool tool_path
+        for cmd_tool in bash sh env cat mkdir rm cp mv grep awk sed jq curl file zip unzip rsync ssh python3 fzf dirname basename readlink head tail date stat touch tr wc cut find chmod mktemp uname pgrep id realpath; do
+            tool_path="$(command -v "$cmd_tool" 2>/dev/null || true)"
+            [ -n "$tool_path" ] && ln -sf "$tool_path" "$t_dir/no_epic_bin/$cmd_tool"
+        done
+
+        PATH="$t_dir/no_epic_bin" bash -c '
+            set -e
+            source "$1/src/core/10_utils.sh"
+            source "$1/src/core/14_saves.sh"
+            source "$1/src/steam/20_discovery.sh"
+            source "$1/src/runners/40_wrappers.sh"
+            source "$1/src/stores/00_store_interface.sh"
+            source "$1/src/diagnostics/60_doctor.sh"
+
+            declare -F store_epic_available >/dev/null
+            store_list_registered | grep -Fxq "epic"
+            ! store_epic_available
+            curl() { touch "$2/net_hit"; return 99; }
+            st=$(store_dispatch epic status)
+            [ ! -e "$2/net_hit" ]
+            printf "%s\n" "$st" | grep -Fq "store=epic"
+            printf "%s\n" "$st" | grep -Fq "missing"
+            printf "%s\n" "$st" | grep -Fq "unconfigured"
+
+            err=$(store_dispatch epic search "alan" 2>&1) && exit 1 || true
+            printf "%s" "$err" | grep -Fq "[ERROR]"
+            err=$(store_dispatch epic download "AlanWake" "$2/dl" 2>&1) && exit 1 || true
+            printf "%s" "$err" | grep -Fq "[ERROR]"
+
+            doc_out=$(doctor_audit || true)
+            printf "%s\n" "$doc_out" | grep -Fq "Epic Store CLI"
+            printf "%s\n" "$doc_out" | grep -Fq "[OPT]"
+        ' _ "$REPO_ROOT" "$t_dir" || exit 1
+
+        cat <<'EOF' > "$t_dir/epic_bin/legendary"
+#!/usr/bin/env bash
+case "$1" in
+    list)
+        if [ "${EPIC_MODE:-ok}" = "bad_json" ]; then
+            printf 'EPIC\tNOT_JSON\tBroken\twindows\n'
+        elif [ "${EPIC_MODE:-ok}" = "evil_tab" ]; then
+            printf '[{"app_name":"BadApp","app_title":"Evil\\tTitle","asset_infos":{"Windows":{}}}]\n'
+        else
+            printf '[{"app_name":"Sugar","app_title":"Rocket League","asset_infos":{"Windows":{}}},{"app_name":"CelesteApp","app_title":"Celeste","asset_infos":{"Linux":{},"Windows":{}}}]\n'
+        fi ;;
+    install)
+        app="$2"; shift 2; gdir=""
+        while [ $# -gt 0 ]; do [ "$1" = "--game-folder" ] && { gdir="$2"; shift 2; continue; }; shift; done
+        mkdir -p "$gdir"; printf 'installed %s\n' "$app" > "$gdir/epic.ok" ;;
+    sync-saves)
+        app="$2"; shift 2; spath=""
+        while [ $# -gt 0 ]; do [ "$1" = "--save-path" ] && { spath="$2"; shift 2; continue; }; shift; done
+        printf 'synced %s %s\n' "$app" "$spath" > "$spath/../sync.ok" ;;
+    launch)
+        printf 'launched %s\n' "$2" ;;
+esac
+EOF
+        chmod +x "$t_dir/epic_bin/legendary"
+        printf '{"access_token":"TOPSECRET_EPIC_TOKEN"}\n' > "$t_dir/home/.config/legendary/user.json"
+        "$REPO_ROOT/scripts/build.sh" >/dev/null
+
+        PATH="$t_dir/epic_bin:$PATH" bash -c '
+            set -e
+            source "$1/src/core/10_utils.sh"
+            source "$1/src/core/14_saves.sh"
+            source "$1/src/steam/20_discovery.sh"
+            source "$1/src/stores/00_store_interface.sh"
+
+            store_epic_available
+            store_list_available | grep -Fxq "epic"
+            st_out=$(store_dispatch epic status)
+            printf "%s\n" "$st_out" | grep -Fq "session present"
+            ! printf "%s\n" "$st_out" | grep -Fq "TOPSECRET_EPIC_TOKEN"
+            store_dispatch epic search "" 2>/dev/null && exit 1 || true
+
+            s_out=$(store_dispatch epic search "celeste")
+            printf "%s\n" "$s_out" | grep -Fq $'\''EPIC\tCelesteApp\tCeleste\tlinux,windows\tAVAILABLE'\''
+            EPIC_MODE=bad_json store_dispatch epic search "broken" 2>/dev/null && exit 1 || true
+            EPIC_MODE=evil_tab store_dispatch epic search "evil" 2>/dev/null && exit 1 || true
+
+            store_dispatch epic download "CelesteApp" "$2/dl_epic" >/dev/null
+            grep -Fq "installed CelesteApp" "$2/dl_epic/epic.ok"
+
+            store_dispatch epic sync "CelesteApp" "$2/game" >/dev/null
+            [ -d "$2/game/.save_snapshots/slot1" ]
+            grep -Fq "synced CelesteApp $2/game/saves" "$2/game/sync.ok"
+
+            "$1/bin/gamectl" epic --help | grep -Fq "gamectl epic"
+            "$1/bin/gamectl" epic status | grep -Fq "ready (legendary:"
+            "$1/bin/gamectl" epic search "rocket" | grep -Fq "Sugar"
+            "$1/bin/gamectl" epic launch "Sugar" | grep -Fq "launched Sugar"
+            "$1/bin/gamectl" epic bogus 2>/dev/null && exit 1 || true
+            "$1/bin/gamectl" stores list | grep -Eq "^epic[[:space:]]+\[AVAILABLE\]"
+        ' _ "$REPO_ROOT" "$t_dir" || exit 1
+    )
+}
+run_test "Optional Epic Adapter & CLI Contracts (WP40A/40C)" test_wp40_epic_adapter_and_cli_contract
+
+# Test 36: WP40B/40C — Epic installed.json Discovery, Deduplication, Validation & TUI Filter
+test_wp40_epic_discovery_and_tui_filter_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp40_disc_XXXXXX")
+    mkdir -p "$t_dir/home/Games/CelesteEpic" "$t_dir/home/Games/SoloTitle" \
+             "$t_dir/home/Epic/BadEpic" "$t_dir/home/.config/legendary" "$t_dir/runtime"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home" XDG_CONFIG_HOME="$t_dir/home/.config" XDG_RUNTIME_DIR="$t_dir/runtime"
+        export LEGENDARY_CONFIG_PATH="$t_dir/home/.config/legendary"
+
+        for b in "$t_dir/home/Games/CelesteEpic/Celeste.bin.x86_64" "$t_dir/home/Games/SoloTitle/solo.bin" \
+                 "$t_dir/home/Epic/BadEpic/bad.bin"; do
+            printf '#!/bin/sh\nexit 0\n' > "$b"
+            chmod +x "$b"
+        done
+
+        cat <<EOF > "$LEGENDARY_CONFIG_PATH/installed.json"
+{
+  "CelesteApp": {
+    "app_name": "CelesteApp",
+    "title": "Celeste Epic",
+    "install_path": "$t_dir/home/Games/CelesteEpic",
+    "executable": "Celeste.bin.x86_64"
+  },
+  "BadTab": {
+    "app_name": "BadTab",
+    "title": "Bad\\tEpicTitle",
+    "install_path": "$t_dir/home/Epic/BadEpic",
+    "executable": "bad.bin"
+  }
+}
+EOF
+
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/stores/00_store_interface.sh"
+
+        local all_out epic_out solo_out fmt_out err_log="$t_dir/scan.err"
+        all_out=$(scan_installed_games --refresh 2>"$err_log") || exit 1
+        [ "$(head -n 1 "$t_dir/runtime/scancache.tab")" = "# gamectl scanner v3" ] || exit 1
+        grep -Fq '[ERROR]' "$err_log" || exit 1
+        ! printf '%s\n' "$all_out" | grep -Fq 'BadEpic' || exit 1
+
+        # Epic game in ~/Games/ is indexed once as EPIC and NOT duplicated as STANDALONE
+        [ "$(printf '%s\n' "$all_out" | grep -c 'CelesteEpic')" -eq 1 ] || exit 1
+        printf '%s\n' "$all_out" | awk -F'\t' '$1 ~ /^CelesteApp/ && $2 ~ /Celeste Epic/ && $3 ~ /^\[EPIC\]/ && NF == 6 && $6 == "EPIC" { ok=1 } END { exit !ok }' || exit 1
+        printf '%s\n' "$all_out" | awk -F'\t' '$2 ~ /SoloTitle/ && $6 == "STANDALONE" { ok=1 } END { exit !ok }' || exit 1
+
+        epic_out=$(scan_installed_games --store EPIC) || exit 1
+        printf '%s\n' "$epic_out" | grep -Fq 'Celeste Epic' || exit 1
+        ! printf '%s\n' "$epic_out" | grep -Fq 'SoloTitle' || exit 1
+        store_dispatch epic list_installed | grep -Fq 'CelesteApp' || exit 1
+
+        solo_out=$(scan_installed_games --store STANDALONE) || exit 1
+        printf '%s\n' "$solo_out" | grep -Fq 'SoloTitle' || exit 1
+        ! printf '%s\n' "$solo_out" | grep -Fq 'Celeste Epic' || exit 1
+
+        fmt_out=$(scan_installed_games --formatted --store EPIC) || exit 1
+        printf '%s\n' "$fmt_out" | grep -Fq '[EPIC]' || exit 1
+
+        # Cache invalidation when installed.json mtime becomes newer than scancache.tab
+        sleep 1
+        cat <<EOF > "$LEGENDARY_CONFIG_PATH/installed.json"
+{
+  "CelesteApp": {
+    "app_name": "CelesteApp",
+    "title": "Celeste Updated",
+    "install_path": "$t_dir/home/Games/CelesteEpic",
+    "executable": "Celeste.bin.x86_64"
+  }
+}
+EOF
+        scan_installed_games --store EPIC | grep -Fq 'Celeste Updated' || exit 1
+
+        grep -Fq 'EPIC\tEpic Games Library' "$REPO_ROOT/src/tui/70_dashboard.sh" || exit 1
+        grep -A3 'ctrl-s)' "$REPO_ROOT/src/tui/70_dashboard.sh" | grep -Fq 'remote_sync_interactive' || exit 1
+        grep -Fq 'epic)' "$REPO_ROOT/completions/gamectl.bash" || exit 1
+    )
+}
+run_test "Epic Discovery, Deduplication & TUI Filter (WP40B/40C)" test_wp40_epic_discovery_and_tui_filter_contract
 
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
