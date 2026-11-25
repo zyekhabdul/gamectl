@@ -1485,11 +1485,12 @@ test_packaging_arch_and_freshness_gate_contract() {
         ! grep -q 'arch = any' "$REPO_ROOT/packaging/aur-git/.SRCINFO" || exit 1
 
         # 4. Debian package carries native arch matching ELF and declares zip dependency
-        local deb_pkg
+        local deb_pkg deb_info
         deb_pkg=$(ls "$REPO_ROOT/packaging/debian"/gamectl_*_amd64.deb 2>/dev/null | head -n 1)
         [ -n "$deb_pkg" ] && [ -f "$deb_pkg" ] || exit 1
-        dpkg-deb -I "$deb_pkg" | grep -q 'Architecture: amd64' || exit 1
-        dpkg-deb -I "$deb_pkg" | grep -qE 'Depends:.*\bzip\b' || exit 1
+        deb_info=$(dpkg-deb -I "$deb_pkg") || exit 1
+        printf '%s\n' "$deb_info" | grep -q 'Architecture: amd64' || exit 1
+        printf '%s\n' "$deb_info" | grep -qE 'Depends:.*\bzip\b' || exit 1
     )
 }
 run_test "Packaging & Freshness (WP33 Packet 33B): .deb arch/zip, .SRCINFO x86_64, pure wheel & depot-dl freshness" test_packaging_arch_and_freshness_gate_contract
