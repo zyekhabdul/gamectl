@@ -318,16 +318,8 @@ download_game() {
         fi
 
         # Fail-fast offline credential preflight for explicit gated sources before metadata HTTP lookups
-        local dl_cache_zip="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl/manifests/${appid}.zip"
-        local dl_stash_zip="$HOME/.local/share/gamectl/manifests/${appid}.zip"
-        if [ ! -f "$dl_cache_zip" ] && [ ! -f "$dl_stash_zip" ]; then
-            if [ "${source,,}" = "luatools" ] && ! get_valid_luatools_token >/dev/null 2>&1; then
-                echo "[ERROR] LuaTools session unavailable. Authenticate with 'gamectl login-luatools <code | session.json>' and retry." >&2
-                return 1
-            elif [ "${source,,}" = "hubcap" ] && [ -z "$(get_hubcap_api_key 2>/dev/null || true)" ]; then
-                echo "[ERROR] Hubcap API key is not configured. Run 'gamectl config set hubcap_key <smm_key>' and retry." >&2
-                return 1
-            fi
+        if declare -F preflight_manifest_source >/dev/null 2>&1; then
+            preflight_manifest_source "$appid" "$source" true || return 1
         fi
     fi
 

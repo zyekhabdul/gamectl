@@ -789,14 +789,13 @@ search_steam() {
             dl_extra_args=()
             [ "$sel_type" = "DLC" ] || return 0
 
-            local parent_id="$sel_parent" parent_name=""
-            if [ -z "$parent_id" ] && declare -F resolve_steam_app_type >/dev/null 2>&1; then
+            local parent_id="" parent_name=""
+            if declare -F resolve_steam_app_type >/dev/null 2>&1; then
                 local r_info="" r_type=""
                 r_info=$(resolve_steam_app_type "$sel_id" 2>/dev/null || true)
                 IFS=$'\t' read -r r_type parent_id parent_name <<< "$r_info"
-            elif [[ "$parent_id" =~ ^[0-9]+$ ]] && declare -F fetch_steam_app_details >/dev/null 2>&1; then
-                parent_name=$(fetch_steam_app_details "$parent_id" 2>/dev/null | jq -r '.name // empty' 2>/dev/null || true)
             fi
+            [[ "$parent_id" =~ ^[0-9]+$ ]] || parent_id="$sel_parent"
             [[ "$parent_id" =~ ^[0-9]+$ ]] || return 0
 
             local dlc_choice="" dlc_rc=0

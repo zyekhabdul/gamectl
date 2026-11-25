@@ -766,13 +766,14 @@ preview_search_game() {
         local details
         details=$(fetch_steam_app_details "$appid" 2>/dev/null || true)
         if [ -n "$details" ] && [ "$details" != "null" ]; then
-            local raw_type parent_id parent_name is_linux is_win genres
-            raw_type=$(echo "$details" | jq -r '.type // empty' 2>/dev/null || true)
-            parent_id=$(echo "$details" | jq -r '.fullgame.appid // empty' 2>/dev/null || true)
-            parent_name=$(echo "$details" | jq -r '.fullgame.name // empty' 2>/dev/null || true)
-            if [ -n "$raw_type" ]; then
-                local norm_type type_badge
-                norm_type="$(normalize_steam_app_type "$raw_type")"
+            local has_type="0" norm_type="APP" parent_id="" parent_name="" is_linux is_win genres
+            if declare -F parse_steam_app_type_json >/dev/null 2>&1; then
+                local parsed_type
+                parsed_type=$(parse_steam_app_type_json "$details")
+                IFS=$'\t' read -r has_type norm_type parent_id parent_name <<< "$parsed_type"
+            fi
+            if [ "$has_type" = "1" ]; then
+                local type_badge
                 type_badge="$(format_app_type_badge "$norm_type")"
                 if [ "$norm_type" = "DLC" ] && [[ "$parent_id" =~ ^[0-9]+$ ]]; then
                     if [ -n "$parent_name" ]; then

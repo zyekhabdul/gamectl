@@ -507,6 +507,41 @@ EOF
     done
 }
 
+# Fail-fast offline credential preflight for explicit gated manifest providers
+# when no valid local cached/stashed manifest archive exists.
+preflight_manifest_source() {
+    local appid="${1:-}"
+    local pref_source="${2:-auto}"
+    local require_depots="${3:-false}"
+    local src_lc="${pref_source,,}"
+
+    case "$src_lc" in
+        luatools|hubcap) ;;
+        *) return 0 ;;
+    esac
+
+    appid=$(strip_ansi "$appid" | tr -dc "0-9")
+    if [ -n "$appid" ]; then
+        local cache_zip="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl/manifests/${appid}.zip"
+        local stash_zip="$HOME/.local/share/gamectl/manifests/${appid}.zip"
+        if [ -f "$cache_zip" ] && validate_manifest_zip "$cache_zip" "$appid" "$require_depots" >/dev/null 2>&1; then
+            return 0
+        fi
+        if [ -f "$stash_zip" ] && validate_manifest_zip "$stash_zip" "$appid" "$require_depots" >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    if [ "$src_lc" = "luatools" ] && ! get_valid_luatools_token >/dev/null 2>&1; then
+        echo "[ERROR] LuaTools session unavailable. Authenticate with 'gamectl login-luatools <code | session.json>' and retry." >&2
+        return 1
+    elif [ "$src_lc" = "hubcap" ] && [ -z "$(get_hubcap_api_key 2>/dev/null || true)" ]; then
+        echo "[ERROR] Hubcap API key is not configured. Run 'gamectl config set hubcap_key <smm_key>' and retry." >&2
+        return 1
+    fi
+    return 0
+}
+
 # Multi-Provider Manifest & Key Harvester
 fetch_manifest() {
     local appid="$1"
@@ -551,6 +586,8 @@ fetch_manifest() {
         return 0
     fi
 
+    preflight_manifest_source "$appid" "$pref_source" "$require_depots" || return 1
+
     echo "[INFO] Harvesting manifest archive for AppID $appid across multi-provider network..." >&2
 
     local run_dir
@@ -575,9 +612,6 @@ fetch_manifest() {
         src_urls[src_count]="https://hubcapmanifest.com/api/v1/manifest/${appid}"
         src_headers[src_count]="Authorization: Bearer $hubcap_key"
         src_count=$((src_count + 1))
-    elif [ "${pref_source,,}" = "hubcap" ]; then
-        echo "[ERROR] Hubcap API key is not configured. Run 'gamectl config set hubcap_key <smm_key>' and retry." >&2
-        return 1
     fi
 
     # Source 3: Ryuu direct mirror
@@ -606,9 +640,6 @@ fetch_manifest() {
         src_urls[src_count]="https://lua.tools/api/manifest/download?appid=${appid}&source=Luie"
         src_headers[src_count]="Authorization: Bearer $token"
         src_count=$((src_count + 1))
-    elif [ "${pref_source,,}" = luatools ]; then
-        echo "[ERROR] LuaTools session unavailable. Authenticate with 'gamectl login-luatools <code | session.json>' and retry." >&2
-        return 1
     fi
 
     local found=0
@@ -878,6 +909,56 @@ fetch_steam_app_details() {
     return 0
 }
 
+# Parse Steam appdetails data JSON into validated 4-column TSV:
+# <HAS_TYPE><TAB><TYPE><TAB><PARENT_APPID><TAB><PARENT_NAME>
+parse_steam_app_type_json() {
+    local details="${1:-}"
+    if [ -z "$details" ] || [ "$details" = "null" ]; then
+        printf '0\tAPP\t\t\n'
+        return 0
+    fi
+
+    local parsed raw_type="" parent_id="" parent_name=""
+    parsed=$(printf '%s' "$details" | jq -r '
+        [
+            (.type // "-" | tostring | gsub("[\\t\\r\\n]"; "") | if length == 0 then "-" else . end),
+            (.fullgame.appid // "-" | tostring | gsub("[^0-9]"; "") | if length == 0 then "-" else . end),
+            (.fullgame.name // "" | tostring | gsub("[\\t\\r\\n]"; " "))
+        ] | @tsv
+    ' 2>/dev/null || true)
+    if [ -z "$parsed" ]; then
+        printf '0\tAPP\t\t\n'
+        return 0
+    fi
+
+    IFS=$'\t' read -r raw_type parent_id parent_name <<< "$parsed"
+    local has_type="1"
+    if [ -z "$raw_type" ] || [ "$raw_type" = "-" ]; then
+        raw_type=""
+        has_type="0"
+    fi
+    [ "$parent_id" = "-" ] && parent_id=""
+
+    local norm_type
+    norm_type="$(normalize_steam_app_type "$raw_type")"
+    if ! [[ "$parent_id" =~ ^[0-9]+$ ]]; then
+        parent_id=""
+        parent_name=""
+    fi
+
+    if declare -F validate_tui_fields >/dev/null 2>&1; then
+        validate_tui_fields "$has_type" "$norm_type" "$parent_id" "$parent_name" 2>/dev/null || {
+            has_type="0"
+            norm_type="APP"
+            parent_id=""
+            parent_name=""
+        }
+    fi
+
+    printf '%s\t%s\t%s\t%s\n' "$has_type" "$norm_type" "$parent_id" "$parent_name"
+    return 0
+}
+
 # Resolve canonical type and parent base game metadata for a single AppID.
 # Emits sanitized TSV: <TYPE><TAB><PARENT_APPID><TAB><PARENT_NAME>
 resolve_steam_app_type() {
@@ -895,31 +976,14 @@ resolve_steam_app_type() {
         return 0
     fi
 
-    local parsed raw_type="" parent_id="" parent_name=""
-    parsed=$(printf '%s' "$details" | jq -r '
-        [
-            (.type // "-" | tostring | gsub("[\\t\\r\\n]"; "") | if length == 0 then "-" else . end),
-            (.fullgame.appid // "-" | tostring | gsub("[^0-9]"; "") | if length == 0 then "-" else . end),
-            (.fullgame.name // "" | tostring | gsub("[\\t\\r\\n]"; " "))
-        ] | @tsv
-    ' 2>/dev/null || true)
-    IFS=$'\t' read -r raw_type parent_id parent_name <<< "$parsed"
-    [ "$raw_type" = "-" ] && raw_type=""
-    [ "$parent_id" = "-" ] && parent_id=""
-
-    local norm_type
-    norm_type="$(normalize_steam_app_type "$raw_type")"
-    [[ "$parent_id" =~ ^[0-9]+$ ]] || parent_id=""
-
-    if declare -F validate_tui_fields >/dev/null 2>&1; then
-        validate_tui_fields "$norm_type" "$parent_id" "$parent_name" 2>/dev/null || {
-            norm_type="APP"
-            parent_id=""
-            parent_name=""
-        }
+    local parsed has_type="" norm_type="APP" parent_id="" parent_name=""
+    parsed=$(parse_steam_app_type_json "$details")
+    IFS=$'\t' read -r has_type norm_type parent_id parent_name <<< "$parsed"
+    if ! [[ "$parent_id" =~ ^[0-9]+$ ]]; then
+        parent_id=""
+        parent_name=""
     fi
-
-    printf '%s\t%s\t%s\n' "$norm_type" "$parent_id" "$parent_name"
+    printf '%s\t%s\t%s\n' "${norm_type:-APP}" "$parent_id" "$parent_name"
     return 0
 }
 

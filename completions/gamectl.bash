@@ -15,7 +15,7 @@ _gamectl_completions() {
     fi
 
     local commands="menu dashboard library list-ui config configure doctor audit stores gog epic launch run configure-wrappers set-id set-id-interactive generate-steamid get-gamescope-args get-resolution get-steam-root get-steam-libraries steam-libs download downloads download-status entitle adopt-steam unlock inject fetch-dlc sync-steam ensure-downloader detect-gpu check-scope check-sandbox list list-formatted search logs fix-check check-fix fix-install install-fix apply-fix fix-revert revert-fix restart-steam reload-steam fetch-manifest manifest deploy-manifest deploy-sls harvest-dlc dlc-manifests fetch-dlc-manifests login-luatools auth-luatools auth-status luatools-status detect-steamstub steamstub check-stub unpack-stub unpack steamless setup-gbe gbe-setup gbe-install install-gbe backup backup-save restore restore-save sync sync-remote sync-companion sync-tuf sync-pull pull-remote pull-companion pull-tuf mod-overrides onlinefix onlinefix-setup detect-overrides dll-overrides proton-list proton-install proton-remove pfx prefix protondb pdb make-desktop desktop-entry fetch-art fetch-artwork get-art get-steam-grid add-to-steam add-steam get-steam-shortcuts --help --version -h -v --list --list-formatted --search --logs --sync --sync-pull --backup --restore --download --downloads --download-status --inject --fetch-dlc --sync-steam --dashboard --preview --preview-dashboard --preview-search --preview-download"
-    local download_opts="--raw --inject-only --all --foreground -f --standalone --sls --source"
+    local download_opts="--raw --inject-only --all --foreground -f --standalone --sls --source --os --allow-dlc"
     local inject_opts="--all --no-sync"
     local launch_opts="--hud --no-hud --mangohud --no-mangohud --gamemode --no-gamemode --gamescope --no-gamescope --fsr --no-fsr --glthread --no-glthread --scope --no-scope --prime --no-prime --sandbox --no-sandbox"
     local set_id_opts="--broadcast --global"
@@ -131,6 +131,8 @@ _gamectl_completions() {
                 COMPREPLY=( $(compgen -W "$download_opts" -- "$cur") )
             elif [ "$prev" = "--source" ]; then
                 COMPREPLY=( $(compgen -W "auto ryuu sushi luatools" -- "$cur") )
+            elif [ "$prev" = "--os" ]; then
+                COMPREPLY=( $(compgen -W "linux windows macos all" -- "$cur") )
             elif [ "$cword" -eq 3 ]; then
                 _complete_path
             fi
