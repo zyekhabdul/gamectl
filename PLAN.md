@@ -1,7 +1,7 @@
 # WORK PACKET 39: MULTI-STORE PHASE 2 (GOG ADAPTER, DISCOVERY, CLI & OPTIONAL PROBE)
 
 - **Track**: Multi-Store Phase 2 / DRM-Free GOG Adapter (`gogdl` / `lgogdownloader`)
-- **Status**: PENDING [0/4 PACKETS]
+- **Status**: COMPLETED [4/4 PACKETS]
 - **Prasyarat**: WP38 (Unified Store Interface, Steam Adapter, Scanner v3 & TUI Filter) — COMPLETED
 - **Riwayat Selesai**: WP33..WP36 (`9a1be91..15e95bc`), CI/Dual-License/Hygiene (`5ea7948..804675e`), Modular Core/Steam/Runners/TUI Split WP37 (`2655748..505b758`), Multi-Store Phase 1 WP38 (`a4caa1d..1c93ff5`), Nix `buildRustPackage` & `export -f` Pruning (`afe0af4..0188408`), serta SIGPIPE/ShellCheck Hardening (working tree terverifikasi).
 - **Basis**: `docs/RFC_MULTISTORE_SUPPORT.md` (v2.0) dan `docs/SOVEREIGN_ORIGINAL_PURPOSE.md`.
@@ -24,7 +24,7 @@
 
 ## 2. Rencana Eksekusi Detail (Packet 39A - 39D)
 
-### [ ] Packet 39A: GOG Store Adapter (`src/stores/20_store_gog.sh`) & Registry
+### [x] Packet 39A: GOG Store Adapter (`src/stores/20_store_gog.sh`) & Registry
 - **Target Files**: `src/stores/20_store_gog.sh`, `src/stores/00_store_interface.sh`, `scripts/build.sh`
 - **Langkah Teknis**:
   1. Buat `src/stores/20_store_gog.sh` yang mengimplementasikan kontrak `store_gog_*`:
@@ -40,7 +40,7 @@
 - **Definition of Done (DoD)**:
   - `store_list_registered` mengembalikan `steam` dan `gog`; `store_dispatch gog ...` berjalan bersih saat `gogdl`/`lgogdownloader` tersedia (mocked atau nyata) dan gagal terstruktur ke `stderr` saat absen.
 
-### [ ] Packet 39B: GOG Local Installation Discovery (`src/steam/20_discovery.sh`)
+### [x] Packet 39B: GOG Local Installation Discovery (`src/steam/20_discovery.sh`)
 - **Target Files**: `src/steam/20_discovery.sh`
 - **Langkah Teknis**:
   1. Perluas `scan_installed_games()` pada pemindaian direktori kustom (`~/Games/`, `~/GOG Games/`, `~/.config/gamectl/libraries`, `GAMECTL_LIBRARY_DIRS`) untuk mendeteksi metadata instalasi GOG (`goggame-*.info` atau `.gog_id` + `gameinfo`):
@@ -50,7 +50,7 @@
 - **Definition of Done (DoD)**:
   - Direktori berisi `goggame-*.info` valid terindeks sebagai `STORE=GOG` pada `scan_installed_games`; nama berkarakter `\t`/`\n` tetap ditolak oleh `validate_tui_fields`.
 
-### [ ] Packet 39C: CLI `gamectl gog`, TUI Filter & Optional Doctor Probe
+### [x] Packet 39C: CLI `gamectl gog`, TUI Filter & Optional Doctor Probe
 - **Target Files**: `src/main.sh`, `src/tui/70_dashboard.sh`, `src/diagnostics/60_doctor.sh`, `completions/gamectl.bash`
 - **Langkah Teknis**:
   1. Tambahkan subcommand `gamectl gog <status|auth|search|download|sync> [args...]` dan `--help` di `src/main.sh` serta completion `gog` di `completions/gamectl.bash`.
@@ -61,7 +61,7 @@
 - **Definition of Done (DoD)**:
   - `gamectl doctor` tetap pass pada host tanpa `gogdl`/`lgogdownloader`; `library_menu` `Tab`/`Alt-S` memfilter `GOG` dengan nol bentrokan `Ctrl-S`.
 
-### [ ] Packet 39D: Contract Tests, Docs, Rebuild & Full Verification
+### [x] Packet 39D: Contract Tests, Docs, Rebuild & Full Verification
 - **Target Files**: `tests/test_remediation.sh`, `DEVELOPMENT.md`, `PLAN.md`, `bin/gamectl`
 - **Langkah Teknis**:
   1. Tambahkan Tests 33–34 di `tests/test_remediation.sh`:

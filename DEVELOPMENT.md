@@ -34,7 +34,8 @@ src/
 │   └── 35_fixes.sh             # Community & Online-Fix harvester, backup snapshot, atomic revert
 ├── stores/
 │   ├── 00_store_interface.sh   # Unified store adapter registry, capability probe & store_dispatch()
-│   └── 10_store_steam.sh       # Built-in Steam/Standalone adapter wrapping CDN downloader & offline DLC sync
+│   ├── 10_store_steam.sh       # Built-in Steam/Standalone adapter wrapping CDN downloader & offline DLC sync
+│   └── 20_store_gog.sh         # Optional DRM-free GOG adapter (gogdl / lgogdownloader) & gamectl gog CLI
 ├── runners/
 │   ├── 40_wrappers.sh          # Wrapper config loader, developer profiler, wrapper builder, global settings
 │   ├── 41_proton_prefix.sh     # Windows runner, wineserver resolver, DLL overrides, GE-Proton manager, manage_prefix
