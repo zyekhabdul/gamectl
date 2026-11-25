@@ -161,3 +161,68 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
   - `make lint` lolos dengan Exit Code 0.
   - Seluruh test contracts (`test_cli.sh`, `test_remediation.sh`, `test_tui_ergonomics.sh`, Python safety suites) lolos dengan Exit Code 0 (0 failed).
   - Executable `bin/gamectl` sinkron 100% dengan seluruh modular source.
+
+---
+
+# REMEDIATION WORK PACKET 2: STEAM CATALOG APP-TYPE SSoT & DLC GUARD
+
+- **Track**: Remediation / Steam Catalog App-Type SSoT & Engine-Level DLC Guard
+- **Status**: PENDING [0/4 PACKETS]
+- **Prasyarat**: Remediation Chunks 1–7 (COMPLETED) & WP40 Epic Adapter (COMPLETED, `76a0630`)
+- **Basis**: `docs/SOVEREIGN_ORIGINAL_PURPOSE.md`, `docs/REMEDIATION.md` (SoC), dan temuan empiris API Valve (`storesearch` vs `IStoreBrowseService/GetItems/v1` & `appdetails`)
+- **Target Files**: `src/steam/31_manifests.sh`, `src/steam/30_downloader.sh`, `src/steam/32_steam_bridge.sh`, `src/tui/70_dashboard.sh`, `src/tui/71_previews.sh`, `tests/test_remediation.sh`, `bin/gamectl`
+
+---
+
+## 1. Tujuan & Invarian
+
+1. **Single Source of Truth Klasifikasi Tipe (Anti-Monkeypatch)**:
+   - Gunakan satu kosakata token kanonik (`GAME`, `DLC`, `DEMO`, `MOD`, `SOUNDTRACK`, `TOOL`, `APP`) dan satu resolver domain (`classify_steam_app_types` via batch `IStoreBrowseService/GetItems/v1` + `fetch_steam_app_details` / `resolve_steam_app_type` via `appdetails?filters=basic,platforms,genres`). Dilarang memakai heuristik judul string (`*DLC*`, `*Soundtrack*`).
+2. **Right-Sized Standardization (YAGNI)**:
+   - Standarisasi kosakata dan domain Steam sekarang; tunda perluasan kolom `ITEM_TYPE`/`PARENT_ID` pada kontrak lintas-store (`20_store_gog.sh`, `30_store_epic.sh`) sampai WP41 (`search_stores`) karena GOG (`mediaType=game`) dan Epic (`legendary list --json`) tidak mencampur DLC di output search.
+3. **Backward Compatibility Cache & Test Contracts**:
+   - Pertahankan cache key `steam_details_${appid}` (tidak memecah cache baru maupun merusak fixture offline `tests/test_cli.sh` / `tests/test_tui_ergonomics.sh`), dan pertahankan `--max-time 15` pada panggilan `storesearch` di `src/tui/70_dashboard.sh` dan `src/steam/32_steam_bridge.sh` (`tests/test_remediation.sh:1223-1224`).
+4. **Engine-Level Guard + Offline Resilience**:
+   - Proteksi DLC berlaku di engine headless `download_game()` (`--allow-dlc` opt-in) maupun TUI (`search_steam()` menawarkan redirect ke `parent_appid`); bila offline/tanpa metadata cache, tetap fallback aman (`APP`/lanjut normal tanpa blokir palsu).
+5. **TUI Structured Fields & Sanitasi**:
+   - `search_steam()` membawa `RAW_TYPE` dan `PARENT_APPID` di kolom TSV tersembunyi (`--with-nth=1,2,3,4`), seluruh field lolos `validate_tui_fields`, dan toggle filter `Tab` (`ALL -> GAME -> DLC -> ALL`) tidak bentrok dengan hotkey eksisting (`ctrl-a/u/s/d/f`).
+
+---
+
+## 2. Rencana Eksekusi Detail (Packet R2A - R2D)
+
+### [ ] Packet R2A: Steam App-Type SSoT & Metadata Helpers (`src/steam/31_manifests.sh`)
+- **Target Files**: `src/steam/31_manifests.sh`
+- **Langkah Teknis**:
+  1. Tambah `format_app_type_badge <raw_type>` untuk merender token `[GAME]`, `[DLC]`, `[DEMO]`, `[MOD]`, `[OST]`, `[TOOL]`, `[APP]` secara konsisten.
+  2. Tambah `classify_steam_app_types <appid1> [appid2 ...]` yang memanggil `IStoreBrowseService/GetItems/v1` dalam 1 batch HTTP (`--connect-timeout 5 --max-time 10`), memetakan enum Valve (`0->GAME`, `4->DLC`, `1->DEMO`, `2->MOD`, `6->VIDEO`, `11->SOUNDTRACK`), memvalidasi output lewat `validate_tui_fields`, dan mengembalikan `<APPID>\t<TYPE>\t<PARENT_APPID>` dengan fallback aman `APP` saat offline/gagal.
+  3. Tambah `fetch_steam_app_details <appid>` (`appdetails?appids=${appid}&filters=basic,platforms,genres` memakai cache key `steam_details_${appid}`) dan `resolve_steam_app_type <appid>` yang mengembalikan `<TYPE>\t<PARENT_APPID>\t<PARENT_NAME>` tanpa memaksa panggilan jaringan bila fixture cache lokal tidak memiliki field `type`.
+- **Definition of Done (DoD)**:
+  - Seluruh caller membaca kosakata tipe kanonik dan tuple terstruktur dari satu SSoT tanpa parser `appdetails`/`IStoreBrowseService` duplikat.
+
+### [ ] Packet R2B: TUI Catalog Badges, Filter Toggle & Preview Metadata
+- **Target Files**: `src/tui/70_dashboard.sh`, `src/tui/71_previews.sh`, `src/steam/32_steam_bridge.sh`
+- **Langkah Teknis**:
+  1. Perbarui `search_steam()` (`70_dashboard.sh`) untuk memperkaya hasil `storesearch` via `classify_steam_app_types`, menyusun baris `APPID\tBADGE\tTITLE\tSTATUS\tRAW_TYPE\tPARENT_APPID` dengan `--with-nth=1,2,3,4`, serta menambah toggle filter `Tab` (`ALL -> GAME -> DLC -> ALL`) tanpa mengganggu `ctrl-a/u/s/d/f`.
+  2. Saat user memilih item `DLC` yang memiliki `PARENT_APPID` untuk diunduh di `search_steam()`, tampilkan prompt pilihan untuk mengunduh Base Game (`PARENT_APPID`) yang sudah mencakup depot DLC.
+  3. Perbarui `preview_search_game()` (`71_previews.sh`) memakai `fetch_steam_app_details` agar menampilkan baris `Type : [BASE GAME]` atau `Type : [DLC] (Base: <name> • <parent_appid>)`.
+  4. Perbarui `unlock_interactive()` (`32_steam_bridge.sh`) menampilkan badge tipe dari `classify_steam_app_types` pada picker adopsi.
+- **Definition of Done (DoD)**:
+  - Pengguna langsung membedakan `[GAME]` vs `[DLC]` pada list kiri dan preview kanan, serta terhindar dari unduhan DLC tunggal tanpa sengaja.
+
+### [ ] Packet R2C: Engine-Level DLC Guard (`src/steam/30_downloader.sh`)
+- **Target Files**: `src/steam/30_downloader.sh`
+- **Langkah Teknis**:
+  1. Tambah flag opt-in `--allow-dlc` pada `download_game()`.
+  2. Sebelum memulai manifest/download, periksa `resolve_steam_app_type "$appid"`: jika terverifikasi `DLC` dengan `PARENT_APPID` dan `--allow-dlc` tidak diberikan, gagalkan dengan pesan terstruktur ke `stderr` yang menyarankan `gamectl download <parent_appid>`.
+  3. Bila offline atau metadata tidak tersedia (`UNKNOWN`/`APP`), lanjutkan eksekusi normal tanpa memblokir pengguna.
+- **Definition of Done (DoD)**:
+  - Baik jalur CLI (`gamectl download <dlc_appid>`) maupun TUI dilindungi satu guard domain yang konsisten dan aman offline.
+
+### [ ] Packet R2D: Offline Contract Tests, Rebuild & Full Verification
+- **Target Files**: `tests/test_remediation.sh`, `bin/gamectl`, `docs/REMEDIATION.md`
+- **Langkah Teknis**:
+  1. Tambah contract test di `tests/test_remediation.sh` dengan mock `IStoreBrowseService` dan `appdetails` offline untuk memverifikasi klasifikasi `[GAME]` vs `[DLC]`, `Tab` filter `ALL/GAME/DLC`, preview `Type` & `Base Game`, serta guard `download_game()` (`DLC` ditolak default, lolos dengan `--allow-dlc`, aman saat offline).
+  2. Kompilasi ulang `bin/gamectl` (`./scripts/build.sh && ./scripts/build.sh --check`), jalankan `STRICT_LINT=1 make lint` dan `make test`, serta tandai seluruh packet R2A–R2D selesai di `docs/REMEDIATION.md`.
+- **Definition of Done (DoD)**:
+  - Seluruh lint, bundle check, suite Bash (`test_cli.sh`, `test_remediation.sh`, dkk.), dan Python safety tests lulus Exit Code `0` tanpa melemahkan assertion eksisting.
