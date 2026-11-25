@@ -2786,7 +2786,7 @@ cnt_p.write_text(str(idx + 1))
 with log.open("a") as fh:
     fh.write(" ".join(sys.argv[1:]) + "\n")
 sys.stdin.read()
-if idx < 2:
+if idx < 3:
     sys.stdout.write("tab\n")
     sys.exit(0)
 sys.exit(130)
@@ -2819,10 +2819,114 @@ assert os.waitstatus_to_exitcode(status) == 0, f"library_menu exited non-zero: {
 PY
         grep -Fq '[Store: ALL]' "$t_dir/fzf_args.log" || exit 1
         grep -Fq '[Store: STEAM]' "$t_dir/fzf_args.log" || exit 1
+        grep -Fq '[Store: GOG]' "$t_dir/fzf_args.log" || exit 1
         grep -Fq '[Store: STANDALONE]' "$t_dir/fzf_args.log" || exit 1
     )
 }
 run_test "Scanner v3 & TUI Store Switcher (WP38C/38D)" test_wp38_scanner_v3_and_store_switcher_contract
+
+# Test 33: WP39A/39C — Optional GOG Adapter, Offline Status, Search/Sync Contracts & CLI
+test_wp39_gog_adapter_and_cli_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp39_gog_XXXXXX")
+    mkdir -p "$t_dir/home/.config/gamectl" "$t_dir/home/.config/gogdl" "$t_dir/home/.local/share/gbe-fork/regular/x64" \
+             "$t_dir/home/.local/share/gbe-fork/windows/release/regular/x64" "$t_dir/runtime" "$t_dir/game/saves" \
+             "$t_dir/no_gog_bin" "$t_dir/gog_bin"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home" XDG_CONFIG_HOME="$t_dir/home/.config" XDG_RUNTIME_DIR="$t_dir/runtime"
+        touch "$t_dir/home/.local/share/gbe-fork/regular/x64/libsteam_api.so" \
+              "$t_dir/home/.local/share/gbe-fork/windows/release/regular/x64/steam_api64.dll"
+        echo "save_data" > "$t_dir/game/saves/slot.dat"
+
+        local cmd_tool tool_path
+        for cmd_tool in bash sh env cat mkdir rm cp mv grep awk sed jq curl file zip unzip rsync ssh python3 fzf dirname basename readlink head tail date stat touch tr wc cut find chmod mktemp uname pgrep id; do
+            tool_path="$(command -v "$cmd_tool" 2>/dev/null || true)"
+            [ -n "$tool_path" ] && ln -sf "$tool_path" "$t_dir/no_gog_bin/$cmd_tool"
+        done
+
+        PATH="$t_dir/no_gog_bin" bash -c '
+            set -e
+            source "$1/src/core/10_utils.sh"
+            source "$1/src/core/14_saves.sh"
+            source "$1/src/steam/20_discovery.sh"
+            source "$1/src/runners/40_wrappers.sh"
+            source "$1/src/stores/00_store_interface.sh"
+            source "$1/src/diagnostics/60_doctor.sh"
+
+            declare -F store_gog_available >/dev/null
+            store_list_registered | grep -Fxq "gog"
+            ! store_gog_available
+            curl() { touch "$2/net_hit"; return 99; }
+            st=$(store_dispatch gog status)
+            [ ! -e "$2/net_hit" ]
+            printf "%s\n" "$st" | grep -Fq "store=gog"
+            printf "%s\n" "$st" | grep -Fq "missing"
+            [ ! -e "$HOME/.config/gamectl/gog_token" ]
+
+            err=$(store_dispatch gog search "witcher" 2>&1) && exit 1 || true
+            printf "%s" "$err" | grep -Fq "[ERROR]"
+            err=$(store_dispatch gog download 1207658924 "$2/dl" 2>&1) && exit 1 || true
+            printf "%s" "$err" | grep -Fq "[ERROR]"
+
+            doc_out=$(doctor_audit || true)
+            printf "%s\n" "$doc_out" | grep -Fq "GOG Store CLI"
+            printf "%s\n" "$doc_out" | grep -Fq "[OPT]"
+        ' _ "$REPO_ROOT" "$t_dir" || exit 1
+
+        cat <<'EOF' > "$t_dir/gog_bin/gogdl"
+#!/usr/bin/env bash
+case "$1" in
+    search)
+        if [ "${GOG_EVIL:-0}" = "1" ]; then
+            printf '[{"id":99,"title":"Bad\\tTitle","worksOn":{"Linux":true}}]\n'
+        else
+            printf '[{"id":1207658924,"title":"The Witcher 3","worksOn":{"Linux":true,"Windows":true}}]\n'
+        fi ;;
+    download)
+        mkdir -p "$4"
+        printf 'downloaded %s\n' "$2" > "$4/gog.ok" ;;
+    save-sync)
+        printf 'synced %s %s\n' "$2" "$3" > "$2/sync.ok" ;;
+esac
+EOF
+        chmod +x "$t_dir/gog_bin/gogdl"
+        printf '{"access_token":"dummy"}\n' > "$t_dir/home/.config/gogdl/auth.json"
+        "$REPO_ROOT/scripts/build.sh" >/dev/null
+
+        PATH="$t_dir/gog_bin:$PATH" bash -c '
+            set -e
+            source "$1/src/core/10_utils.sh"
+            source "$1/src/core/14_saves.sh"
+            source "$1/src/steam/20_discovery.sh"
+            source "$1/src/stores/00_store_interface.sh"
+
+            store_gog_available
+            store_list_available | grep -Fxq "gog"
+            store_dispatch gog status | grep -Fq "session present"
+            store_dispatch gog search "" 2>/dev/null && exit 1 || true
+
+            s_out=$(store_dispatch gog search "witcher")
+            printf "%s\n" "$s_out" | grep -Fq $'\''GOG\t1207658924\tThe Witcher 3\tlinux,windows\tAVAILABLE'\''
+            GOG_EVIL=1 store_dispatch gog search "evil" 2>/dev/null && exit 1 || true
+
+            store_dispatch gog download 1207658924 "$2/dl_game" >/dev/null
+            grep -Fq "downloaded 1207658924" "$2/dl_game/gog.ok"
+
+            store_dispatch gog sync 1207658924 "$2/game" >/dev/null
+            [ -d "$2/game/.save_snapshots/slot1" ]
+            grep -Fq "synced $2/game 1207658924" "$2/game/sync.ok"
+
+            "$1/bin/gamectl" gog --help | grep -Fq "gamectl gog"
+            "$1/bin/gamectl" gog status | grep -Fq "ready (gogdl:"
+            "$1/bin/gamectl" gog search "witcher" | grep -Fq "1207658924"
+            "$1/bin/gamectl" gog bogus 2>/dev/null && exit 1 || true
+            "$1/bin/gamectl" stores list | grep -Eq "^gog[[:space:]]+\[AVAILABLE\]"
+        ' _ "$REPO_ROOT" "$t_dir" || exit 1
+    )
+}
+run_test "Optional GOG Adapter & CLI Contracts (WP39A/39C)" test_wp39_gog_adapter_and_cli_contract
+
 
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
