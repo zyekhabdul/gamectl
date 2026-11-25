@@ -352,7 +352,9 @@ parse_remote_sync_target() {
             echo "[ERROR] Remote target '$raw' requires rclone, which is not installed in PATH." >&2
             return 1
         fi
-        if ! rclone listremotes 2>/dev/null | grep -Fqx "${r_name}:"; then
+        local rclone_remotes
+        rclone_remotes=$(rclone listremotes 2>/dev/null || true)
+        if ! grep -Fqx "${r_name}:" <<< "$rclone_remotes"; then
             echo "[ERROR] rclone remote '${r_name}:' not found (check 'rclone listremotes')." >&2
             return 1
         fi
@@ -377,6 +379,10 @@ parse_remote_sync_target() {
             echo "[ERROR] Invalid remote sync target '$raw': missing host or remote name." >&2
             return 1
         fi
+        local rclone_remotes=""
+        if command -v rclone >/dev/null 2>&1; then
+            rclone_remotes=$(rclone listremotes 2>/dev/null || true)
+        fi
         if [[ "$lhs" == *@* ]] || [[ "$lhs" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             if [ -z "$rhs" ]; then
                 echo "[ERROR] SSH target '$raw' has empty path after ':'. Omit ':' or specify a path (e.g. ${lhs}:~/gamectl-saves)." >&2
@@ -385,7 +391,7 @@ parse_remote_sync_target() {
             REMOTE_TARGET_BACKEND="ssh"
             REMOTE_TARGET_ENDPOINT="$lhs"
             REMOTE_TARGET_BASE="$rhs"
-        elif command -v rclone >/dev/null 2>&1 && rclone listremotes 2>/dev/null | grep -Fqx "${lhs}:"; then
+        elif [ -n "$rclone_remotes" ] && grep -Fqx "${lhs}:" <<< "$rclone_remotes"; then
             while [[ "$rhs" == /* ]]; do rhs="${rhs#/}"; done
             while [[ "$rhs" == */ ]]; do rhs="${rhs%/}"; done
             REMOTE_TARGET_BACKEND="rclone"
@@ -615,7 +621,7 @@ find_game_binary() {
         fname="${f##*/}"
         validate_tui_fields "$fname" || continue
         case "$fname" in
-            UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|vcredist*|dotnet*|vc_redist*|*CrashReport*)
+            UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|dotnet*|*CrashReport*)
                 continue
                 ;;
             *)
@@ -634,7 +640,7 @@ find_game_binary() {
                 fname="${f##*/}"
                 validate_tui_fields "$fname" || continue
                 case "$fname" in
-                    UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|vcredist*|dotnet*|vc_redist*|*CrashReport*)
+                    UnityCrashHandler*|*unins*|*setup*|*installer*|*redist*|DXSETUP*|dotnet*|*CrashReport*)
                         continue
                         ;;
                     *)
@@ -938,7 +944,9 @@ audit_zip_safety() {
         echo "[ERROR] Security violation: unsafe path traversal detected in archive payload." >&2
         return 1
     fi
-    if unzip -Z "$zip_file" 2>/dev/null | grep -Eq '^l[-rwxstST]{6,9}[[:space:]]'; then
+    local zip_details
+    zip_details=$(unzip -Z "$zip_file" 2>/dev/null) || return 1
+    if grep -Eq '^l[-rwxstST]{6,9}[[:space:]]' <<< "$zip_details"; then
         echo "[ERROR] Security violation: symlink entry detected in archive payload." >&2
         return 1
     fi
@@ -5176,7 +5184,7 @@ login_luatools() {
             -X POST "https://lua.tools/api/auth/code/redeem" \
             -H "Content-Type: application/json" \
             -H "User-Agent: discord(dot)gg/luatools" \
-            -d "{"code":"$code"}" 2>/dev/null || true)
+            -d "$(jq -nc --arg code "$code" '{code:$code}')" 2>/dev/null || true)
 
         local token_hash
         token_hash=$(echo "$redeem_resp" | jq -r '.token // empty' 2>/dev/null || true)
@@ -5192,7 +5200,7 @@ login_luatools() {
             -H "Content-Type: application/json" \
             -H "apikey: $supabase_key" \
             -H "User-Agent: discord(dot)gg/luatools" \
-            -d "{"type":"magiclink","token_hash":"$token_hash"}" 2>/dev/null || true)
+            -d "$(jq -nc --arg th "$token_hash" '{type:"magiclink",token_hash:$th}')" 2>/dev/null || true)
 
         local access_token refresh_token expires_in
         access_token=$(echo "$verify_resp" | jq -r '.access_token // empty' 2>/dev/null || true)
@@ -5234,7 +5242,7 @@ login_luatools() {
             -H "Content-Type: application/json" \
             -H "apikey: $supabase_key" \
             -H "User-Agent: discord(dot)gg/luatools" \
-            -d "{"refresh_token":"$input"}" 2>/dev/null || true)
+            -d "$(jq -nc --arg rt "$input" '{refresh_token:$rt}')" 2>/dev/null || true)
 
         local access_token new_refresh expires_in
         access_token=$(echo "$refresh_resp" | jq -r '.access_token // empty' 2>/dev/null || true)
@@ -6799,7 +6807,7 @@ revert_game_fix() {
             done < "$installed_list"
         elif [ -d "$backup_files_dir" ]; then
             (
-                cd "$backup_files_dir"
+                cd "$backup_files_dir" || exit 1
                 find . -type f | while read -r f; do
                     echo "  • [RESTORE] ${f#./} (original file from backup)"
                 done
@@ -6828,9 +6836,9 @@ revert_game_fix() {
         done < "$installed_list"
     elif [ -d "$backup_files_dir" ]; then
         (
-            cd "$backup_files_dir"
+            cd "$backup_files_dir" || exit 1
             find . -type f -exec cp -pv {} "$resolved_dir/{}" \;
-        )
+        ) || return 1
     fi
 
     invalidate_scan_cache
@@ -12923,7 +12931,7 @@ preview_dashboard() {
                     local fname="${f##*/}"
                     case "$fname" in
                         *steam*|store_*) c_steam=$((c_steam + 1)) ;;
-                        *proton*|protondb_*) c_pdb=$((c_pdb + 1)) ;;
+                        *proton*) c_pdb=$((c_pdb + 1)) ;;
                     esac
                 done
                 printf "%s %s %s\n" "$c_size" "$c_steam" "$c_pdb" > "$c_cache" 2>/dev/null || true
@@ -13017,7 +13025,7 @@ preview_dashboard() {
             echo "  • Live real-time download log streaming"
             echo "  • Interactive pause/resume and process cancellation (${UI_CYAN}Ctrl-K${UI_RST})"
             ;;
-        *4*|*UNLOCK*|*ENTITLE*|*ENTITLEMENT*|*ACF*|*ADOPT*)
+        *4*|*UNLOCK*|*ENTITLE*|*ACF*|*ADOPT*)
             echo "${UI_BOX}╭─ SELECTED MODULE: [04] STEAM ACF ADOPTION ────────────╮${UI_RST}"
             echo "│ ${UI_BOLD}PHYSICAL DISCOVERY & ASSET ADOPTION MANAGER${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
@@ -13213,7 +13221,7 @@ preview_dashboard() {
             echo
             echo "  ${UI_DIM}Full Audit: Press Enter to launch interactive 7-layer doctor_audit${UI_RST}"
             ;;
-        *7*|*LOG*|*LOGS*|*ACTIVITY*|*RIWAYAT*)
+        *7*|*LOG*|*ACTIVITY*|*RIWAYAT*)
             echo "${UI_BOX}╭─ SELECTED MODULE: [07] ACTIVITY & RUNTIME LOGS ───────╮${UI_RST}"
             echo "│ ${UI_BOLD}CENTRALIZED OPERATIONAL TELEMETRY & AUDIT${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
@@ -13355,14 +13363,14 @@ preview_log_entry() {
             *LAUNCH*|*RUNNER*)
                 advice="Windows runner missing or crashed. Run 'gamectl doctor' or install Proton-GE/Wine."
                 ;;
+            *SAVE*|*BACKUP*|*RESTORE*)
+                advice="Savegame snapshot error. Verify disk space in target directory or storage quota."
+                ;;
             *STORE*|*DOWNLOAD*|*DEPOT*)
                 advice="Network or CDN timeout. Check connectivity to Steam Store or CDN endpoints."
                 ;;
             *GBE*|*INJECT*)
                 advice="GBE injection failure. Check file permissions or verify 32-bit vs 64-bit architecture."
-                ;;
-            *SAVE*|*BACKUP*|*RESTORE*)
-                advice="Savegame snapshot error. Verify disk space in target directory or storage quota."
                 ;;
             *DRM*|*STEAMSTUB*)
                 advice="SteamStub DRM detected. Run 'gamectl unpack <exe>' using Steamless CLI."
