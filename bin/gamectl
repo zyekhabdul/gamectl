@@ -2669,6 +2669,10 @@ scan_installed_games() {
     declare -F _epic_config_dir >/dev/null 2>&1 && epic_cfg_dir="$(_epic_config_dir)"
     local epic_installed="$epic_cfg_dir/installed.json"
 
+    local amazon_cfg_dir="${NILE_CONFIG_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/nile}"
+    declare -F _amazon_config_dir >/dev/null 2>&1 && amazon_cfg_dir="$(_amazon_config_dir)"
+    local amazon_installed="$amazon_cfg_dir/installed.json"
+
     # Fast-path: Check cache validity (TTL: 60s, invalidated if candidate library directories are newer)
     local use_cached=false
     if [ "$force_refresh" = false ] && [ -f "$cache_file" ] &&
@@ -2686,6 +2690,9 @@ scan_installed_games() {
                 fi
             done
             if [ "$use_cached" = true ] && [ -f "$epic_installed" ] && [ "$epic_installed" -nt "$cache_file" ]; then
+                use_cached=false
+            fi
+            if [ "$use_cached" = true ] && [ -f "$amazon_installed" ] && [ "$amazon_installed" -nt "$cache_file" ]; then
                 use_cached=false
             fi
         fi
@@ -2800,6 +2807,56 @@ scan_installed_games() {
                 done <<< "$epic_rows"
             else
                 printf '[ERROR] Invalid Epic installed.json payload in %s\n' "$epic_installed" >&2
+            fi
+        fi
+
+        # 1c. Scan Amazon Games (Nile installed.json) before custom dirs to deduplicate ~/Games/
+        if [ -f "$amazon_installed" ] && command -v jq >/dev/null 2>&1; then
+            local amazon_rows=""
+            if amazon_rows=$(jq -r '
+                (if type == "array" then to_entries | map({k:(.key|tostring), v:.value})
+                 elif type == "object" then to_entries | map({k:.key, v:.value})
+                 else error("invalid") end)[] |
+                (.k | tostring) as $k |
+                if (.v | type) != "object" then "ERR\t" + ($k | gsub("[\\t\\r\\n]"; "_"))
+                else
+                    ((.v.id // .v.product.id // (if ($k | test("^[0-9]+$")) then "" else $k end)) | tostring) as $id |
+                    ((.v.title // .v.product.title // $id) | tostring) as $title |
+                    ((.v.path // .v.install_path // "") | tostring) as $ipath |
+                    ((.v.executable // "") | tostring) as $exe |
+                    if ($id == "") or ($ipath == "") or ($id | test("[\\t\\r\\n]")) or ($title | test("[\\t\\r\\n]")) or ($ipath | test("[\\t\\r\\n]")) or ($exe | test("[\\t\\r\\n]")) then
+                        "ERR\t" + ($k | gsub("[\\t\\r\\n]"; "_"))
+                    else ["OK", $id, $title, $ipath, $exe] | @tsv end
+                end' "$amazon_installed" 2>/dev/null); then
+                local a_kind a_id a_title a_path a_exe
+                while IFS=$'\t' read -r a_kind a_id a_title a_path a_exe; do
+                    [ -n "$a_kind" ] || continue
+                    if [ "$a_kind" = "ERR" ]; then
+                        printf '[ERROR] Invalid Amazon metadata entry (%s) in %s\n' "${a_id:-unknown}" "$amazon_installed" >&2
+                        continue
+                    fi
+                    [ -d "$a_path" ] || continue
+                    local canon_adir
+                    canon_adir=$(realpath -e "$a_path" 2>/dev/null || echo "$a_path")
+                    [[ -v seen_dirs["$canon_adir"] ]] && continue
+                    [[ -v seen_dirs["$a_path"] ]] && continue
+                    seen_dirs["$canon_adir"]=1
+                    seen_dirs["$a_path"]=1
+                    local a_gbin=""
+                    if [ -n "$a_exe" ] && [[ "$a_exe" != /* ]] && [[ "$a_exe" != *".."* ]] && [ -f "$a_path/$a_exe" ]; then
+                        a_gbin="$a_exe"
+                    else
+                        a_gbin=$(find_game_binary "$a_path") || continue
+                    fi
+                    [ -n "$a_gbin" ] || continue
+                    validate_tui_fields "$a_id" "$a_title" "$a_path" "$a_gbin" || continue
+                    local a_status
+                    a_status=$(resolve_game_drm_status "$a_path" "" "$a_gbin")
+                    [ "$a_status" = "STANDALONE" ] && a_status="AMAZON"
+                    printf "%s\t%s\t%s\t%s\t%s\tAMAZON\n" "$a_id" "$a_title" "$a_status" "$a_path" "$a_gbin" >> "$cache_file.tmp"
+                done <<< "$amazon_rows"
+            else
+                printf '[ERROR] Invalid Amazon installed.json payload in %s\n' "$amazon_installed" >&2
             fi
         fi
 
@@ -2923,6 +2980,7 @@ scan_installed_games() {
                 *VALVE_DLL*)  c_badge="${UI_CYAN}[VALVE_DLL] ${UI_RST}" ;;
                 *GOG*)        c_badge="${UI_PURPLE}[GOG]       ${UI_RST}" ;;
                 *EPIC*)       c_badge="${UI_CYAN}[EPIC]      ${UI_RST}" ;;
+                *AMAZON*)     c_badge="${UI_AMBER}[AMAZON]    ${UI_RST}" ;;
                 *)            c_badge="${UI_ICE}[STANDALONE]${UI_RST}" ;;
             esac
             printf "%s\t%s\t%s\t%s\t%s\t%s\n" "${UI_DIM}${c_appid}${UI_RST}" "${UI_BOLD}${c_title}${UI_RST}" "$c_badge" "$c_gdir" "$c_gbin" "$c_store"
@@ -7722,7 +7780,7 @@ EOF
 
 # Print registered store adapter identifiers, one per line.
 store_list_registered() {
-    printf '%s\n' "steam" "gog" "epic"
+    printf '%s\n' "steam" "gog" "epic" "amazon"
 }
 
 # Print store adapters that are offline-ready on this host.
@@ -7804,10 +7862,130 @@ stores_cli() {
     esac
 }
 
+# Unified headless authentication hub across all stores (never stores plaintext secrets).
+auth_hub_cli() {
+    local action="${1:-status}"
+    [ $# -gt 0 ] && shift
+    case "$action" in
+        status)
+            local lua_status="unconfigured"
+            local lumen_auth="${XDG_DATA_HOME:-$HOME/.local/share}/Lumen/luatools/backend/data/lua_tools_auth.json"
+            if [ -s "$HOME/.config/gamectl/lua_tools_auth.json" ] || [ -s "$lumen_auth" ]; then
+                lua_status="session present"
+            fi
+            local hubcap_status="unconfigured"
+            if declare -F get_hubcap_api_key >/dev/null 2>&1 && [ -n "$(get_hubcap_api_key 2>/dev/null || true)" ]; then
+                hubcap_status="configured"
+            fi
+            printf 'store=steam\n  luatools : %s\n  hubcap   : %s\n' "$lua_status" "$hubcap_status"
+            local s
+            for s in gog epic amazon; do
+                store_dispatch "$s" status
+            done
+            ;;
+        gog)    gog_cli auth "$@" ;;
+        epic)   epic_cli auth "$@" ;;
+        amazon) amazon_cli auth "$@" ;;
+        luatools)
+            if [ $# -gt 0 ]; then
+                login_luatools "$@"
+            elif [ -t 0 ] && [ -t 1 ] && declare -F login_luatools_interactive >/dev/null 2>&1; then
+                login_luatools_interactive
+            else
+                echo "Usage: gamectl auth luatools <code|token|session.json>" >&2
+                return 1
+            fi
+            ;;
+        --help|-h|help)
+            echo "Usage: gamectl auth [status|gog|epic|amazon|luatools] [args...]"
+            ;;
+        *)
+            echo "[ERROR] Unknown auth target '$action'. Usage: gamectl auth [status|gog|epic|amazon|luatools] [args...]" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Cross-store search aggregator returning validated 7-col TSV:
+# STORE<TAB>APP_ID<TAB>TITLE<TAB>PLATFORMS<TAB>STATUS<TAB>ITEM_TYPE<TAB>PARENT_APPID
+store_search_all() {
+    local query="" target="all"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --store)
+                [ -n "${2:-}" ] || { echo "[ERROR] --store requires a store name." >&2; return 1; }
+                target="${2,,}"; shift 2 ;;
+            --store=*)
+                target="${1#*=}"; target="${target,,}"; shift ;;
+            --help|-h)
+                echo "Usage: gamectl search-stores <query> [--store <all|steam|gog|epic|amazon>]"
+                return 0 ;;
+            *)
+                [ -z "$query" ] && query="$1" || query="$query $1"
+                shift ;;
+        esac
+    done
+    [ -n "$query" ] || { echo "[ERROR] Usage: gamectl search-stores <query> [--store <all|steam|gog|epic|amazon>]" >&2; return 1; }
+
+    local -a targets=()
+    if [ "$target" = "all" ]; then
+        local avail_s
+        while IFS= read -r avail_s; do
+            [ -n "$avail_s" ] && targets+=("$avail_s")
+        done < <(store_list_available)
+    else
+        store_list_registered | grep -Fxq "$target" || { echo "[ERROR] Unsupported store '$target'." >&2; return 1; }
+        store_dispatch "$target" available >/dev/null 2>&1 || { echo "[ERROR] Store '$target' is unavailable on this host." >&2; return 1; }
+        targets=("$target")
+    fi
+
+    local -a raw_rows=() steam_ids=()
+    local st out line r_store r_id r_title r_plats r_status
+    for st in "${targets[@]}"; do
+        out=$(store_dispatch "$st" search "$query" 2>/dev/null || true)
+        [ -n "$out" ] || continue
+        while IFS=$'\t' read -r r_store r_id r_title r_plats r_status; do
+            [ -n "$r_store" ] && [ -n "$r_id" ] || continue
+            raw_rows+=("${r_store}"$'\t'"${r_id}"$'\t'"${r_title}"$'\t'"${r_plats}"$'\t'"${r_status}")
+            [ "$r_store" = "STEAM" ] && [[ "$r_id" =~ ^[0-9]+$ ]] && steam_ids+=("$r_id")
+        done <<< "$out"
+    done
+    [ "${#raw_rows[@]}" -gt 0 ] || { echo "[ERROR] Cross-store search returned no results for '$query'." >&2; return 1; }
+
+    declare -A st_type=() st_parent=()
+    if [ "${#steam_ids[@]}" -gt 0 ] && declare -F classify_steam_app_types >/dev/null 2>&1; then
+        local c_out c_id c_type c_parent
+        c_out=$(classify_steam_app_types "${steam_ids[@]}" 2>/dev/null || true)
+        while IFS=$'\t' read -r c_id c_type c_parent; do
+            [ -n "$c_id" ] || continue
+            st_type["$c_id"]="${c_type:-APP}"
+            st_parent["$c_id"]="${c_parent:-}"
+        done <<< "$c_out"
+    fi
+
+    local emitted=0 item_type parent_id row
+    for row in "${raw_rows[@]}"; do
+        IFS=$'\t' read -r r_store r_id r_title r_plats r_status <<< "$row"
+        if [ "$r_store" = "STEAM" ]; then
+            item_type="${st_type[$r_id]:-APP}"
+            parent_id="${st_parent[$r_id]:-}"
+        else
+            item_type="GAME"
+            parent_id=""
+        fi
+        if declare -F validate_tui_fields >/dev/null 2>&1; then
+            validate_tui_fields "$r_store" "$r_id" "$r_title" "$r_plats" "$r_status" "$item_type" "$parent_id" || continue
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$r_store" "$r_id" "$r_title" "$r_plats" "$r_status" "$item_type" "$parent_id"
+        emitted=$((emitted + 1))
+    done
+    [ "$emitted" -gt 0 ]
+}
+
 # Standalone-source compatibility: load split store adapters when sourced directly outside bin/gamectl
 if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
     _stores_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-    for _stores_sub in 10_store_steam.sh 20_store_gog.sh 30_store_epic.sh; do
+    for _stores_sub in 10_store_steam.sh 20_store_gog.sh 30_store_epic.sh 40_store_amazon.sh; do
         if [ -f "$_stores_dir/$_stores_sub" ]; then
             # shellcheck source=/dev/null
             source "$_stores_dir/$_stores_sub"
@@ -8254,6 +8432,140 @@ epic_cli() {
             legendary launch "$@" ;;
         --help|-h|help) echo "Usage: gamectl epic <status|auth|search|download|sync|launch> [args...]" ;;
         *) echo "[ERROR] Unknown epic subcommand '$action'. Usage: gamectl epic <status|auth|search|download|sync|launch> [args...]" >&2; return 1 ;;
+    esac
+}
+
+# --- [MODULE] src/stores/40_store_amazon.sh ---
+# ==============================================================================
+# Optional Amazon Prime Gaming Store Adapter (nile)
+# ==============================================================================
+
+_amazon_config_dir() {
+    printf '%s\n' "${NILE_CONFIG_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/nile}"
+}
+
+_amazon_resolve_cli() {
+    command -v nile >/dev/null 2>&1 && { echo "nile"; return 0; }
+    return 1
+}
+
+_amazon_auth_session_present() {
+    [ -s "$(_amazon_config_dir)/user.json" ]
+}
+
+store_amazon_available() { _amazon_resolve_cli >/dev/null 2>&1; }
+
+store_amazon_status() {
+    local cli_path="" cli_status="missing (optional: install nile)"
+    if _amazon_resolve_cli >/dev/null 2>&1; then
+        cli_path="$(command -v nile 2>/dev/null || echo "nile")"
+        cli_status="ready (nile: $cli_path)"
+    fi
+    local auth_status="unconfigured (run 'gamectl amazon auth')"
+    _amazon_auth_session_present && auth_status="session present (external tool-managed)"
+    printf 'store=amazon\n  cli      : %s\n  auth     : %s\n' "$cli_status" "$auth_status"
+    return 0
+}
+
+_amazon_parse_catalog_json() {
+    local query="${1:-}"
+    jq -r --arg q "$query" '
+        (if type == "array" then . else error("invalid") end) as $items |
+        ($q | ascii_downcase) as $ql |
+        $items[] |
+        ((.product.id // .id // "") | tostring) as $id |
+        ((.product.title // .title // $id) | tostring) as $title |
+        (if (.platforms | type) == "string" then .platforms
+         elif (.platforms | type) == "array" then ([.platforms[] | tostring | ascii_downcase] | join(","))
+         else "windows" end | if length == 0 then "windows" else . end) as $plats |
+        if ($id == "") or ($id | test("[\\t\\r\\n]")) or ($title | test("[\\t\\r\\n]")) or ($plats | test("[\\t\\r\\n]")) then
+            error("TUI catalog contains TAB, CR or newline")
+        else
+            select(($id | ascii_downcase | contains($ql)) or ($title | ascii_downcase | contains($ql))) |
+            [$id, $title, $plats] | @tsv
+        end' 2>/dev/null
+}
+
+store_amazon_search() {
+    local query="${1:-}" raw_out="" parsed_rows=""
+    [ -n "$query" ] || { echo "[ERROR] Usage: store_amazon_search <query>" >&2; return 1; }
+    _amazon_resolve_cli >/dev/null 2>&1 || { echo "[ERROR] Amazon CLI not installed (optional: install nile)." >&2; return 1; }
+
+    raw_out=$(nile library list --json 2>/dev/null || nile list-games --json 2>/dev/null || true)
+    local trimmed="${raw_out#"${raw_out%%[![:space:]]*}"}"
+    if [ -z "$trimmed" ] || [[ "$trimmed" != "["* ]]; then
+        echo "[ERROR] Invalid Amazon search catalog JSON." >&2
+        return 1
+    fi
+    parsed_rows=$(printf '%s' "$raw_out" | _amazon_parse_catalog_json "$query") || {
+        echo "[ERROR] Invalid Amazon search catalog JSON." >&2
+        return 1
+    }
+    [ -n "$parsed_rows" ] || { echo "[ERROR] Amazon catalog search returned no matches for '$query'." >&2; return 1; }
+
+    declare -A installed_ids=()
+    if declare -F scan_installed_games >/dev/null 2>&1; then
+        local ins_id
+        while IFS=$'\t' read -r ins_id _; do
+            ins_id="${ins_id//[[:space:]]/}"
+            [ -n "$ins_id" ] && installed_ids["$ins_id"]=1
+        done < <(scan_installed_games --store AMAZON 2>/dev/null || true)
+    fi
+
+    local app_id title platforms row_status
+    while IFS=$'\t' read -r app_id title platforms; do
+        [ -n "$app_id" ] || continue
+        declare -F validate_tui_fields >/dev/null 2>&1 && { validate_tui_fields "$app_id" "$title" "$platforms" || return 1; }
+        row_status="AVAILABLE"
+        [ -n "${installed_ids["$app_id"]:-}" ] && row_status="INSTALLED"
+        printf 'AMAZON\t%s\t%s\t%s\t%s\n' "$app_id" "$title" "${platforms:-windows}" "$row_status"
+    done <<< "$parsed_rows"
+}
+
+store_amazon_list_installed() {
+    declare -F scan_installed_games >/dev/null 2>&1 || { echo "[ERROR] scan_installed_games is unavailable." >&2; return 1; }
+    scan_installed_games --store AMAZON "$@"
+}
+
+store_amazon_download() {
+    local app_id="${1:-}"
+    if [ -z "$app_id" ] || [[ ! "$app_id" =~ ^[0-9A-Za-z._-]+$ ]] || [[ "$app_id" == *".."* ]]; then
+        echo "[ERROR] Usage: store_amazon_download <app_id> [target_dir] [options...]" >&2
+        return 1
+    fi
+    _amazon_resolve_cli >/dev/null 2>&1 || { echo "[ERROR] Amazon CLI not installed (optional: install nile)." >&2; return 1; }
+    local target_dir="${GAMECTL_LIBRARY_DIR:-$HOME/Games}/$app_id"
+    if [ -n "${2:-}" ] && [[ "${2:-}" != -* ]]; then target_dir="$2"; shift 2; else shift; fi
+    mkdir -p "$target_dir" || return 1
+    nile install "$app_id" --path "$target_dir" "$@" || return $?
+    declare -F invalidate_scan_cache >/dev/null 2>&1 && invalidate_scan_cache || true
+}
+
+store_amazon_sync() {
+    local app_id="${1:-}" game_dir="${2:-}"
+    if [ -z "$app_id" ] || [[ ! "$app_id" =~ ^[0-9A-Za-z._-]+$ ]] || [[ "$app_id" == *".."* ]] || [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
+        echo "[ERROR] Usage: store_amazon_sync <app_id> <existing_game_dir> [options...]" >&2
+        return 1
+    fi
+    shift 2
+    _amazon_resolve_cli >/dev/null 2>&1 || { echo "[ERROR] Amazon CLI not installed (optional: install nile)." >&2; return 1; }
+    declare -F backup_save >/dev/null 2>&1 && { backup_save "$game_dir" true || return $?; }
+    nile verify "$app_id" --path "$game_dir" "$@"
+}
+
+amazon_cli() {
+    local action="${1:-status}"
+    [ $# -gt 0 ] && shift
+    case "$action" in
+        status) store_dispatch amazon status ;;
+        auth)
+            _amazon_resolve_cli >/dev/null 2>&1 || { echo "[ERROR] Amazon auth requires nile." >&2; return 1; }
+            nile auth "$@" ;;
+        search) store_dispatch amazon search "$@" ;;
+        download) store_dispatch amazon download "$@" ;;
+        sync) store_dispatch amazon sync "$@" ;;
+        --help|-h|help) echo "Usage: gamectl amazon <status|auth|search|download|sync> [args...]" ;;
+        *) echo "[ERROR] Unknown amazon subcommand '$action'. Usage: gamectl amazon <status|auth|search|download|sync> [args...]" >&2; return 1 ;;
     esac
 }
 
@@ -12112,6 +12424,13 @@ doctor_audit() {
         echo "    • $(printf '%-18s' "Epic Store CLI") : ${UI_DIM}[OPT]${UI_RST} Optional (Install legendary for Epic Games support)"
     fi
 
+    if command -v nile >/dev/null 2>&1; then
+        echo "    • $(printf '%-18s' "Amazon Store CLI") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(command -v nile))${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "    • $(printf '%-18s' "Amazon Store CLI") : ${UI_DIM}[OPT]${UI_RST} Optional (Install nile for Amazon Games support)"
+    fi
+
     # Layer 7: Steam Client & SLSsteam Integration
     echo
     echo "  ${UI_PURPLE}[LAYER 7] Steam Client & Secondary Bridge Integration${UI_RST}"
@@ -12708,7 +13027,8 @@ library_menu() {
                 ALL) active_store="STEAM" ;;
                 STEAM) active_store="GOG" ;;
                 GOG) active_store="EPIC" ;;
-                EPIC) active_store="STANDALONE" ;;
+                EPIC) active_store="AMAZON" ;;
+                AMAZON) active_store="STANDALONE" ;;
                 *) active_store="ALL" ;;
             esac
             continue
@@ -12717,7 +13037,7 @@ library_menu() {
             store_pick=$(tui_action_palette \
                 "Store Filter" \
                 "Select Store View (Enter: Apply │ Esc: Cancel)" \
-                "$(printf 'ALL\tAll Stores (Unified)\nSTEAM\tSteam Library\nGOG\tGOG Library (DRM-Free)\nEPIC\tEpic Games Library (Legendary)\nSTANDALONE\tStandalone / Portable\n')" \
+                "$(printf 'ALL\tAll Stores (Unified)\nSTEAM\tSteam Library\nGOG\tGOG Library (DRM-Free)\nEPIC\tEpic Games Library (Legendary)\nAMAZON\tAmazon Games Library (Nile)\nSTANDALONE\tStandalone / Portable\n')" \
                 "" \
                 "Store > ") || hk_rc=$?
             if [ "$hk_rc" -ne 0 ] && [ "$hk_rc" -ne 1 ] && [ "$hk_rc" -ne 130 ]; then
@@ -13021,12 +13341,12 @@ search_steam() {
     while true; do
         flush_tty_input
         local fzf_out fzf_rc=0
-        local fzf_header="Enter: Actions │ Tab: Type ($type_filter) │ Ctrl-F: New Search │ Esc: Dashboard"
+        local fzf_header="Enter: Actions │ Tab: Type ($type_filter) │ Alt-S: All Stores │ Ctrl-F: New Search │ Esc: Dashboard"
         fzf_out=$(_filtered_search_results | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3,4 \
-            --expect=tab,ctrl-a,ctrl-u,ctrl-s,ctrl-d,ctrl-f \
-            --bind="tab:accept,ctrl-a:accept,ctrl-u:accept,ctrl-s:accept,ctrl-d:accept,ctrl-f:accept" \
+            --expect=tab,alt-s,ctrl-a,ctrl-u,ctrl-s,ctrl-d,ctrl-f \
+            --bind="tab:accept,alt-s:accept,ctrl-a:accept,ctrl-u:accept,ctrl-s:accept,ctrl-d:accept,ctrl-f:accept" \
             --border-label="  ╢ gamectl :: Steam Store Catalog [Type: $type_filter] ╟  " \
             --border-label-pos=2 \
             --header="$fzf_header" \
@@ -13052,6 +13372,12 @@ search_steam() {
                 GAME) type_filter="DLC" ;;
                 *)    type_filter="ALL" ;;
             esac
+            continue
+        fi
+
+        if [ "$trigger_key" = "alt-s" ]; then
+            search_stores_interactive "$query" || true
+            _refresh_search_results
             continue
         fi
 
@@ -13340,6 +13666,45 @@ EOF
     return 0
 }
 
+
+# Interactive Cross-Store Search & Download Switcher
+search_stores_interactive() {
+    local query="${1:-}" target_store="${2:-all}"
+    [ -t 0 ] && [ -t 1 ] && command -v fzf >/dev/null 2>&1 || return 1
+    if [ -z "$query" ]; then
+        query=$(tui_prompt_input "gamectl :: Cross-Store Search" "Search across Steam, GOG, Epic & Amazon" "" "Search All > ") || return 0
+        query=$(echo "$query" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        [ -n "$query" ] || return 0
+    fi
+    local raw_rows="" rows="" r_store r_id r_title r_plats r_status r_type r_parent
+    raw_rows=$(store_search_all "$query" --store "$target_store" 2>/dev/null || true)
+    if [ -z "$raw_rows" ]; then
+        tui_modal_notice "Cross-Store Search" "No matches found across available stores for '$query'." || return $?
+        return 0
+    fi
+    while IFS=$'\t' read -r r_store r_id r_title r_plats r_status r_type r_parent; do
+        [ -n "$r_store" ] && [ -n "$r_id" ] || continue
+        local badge; badge="$(format_app_type_badge "${r_type:-APP}")"
+        rows+="${r_store}"$'\t'"${r_id}"$'\t'"${badge}"$'\t'"${r_title}"$'\t'"${r_plats}"$'\t'"${r_status}"$'\t'"${r_type}"$'\t'"${r_parent}"$'\n'
+    done <<< "$raw_rows"
+
+    local pick p_rc=0
+    pick=$(printf '%s' "$rows" | fzf --delimiter=$'\t' --with-nth=1,2,3,4,5,6 \
+        --border-label="  ╢ gamectl :: Cross-Store Catalog ($target_store) ╟  " --border-label-pos=2 \
+        --header="Enter: Download via Store Adapter │ Esc: Return" --prompt="Cross-Store > ") || p_rc=$?
+    [ "$p_rc" -eq 130 ] && return 0
+    [ "$p_rc" -ne 0 ] && [ "$p_rc" -ne 1 ] && return "$p_rc"
+    [ -n "$pick" ] || return 0
+
+    IFS=$'\t' read -r r_store r_id _ r_title _ _ r_type r_parent <<< "$pick"
+    local dest_dir; dest_dir="$(resolve_target_library_dir "$r_title")"
+    if [ "$r_store" = "STEAM" ]; then
+        local target_os; target_os="$(detect_app_platform_os "$r_id")"
+        tui_exec_action "Steam Download ($r_title)" download_game "$r_id" "$dest_dir" "$r_title" --all --os "$target_os"
+    else
+        tui_exec_action "$r_store Download ($r_title)" store_dispatch "${r_store,,}" download "$r_id" "$dest_dir"
+    fi
+}
 
 # Standalone-source compatibility: load split tui submodules when sourced directly outside bin/gamectl
 if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
@@ -14394,6 +14759,15 @@ case "${1:-}" in
     epic)
         epic_cli "${2:-status}" "${@:3}"
         ;;
+    amazon)
+        amazon_cli "${2:-status}" "${@:3}"
+        ;;
+    auth)
+        auth_hub_cli "${2:-status}" "${@:3}"
+        ;;
+    search-stores|search_stores)
+        store_search_all "${@:2}"
+        ;;
     check-scope|systemd-scope)
         if check_systemd_scope_support; then
             echo "[INFO] cgroups v2 / systemd-run user scope isolation is supported and active."
@@ -14747,6 +15121,12 @@ Usage:
                       Optional DRM-free GOG adapter (delegates to gogdl / lgogdownloader)
   gamectl epic <status|auth|search|download|sync|launch> [args...]
                       Optional Epic Games adapter (delegates to legendary)
+  gamectl amazon <status|auth|search|download|sync> [args...]
+                      Optional Amazon Prime Gaming adapter (delegates to nile)
+  gamectl auth [status|gog|epic|amazon|luatools] [args...]
+                      Unified offline auth status and native CLI login delegation
+  gamectl search-stores <query> [--store <all|steam|gog|epic|amazon>]
+                      Cross-store catalog search with canonical app-type taxonomy
   gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread] [--scope|--no-scope] [--prime|--no-prime] [--sandbox|--no-sandbox]
                       Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]
