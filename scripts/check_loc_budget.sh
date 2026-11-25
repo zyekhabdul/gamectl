@@ -46,6 +46,11 @@ for file in "${files[@]}"; do
     checked=$((checked + 1))
 done
 
+if [ "$checked" -eq 0 ]; then
+    printf '[FAIL] No source modules found under %s/src\n' "$REPO_ROOT" >&2
+    exit 1
+fi
+
 if [ "$violations" -gt 0 ]; then
     printf '[FAIL] %d module(s) exceeded LOC budget.\n' "$violations" >&2
     exit 1
