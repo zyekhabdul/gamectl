@@ -3752,6 +3752,49 @@ EOF
 }
 run_test "Unified Auth Hub & Cross-Store Search (WP41C)" test_wp41_auth_hub_and_cross_store_search_contract
 
+# Test 41: Work Packet 3 (R3A-R3D) — Module LOC Budget Guard & Submodule Auto-Loaders
+test_r3_loc_budget_and_submodule_autoloader_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_r3_loc_XXXXXX")
+    mkdir -p "$t_dir/src/core"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        bash "$REPO_ROOT/scripts/check_loc_budget.sh" "$REPO_ROOT" >/dev/null || exit 1
+
+        # New module <= 600 passes; > 600 fails; legacy ceiling exceeded fails; empty src fails
+        printf '# ok\n' > "$t_dir/src/core/ok.sh"
+        bash "$REPO_ROOT/scripts/check_loc_budget.sh" "$t_dir" >/dev/null || exit 1
+        python3 -c 'print("\n".join(["# x"]*601))' > "$t_dir/src/core/over.sh"
+        ! bash "$REPO_ROOT/scripts/check_loc_budget.sh" "$t_dir" 2>/dev/null || exit 1
+        rm -f "$t_dir/src/core/over.sh"
+        python3 -c 'print("\n".join(["# x"]*606))' > "$t_dir/src/main.sh"
+        ! bash "$REPO_ROOT/scripts/check_loc_budget.sh" "$t_dir" 2>/dev/null || exit 1
+        rm -rf "$t_dir/src" && mkdir -p "$t_dir/src"
+        ! bash "$REPO_ROOT/scripts/check_loc_budget.sh" "$t_dir" 2>/dev/null || exit 1
+
+        # Unbundled sibling auto-loaders load 21_shortcuts_artwork.sh and 72_store_tui.sh
+        bash -c '
+            set -e
+            unset GAMECTL_BUNDLED
+            source "$1/src/core/00_header.sh"
+            source "$1/src/core/10_utils.sh"
+            source "$1/src/steam/20_discovery.sh"
+            declare -F create_desktop_entry >/dev/null
+            declare -F fetch_steam_artwork >/dev/null
+            declare -F add_steam_shortcut >/dev/null
+            source "$1/src/tui/70_dashboard.sh"
+            declare -F search_stores_interactive >/dev/null
+        ' _ "$REPO_ROOT" || exit 1
+
+        grep -Fq '_scan_json_store_entries' "$REPO_ROOT/src/steam/20_discovery.sh" || exit 1
+        ! grep -Fq 'src/steam/20_discovery.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
+        local dash_cap
+        dash_cap=$(sed -n 's/.*\["src\/tui\/70_dashboard\.sh"\]=\([0-9]*\).*/\1/p' "$REPO_ROOT/scripts/check_loc_budget.sh")
+        [ -n "$dash_cap" ] && [ "$dash_cap" -le 1020 ] || exit 1
+    )
+}
+run_test "Module LOC Budget & Submodule Auto-Loaders (R3A-R3D)" test_r3_loc_budget_and_submodule_autoloader_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"
