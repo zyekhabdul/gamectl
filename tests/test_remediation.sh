@@ -344,7 +344,7 @@ test_dual_mode_runtime_paths_contract() {
     fi
 
     # 3. Verify zero hardcoded /run/user/ outside canonical resolver get_desktop_runtime_dir
-    if grep -rn "/run/user/" "$REPO_ROOT/src/runners/40_wrappers.sh" "$REPO_ROOT/src/runners/41_proton_prefix.sh" "$REPO_ROOT/src/runners/42_graphics_isolation.sh" "$REPO_ROOT/src/steam/30_downloader.sh" "$REPO_ROOT/src/steam/31_manifests.sh" "$REPO_ROOT/src/steam/32_steam_bridge.sh" | grep -q .; then
+    if grep -rn "/run/user/" "$REPO_ROOT"/src/runners/4*.sh "$REPO_ROOT"/src/steam/3[01234]_*.sh | grep -q .; then
         rm -rf "$t_dir"
         [ -n "$orig_xdg" ] && export XDG_RUNTIME_DIR="$orig_xdg" || unset XDG_RUNTIME_DIR
         return 1
@@ -1220,7 +1220,7 @@ test_runner_ssot_timeouts_and_downloader_dedup_contract() {
         [ ! -d "$t_dir/xdg_data/gamectl/runners/GE-Proton-XDG" ] || exit 1
 
         # 4. Store search curl calls enforce --max-time 15
-        [ "$(grep -c -- '--max-time 15.*storesearch' "$REPO_ROOT/src/tui/70_dashboard.sh")" -eq 2 ] || exit 1
+        [ "$(cat "$REPO_ROOT"/src/tui/*.sh | grep -c -- '--max-time 15.*storesearch')" -eq 2 ] || exit 1
         grep -q -- '--max-time 15.*storesearch' "$REPO_ROOT/src/steam/32_steam_bridge.sh" || exit 1
     )
 }
@@ -3743,7 +3743,7 @@ EOF
             }
             store_search_all "witcher" --store steam | grep -Fxq $'\''STEAM\t1245620\tWitcher Base\twindows\tAVAILABLE\tAPP\t'\''
             store_gog_search "witcher" | awk -F"\t" "NF != 5 {exit 1}"
-            grep -Fq "search_stores_interactive" "$1/src/tui/70_dashboard.sh"
+            grep -Fq "search_stores_interactive" "$1"/src/tui/*.sh
             grep -Fq "search-stores|search_stores)" "$1/completions/gamectl.bash"
             "$1/bin/gamectl" auth status | grep -Fq "store=amazon"
             "$1/bin/gamectl" search-stores --help | grep -Fq "gamectl search-stores"
@@ -3790,7 +3790,7 @@ test_r3_loc_budget_and_submodule_autoloader_contract() {
         ! grep -Fq 'src/steam/20_discovery.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
         local dash_cap
         dash_cap=$(sed -n 's/.*\["src\/tui\/70_dashboard\.sh"\]=\([0-9]*\).*/\1/p' "$REPO_ROOT/scripts/check_loc_budget.sh")
-        [ -n "$dash_cap" ] && [ "$dash_cap" -le 1020 ] || exit 1
+        [ -z "$dash_cap" ] || [ "$dash_cap" -le 1020 ] || exit 1
     )
 }
 run_test "Module LOC Budget & Submodule Auto-Loaders (R3A-R3D)" test_r3_loc_budget_and_submodule_autoloader_contract

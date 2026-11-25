@@ -747,26 +747,26 @@ run_test "Library Scanner Optimization: Single-pass parser & runtime disk cache"
 
 test_fzf_interactive_input_contract() {
     # Invariant: Free-text fzf input prompts must not contaminate stdin and must distinguish ESC (130) from Enter (0 or 1)
-    ! grep -q 'query_raw=$(echo "Search Steam Store' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
+    ! cat "$REPO_ROOT"/src/tui/*.sh | grep -q 'query_raw=$(echo "Search Steam Store' && \
     ! grep -q 'u_appid_raw=$(echo "Enter Steam AppID' "$REPO_ROOT/src/steam/32_steam_bridge.sh" && \
-    grep -q '\[ "$fzf_rc" -eq 130 \] && return 0' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
+    cat "$REPO_ROOT"/src/tui/*.sh | grep -q '\[ "$fzf_rc" -eq 130 \] && return 0' && \
     grep -q '\[ "$fzf_rc" -eq 130 \] && return 0' "$REPO_ROOT/src/steam/32_steam_bridge.sh" && \
-    grep -q ': | fzf' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
+    cat "$REPO_ROOT"/src/tui/*.sh | grep -q ': | fzf' && \
     grep -q ': | fzf' "$REPO_ROOT/src/steam/32_steam_bridge.sh" && \
-    grep -q '\[ "$fzf_rc" -eq 130 \] && break' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
-    grep -q '\[ -z "$selection" \] && continue' "$REPO_ROOT/src/tui/70_dashboard.sh"
+    cat "$REPO_ROOT"/src/tui/*.sh | grep -q '\[ "$fzf_rc" -eq 130 \] && break' && \
+    cat "$REPO_ROOT"/src/tui/*.sh | grep -q '\[ -z "$selection" \] && continue'
 }
 run_test "TUI Input Invariant: Resilient fzf exit-code handling on free-text entry" test_fzf_interactive_input_contract
 
 test_fzf_menu_loop_break_invariants() {
     # Invariant: All menu loops must capture fzf_rc and only break on ESC/Ctrl-C (130)
     local count_dash count_down
-    count_dash=$(grep -c '\[ "$fzf_rc" -eq 130 \] && break' "$REPO_ROOT/src/tui/70_dashboard.sh")
-    count_down=$(grep -c '\[ "$fzf_rc" -eq 130 \] && break' "$REPO_ROOT/src/steam/30_downloader.sh")
+    count_dash=$(cat "$REPO_ROOT"/src/tui/*.sh | grep -c '\[ "$fzf_rc" -eq 130 \] && break')
+    count_down=$(cat "$REPO_ROOT"/src/steam/3[034]_*.sh | grep -c '\[ "$fzf_rc" -eq 130 \] && break')
     [ "$count_dash" -eq 3 ] && [ "$count_down" -eq 1 ] && \
-    grep -q '\[ -z "$selection" \] && continue' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
-    grep -q '\[ -z "$fzf_out" \] && continue' "$REPO_ROOT/src/tui/70_dashboard.sh" && \
-    grep -q '\[ -z "$selection" \] && continue' "$REPO_ROOT/src/steam/30_downloader.sh" && \
+    cat "$REPO_ROOT"/src/tui/*.sh | grep -q '\[ -z "$selection" \] && continue' && \
+    cat "$REPO_ROOT"/src/tui/*.sh | grep -q '\[ -z "$fzf_out" \] && continue' && \
+    cat "$REPO_ROOT"/src/steam/3[034]_*.sh | grep -q '\[ -z "$selection" \] && continue' && \
     grep -q '0|q|Q|cancel)' "$REPO_ROOT/src/runners/40_wrappers.sh" && \
     grep -q 'continue' "$REPO_ROOT/src/runners/40_wrappers.sh"
 }
@@ -1967,18 +1967,18 @@ run_test "Cross-Library ACF Realization: Auto-discover ~/Games and provision phy
 test_screen_flickering_elimination_contract() {
     source "$REPO_ROOT/src/core/10_utils.sh"
 
-    # Invariant 1: Zero sleep calls in 70_dashboard.sh (no screen freezing in TUI)
-    if grep -q 'sleep' "$REPO_ROOT/src/tui/70_dashboard.sh"; then
+    # Invariant 1: Zero sleep calls in TUI modules (no screen freezing in TUI)
+    if grep -q 'sleep' "$REPO_ROOT"/src/tui/*.sh; then
         return 1
     fi
 
     # Invariant 2: Zero sleep calls in steam downloader/manifest/bridge modules (no screen freezing in TUI)
-    if grep -q 'sleep' "$REPO_ROOT/src/steam/30_downloader.sh" "$REPO_ROOT/src/steam/31_manifests.sh" "$REPO_ROOT/src/steam/32_steam_bridge.sh"; then
+    if grep -q 'sleep' "$REPO_ROOT"/src/steam/3[01234]_*.sh; then
         return 1
     fi
 
-    # Invariant 3: Zero raw stdout shortcut notifications in 70_dashboard.sh
-    if grep -q 'echo "\[INFO\] Shortcut' "$REPO_ROOT/src/tui/70_dashboard.sh"; then
+    # Invariant 3: Zero raw stdout shortcut notifications in TUI modules
+    if grep -q 'echo "\[INFO\] Shortcut' "$REPO_ROOT"/src/tui/*.sh; then
         return 1
     fi
 
@@ -2014,7 +2014,7 @@ run_test "SSoT Log File (Chunk 1): Centralized runtime log path and cockpit even
 
 test_zero_flicker_tui_actions_contract() {
     # 1. Zero raw execute read pauses in library_menu
-    if grep -E 'ctrl-[a-z]:execute\(.*read' "$REPO_ROOT/src/tui/70_dashboard.sh"; then
+    if grep -E 'ctrl-[a-z]:execute\(.*read' "$REPO_ROOT"/src/tui/*.sh; then
         return 1
     fi
 
@@ -2022,10 +2022,10 @@ test_zero_flicker_tui_actions_contract() {
     grep -q -- '--expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
 
     # 3. list_downloads_interactive uses --expect=ctrl-k and zero execute read pauses
-    if grep -E 'ctrl-k:execute\(.*read' "$REPO_ROOT/src/steam/30_downloader.sh"; then
+    if grep -E 'ctrl-k:execute\(.*read' "$REPO_ROOT"/src/steam/3[034]_*.sh; then
         return 1
     fi
-    grep -q -- '--expect=ctrl-k' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    grep -q -- '--expect=ctrl-k' "$REPO_ROOT"/src/steam/3[034]_*.sh || return 1
 
     # 4. Zero clear calls in game_controller_hud and manage_prefix
     if grep -n 'clear' "$REPO_ROOT/src/runners/50_launcher.sh" | grep -v 'clean'; then
@@ -2047,7 +2047,7 @@ test_standalone_tui_exit_contract() {
     grep -q '\[ "\$standalone" = "true" \] && exit_tui_screen' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
 
     # 2. search_steam standalone mode exits to shell, zero forced dashboard redirection
-    if grep -q 'dashboard_menu' <(sed -n '/search_steam()/,/^}/p' "$REPO_ROOT/src/tui/70_dashboard.sh" | grep -A 5 '\[ "\$standalone" = "true" \]'); then
+    if grep -q 'dashboard_menu' <(cat "$REPO_ROOT"/src/tui/*.sh | sed -n '/search_steam()/,/^}/p' | grep -A 5 '\[ "\$standalone" = "true" \]'); then
         return 1
     fi
 
@@ -2082,8 +2082,8 @@ test_ghost_download_self_healing_contract() {
     grep -q 'kill -0 "\$st_pid"' "$REPO_ROOT/src/core/10_utils.sh" || return 1
 
     # 2. Verify list_downloads_interactive checks process liveness before displaying
-    grep -q 'kill -0 "\$st_pid"' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
-    grep -q 'rm -rf "\$st_dir"' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    grep -q 'kill -0 "\$st_pid"' "$REPO_ROOT"/src/steam/3[034]_*.sh || return 1
+    grep -q 'rm -rf "\$st_dir"' "$REPO_ROOT"/src/steam/3[034]_*.sh || return 1
 
     # 3. Dynamic test: create a dummy staging directory with a dead PID (99999999)
     local test_run_dir
@@ -2105,16 +2105,16 @@ run_test "Ghost Download Healing (Chunk 1): Self-healing purge of dead PID stagi
 
 test_standalone_download_posix_signals_contract() {
     # 1. Verify list_downloads_interactive branches on Standalone engine
-    grep -q '\[ "\$sel_engine" = "Standalone" \]' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    cat "$REPO_ROOT"/src/steam/3[034]_*.sh | grep -q '\[ "\$sel_engine" = "Standalone" \]' || return 1
 
     # 2. Verify native POSIX signals (SIGSTOP, SIGCONT, SIGTERM)
-    grep -q 'kill -STOP "\$t_pid"' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
-    grep -q 'kill -CONT "\$t_pid"' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
-    grep -q 'kill -TERM "\$t_pid"' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    cat "$REPO_ROOT"/src/steam/3[034]_*.sh | grep -q 'kill -STOP "\$t_pid"' || return 1
+    cat "$REPO_ROOT"/src/steam/3[034]_*.sh | grep -q 'kill -CONT "\$t_pid"' || return 1
+    cat "$REPO_ROOT"/src/steam/3[034]_*.sh | grep -q 'kill -TERM "\$t_pid"' || return 1
 
     # 3. Verify Steam client fallback branch is preserved
-    grep -q 'steam "steam://pause/\$sel_appid"' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
-    grep -q 'steam "steam://resume/\$sel_appid"' "$REPO_ROOT/src/steam/30_downloader.sh" || return 1
+    cat "$REPO_ROOT"/src/steam/3[034]_*.sh | grep -q 'steam "steam://pause/\$sel_appid"' || return 1
+    cat "$REPO_ROOT"/src/steam/3[034]_*.sh | grep -q 'steam "steam://resume/\$sel_appid"' || return 1
 
     return 0
 }
@@ -2730,8 +2730,8 @@ test_tui_game_fixes_exposure_contract() {
     grep -F -q 'manage_game_fixes_interactive "$sel_appid" "$sel_title" "$sel_dir"' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
 
     # 2. Verify search_steam action palette exposure for installed and uninstalled games
-    grep -F -q 'Check Community Fixes & Online-Fix Catalog' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
-    grep -F -q '[Fixes & OnlineFix] Check Community Fixes & Online-Fix Catalog' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
+    cat "$REPO_ROOT"/src/tui/*.sh | grep -F -q 'Check Community Fixes & Online-Fix Catalog' || return 1
+    cat "$REPO_ROOT"/src/tui/*.sh | grep -F -q '[Fixes & OnlineFix] Check Community Fixes & Online-Fix Catalog' || return 1
 
     # 3. Verify main.sh CLI registration and exports
     grep -q -- '--preview-fix' "$REPO_ROOT/src/main.sh" || return 1

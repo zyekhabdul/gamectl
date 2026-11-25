@@ -235,8 +235,8 @@ test_tui_os_parameter_forwarding_contract() {
     # 1. Static AST/Grep contract audit across all dashboard entrypoints
     # In search_steam: all download actions must include --os "$target_os"
     local search_matches
-    search_matches=$(grep -c 'download_game.*--os "\$target_os"' "$REPO_ROOT/src/tui/70_dashboard.sh" || echo 0)
-    [ "$search_matches" -ge 4 ] || { echo "[FAIL] Expected at least 4 download_game --os calls in 70_dashboard.sh, found: $search_matches" >&2; return 1; }
+    search_matches=$(cat "$REPO_ROOT"/src/tui/*.sh | grep -c 'download_game.*--os "\$target_os"' || echo 0)
+    [ "$search_matches" -ge 4 ] || { echo "[FAIL] Expected at least 4 download_game --os calls across src/tui/, found: $search_matches" >&2; return 1; }
 
     # In unlock_interactive: auto-download bridge must include --os "$target_os"
     grep -q 'download_game.*--os "\$target_os"' "$REPO_ROOT/src/steam/32_steam_bridge.sh" || { echo "[FAIL] Missing --os in unlock_interactive" >&2; return 1; }
