@@ -22,6 +22,8 @@ MODULES=(
     "$REPO_ROOT/src/steam/30_downloader.sh"
     "$REPO_ROOT/src/steam/31_manifests.sh"
     "$REPO_ROOT/src/steam/32_steam_bridge.sh"
+    "$REPO_ROOT/src/steam/33_download_telemetry.sh"
+    "$REPO_ROOT/src/steam/34_download_monitor.sh"
     "$REPO_ROOT/src/steam/35_fixes.sh"
     "$REPO_ROOT/src/stores/00_store_interface.sh"
     "$REPO_ROOT/src/stores/10_store_steam.sh"
