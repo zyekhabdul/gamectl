@@ -36,7 +36,8 @@ src/
 │   ├── 00_store_interface.sh   # Unified store adapter registry, capability probe & store_dispatch()
 │   ├── 10_store_steam.sh       # Built-in Steam/Standalone adapter wrapping CDN downloader & offline DLC sync
 │   ├── 20_store_gog.sh         # Optional DRM-free GOG adapter (gogdl / lgogdownloader) & gamectl gog CLI
-│   └── 30_store_epic.sh        # Optional Epic Games adapter (legendary) & gamectl epic CLI
+│   ├── 30_store_epic.sh        # Optional Epic Games adapter (legendary) & gamectl epic CLI
+│   └── 40_store_amazon.sh      # Optional Amazon Prime Gaming adapter (nile) & gamectl amazon CLI
 ├── runners/
 │   ├── 40_wrappers.sh          # Wrapper config loader, developer profiler, wrapper builder, global settings
 │   ├── 41_proton_prefix.sh     # Windows runner, wineserver resolver, DLL overrides, GE-Proton manager, manage_prefix
