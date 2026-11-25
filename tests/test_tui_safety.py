@@ -49,23 +49,33 @@ class TuiSafetyTests(unittest.TestCase):
     def scripted_fzf(self, responses):
         stub_dir = self.base / "stubs"
         stub_dir.mkdir(exist_ok=True)
+        steps_dir = self.base / "fzf-steps"
+        if steps_dir.exists():
+            shutil.rmtree(steps_dir)
+        steps_dir.mkdir()
+        for idx, (code, output) in enumerate(responses):
+            (steps_dir / f"{idx}.rc").write_text(str(code))
+            (steps_dir / f"{idx}.out").write_text(output)
         script = stub_dir / "fzf"
-        script.write_text('''#!/usr/bin/env python3
-import json, os, pathlib, sys
-base = pathlib.Path(os.environ["HOME"])
-counter = base / "fzf-counter"
-index = int(counter.read_text()) if counter.exists() else 0
-counter.write_text(str(index + 1))
-steps = json.loads(os.environ["TEST_FZF_STEPS"])
-code, output = steps[index] if index < len(steps) else (130, "")
-(base / "fzf-input").write_text(sys.stdin.read())
-sys.stdout.write(output)
-sys.exit(code)
+        script.write_text('''#!/usr/bin/env bash
+base="$HOME"
+counter="$base/fzf-counter"
+index=0
+[ -f "$counter" ] && index=$(<"$counter")
+printf '%s' "$((index + 1))" > "$counter"
+cat > "$base/fzf-input"
+rc_file="$base/fzf-steps/$index.rc"
+out_file="$base/fzf-steps/$index.out"
+if [ -f "$rc_file" ]; then
+    rc=$(<"$rc_file")
+    [ -f "$out_file" ] && cat "$out_file"
+    exit "$rc"
+fi
+exit 130
 ''')
         script.chmod(0o755)
         (self.base / "fzf-counter").unlink(missing_ok=True)
         self.env["PATH"] = str(stub_dir) + os.pathsep + os.environ["PATH"]
-        self.env["TEST_FZF_STEPS"] = json.dumps(responses)
 
     def test_library_inject_is_offline_and_reports_failure(self):
         row = f"105600\tTest\tSTANDALONE\t{self.game}\tgame.exe\n"
@@ -313,7 +323,7 @@ game_controller_hud "$test_pid" "Player's 測試 $HOME" "$TEST_LOG" "$TEST_GAME"
         try:
             deadline = time.monotonic() + 8
             while time.monotonic() < deadline:
-                if select.select([fd], [], [], 0.05)[0]:
+                if select.select([fd], [], [], 0.01)[0]:
                     try:
                         chunk = os.read(fd, 65536)
                     except OSError as error:
