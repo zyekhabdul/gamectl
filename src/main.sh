@@ -139,6 +139,9 @@ case "${1:-}" in
     stores|store)
         stores_cli "${2:-status}" "${@:3}"
         ;;
+    gog)
+        gog_cli "${2:-status}" "${@:3}"
+        ;;
     check-scope|systemd-scope)
         if check_systemd_scope_support; then
             echo "[INFO] cgroups v2 / systemd-run user scope isolation is supported and active."
@@ -488,6 +491,8 @@ Usage:
   gamectl doctor      Run 8-layer system & GPU health diagnostics (alias: audit)
   gamectl stores [list|status]
                       Inspect registered store adapters and offline readiness
+  gamectl gog <status|auth|search|download|sync> [args...]
+                      Optional DRM-free GOG adapter (delegates to gogdl / lgogdownloader)
   gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread] [--scope|--no-scope] [--prime|--no-prime] [--sandbox|--no-sandbox]
                       Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]

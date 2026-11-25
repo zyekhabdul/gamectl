@@ -153,7 +153,7 @@ scan_installed_games() {
         if [ $((now - mtime)) -lt 60 ]; then
             use_cached=true
             local lib_check
-            for lib_check in "$HOME/Games" "$HOME/.local/share/Steam/steamapps" "$HOME/.local/share/lutris/games"; do
+            for lib_check in "$HOME/Games" "$HOME/GOG Games" "$HOME/.local/share/Steam/steamapps" "$HOME/.local/share/lutris/games"; do
                 if [ -d "$lib_check" ] && [ "$lib_check" -nt "$cache_file" ]; then
                     use_cached=false
                     break
@@ -221,6 +221,7 @@ scan_installed_games() {
         # 2. Scan Custom & Standalone Directories
         local custom_search_dirs=(
             "$HOME/Games"
+            "$HOME/GOG Games"
             "$HOME/.local/share/lutris/games"
         )
 
@@ -268,26 +269,56 @@ scan_installed_games() {
                 gbin=$(find_game_binary "$gdir") || continue
                 [ -z "$gbin" ] && continue
 
-                local appid
-                appid="$(resolve_game_appid "$gdir" "STANDALONE")"
+                local row_store="STANDALONE" gog_info="" gog_id="" gog_name="" _gf
+                for _gf in "$gdir"/goggame-*.info; do
+                    [ -f "$_gf" ] && gog_info="$_gf" && break
+                done
+                if [ -n "$gog_info" ]; then
+                    local gog_tsv=""
+                    if ! gog_tsv=$(jq -r '[((.gameId // .rootGameId // "") | tostring), ((.name // "") | tostring)] | if any(test("[\\t\\r\\n]")) then error("invalid") else @tsv end' "$gog_info" 2>/dev/null); then
+                        printf '[ERROR] Invalid GOG metadata in %s\n' "$gdir" >&2
+                        continue
+                    fi
+                    IFS=$'\t' read -r gog_id gog_name <<< "$gog_tsv"
+                    if [ -z "$gog_id" ]; then
+                        local _gbase="${gog_info##*/}"
+                        _gbase="${_gbase#goggame-}"
+                        gog_id="${_gbase%.info}"
+                    fi
+                    row_store="GOG"
+                elif [ -f "$gdir/.gog_id" ]; then
+                    gog_id=$(cat "$gdir/.gog_id" 2>/dev/null) || gog_id=""
+                    if [ -f "$gdir/gameinfo" ]; then
+                        gog_name=$(head -n 1 "$gdir/gameinfo" 2>/dev/null) || gog_name=""
+                    fi
+                    [ -n "$gog_id" ] && row_store="GOG"
+                fi
 
-                # AppID collision precedence: skip duplicate if already discovered in Steam library
-                if [ "$appid" != "STANDALONE" ] && [[ -v seen_appids["$appid"] ]]; then
+                local appid
+                if [ "$row_store" = "GOG" ]; then
+                    appid="${gog_id:-STANDALONE}"
+                else
+                    appid="$(resolve_game_appid "$gdir" "STANDALONE")"
+                fi
+
+                # AppID collision precedence: skip duplicate Steam AppID if already discovered in Steam library
+                if [ "$row_store" != "GOG" ] && [ "$appid" != "STANDALONE" ] && [[ -v seen_appids["$appid"] ]]; then
                     continue
                 fi
-                [ "$appid" != "STANDALONE" ] && seen_appids["$appid"]=1
+                [ "$row_store" != "GOG" ] && [ "$appid" != "STANDALONE" ] && seen_appids["$appid"]=1
 
-                local title="$folder_name"
+                local title="${gog_name:-$folder_name}"
                 if [ -f "$gdir/.gamectl_title" ]; then
                     title=$(cat "$gdir/.gamectl_title" 2>/dev/null) || title="$folder_name"
                 fi
                 [ -n "$title" ] || title="$folder_name"
-                validate_tui_fields "$title" "$gbin" || continue
+                validate_tui_fields "$appid" "$title" "$gbin" || continue
 
                 local status
                 status=$(resolve_game_drm_status "$gdir" "" "$gbin")
+                [ "$row_store" = "GOG" ] && [ "$status" = "STANDALONE" ] && status="GOG"
 
-                printf "%s\t%s\t%s\t%s\t%s\tSTANDALONE\n" "$appid" "$title" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
+                printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$appid" "$title" "$status" "$gdir" "$gbin" "$row_store" >> "$cache_file.tmp"
             done
         done
         mv -f "$cache_file.tmp" "$cache_file"
@@ -305,6 +336,7 @@ scan_installed_games() {
                 *GBE_FORK*)   c_badge="${UI_GREEN}[GBE_FORK]  ${UI_RST}" ;;
                 *VALVE_SO*)   c_badge="${UI_AMBER}[VALVE_SO]  ${UI_RST}" ;;
                 *VALVE_DLL*)  c_badge="${UI_CYAN}[VALVE_DLL] ${UI_RST}" ;;
+                *GOG*)        c_badge="${UI_PURPLE}[GOG]       ${UI_RST}" ;;
                 *)            c_badge="${UI_ICE}[STANDALONE]${UI_RST}" ;;
             esac
             printf "%s\t%s\t%s\t%s\t%s\t%s\n" "${UI_DIM}${c_appid}${UI_RST}" "${UI_BOLD}${c_title}${UI_RST}" "$c_badge" "$c_gdir" "$c_gbin" "$c_store"

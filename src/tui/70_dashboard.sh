@@ -363,7 +363,8 @@ library_menu() {
         elif [ "$trigger_key" = "tab" ]; then
             case "$active_store" in
                 ALL) active_store="STEAM" ;;
-                STEAM) active_store="STANDALONE" ;;
+                STEAM) active_store="GOG" ;;
+                GOG) active_store="STANDALONE" ;;
                 *) active_store="ALL" ;;
             esac
             continue
@@ -372,7 +373,7 @@ library_menu() {
             store_pick=$(tui_action_palette \
                 "Store Filter" \
                 "Select Store View (Enter: Apply │ Esc: Cancel)" \
-                "$(printf 'ALL\tAll Stores (Unified)\nSTEAM\tSteam Library\nSTANDALONE\tStandalone / Portable\n')" \
+                "$(printf 'ALL\tAll Stores (Unified)\nSTEAM\tSteam Library\nGOG\tGOG Library (DRM-Free)\nSTANDALONE\tStandalone / Portable\n')" \
                 "" \
                 "Store > ") || hk_rc=$?
             if [ "$hk_rc" -ne 0 ] && [ "$hk_rc" -ne 1 ] && [ "$hk_rc" -ne 130 ]; then

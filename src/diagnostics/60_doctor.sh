@@ -161,6 +161,16 @@ doctor_audit() {
         warn_cnt=$((warn_cnt + 1))
     fi
 
+    if command -v gogdl >/dev/null 2>&1; then
+        echo "    • $(printf '%-18s' "GOG Store CLI") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(command -v gogdl))${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
+    elif command -v lgogdownloader >/dev/null 2>&1; then
+        echo "    • $(printf '%-18s' "GOG Store CLI") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(command -v lgogdownloader))${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "    • $(printf '%-18s' "GOG Store CLI") : ${UI_DIM}[OPT]${UI_RST} Optional (Install gogdl or lgogdownloader for GOG support)"
+    fi
+
     # Layer 7: Steam Client & SLSsteam Integration
     echo
     echo "  ${UI_PURPLE}[LAYER 7] Steam Client & Secondary Bridge Integration${UI_RST}"
