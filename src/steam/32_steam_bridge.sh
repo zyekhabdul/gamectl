@@ -546,16 +546,47 @@ unlock_interactive() {
             return 1
         fi
 
+        local -a adopt_ids=()
+        local aid aname
+        while IFS=$'\t' read -r aid aname; do
+            aid="${aid//[[:space:]]/}"
+            [[ "$aid" =~ ^[0-9]+$ ]] && adopt_ids+=("$aid")
+        done <<< "$search_items"
+
+        declare -A adopt_type_map=() adopt_parent_map=()
+        if [ "${#adopt_ids[@]}" -gt 0 ] && declare -F classify_steam_app_types >/dev/null 2>&1; then
+            local c_out c_id c_type c_parent
+            c_out=$(classify_steam_app_types "${adopt_ids[@]}" 2>/dev/null || true)
+            while IFS=$'\t' read -r c_id c_type c_parent; do
+                [ -n "$c_id" ] || continue
+                adopt_type_map["$c_id"]="${c_type:-APP}"
+                adopt_parent_map["$c_id"]="${c_parent:-}"
+            done <<< "$c_out"
+        fi
+
+        local adopt_items=""
+        while IFS=$'\t' read -r aid aname; do
+            [ -n "$aid" ] || continue
+            local raw_type="${adopt_type_map[$aid]:-APP}"
+            local parent_id="${adopt_parent_map[$aid]:-}"
+            local type_badge="[$raw_type]"
+            if declare -F format_app_type_badge >/dev/null 2>&1; then
+                type_badge="$(format_app_type_badge "$raw_type")"
+            fi
+            validate_tui_fields "$aid" "$aname" "$raw_type" "$parent_id" || continue
+            adopt_items+="${aid}"$'\t'"${type_badge}"$'\t'"${aname}"$'\t'"${raw_type}"$'\t'"${parent_id}"$'\n'
+        done <<< "$search_items"
+
         local sel_item fzf_sel_rc=0
         export GAMECTL_PREVIEW_BIN="$SELF_BIN"
-        sel_item=$(echo "$search_items" | fzf \
+        sel_item=$(printf '%s' "$adopt_items" | fzf \
             --delimiter=$'\t' \
-            --with-nth=1,2 \
+            --with-nth=1,2,3 \
             --border-label="  ╢ Steam Store Search :: Pick Target Game ╟  " \
             --border-label-pos=2 \
             --header="SELECT GAME FOR ACF ADOPTION (Enter: Select │ Esc: Cancel)" \
             --prompt="Adopt Game > " \
-            --preview='"$GAMECTL_PREVIEW_BIN" --preview-adopt {1} {2}' \
+            --preview='"$GAMECTL_PREVIEW_BIN" --preview-adopt {1} {3}' \
             --preview-window=down:45%:border-rounded \
             --reverse 2>/dev/null) || fzf_sel_rc=$?
 
@@ -568,8 +599,15 @@ unlock_interactive() {
         fi
         [ -z "$sel_item" ] && return 0
 
-        u_appid=$(echo "$sel_item" | awk -F'\t' '{print $1}')
-        u_title=$(echo "$sel_item" | awk -F'\t' '{print $2}')
+        local _a1="" _a2="" _a3=""
+        IFS=$'\t' read -r _a1 _a2 _a3 _ <<< "$sel_item"
+        if [ -n "$_a3" ]; then
+            u_appid="$_a1"
+            u_title="$_a3"
+        else
+            u_appid="$_a1"
+            u_title="$_a2"
+        fi
     fi
 
     [ -z "$u_appid" ] && return 0

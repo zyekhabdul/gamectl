@@ -764,9 +764,26 @@ preview_search_game() {
 
     if [ -n "$appid" ] && [[ "$appid" =~ ^[0-9]+$ ]]; then
         local details
-        details=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=platforms,genres" "steam_details_${appid}" 3600 2>/dev/null | jq -r ".\"${appid}\".data // empty" 2>/dev/null || true)
+        details=$(fetch_steam_app_details "$appid" 2>/dev/null || true)
         if [ -n "$details" ] && [ "$details" != "null" ]; then
-            local is_linux is_win genres
+            local raw_type parent_id parent_name is_linux is_win genres
+            raw_type=$(echo "$details" | jq -r '.type // empty' 2>/dev/null || true)
+            parent_id=$(echo "$details" | jq -r '.fullgame.appid // empty' 2>/dev/null || true)
+            parent_name=$(echo "$details" | jq -r '.fullgame.name // empty' 2>/dev/null || true)
+            if [ -n "$raw_type" ]; then
+                local norm_type type_badge
+                norm_type="$(normalize_steam_app_type "$raw_type")"
+                type_badge="$(format_app_type_badge "$norm_type")"
+                if [ "$norm_type" = "DLC" ] && [[ "$parent_id" =~ ^[0-9]+$ ]]; then
+                    if [ -n "$parent_name" ]; then
+                        printf "  %sType       %s : %s %s(Base: %s • %s)%s\n" "${UI_CYAN}" "${UI_RST}" "$type_badge" "${UI_DIM}" "$parent_name" "$parent_id" "${UI_RST}"
+                    else
+                        printf "  %sType       %s : %s %s(Base: %s)%s\n" "${UI_CYAN}" "${UI_RST}" "$type_badge" "${UI_DIM}" "$parent_id" "${UI_RST}"
+                    fi
+                else
+                    printf "  %sType       %s : %s\n" "${UI_CYAN}" "${UI_RST}" "$type_badge"
+                fi
+            fi
             is_linux=$(echo "$details" | jq -r ".platforms.linux // false" 2>/dev/null || echo "false")
             is_win=$(echo "$details" | jq -r ".platforms.windows // false" 2>/dev/null || echo "false")
             genres=$(echo "$details" | jq -r "[.genres[]?.description] | join(\", \")" 2>/dev/null || true)
