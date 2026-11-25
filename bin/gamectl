@@ -2627,17 +2627,28 @@ get_steam_libraries() {
     done
 }
 
-# Scan installed games dynamically in standard & custom paths
+# Scan installed games dynamically in standard & custom paths (v3 6-column schema)
 scan_installed_games() {
     local is_formatted=false
     local force_refresh=false
+    local store_filter="ALL"
 
-    for arg in "$@"; do
-        case "$arg" in
+    while [ $# -gt 0 ]; do
+        case "$1" in
             --formatted|-f) is_formatted=true ;;
             --refresh|--no-cache|-r) force_refresh=true ;;
+            --store)
+                shift
+                store_filter="${1:-ALL}"
+                ;;
+            --store=*)
+                store_filter="${1#--store=}"
+                ;;
         esac
+        shift || true
     done
+    store_filter="${store_filter^^}"
+    [ -n "$store_filter" ] || store_filter="ALL"
 
     local cache_dir
     cache_dir="$(get_runtime_dir)"
@@ -2646,7 +2657,7 @@ scan_installed_games() {
     # Fast-path: Check cache validity (TTL: 60s, invalidated if candidate library directories are newer)
     local use_cached=false
     if [ "$force_refresh" = false ] && [ -f "$cache_file" ] &&
-       [ "$(head -n 1 "$cache_file")" = "# gamectl scanner v2" ]; then
+       [ "$(head -n 1 "$cache_file")" = "# gamectl scanner v3" ]; then
         local now mtime
         now=$(date +%s)
         mtime=$(stat -c%Y "$cache_file" 2>/dev/null || echo 0)
@@ -2663,7 +2674,7 @@ scan_installed_games() {
     fi
 
     if [ "$use_cached" = false ]; then
-        printf '%s\n' '# gamectl scanner v2' > "$cache_file.tmp"
+        printf '%s\n' '# gamectl scanner v3' > "$cache_file.tmp"
         declare -A seen_dirs=()
         declare -A seen_appids=()
 
@@ -2714,7 +2725,7 @@ scan_installed_games() {
                 status=$(resolve_game_drm_status "$gdir" "" "$gbin")
 
                 [ -z "$appid" ] && appid="STANDALONE"
-                printf "%s\t%s\t%s\t%s\t%s\n" "$appid" "$name" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
+                printf "%s\t%s\t%s\t%s\t%s\tSTEAM\n" "$appid" "$name" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
             done
         done < <(get_steam_libraries)
 
@@ -2787,16 +2798,19 @@ scan_installed_games() {
                 local status
                 status=$(resolve_game_drm_status "$gdir" "" "$gbin")
 
-                printf "%s\t%s\t%s\t%s\t%s\n" "$appid" "$title" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
+                printf "%s\t%s\t%s\t%s\t%s\tSTANDALONE\n" "$appid" "$title" "$status" "$gdir" "$gbin" >> "$cache_file.tmp"
             done
         done
         mv -f "$cache_file.tmp" "$cache_file"
     fi
 
-    # Render formatted or raw tab entries
+    # Render formatted or raw tab entries (6-column v3 TSV: APPID, TITLE, STATUS, GAME_DIR, GAME_BIN, STORE)
     if [ "$is_formatted" = true ]; then
-        while IFS=$'\t' read -r c_appid c_title c_status c_gdir c_gbin; do
+        while IFS=$'\t' read -r c_appid c_title c_status c_gdir c_gbin c_store; do
+            [[ "$c_appid" == \#* ]] && continue
             [ -z "$c_gdir" ] && continue
+            c_store="${c_store:-STANDALONE}"
+            [ "$store_filter" != "ALL" ] && [ "${c_store^^}" != "$store_filter" ] && continue
             local c_badge=""
             case "$c_status" in
                 *GBE_FORK*)   c_badge="${UI_GREEN}[GBE_FORK]  ${UI_RST}" ;;
@@ -2804,14 +2818,17 @@ scan_installed_games() {
                 *VALVE_DLL*)  c_badge="${UI_CYAN}[VALVE_DLL] ${UI_RST}" ;;
                 *)            c_badge="${UI_ICE}[STANDALONE]${UI_RST}" ;;
             esac
-            printf "%s\t%s\t%s\t%s\t%s\n" "${UI_DIM}${c_appid}${UI_RST}" "${UI_BOLD}${c_title}${UI_RST}" "$c_badge" "$c_gdir" "$c_gbin"
+            printf "%s\t%s\t%s\t%s\t%s\t%s\n" "${UI_DIM}${c_appid}${UI_RST}" "${UI_BOLD}${c_title}${UI_RST}" "$c_badge" "$c_gdir" "$c_gbin" "$c_store"
         done < "$cache_file"
     else
-        while IFS=$'\t' read -r c_appid c_title c_status c_gdir c_gbin; do
+        while IFS=$'\t' read -r c_appid c_title c_status c_gdir c_gbin c_store; do
+            [[ "$c_appid" == \#* ]] && continue
             [ -z "$c_gdir" ] && continue
+            c_store="${c_store:-STANDALONE}"
+            [ "$store_filter" != "ALL" ] && [ "${c_store^^}" != "$store_filter" ] && continue
             local clean_stat="$c_status"
             [[ "$clean_stat" != \[*\] ]] && clean_stat="[$clean_stat]"
-            printf "%-8s\t%-22s\t%-12s\t%s\t%s\n" "$c_appid" "$c_title" "$clean_stat" "$c_gdir" "$c_gbin"
+            printf "%-8s\t%-22s\t%-12s\t%s\t%s\t%s\n" "$c_appid" "$c_title" "$clean_stat" "$c_gdir" "$c_gbin" "$c_store"
         done < "$cache_file"
     fi
 }
@@ -7280,6 +7297,258 @@ EOF
     return 0
 }
 
+# --- [MODULE] src/stores/00_store_interface.sh ---
+# ==============================================================================
+# Unified Store Interface & Adapter Registry (Multi-Store Phase 1)
+# ==============================================================================
+
+# Print registered store adapter identifiers, one per line.
+store_list_registered() {
+    printf '%s\n' "steam"
+}
+
+# Print store adapters that are offline-ready on this host.
+store_list_available() {
+    local store_name=""
+    while IFS= read -r store_name; do
+        [ -n "$store_name" ] || continue
+        if declare -F "store_${store_name}_available" >/dev/null 2>&1; then
+            if "store_${store_name}_available" >/dev/null 2>&1; then
+                printf '%s\n' "$store_name"
+            fi
+        fi
+    done < <(store_list_registered)
+}
+
+# Validate and dispatch an operation to a registered store adapter.
+store_dispatch() {
+    local store="${1:-}"
+    local op="${2:-}"
+    if [ -z "$store" ] || [ -z "$op" ]; then
+        echo "Usage: store_dispatch <store> <op> [args...]" >&2
+        return 1
+    fi
+    shift 2
+
+    if [[ ! "$store" =~ ^[a-z0-9_]+$ ]]; then
+        echo "[ERROR] Invalid store identifier: $store" >&2
+        return 1
+    fi
+
+    if ! store_list_registered | grep -Fxq "$store"; then
+        echo "[ERROR] Unsupported or unregistered store: $store" >&2
+        return 1
+    fi
+
+    case "$op" in
+        available|status|search|list_installed|download|sync)
+            ;;
+        *)
+            echo "[ERROR] Unsupported store operation: $op (supported: available, status, search, list_installed, download, sync)" >&2
+            return 1
+            ;;
+    esac
+
+    local handler="store_${store}_${op}"
+    if ! declare -F "$handler" >/dev/null 2>&1; then
+        echo "[ERROR] Store adapter '$store' does not implement '$op' ($handler)" >&2
+        return 1
+    fi
+
+    "$handler" "$@"
+}
+
+# CLI entrypoint for `gamectl stores [list|status]`
+stores_cli() {
+    local action="${1:-status}"
+    local store_name=""
+    case "$action" in
+        list)
+            while IFS= read -r store_name; do
+                [ -n "$store_name" ] || continue
+                if store_dispatch "$store_name" available >/dev/null 2>&1; then
+                    printf '%-12s\t[AVAILABLE]\n' "$store_name"
+                else
+                    printf '%-12s\t[UNAVAILABLE]\n' "$store_name"
+                fi
+            done < <(store_list_registered)
+            ;;
+        status)
+            while IFS= read -r store_name; do
+                [ -n "$store_name" ] || continue
+                store_dispatch "$store_name" status
+            done < <(store_list_registered)
+            ;;
+        *)
+            echo "Usage: gamectl stores [list|status]" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Standalone-source compatibility: load split store adapters when sourced directly outside bin/gamectl
+if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
+    _stores_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    for _stores_sub in 10_store_steam.sh; do
+        if [ -f "$_stores_dir/$_stores_sub" ]; then
+            # shellcheck source=/dev/null
+            source "$_stores_dir/$_stores_sub"
+        fi
+    done
+    unset _stores_dir _stores_sub
+fi
+
+# --- [MODULE] src/stores/10_store_steam.sh ---
+# ==============================================================================
+# Built-in Steam Store Adapter (Standalone CDN + GBE Fork + Offline Metadata)
+# ==============================================================================
+
+# Offline availability probe for built-in Steam standalone adapter.
+store_steam_available() {
+    if declare -F resolve_depot_dl_bin >/dev/null 2>&1 && resolve_depot_dl_bin >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+# Report offline-safe capability status for built-in Steam adapter.
+store_steam_status() {
+    local dl_bin="" dl_status="missing"
+    if declare -F resolve_depot_dl_bin >/dev/null 2>&1; then
+        dl_bin="$(resolve_depot_dl_bin 2>/dev/null || true)"
+    fi
+    if [ -n "$dl_bin" ]; then
+        dl_status="ready ($dl_bin)"
+    fi
+
+    local gbe_linux="" gbe_win="" gbe_status="missing"
+    if declare -F get_gbe_template >/dev/null 2>&1; then
+        gbe_linux="$(get_gbe_template linux x64 2>/dev/null || true)"
+        gbe_win="$(get_gbe_template windows x64 2>/dev/null || true)"
+    fi
+    if [ -n "$gbe_linux" ] && [ -n "$gbe_win" ]; then
+        gbe_status="ready (linux+windows)"
+    elif [ -n "$gbe_linux" ] || [ -n "$gbe_win" ]; then
+        gbe_status="partial"
+    fi
+
+    local lua_status="unconfigured"
+    if [ -s "$HOME/.config/gamectl/lua_tools_auth.json" ]; then
+        lua_status="session present"
+    fi
+
+    local hubcap_key="" hubcap_status="unconfigured"
+    if declare -F get_hubcap_api_key >/dev/null 2>&1; then
+        hubcap_key="$(get_hubcap_api_key 2>/dev/null || true)"
+    fi
+    [ -n "$hubcap_key" ] && hubcap_status="configured"
+
+    echo "store=steam"
+    echo "  depot_dl : $dl_status"
+    echo "  gbe_fork : $gbe_status"
+    echo "  luatools : $lua_status"
+    echo "  hubcap   : $hubcap_status"
+    return 0
+}
+
+# Search Steam Store catalog and emit sanitized TSV:
+#   STEAM<TAB>APP_ID<TAB>TITLE<TAB>PLATFORMS<TAB>STATUS
+store_steam_search() {
+    local query="${1:-}"
+    if [ -z "$query" ]; then
+        echo "[ERROR] Usage: store_steam_search <query>" >&2
+        return 1
+    fi
+
+    local encoded_query raw_results parsed_rows
+    encoded_query=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$query")
+    raw_results=$(curl -s --connect-timeout 5 --max-time 15 \
+        "https://store.steampowered.com/api/storesearch/?term=${encoded_query}&l=english&cc=US" 2>/dev/null || true)
+
+    if [ -z "$raw_results" ]; then
+        echo "[ERROR] Steam Store search failed or returned an empty response." >&2
+        return 1
+    fi
+
+    if ! parsed_rows=$(printf '%s' "$raw_results" | jq -r '
+        if (.items | type) != "array" then
+            error("Invalid Steam search payload")
+        elif any(.items[]?; (.id | tostring | test("[\\t\\r\\n]")) or (.name | tostring | test("[\\t\\r\\n]"))) then
+            error("TUI catalog contains TAB, CR or newline")
+        else
+            .items[] |
+            [
+                (.id | tostring),
+                (.name | tostring),
+                (
+                    [
+                        (if (.platforms.linux // false) then "linux" else empty end),
+                        (if (.platforms.windows // false) then "windows" else empty end),
+                        (if (.platforms.mac // false) then "mac" else empty end)
+                    ] | join(",") | if length == 0 then "unknown" else . end
+                )
+            ] | @tsv
+        end
+    ' 2>/dev/null); then
+        echo "[ERROR] Invalid Steam search catalog." >&2
+        return 1
+    fi
+
+    declare -A installed_ids=()
+    if declare -F scan_installed_games >/dev/null 2>&1; then
+        local ins_id
+        while IFS=$'\t' read -r ins_id _; do
+            ins_id="${ins_id//[[:space:]]/}"
+            [ -n "$ins_id" ] && installed_ids["$ins_id"]=1
+        done < <(scan_installed_games 2>/dev/null || true)
+    fi
+
+    local app_id title platforms row_status
+    while IFS=$'\t' read -r app_id title platforms; do
+        [ -n "$app_id" ] || continue
+        if declare -F validate_tui_fields >/dev/null 2>&1; then
+            validate_tui_fields "$app_id" "$title" "$platforms" || return 1
+        fi
+        row_status="AVAILABLE"
+        [ -n "${installed_ids["$app_id"]:-}" ] && row_status="INSTALLED"
+        printf 'STEAM\t%s\t%s\t%s\t%s\n' "$app_id" "$title" "$platforms" "$row_status"
+    done <<< "$parsed_rows"
+    return 0
+}
+
+# List installed games belonging to Steam or Standalone libraries (v3 6-col TSV).
+store_steam_list_installed() {
+    if ! declare -F scan_installed_games >/dev/null 2>&1; then
+        echo "[ERROR] scan_installed_games is unavailable." >&2
+        return 1
+    fi
+    scan_installed_games "$@" | awk -F'\t' '{ st = ($6 == "" ? "STANDALONE" : $6); if (st == "STEAM" || st == "STANDALONE") print }'
+}
+
+# Delegate Steam/Standalone download to headless downloader engine.
+store_steam_download() {
+    local app_id="${1:-}"
+    if [ -z "$app_id" ]; then
+        echo "Usage: store_steam_download <appid> [target_dir] [title] [options...]" >&2
+        return 1
+    fi
+    download_game "$@"
+}
+
+# Synchronize offline DLC manifest metadata without invoking Steam Client.
+store_steam_sync() {
+    local app_id="${1:-}"
+    local game_dir="${2:-}"
+    if [ -z "$app_id" ] || [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
+        echo "[ERROR] Usage: store_steam_sync <appid> <existing_game_dir>" >&2
+        return 1
+    fi
+    fetch_dlc "$game_dir" "$app_id"
+}
+
 # --- [MODULE] src/runners/40_wrappers.sh ---
 # Canonical wrapper config & env override loader (SSoT)
 load_wrapper_config() {
@@ -11674,17 +11943,18 @@ library_menu() {
     clean_stale_locks
 
     export GAMECTL_PREVIEW_BIN="$SELF_BIN"
+    local active_store="ALL"
 
     while true; do
         flush_tty_input
         local fzf_out fzf_rc=0
-        fzf_out=$(scan_installed_games --formatted | fzf \
+        fzf_out=$(scan_installed_games --formatted --store "$active_store" | fzf \
             --delimiter=$'\t' \
             --with-nth=1,2,3 \
-            --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x \
-            --border-label="  ╢ gamectl :: Game Library ╟  " \
+            --expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x,tab,alt-s \
+            --border-label="  ╢ gamectl :: Game Library [Store: $active_store] ╟  " \
             --border-label-pos=2 \
-            --header="Enter: Launch/Manage │ Ctrl-I: Inject GBE │ Ctrl-D: Make Desktop │ Ctrl-F: Search │ Esc: Dashboard" \
+            --header="Enter: Launch/Manage │ Tab/Alt-S: Store │ Ctrl-I: Inject GBE │ Ctrl-F: Search │ Esc: Dashboard" \
             --prompt="Library > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview {1} {2} {3} {4} {5}' \
             --preview-window=right:55%:border-rounded:wrap \
@@ -11708,6 +11978,28 @@ library_menu() {
         elif [ "$trigger_key" = "ctrl-f" ]; then
             search_steam "" false || hk_rc=$?
             invalidate_scan_cache
+        elif [ "$trigger_key" = "tab" ]; then
+            case "$active_store" in
+                ALL) active_store="STEAM" ;;
+                STEAM) active_store="STANDALONE" ;;
+                *) active_store="ALL" ;;
+            esac
+            continue
+        elif [ "$trigger_key" = "alt-s" ]; then
+            local store_pick=""
+            store_pick=$(tui_action_palette \
+                "Store Filter" \
+                "Select Store View (Enter: Apply │ Esc: Cancel)" \
+                "$(printf 'ALL\tAll Stores (Unified)\nSTEAM\tSteam Library\nSTANDALONE\tStandalone / Portable\n')" \
+                "" \
+                "Store > ") || hk_rc=$?
+            if [ "$hk_rc" -ne 0 ] && [ "$hk_rc" -ne 1 ] && [ "$hk_rc" -ne 130 ]; then
+                return "$hk_rc"
+            fi
+            if [ "$hk_rc" -eq 0 ] && [ -n "$store_pick" ]; then
+                active_store=$(printf '%s' "$store_pick" | cut -f1)
+            fi
+            continue
         fi
         if [ "$hk_rc" -ne 0 ] && [ "$hk_rc" -ne 1 ] && [ "$hk_rc" -ne 130 ]; then
             return "$hk_rc"
@@ -13096,6 +13388,7 @@ export -f get_runtime_dir strip_ansi preview_game sync_save_remote sync_to_compa
 export -f require_tui check_fzf_status validate_tui_fields store_search_items tui_exec_action tui_run_engine tui_prompt_input tui_action_palette remote_sync_interactive manage_active_processes_interactive login_luatools_interactive resolve_game_drm_status install_tui_screen_traps get_desktop_runtime_dir detect_vulkan_capability resolve_graphics_renderer inspect_game_log_hint resolve_game_appid get_game_log_file load_wrapper_config prepare_windows_runner_env
 export -f is_gbe_library install_gbe_library get_config_value set_config_value get_hubcap_api_key atomic_set_kv_file atomic_prepend_line audit_zip_safety list_runner_dirs is_game_active_for_dir parse_remote_sync_target probe_ssh_remote_home resolve_ssh_remote_base resolve_rclone_remote_saves
 export -f _is_prefix_save_noise _check_confined_ancestor discover_prefix_saves collect_prefix_saves restore_prefix_saves resolve_dev_profiler_env configure_dev_profile
+export -f store_list_registered store_list_available store_dispatch stores_cli store_steam_available store_steam_status store_steam_search store_steam_list_installed store_steam_download store_steam_sync
 
 # Top-level Menu
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -13231,6 +13524,9 @@ case "${1:-}" in
         ;;
     doctor|audit)
         doctor_audit
+        ;;
+    stores|store)
+        stores_cli "${2:-status}" "${@:3}"
         ;;
     check-scope|systemd-scope)
         if check_systemd_scope_support; then
@@ -13579,6 +13875,8 @@ Usage:
   gamectl config [set <k> <v>|get <k>|list]
                       Open global configuration menu or read/write settings (~/.config/gamectl/config)
   gamectl doctor      Run 7-layer system & GPU health diagnostics (alias: audit)
+  gamectl stores [list|status]
+                      Inspect registered store adapters and offline readiness
   gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread] [--scope|--no-scope] [--prime|--no-prime] [--sandbox|--no-sandbox]
                       Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]
