@@ -148,6 +148,12 @@ case "${1:-}" in
     amazon)
         amazon_cli "${2:-status}" "${@:3}"
         ;;
+    auth)
+        auth_hub_cli "${2:-status}" "${@:3}"
+        ;;
+    search-stores|search_stores)
+        store_search_all "${@:2}"
+        ;;
     check-scope|systemd-scope)
         if check_systemd_scope_support; then
             echo "[INFO] cgroups v2 / systemd-run user scope isolation is supported and active."
@@ -503,6 +509,10 @@ Usage:
                       Optional Epic Games adapter (delegates to legendary)
   gamectl amazon <status|auth|search|download|sync> [args...]
                       Optional Amazon Prime Gaming adapter (delegates to nile)
+  gamectl auth [status|gog|epic|amazon|luatools] [args...]
+                      Unified offline auth status and native CLI login delegation
+  gamectl search-stores <query> [--store <all|steam|gog|epic|amazon>]
+                      Cross-store catalog search with canonical app-type taxonomy
   gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread] [--scope|--no-scope] [--prime|--no-prime] [--sandbox|--no-sandbox]
                       Launch game with isolated prefix and runtime wrapper options
   gamectl configure-wrappers <dir> [title]
