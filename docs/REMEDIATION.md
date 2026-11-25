@@ -292,3 +292,62 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
   3. Rebuild `bin/gamectl` (`./scripts/build.sh && ./scripts/build.sh --check`), jalankan `STRICT_LINT=1 make lint` dan `make test`, tandai Packet R2.1A–R2.1D `[x]` / `[ COMPLETED & VERIFIED ]` di `docs/REMEDIATION.md`, dan bersihkan `.deb`.
 - **Definition of Done (DoD)**:
   - Seluruh suite Bash (`test_cli.sh`, `test_remediation.sh`, `test_tui_ergonomics.sh`, `test_depot_filter.sh`, `test_hubcap.sh`), Python (`42/42`), lint, dan bundle check lulus Exit Code `0`.
+
+---
+
+# REMEDIATION WORK PACKET 3: MODULE SIZE DISCIPLINE, SAFE STRUCTURAL SPLIT & LOC RATCHET GUARD
+
+- **Track**: Remediation / Module Size Discipline, Safe Structural Decomposition & LOC Ratchet Guard
+- **Status**: PENDING [0/4 PACKETS]
+- **Prasyarat**: Remediation Work Packet 2.1 (`8aa0e35`) & WP41 Multi-Store Phase 4 (`1bff087`)
+- **Basis**: Audit empiris post-WP41 (12/26 modul >600 LOC; `30_downloader.sh` 1.249, `70_dashboard.sh` 1.057, `20_discovery.sh` 991, `31_manifests.sh` 989, `35_fixes.sh` 981, `41_proton_prefix.sh` 980, `10_utils.sh` 959), audit static-grep coupling (`tests/test_cli.sh`: 45 ref `30_downloader.sh`, 24 ref `70_dashboard.sh`; `20_discovery.sh`: 0 static-grep), dan standar 150–600 LOC di `DEVELOPMENT.md`
+- **Target Files**: `scripts/check_loc_budget.sh`, `Makefile`, `src/steam/20_discovery.sh`, `src/steam/21_shortcuts_artwork.sh`, `src/tui/70_dashboard.sh`, `src/tui/72_store_tui.sh`, `scripts/build.sh`, `tests/test_remediation.sh`, `DEVELOPMENT.md`, `bin/gamectl`, `docs/REMEDIATION.md`
+
+---
+
+## 1. Tujuan, Temuan Forensik & Batas YAGNI
+
+1. **Hard Freeze & Ratchet Guard (Anti-Regresi Ukuran)**:
+   - Terapkan hard-cap `<= 600 LOC` untuk seluruh modul baru di `src/*/*.sh` dan `src/main.sh`, serta no-growth ceiling baseline bagi 12 modul legacy >600 LOC agar ukurannya tidak bisa bertambah lagi.
+2. **Larangan Penambahan Domain Baru ke `30_downloader.sh` & `70_dashboard.sh`**:
+   - Perlakukan 7 modul kritis (>950 LOC) sebagai bugfix/wiring-only; seluruh fitur lintas-store TUI berikutnya ditempatkan di `src/tui/72_store_tui.sh` dan adapter store baru di `src/stores/` (`<= 200 LOC`).
+3. **Penghormatan Kendala Static-Grep Test Coupling (Anti Big-Bang)**:
+   - `tests/test_cli.sh` mengunci path file `30_downloader.sh` (45 ref) dan `70_dashboard.sh` (24 ref) lewat `grep` statis (`--expect=ctrl-k`, `kill -STOP`, `search_steam`, `library_menu`). Pemindahan fungsi legacy dari dua file tersebut ditunda sampai paket terpisah (R3.1) yang memigrasi assertion static-grep ke behavioral/`bin/gamectl` check.
+4. **Zero-Breakage Split via Sibling Auto-Loader**:
+   - `20_discovery.sh` memiliki 0 static-grep assertion di `tests/` (45 hit murni `source`), sehingga pemisahan `21_shortcuts_artwork.sh` (~511 LOC) + sibling auto-loader unbundled aman 100% tanpa mengubah test eksisting.
+
+---
+
+## 2. Rencana Eksekusi Detail (Packet R3A - R3D)
+
+### [ ] Packet R3A: Deterministic LOC Budget & Legacy Ratchet Guard (`scripts/check_loc_budget.sh`, `Makefile`)
+- **Target Files**: `scripts/check_loc_budget.sh`, `Makefile`
+- **Langkah Teknis**:
+  1. Buat `scripts/check_loc_budget.sh` dengan hard-cap `600 LOC` untuk semua modul di `src/*/*.sh` dan `src/main.sh`, serta tabel ceiling baseline untuk 12 modul legacy (`30_downloader.sh:1249`, `70_dashboard.sh:1057`, `20_discovery.sh:991`, `31_manifests.sh:989`, `35_fixes.sh:981`, `41_proton_prefix.sh:980`, `10_utils.sh:959`, `71_previews.sh:891`, `50_launcher.sh:795`, `40_wrappers.sh:723`, `32_steam_bridge.sh:694`, `main.sh:605`).
+  2. Hubungkan `./scripts/check_loc_budget.sh` ke target `lint:` di `Makefile`.
+- **Definition of Done (DoD)**:
+  - `make lint` dan `STRICT_LINT=1 make lint` gagal deterministik bila ada modul baru >600 LOC atau modul legacy melampaui ceiling-nya.
+
+### [ ] Packet R3B: Zero-Breakage Split `src/steam/21_shortcuts_artwork.sh`
+- **Target Files**: `src/steam/20_discovery.sh`, `src/steam/21_shortcuts_artwork.sh`, `scripts/build.sh`, `scripts/check_loc_budget.sh`
+- **Langkah Teknis**:
+  1. Pindahkan `create_desktop_entry`, `get_steam_grid_dir`, `fetch_steam_artwork`, `get_steam_shortcuts_vdf`, `check_steam_active`, dan `add_steam_shortcut` (~511 LOC) ke `src/steam/21_shortcuts_artwork.sh`.
+  2. Tambahkan sibling auto-loader `GAMECTL_BUNDLED` di `src/steam/20_discovery.sh`, daftarkan `21_shortcuts_artwork.sh` di `scripts/build.sh`, dan hapus `20_discovery.sh` dari legacy ceiling (kini <= 520 LOC). Isolasikan commit pure-move bila diff >150 baris.
+- **Definition of Done (DoD)**:
+  - `20_discovery.sh` dan `21_shortcuts_artwork.sh` masing-masing <= 550 LOC; seluruh test yang me-`source 20_discovery.sh` tetap pass tanpa mutasi file test.
+
+### [ ] Packet R3C: Dedicated Multi-Store TUI Module (`72_store_tui.sh`) & Scanner Helper
+- **Target Files**: `src/tui/70_dashboard.sh`, `src/tui/72_store_tui.sh`, `src/steam/20_discovery.sh`, `scripts/build.sh`, `scripts/check_loc_budget.sh`
+- **Langkah Teknis**:
+  1. Pindahkan definisi `search_stores_interactive()` dari `70_dashboard.sh` ke `src/tui/72_store_tui.sh` (pemanggilan di `70_dashboard.sh:717` tetap menjaga Test 40 lulus), daftarkan di sibling auto-loader `70_dashboard.sh` serta `scripts/build.sh`, dan turunkan ceiling `70_dashboard.sh` (`1057 -> 1020`).
+  2. Konsolidasikan duplikasi loop `# 1b` Epic dan `# 1c` Amazon di `src/steam/20_discovery.sh` ke satu helper `_scan_json_store_entries()`.
+- **Definition of Done (DoD)**:
+  - Fitur lintas-store TUI terisolasi di `72_store_tui.sh` (<= 150 LOC) dan duplikasi loop discovery Epic/Amazon tereliminasi.
+
+### [ ] Packet R3D: Contract Test, Docs, Rebuild & Full Verification
+- **Target Files**: `tests/test_remediation.sh`, `DEVELOPMENT.md`, `docs/REMEDIATION.md`, `bin/gamectl`
+- **Langkah Teknis**:
+  1. Tambahkan Test 41 di `tests/test_remediation.sh`: uji `check_loc_budget.sh` pass/fail deterministik di tempdir serta uji sibling auto-loader unbundled `21_shortcuts_artwork.sh` dan `72_store_tui.sh`.
+  2. Perbarui peta modul di `DEVELOPMENT.md`, tandai Packet R3A–R3D `[x]` / `[ COMPLETED & VERIFIED ]` di `docs/REMEDIATION.md`, rebuild `bin/gamectl` (`./scripts/build.sh && ./scripts/build.sh --check`), dan jalankan `STRICT_LINT=1 make lint` + `make test`.
+- **Definition of Done (DoD)**:
+  - Seluruh lint, LOC budget gate, bundle check, suite Bash, dan Python safety suite (42/42) lulus Exit Code `0`.
