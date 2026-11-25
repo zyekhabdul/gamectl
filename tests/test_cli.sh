@@ -455,7 +455,11 @@ test_arch_pkgbuild_validation() {
     [ -f "$REPO_ROOT/packaging/arch/PKGBUILD" ] && \
     [ -f "$REPO_ROOT/packaging/arch/.SRCINFO" ] && \
     bash -n "$REPO_ROOT/packaging/arch/PKGBUILD" && \
-    grep -q "pkgname = gamectl" "$REPO_ROOT/packaging/arch/.SRCINFO"
+    grep -q "pkgname = gamectl" "$REPO_ROOT/packaging/arch/.SRCINFO" && \
+    grep -q "makedepends = cargo" "$REPO_ROOT/packaging/arch/.SRCINFO" && \
+    grep -q "cargo build --frozen --release --bin gamectl-depot-dl" "$REPO_ROOT/packaging/arch/PKGBUILD" && \
+    grep -q "crates/depot-dl/target/release/gamectl-depot-dl" "$REPO_ROOT/packaging/arch/PKGBUILD" && \
+    ! grep -q "install -Dm755 bin/gamectl-depot-dl" "$REPO_ROOT/packaging/arch/PKGBUILD"
 }
 run_test "Arch Packaging: Valid PKGBUILD syntax and .SRCINFO generation" test_arch_pkgbuild_validation
 
@@ -463,7 +467,11 @@ test_aur_git_pkgbuild_validation() {
     [ -f "$REPO_ROOT/packaging/aur-git/PKGBUILD" ] && \
     [ -f "$REPO_ROOT/packaging/aur-git/.SRCINFO" ] && \
     bash -n "$REPO_ROOT/packaging/aur-git/PKGBUILD" && \
-    grep -q "pkgname = gamectl-git" "$REPO_ROOT/packaging/aur-git/.SRCINFO"
+    grep -q "pkgname = gamectl-git" "$REPO_ROOT/packaging/aur-git/.SRCINFO" && \
+    grep -q "makedepends = cargo" "$REPO_ROOT/packaging/aur-git/.SRCINFO" && \
+    grep -q "cargo build --frozen --release --bin gamectl-depot-dl" "$REPO_ROOT/packaging/aur-git/PKGBUILD" && \
+    grep -q "crates/depot-dl/target/release/gamectl-depot-dl" "$REPO_ROOT/packaging/aur-git/PKGBUILD" && \
+    ! grep -q "install -Dm755 bin/gamectl-depot-dl" "$REPO_ROOT/packaging/aur-git/PKGBUILD"
 }
 run_test "AUR Git Packaging: Valid PKGBUILD syntax and .SRCINFO generation" test_aur_git_pkgbuild_validation
 
@@ -1098,8 +1106,10 @@ run_test "Download Orchestrator: download_game --engine=standalone native flow" 
 
 test_native_depot_dl_binary_and_compiler_contract() {
     source "$REPO_ROOT/src/steam/30_downloader.sh"
-    # 1. Compiler check flag contract
+    # 1. Compiler check flag and clean locked build contract
     "$REPO_ROOT/scripts/build-depot-dl.sh" --check >/dev/null 2>&1 || return 1
+    ! grep -q "unsignee" "$REPO_ROOT/scripts/build-depot-dl.sh" || return 1
+    grep -q -- "--locked" "$REPO_ROOT/scripts/build-depot-dl.sh" || return 1
 
     # 2. Verify binary existence and execution
     local dl_bin="$REPO_ROOT/bin/gamectl-depot-dl"
