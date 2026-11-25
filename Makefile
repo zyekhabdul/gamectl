@@ -49,7 +49,8 @@ lint:
 		exit 1; \
 	else \
 		echo "[INFO] shellcheck not found (syntax-only lint passed)"; \
-	fi
+	fi; \
+	bash scripts/check_loc_budget.sh
 
 pkg-deb:
 	bash packaging/debian/build-deb.sh

@@ -298,7 +298,7 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 # REMEDIATION WORK PACKET 3: MODULE SIZE DISCIPLINE, SAFE STRUCTURAL SPLIT & LOC RATCHET GUARD
 
 - **Track**: Remediation / Module Size Discipline, Safe Structural Decomposition & LOC Ratchet Guard
-- **Status**: PENDING [0/4 PACKETS]
+- **Status**: IN PROGRESS [1/4 PACKETS]
 - **Prasyarat**: Remediation Work Packet 2.1 (`8aa0e35`) & WP41 Multi-Store Phase 4 (`1bff087`)
 - **Basis**: Audit empiris post-WP41 (12/26 modul >600 LOC; `30_downloader.sh` 1.249, `70_dashboard.sh` 1.057, `20_discovery.sh` 991, `31_manifests.sh` 989, `35_fixes.sh` 981, `41_proton_prefix.sh` 980, `10_utils.sh` 959), audit static-grep coupling (`tests/test_cli.sh`: 45 ref `30_downloader.sh`, 24 ref `70_dashboard.sh`; `20_discovery.sh`: 0 static-grep), dan standar 150–600 LOC di `DEVELOPMENT.md`
 - **Target Files**: `scripts/check_loc_budget.sh`, `Makefile`, `src/steam/20_discovery.sh`, `src/steam/21_shortcuts_artwork.sh`, `src/tui/70_dashboard.sh`, `src/tui/72_store_tui.sh`, `scripts/build.sh`, `tests/test_remediation.sh`, `DEVELOPMENT.md`, `bin/gamectl`, `docs/REMEDIATION.md`
@@ -320,7 +320,7 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 
 ## 2. Rencana Eksekusi Detail (Packet R3A - R3D)
 
-### [ ] Packet R3A: Deterministic LOC Budget & Legacy Ratchet Guard (`scripts/check_loc_budget.sh`, `Makefile`)
+### [x] Packet R3A: Deterministic LOC Budget & Legacy Ratchet Guard (`scripts/check_loc_budget.sh`, `Makefile`)
 - **Target Files**: `scripts/check_loc_budget.sh`, `Makefile`
 - **Langkah Teknis**:
   1. Buat `scripts/check_loc_budget.sh` dengan hard-cap `600 LOC` untuk semua modul di `src/*/*.sh` dan `src/main.sh`, serta tabel ceiling baseline untuk 12 modul legacy (`30_downloader.sh:1249`, `70_dashboard.sh:1057`, `20_discovery.sh:991`, `31_manifests.sh:989`, `35_fixes.sh:981`, `41_proton_prefix.sh:980`, `10_utils.sh:959`, `71_previews.sh:891`, `50_launcher.sh:795`, `40_wrappers.sh:723`, `32_steam_bridge.sh:694`, `main.sh:605`).
