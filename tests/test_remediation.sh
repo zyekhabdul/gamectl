@@ -2927,6 +2927,55 @@ EOF
 }
 run_test "Optional GOG Adapter & CLI Contracts (WP39A/39C)" test_wp39_gog_adapter_and_cli_contract
 
+# Test 34: WP39B/39C — GOG Local Discovery (goggame-*.info), Validation & TUI Filter
+test_wp39_gog_discovery_and_tui_filter_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp39_disc_XXXXXX")
+    mkdir -p "$t_dir/home/GOG Games/Witcher3" "$t_dir/home/Games/SoloTitle" \
+             "$t_dir/home/Games/BadGog" "$t_dir/steam/steamapps/common/SteamTitle" "$t_dir/runtime"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home" STEAM_ROOT="$t_dir/steam" XDG_RUNTIME_DIR="$t_dir/runtime"
+
+        for b in "$t_dir/home/GOG Games/Witcher3/witcher.sh" "$t_dir/home/Games/SoloTitle/solo.bin" \
+                 "$t_dir/home/Games/BadGog/bad.bin" "$t_dir/steam/steamapps/common/SteamTitle/steam.bin"; do
+            printf '#!/bin/sh\nexit 0\n' > "$b"
+            chmod +x "$b"
+        done
+        printf '{"gameId":"1207658924","name":"The Witcher 3"}\n' > "$t_dir/home/GOG Games/Witcher3/goggame-1207658924.info"
+        printf '{"gameId":"999","name":"Bad\\tGogName"}\n' > "$t_dir/home/Games/BadGog/goggame-999.info"
+        printf '"AppState"\n{\n  "appid" "99881"\n  "name" "SteamTitle"\n  "installdir" "SteamTitle"\n}\n' \
+            > "$t_dir/steam/steamapps/appmanifest_99881.acf"
+
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/stores/00_store_interface.sh"
+
+        local all_out gog_out solo_out err_log="$t_dir/scan.err"
+        all_out=$(scan_installed_games --refresh 2>"$err_log") || exit 1
+        [ "$(head -n 1 "$t_dir/runtime/scancache.tab")" = "# gamectl scanner v3" ] || exit 1
+        grep -Fq '[ERROR]' "$err_log" || exit 1
+        ! printf '%s\n' "$all_out" | grep -Fq 'BadGog' || exit 1
+
+        printf '%s\n' "$all_out" | awk -F'\t' '$1 ~ /^1207658924/ && $2 ~ /The Witcher 3/ && $3 ~ /^\[GOG\]/ && NF == 6 && $6 == "GOG" { ok=1 } END { exit !ok }' || exit 1
+        printf '%s\n' "$all_out" | awk -F'\t' '$2 ~ /SoloTitle/ && $6 == "STANDALONE" { ok=1 } END { exit !ok }' || exit 1
+        printf '%s\n' "$all_out" | awk -F'\t' '$2 ~ /SteamTitle/ && $6 == "STEAM" { ok=1 } END { exit !ok }' || exit 1
+
+        gog_out=$(scan_installed_games --store GOG) || exit 1
+        printf '%s\n' "$gog_out" | grep -Fq 'The Witcher 3' || exit 1
+        ! printf '%s\n' "$gog_out" | grep -Fq 'SoloTitle' || exit 1
+        store_dispatch gog list_installed | grep -Fq '1207658924' || exit 1
+
+        solo_out=$(scan_installed_games --store STANDALONE) || exit 1
+        printf '%s\n' "$solo_out" | grep -Fq 'SoloTitle' || exit 1
+        ! printf '%s\n' "$solo_out" | grep -Fq 'The Witcher 3' || exit 1
+
+        grep -Fq 'GOG\tGOG Library' "$REPO_ROOT/src/tui/70_dashboard.sh" || exit 1
+        grep -A3 'ctrl-s)' "$REPO_ROOT/src/tui/70_dashboard.sh" | grep -Fq 'remote_sync_interactive' || exit 1
+        grep -Fq 'gog)' "$REPO_ROOT/completions/gamectl.bash" || exit 1
+    )
+}
+run_test "GOG Discovery & TUI Store Filter (WP39B/39C)" test_wp39_gog_discovery_and_tui_filter_contract
 
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
