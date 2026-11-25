@@ -3662,6 +3662,96 @@ EOF
 }
 run_test "Optional Amazon Adapter, Discovery & CLI (WP41A/41B)" test_wp41_amazon_adapter_and_discovery_contract
 
+# Test 40: WP41C — Unified Auth Hub (gamectl auth) & Cross-Store Search (search_stores)
+test_wp41_auth_hub_and_cross_store_search_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp41_auth_search_XXXXXX")
+    mkdir -p "$t_dir/home/.config/gamectl" "$t_dir/home/.config/gogdl" "$t_dir/home/.config/legendary" \
+             "$t_dir/home/.config/nile" "$t_dir/runtime" "$t_dir/bin"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home" XDG_CONFIG_HOME="$t_dir/home/.config" XDG_RUNTIME_DIR="$t_dir/runtime"
+        export LEGENDARY_CONFIG_PATH="$t_dir/home/.config/legendary" NILE_CONFIG_PATH="$t_dir/home/.config/nile"
+        printf '{"refresh_token":"SECRET_LUA_TOK"}\n' > "$t_dir/home/.config/gamectl/lua_tools_auth.json"
+        printf '{"access_token":"SECRET_GOG_TOK"}\n' > "$t_dir/home/.config/gogdl/auth.json"
+        printf '{"access_token":"SECRET_EPIC_TOK"}\n' > "$t_dir/home/.config/legendary/user.json"
+        printf '{"token":"SECRET_AMZ_TOK"}\n' > "$t_dir/home/.config/nile/user.json"
+
+        cat <<'EOF' > "$t_dir/bin/gogdl"
+#!/usr/bin/env bash
+case "$1" in auth) echo "gog auth ok";; search) printf '[{"id":"111","title":"Witcher","worksOn":{"Linux":true}}]\n';; esac
+EOF
+        cat <<'EOF' > "$t_dir/bin/legendary"
+#!/usr/bin/env bash
+case "$1" in auth) echo "epic auth ok";; list) printf '[{"app_name":"Ep1","app_title":"Witcher Epic","asset_infos":{"Windows":{}}}]\n';; esac
+EOF
+        cat <<'EOF' > "$t_dir/bin/nile"
+#!/usr/bin/env bash
+case "$1" in auth) echo "amz auth ok";; library|list-games) printf '[{"product":{"id":"Am1","title":"Witcher Amazon"},"platforms":["windows"]}]\n';; esac
+EOF
+        chmod +x "$t_dir/bin/gogdl" "$t_dir/bin/legendary" "$t_dir/bin/nile"
+
+        PATH="$t_dir/bin:$PATH" bash -c '
+            set -e
+            source "$1/src/core/10_utils.sh"; source "$1/src/steam/20_discovery.sh"; source "$1/src/steam/30_downloader.sh"
+            source "$1/src/steam/31_manifests.sh"; source "$1/src/stores/00_store_interface.sh"
+
+            net_hit="$2/auth_net_hit"
+            batch_log="$2/batch.calls"
+            curl() { touch "$net_hit"; return 99; }
+            auth_st=$(auth_hub_cli status)
+            [ ! -e "$net_hit" ]
+            for tok in SECRET_LUA_TOK SECRET_GOG_TOK SECRET_EPIC_TOK SECRET_AMZ_TOK; do
+                ! printf "%s\n" "$auth_st" | grep -Fq "$tok"
+            done
+            printf "%s\n" "$auth_st" | grep -Fq "store=steam"
+            printf "%s\n" "$auth_st" | grep -Fq "store=gog"
+            printf "%s\n" "$auth_st" | grep -Fq "store=epic"
+            printf "%s\n" "$auth_st" | grep -Fq "store=amazon"
+
+            [ "$(auth_hub_cli gog)" = "gog auth ok" ]
+            [ "$(auth_hub_cli epic)" = "epic auth ok" ]
+            [ "$(auth_hub_cli amazon)" = "amz auth ok" ]
+            login_luatools() { echo "lua auth $1"; }
+            [ "$(auth_hub_cli luatools ABCDEF)" = "lua auth ABCDEF" ]
+            auth_hub_cli bogus 2>/dev/null && exit 1 || true
+
+            : > "$batch_log"
+            curl() {
+                local u="${@: -1}"
+                if [[ "$u" == *storesearch* ]]; then
+                    printf "%s" "{\"items\":[{\"id\":1245620,\"name\":\"Witcher Base\",\"platforms\":{\"windows\":true}},{\"id\":2778580,\"name\":\"Witcher DLC\",\"platforms\":{\"windows\":true}}]}"
+                elif [[ "$u" == *IStoreBrowseService/GetItems* ]]; then
+                    printf "1\n" >> "$batch_log"
+                    printf "%s" "{\"response\":{\"store_items\":[{\"appid\":1245620,\"type\":0},{\"appid\":2778580,\"type\":4,\"related_items\":{\"parent_appid\":1245620}}]}}"
+                fi
+            }
+            all_res=$(store_search_all "witcher")
+            [ "$(wc -l < "$batch_log")" -eq 1 ]
+            printf "%s\n" "$all_res" | awk -F"\t" "NF != 7 {exit 1}"
+            printf "%s\n" "$all_res" | grep -Fxq $'\''STEAM\t1245620\tWitcher Base\twindows\tAVAILABLE\tGAME\t'\''
+            printf "%s\n" "$all_res" | grep -Fxq $'\''STEAM\t2778580\tWitcher DLC\twindows\tAVAILABLE\tDLC\t1245620'\''
+            printf "%s\n" "$all_res" | grep -Fxq $'\''GOG\t111\tWitcher\tlinux\tAVAILABLE\tGAME\t'\''
+            printf "%s\n" "$all_res" | grep -Fxq $'\''EPIC\tEp1\tWitcher Epic\twindows\tAVAILABLE\tGAME\t'\''
+            printf "%s\n" "$all_res" | grep -Fxq $'\''AMAZON\tAm1\tWitcher Amazon\twindows\tAVAILABLE\tGAME\t'\''
+
+            # Store filter + offline Steam batch fallback to APP + 5-col store_*_search intact
+            [ "$(store_search_all "witcher" --store gog | wc -l)" -eq 1 ]
+            curl() {
+                local u="${@: -1}"
+                [[ "$u" == *storesearch* ]] && printf "%s" "{\"items\":[{\"id\":1245620,\"name\":\"Witcher Base\",\"platforms\":{\"windows\":true}}]}" || return 1
+            }
+            store_search_all "witcher" --store steam | grep -Fxq $'\''STEAM\t1245620\tWitcher Base\twindows\tAVAILABLE\tAPP\t'\''
+            store_gog_search "witcher" | awk -F"\t" "NF != 5 {exit 1}"
+            grep -Fq "search_stores_interactive" "$1/src/tui/70_dashboard.sh"
+            grep -Fq "search-stores|search_stores)" "$1/completions/gamectl.bash"
+            "$1/bin/gamectl" auth status | grep -Fq "store=amazon"
+            "$1/bin/gamectl" search-stores --help | grep -Fq "gamectl search-stores"
+        ' _ "$REPO_ROOT" "$t_dir" || exit 1
+    )
+}
+run_test "Unified Auth Hub & Cross-Store Search (WP41C)" test_wp41_auth_hub_and_cross_store_search_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"
