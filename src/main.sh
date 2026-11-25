@@ -510,7 +510,7 @@ Usage:
                       Collect discovered Wine prefix saves into <dir>/saves/_prefix_saves/
   gamectl restore-prefix-saves <dir>
                       Restore staged Wine prefix saves back into <dir>/pfx/drive_c/users/
-  gamectl download <appid> [dir] [title] [--source <auto|...>] [--standalone|--sls] [--raw|--inject-only]
+  gamectl download <appid> [dir] [title] [--source <auto|...>] [--allow-dlc] [--standalone|--sls] [--raw|--inject-only]
                       Download game via native Valve CDN (default: Pure Standalone zero-client)
   gamectl downloads   Monitor active & recent downloads (Interactive TUI)
   gamectl download-status

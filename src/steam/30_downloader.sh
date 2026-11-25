@@ -182,7 +182,7 @@ download_game() {
     # Strip ANSI escape sequences & non-digits
     appid=$(strip_ansi "$appid" | tr -dc "0-9")
     if [ -z "$appid" ]; then
-        echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|manifesthub|ryuu|sushi|luatools>] [--os <linux|windows|macos|all>] [--raw|--inject-only|--all|--standalone|--sls]" >&2
+        echo "Usage: gamectl download <appid> [target_dir] [title] [--source <auto|manifesthub|ryuu|sushi|luatools>] [--os <linux|windows|macos|all>] [--allow-dlc] [--raw|--inject-only|--all|--standalone|--sls]" >&2
         return 1
     fi
     shift
@@ -194,9 +194,13 @@ download_game() {
     local source="auto"         # "auto", "ryuu", "sushi", "luatools"
     local engine="standalone"   # Default to Pure Standalone CDN engine (Zero Steam Client)
     local is_strict_standalone=true
+    local allow_dlc=false
 
     while [ $# -gt 0 ]; do
         case "$1" in
+            --allow-dlc)
+                allow_dlc=true
+                ;;
             --engine)
                 shift
                 case "${1:-}" in
@@ -287,13 +291,6 @@ download_game() {
         esac
     fi
 
-    if [ -z "$title" ]; then
-        title=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" "steam_basic_${appid}" 3600 2>/dev/null | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
-        [ -z "$title" ] && title="AppID_${appid}"
-    fi
-
-    log_msg "INFO" "DOWNLOAD" "Starting download for $title (AppID: $appid, Action: $action, Source: $source)"
-
     # Auto-resolve engine preference
     if [ "$engine" = "auto" ]; then
         if [ "$action" = "inject" ]; then
@@ -319,7 +316,43 @@ download_game() {
             echo "[WARN] Standalone downloader binary (gamectl-depot-dl) not found. Falling back to SLSsteam engine." >&2
             engine="sls"
         fi
+
+        # Fail-fast offline credential preflight for explicit gated sources before metadata HTTP lookups
+        local dl_cache_zip="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl/manifests/${appid}.zip"
+        local dl_stash_zip="$HOME/.local/share/gamectl/manifests/${appid}.zip"
+        if [ ! -f "$dl_cache_zip" ] && [ ! -f "$dl_stash_zip" ]; then
+            if [ "${source,,}" = "luatools" ] && ! get_valid_luatools_token >/dev/null 2>&1; then
+                echo "[ERROR] LuaTools session unavailable. Authenticate with 'gamectl login-luatools <code | session.json>' and retry." >&2
+                return 1
+            elif [ "${source,,}" = "hubcap" ] && [ -z "$(get_hubcap_api_key 2>/dev/null || true)" ]; then
+                echo "[ERROR] Hubcap API key is not configured. Run 'gamectl config set hubcap_key <smm_key>' and retry." >&2
+                return 1
+            fi
+        fi
     fi
+
+    # Engine-level DLC guard (consistent across CLI and TUI)
+    if [ "$allow_dlc" != true ] && declare -F resolve_steam_app_type >/dev/null 2>&1; then
+        local app_type_info="" app_type="" parent_appid="" parent_name=""
+        app_type_info=$(resolve_steam_app_type "$appid" 2>/dev/null || true)
+        IFS=$'\t' read -r app_type parent_appid parent_name <<< "$app_type_info"
+        if [ "$app_type" = "DLC" ] && [[ "$parent_appid" =~ ^[0-9]+$ ]]; then
+            local dlc_label="${title:+ ($title)}"
+            local parent_label="${parent_name:+${parent_name} }($parent_appid)"
+            echo "[ERROR] AppID ${appid}${dlc_label} is a DLC for Base Game ${parent_label}." >&2
+            echo "[ERROR] Base game downloads already include associated DLC depots. Run: gamectl download $parent_appid" >&2
+            echo "[ERROR] To download this DLC AppID explicitly anyway, re-run with --allow-dlc." >&2
+            log_msg "WARN" "DOWNLOAD" "Blocked direct DLC download for AppID $appid (base game: $parent_appid)"
+            return 1
+        fi
+    fi
+
+    if [ -z "$title" ]; then
+        title=$(fetch_cached_json "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic" "steam_basic_${appid}" 3600 2>/dev/null | jq -r ".\"${appid}\".data.name // empty" 2>/dev/null || true)
+        [ -z "$title" ] && title="AppID_${appid}"
+    fi
+
+    log_msg "INFO" "DOWNLOAD" "Starting download for $title (AppID: $appid, Action: $action, Source: $source)"
 
     # Route 1: Standalone Native Steam CDN Engine (Zero Steam Client required)
     if [ "$engine" = "standalone" ]; then
