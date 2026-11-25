@@ -2632,6 +2632,197 @@ test_cli_alias_and_ci_gates_contract() {
 }
 run_test "CLI Alias Collision & CI Test Gates Contract" test_cli_alias_and_ci_gates_contract
 
+# Test 31: WP38A/38B — Unified Store Interface & Built-in Steam Adapter
+test_wp38_store_interface_and_steam_adapter_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp38_store_XXXXXX")
+    mkdir -p "$t_dir/home/.config/gamectl" "$t_dir/home/.local/share/gbe-fork/regular/x64" \
+             "$t_dir/home/.local/share/gbe-fork/windows/release/regular/x64" \
+             "$t_dir/runtime" "$t_dir/cache" "$t_dir/game"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_CONFIG_HOME="$t_dir/home/.config"
+        export XDG_CACHE_HOME="$t_dir/cache"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+
+        touch "$t_dir/home/.local/share/gbe-fork/regular/x64/libsteam_api.so"
+        touch "$t_dir/home/.local/share/gbe-fork/windows/release/regular/x64/steam_api64.dll"
+
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/steam/30_downloader.sh"
+        source "$REPO_ROOT/src/steam/31_manifests.sh"
+        source "$REPO_ROOT/src/stores/00_store_interface.sh"
+
+        # 1. Sibling loader & registry contracts
+        declare -F store_steam_available >/dev/null || exit 1
+        store_list_registered | grep -Fxq "steam" || exit 1
+        store_list_available | grep -Fxq "steam" || exit 1
+
+        # 2. store_dispatch rejects unknown store, invalid identifier, and unknown op
+        local err_out rc
+        err_out=$(store_dispatch "bogus" "status" 2>&1) && rc=0 || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+        printf '%s' "$err_out" | grep -Fq '[ERROR]' || exit 1
+
+        err_out=$(store_dispatch "bad!store" "status" 2>&1) && rc=0 || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+
+        err_out=$(store_dispatch "steam" "explode" 2>&1) && rc=0 || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+        printf '%s' "$err_out" | grep -Fq '[ERROR]' || exit 1
+
+        # 3. Offline-safe store_steam_status never invokes network
+        curl() { touch "$t_dir/net_called"; return 99; }
+        local st_out
+        st_out=$(store_dispatch "steam" "status") || exit 1
+        [ ! -e "$t_dir/net_called" ] || exit 1
+        printf '%s\n' "$st_out" | grep -Fq 'store=steam' || exit 1
+        printf '%s\n' "$st_out" | grep -Fq 'gbe_fork : ready' || exit 1
+
+        # 4. store_steam_search TSV format & validate_tui_fields separator rejection
+        scan_installed_games() { printf '105600\tTerraria\t[STANDALONE]\t/tmp/t\tgame.bin\tSTANDALONE\n'; }
+        curl() {
+            printf '%s' '{"items":[{"id":105600,"name":"Terraria","platforms":{"linux":true,"windows":true,"mac":false}},{"id":48000,"name":"LIMBO","platforms":{"linux":true,"windows":true}}]}'
+        }
+        local s_out
+        s_out=$(store_dispatch "steam" "search" "Terraria") || exit 1
+        printf '%s\n' "$s_out" | grep -Fq $'STEAM\t105600\tTerraria\tlinux,windows\tINSTALLED' || exit 1
+        printf '%s\n' "$s_out" | grep -Fq $'STEAM\t48000\tLIMBO\tlinux,windows\tAVAILABLE' || exit 1
+
+        curl() { printf '%s' '{"items":[{"id":999,"name":"Evil\tTabTitle","platforms":{"linux":true}}]}'; }
+        err_out=$(store_dispatch "steam" "search" "Evil" 2>&1) && rc=0 || rc=$?
+        [ "$rc" -ne 0 ] || exit 1
+        printf '%s' "$err_out" | grep -Fq '[ERROR]' || exit 1
+        unset -f scan_installed_games
+
+        # 5. store_steam_sync offline DLC generation without Steam Client or network
+        fetch_cached_json() { return 1; }
+        curl() { return 1; }
+        printf 'addappid(999105)\naddappid(999106)\n' > "$t_dir/game/999105.lua"
+        store_dispatch "steam" "sync" "999105" "$t_dir/game" >/dev/null || exit 1
+        grep -Fq '999106=DLC_999106' "$t_dir/game/steam_settings/DLC.txt" || exit 1
+        unset -f fetch_cached_json curl
+
+        # 6. Bundled CLI `gamectl stores [list|status]`
+        "$REPO_ROOT/scripts/build.sh" >/dev/null
+        local cli_list cli_status
+        cli_list=$("$REPO_ROOT/bin/gamectl" stores list) || exit 1
+        printf '%s\n' "$cli_list" | grep -Eq '^steam[[:space:]]+\[AVAILABLE\]' || exit 1
+        cli_status=$("$REPO_ROOT/bin/gamectl" stores status) || exit 1
+        printf '%s\n' "$cli_status" | grep -Fq 'store=steam' || exit 1
+        "$REPO_ROOT/bin/gamectl" stores invalid >/dev/null 2>&1 && exit 1 || true
+    )
+}
+run_test "Multi-Store Interface & Steam Adapter (WP38A/38B)" test_wp38_store_interface_and_steam_adapter_contract
+
+# Test 32: WP38C/38D — Scanner v3 6-Column Schema, Legacy Cache Refresh & TUI Store Switcher
+test_wp38_scanner_v3_and_store_switcher_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp38_scan_XXXXXX")
+    mkdir -p "$t_dir/home/Games/SoloTitle" "$t_dir/steam/steamapps/common/SteamTitle" \
+             "$t_dir/runtime" "$t_dir/bin"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export STEAM_ROOT="$t_dir/steam"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+
+        touch "$t_dir/steam/steamapps/common/SteamTitle/steamgame.bin"
+        chmod +x "$t_dir/steam/steamapps/common/SteamTitle/steamgame.bin"
+        cat <<'EOF' > "$t_dir/steam/steamapps/appmanifest_99881.acf"
+"AppState"
+{
+    "appid" "99881"
+    "name" "SteamTitle"
+    "installdir" "SteamTitle"
+}
+EOF
+        touch "$t_dir/home/Games/SoloTitle/sologame.bin"
+        chmod +x "$t_dir/home/Games/SoloTitle/sologame.bin"
+
+        # Seed legacy v2 cache that MUST be rejected and refreshed to v3
+        printf '# gamectl scanner v2\n1\tStaleV2\t[STANDALONE]\t/stale/legacy/path\tstale.bin\n' > "$t_dir/runtime/scancache.tab"
+
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+
+        # 1. Scanner v3 invalidates v2 cache and writes 6-column v3 cache
+        local all_out
+        all_out=$(scan_installed_games) || exit 1
+        [ "$(head -n 1 "$t_dir/runtime/scancache.tab")" = "# gamectl scanner v3" ] || exit 1
+        ! printf '%s\n' "$all_out" | grep -Fq 'StaleV2' || exit 1
+        printf '%s\n' "$all_out" | awk -F'\t' '$2 ~ /SteamTitle/ && NF == 6 && $6 == "STEAM" { found=1 } END { exit !found }' || exit 1
+        printf '%s\n' "$all_out" | awk -F'\t' '$2 ~ /SoloTitle/ && NF == 6 && $6 == "STANDALONE" { found=1 } END { exit !found }' || exit 1
+
+        # 2. Backward compatibility for 5-column cut consumers
+        printf '%s\n' "$all_out" | cut -f1-5 | grep -Fq 'SteamTitle' || exit 1
+        printf '%s\n' "$all_out" | cut -f1-5 | grep -Fq 'SoloTitle' || exit 1
+
+        # 3. Store filtering (--store STEAM / --store STANDALONE)
+        local steam_only solo_only
+        steam_only=$(scan_installed_games --store STEAM) || exit 1
+        printf '%s\n' "$steam_only" | grep -Fq 'SteamTitle' || exit 1
+        ! printf '%s\n' "$steam_only" | grep -Fq 'SoloTitle' || exit 1
+
+        solo_only=$(scan_installed_games --store STANDALONE) || exit 1
+        printf '%s\n' "$solo_only" | grep -Fq 'SoloTitle' || exit 1
+        ! printf '%s\n' "$solo_only" | grep -Fq 'SteamTitle' || exit 1
+
+        # 4. TUI zero-key-collision checks: ctrl-s stays Remote Sync; tab & alt-s in --expect
+        grep -q -- '--expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x,tab,alt-s' "$REPO_ROOT/src/tui/70_dashboard.sh" || exit 1
+        grep -A3 'ctrl-s)' "$REPO_ROOT/src/tui/70_dashboard.sh" | grep -Fq 'remote_sync_interactive' || exit 1
+
+        # 5. Live library_menu Tab cycling under PTY + stub fzf
+        cat <<'EOF' > "$t_dir/bin/fzf"
+#!/usr/bin/env python3
+import os, pathlib, sys
+log = pathlib.Path(os.environ["FZF_ARG_LOG"])
+cnt_p = pathlib.Path(os.environ["FZF_CNT"])
+idx = int(cnt_p.read_text()) if cnt_p.exists() else 0
+cnt_p.write_text(str(idx + 1))
+with log.open("a") as fh:
+    fh.write(" ".join(sys.argv[1:]) + "\n")
+sys.stdin.read()
+if idx < 2:
+    sys.stdout.write("tab\n")
+    sys.exit(0)
+sys.exit(130)
+EOF
+        chmod +x "$t_dir/bin/fzf"
+        export FZF_ARG_LOG="$t_dir/fzf_args.log"
+        export FZF_CNT="$t_dir/fzf_cnt"
+        export PATH="$t_dir/bin:$PATH"
+
+        python3 - "$REPO_ROOT/bin/gamectl" <<'PY' || exit 1
+import os, pty, select, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("bash", ["bash", "-c", f'source "{sys.argv[1]}"; clean_stale_locks() {{ :; }}; library_menu'], os.environ)
+out = bytearray()
+while True:
+    if select.select([fd], [], [], 5)[0]:
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:
+            chunk = b""
+        if not chunk:
+            break
+        out.extend(chunk)
+    else:
+        break
+_, status = os.waitpid(pid, 0)
+os.close(fd)
+assert os.waitstatus_to_exitcode(status) == 0, f"library_menu exited non-zero: {bytes(out)!r}"
+PY
+        grep -Fq '[Store: ALL]' "$t_dir/fzf_args.log" || exit 1
+        grep -Fq '[Store: STEAM]' "$t_dir/fzf_args.log" || exit 1
+        grep -Fq '[Store: STANDALONE]' "$t_dir/fzf_args.log" || exit 1
+    )
+}
+run_test "Scanner v3 & TUI Store Switcher (WP38C/38D)" test_wp38_scanner_v3_and_store_switcher_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"

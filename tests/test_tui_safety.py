@@ -102,9 +102,10 @@ library_menu
         rows = result.stdout.splitlines()
         self.assertEqual(len(rows), 1, result.stdout)
         fields = rows[0].split("\t")
-        self.assertEqual(len(fields), 5, fields)
+        self.assertEqual(len(fields), 6, fields)
         self.assertEqual(fields[3], str(valid))
         self.assertIn("\\t", fields[1])
+        self.assertEqual(fields[5], "STANDALONE")
         self.assertIn("[ERROR]", result.stderr)
 
     def test_scanner_rejects_multiline_titles_executables_and_legacy_cache(self):
