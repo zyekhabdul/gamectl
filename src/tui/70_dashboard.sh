@@ -581,7 +581,7 @@ library_menu() {
 # Standalone-source compatibility: load split tui submodules when sourced directly outside bin/gamectl
 if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
     _tui_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-    for _tui_sub in 71_previews.sh 72_store_tui.sh 73_search_tui.sh; do
+    for _tui_sub in 71_previews.sh 72_store_tui.sh 73_search_tui.sh 74_dashboard_preview.sh; do
         if [ -f "$_tui_dir/$_tui_sub" ]; then
             # shellcheck source=/dev/null
             source "$_tui_dir/$_tui_sub"
