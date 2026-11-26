@@ -4868,6 +4868,286 @@ is_valid_lua_manifest() {
     fi
 }
 
+# Fail-fast offline credential preflight for explicit gated manifest providers
+# when no valid local cached/stashed manifest archive exists.
+preflight_manifest_source() {
+    local appid="${1:-}"
+    local pref_source="${2:-auto}"
+    local require_depots="${3:-false}"
+    local src_lc="${pref_source,,}"
+
+    case "$src_lc" in
+        luatools|hubcap) ;;
+        *) return 0 ;;
+    esac
+
+    appid=$(strip_ansi "$appid" | tr -dc "0-9")
+    if [ -n "$appid" ]; then
+        local cache_zip="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl/manifests/${appid}.zip"
+        local stash_zip="$HOME/.local/share/gamectl/manifests/${appid}.zip"
+        if [ -f "$cache_zip" ] && validate_manifest_zip "$cache_zip" "$appid" "$require_depots" >/dev/null 2>&1; then
+            return 0
+        fi
+        if [ -f "$stash_zip" ] && validate_manifest_zip "$stash_zip" "$appid" "$require_depots" >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    if [ "$src_lc" = "luatools" ] && ! get_valid_luatools_token >/dev/null 2>&1; then
+        echo "[ERROR] LuaTools session unavailable. Authenticate with 'gamectl login-luatools <code | session.json>' and retry." >&2
+        return 1
+    elif [ "$src_lc" = "hubcap" ] && [ -z "$(get_hubcap_api_key 2>/dev/null || true)" ]; then
+        echo "[ERROR] Hubcap API key is not configured. Run 'gamectl config set hubcap_key <smm_key>' and retry." >&2
+        return 1
+    fi
+    return 0
+}
+
+# Multi-Provider Manifest & Key Harvester
+fetch_manifest() {
+    local appid="$1"
+    local dest_file="${2:-}"
+    local pref_source="${3:-auto}"
+    local require_depots="${4:-false}"
+
+    # Strip any ANSI escape sequences
+    appid=$(strip_ansi "$appid" | tr -dc "0-9")
+    if [ -z "$appid" ]; then
+        echo "[ERROR] fetch_manifest: Invalid numeric AppID." >&2
+        return 1
+    fi
+
+    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl/manifests"
+    mkdir -p -m 700 "$cache_dir"
+    local cached_zip="$cache_dir/${appid}.zip"
+
+    # 1. Check valid persistent cache
+    if [ -f "$cached_zip" ] && validate_manifest_zip "$cached_zip" "$appid" "$require_depots"; then
+        echo "[INFO] Using cached manifest archive: $cached_zip" >&2
+        if [ -n "$dest_file" ]; then
+            cp -f "$cached_zip" "$dest_file"
+            echo "$dest_file"
+        else
+            echo "$cached_zip"
+        fi
+        return 0
+    fi
+
+    # 2. Check local repository stash (~/.local/share/gamectl/manifests/)
+    local stash_zip="$HOME/.local/share/gamectl/manifests/${appid}.zip"
+    if [ -f "$stash_zip" ] && validate_manifest_zip "$stash_zip" "$appid" "$require_depots"; then
+        echo "[INFO] Using local stash manifest archive: $stash_zip" >&2
+        cp -f "$stash_zip" "$cached_zip"
+        if [ -n "$dest_file" ]; then
+            cp -f "$stash_zip" "$dest_file"
+            echo "$dest_file"
+        else
+            echo "$stash_zip"
+        fi
+        return 0
+    fi
+
+    preflight_manifest_source "$appid" "$pref_source" "$require_depots" || return 1
+
+    echo "[INFO] Harvesting manifest archive for AppID $appid across multi-provider network..." >&2
+
+    local run_dir
+    run_dir="$(get_runtime_dir)"
+    local dl_tmp="$run_dir/fetch_manifest_${appid}_$$.zip"
+    rm -f "$dl_tmp"
+
+    declare -a src_names src_urls src_headers
+    local src_count=0
+
+    # Source 1: ManifestHub (Official GitHub archive per AppID branch)
+    src_names[src_count]="ManifestHub"
+    src_urls[src_count]="https://codeload.github.com/steamtoolsapp/ManifestHub/zip/refs/heads/${appid}"
+    src_headers[src_count]=""
+    src_count=$((src_count + 1))
+
+    # Source 2: Hubcap Manifest REST API (Community Discord key-gated database)
+    local hubcap_key
+    hubcap_key=$(get_hubcap_api_key 2>/dev/null || true)
+    if [ -n "$hubcap_key" ]; then
+        src_names[src_count]="Hubcap"
+        src_urls[src_count]="https://hubcapmanifest.com/api/v1/manifest/${appid}"
+        src_headers[src_count]="Authorization: Bearer $hubcap_key"
+        src_count=$((src_count + 1))
+    fi
+
+    # Source 3: Ryuu direct mirror
+    src_names[src_count]="Ryuu"
+    src_urls[src_count]="http://167.235.229.108/${appid}"
+    src_headers[src_count]=""
+    src_count=$((src_count + 1))
+
+    # Source 3: Sushi GitHub repository (alt)
+    src_names[src_count]="Sushi"
+    src_urls[src_count]="https://raw.githubusercontent.com/sushi-dev55-alt/sushitools-games-repo-alt/refs/heads/main/${appid}.zip"
+    src_headers[src_count]=""
+    src_count=$((src_count + 1))
+
+    # Source 4: Sushi GitHub repository (main)
+    src_names[src_count]="SushiMain"
+    src_urls[src_count]="https://raw.githubusercontent.com/sushi-dev55/sushitools-games-repo/main/${appid}.zip"
+    src_headers[src_count]=""
+    src_count=$((src_count + 1))
+
+    # Source 5: Lua.tools managed API (if auth session exists)
+    local token
+    token=$(get_valid_luatools_token 2>/dev/null || true)
+    if [ -n "$token" ]; then
+        src_names[src_count]="LuaTools"
+        src_urls[src_count]="https://lua.tools/api/manifest/download?appid=${appid}&source=Luie"
+        src_headers[src_count]="Authorization: Bearer $token"
+        src_count=$((src_count + 1))
+    fi
+
+    local found=0
+    for ((i=0; i<src_count; i++)); do
+        local name="${src_names[i]}"
+        local url="${src_urls[i]}"
+        local hdr="${src_headers[i]}"
+
+        if [ "$pref_source" != "auto" ] && [ "${pref_source,,}" != "${name,,}" ]; then
+            continue
+        fi
+
+        echo "[INFO] Querying provider: $name ($url)..." >&2
+        local curl_args=("-sSL" "--connect-timeout" "5" "--max-time" "25" "-A" "discord(dot)gg/luatools" "-o" "$dl_tmp" "-w" "%{http_code}")
+        if [ -n "$hdr" ]; then
+            curl_args+=("-H" "$hdr")
+        fi
+
+        local http_code
+        http_code=$(curl "${curl_args[@]}" "$url" 2>/dev/null || echo "000")
+
+        if [ "$http_code" = "200" ] && [ -s "$dl_tmp" ]; then
+            # Format adaptation: If payload is a raw Lua script, encapsulate into standardized ZIP
+            if ! unzip -tq "$dl_tmp" >/dev/null 2>&1 && is_valid_lua_manifest "$dl_tmp" "$appid"; then
+                local stage_lua="$run_dir/${appid}.lua"
+                cp -f "$dl_tmp" "$stage_lua"
+                local zip_tmp="$run_dir/wrap_${appid}_$$.zip"
+                (cd "$run_dir" && zip -q -0 "$zip_tmp" "${appid}.lua") 2>/dev/null || true
+                rm -f "$stage_lua"
+                if [ -f "$zip_tmp" ]; then
+                    mv -f "$zip_tmp" "$dl_tmp"
+                fi
+            fi
+
+            if validate_manifest_zip "$dl_tmp" "$appid" "$require_depots"; then
+                echo "[VERIFIED] Manifest archive acquired from $name." >&2
+                cp -f "$dl_tmp" "$cached_zip"
+                if [ -n "$dest_file" ]; then
+                    cp -f "$dl_tmp" "$dest_file"
+                    echo "$dest_file"
+                else
+                    echo "$cached_zip"
+                fi
+                found=1
+                rm -f "$dl_tmp"
+                break
+            else
+                echo "[WARN] Provider $name returned an invalid archive or lacks the required depot manifests." >&2
+                rm -f "$dl_tmp"
+            fi
+        else
+            echo "[INFO] Provider $name returned HTTP $http_code." >&2
+            rm -f "$dl_tmp"
+        fi
+    done
+
+    if [ "$found" -eq 1 ]; then
+        return 0
+    else
+        echo "[ERROR] Manifest archive for AppID $appid not found across available providers." >&2
+        if [ -z "$hubcap_key" ]; then
+            echo "[NOTE] Hubcap provider was skipped (no API key configured)." >&2
+            echo "[NOTE] To configure Hubcap key: run 'gamectl config set hubcap_key smm_...' or open Master Dashboard -> Global Settings." >&2
+        fi
+        local token
+        token=$(get_valid_luatools_token 2>/dev/null || true)
+        if [ -z "$token" ]; then
+            echo "[NOTE] LuaTools extended catalog was skipped (no active session)." >&2
+            echo "[NOTE] To authenticate with LuaTools: run 'gamectl login-luatools' or open Master Dashboard -> Global Settings -> LuaTools Session." >&2
+        fi
+        return 1
+    fi
+}
+
+# Harvest and integrate additional DLC manifest archives for an AppID into stage directory
+harvest_dlc_manifests() {
+    local base_appid="$1"
+    local stage_dir="$2"
+    local source="${3:-auto}"
+    [ -d "$stage_dir" ] || return 0
+
+    local lua_file="$stage_dir/${base_appid}.lua"
+    if [ ! -f "$lua_file" ]; then
+        shopt -s nullglob globstar
+        local found_luas=("$stage_dir"/**/"${base_appid}.lua" "$stage_dir"/**/*.lua "$stage_dir"/*.lua)
+        shopt -u nullglob globstar
+        [ ${#found_luas[@]} -gt 0 ] && lua_file="${found_luas[0]}"
+    fi
+    [ -f "$lua_file" ] || return 0
+
+    # Discover candidate DLC AppIDs from addappid(<id>)
+    local dlc_appids=()
+    while read -r cand_id; do
+        [ -n "$cand_id" ] || continue
+        [ "$cand_id" = "$base_appid" ] && continue
+        dlc_appids+=("$cand_id")
+    done < <(grep -E '^[[:space:]]*addappid\([[:space:]]*[0-9]+[[:space:]]*\)' "$lua_file" 2>/dev/null | sed -E 's/.*addappid\([[:space:]]*([0-9]+).*/\1/')
+
+    if [ ${#dlc_appids[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    echo "[INFO] Discovered ${#dlc_appids[@]} candidate DLC AppID(s) in Lua manifest: ${dlc_appids[*]}" >&2
+
+    local harvested=0
+    for dlc_id in "${dlc_appids[@]}"; do
+        # Avoid re-harvesting if already staged
+        shopt -s nullglob globstar
+        local existing_dlc_lua=("$stage_dir"/**/"${dlc_id}.lua" "$stage_dir"/*"${dlc_id}.lua")
+        shopt -u nullglob globstar
+        if [ ${#existing_dlc_lua[@]} -gt 0 ]; then
+            continue
+        fi
+
+        local dlc_zip
+        dlc_zip=$(fetch_manifest "$dlc_id" "" "$source" 2>/dev/null || true)
+        if [ -n "$dlc_zip" ] && [ -f "$dlc_zip" ] && validate_manifest_zip "$dlc_zip" "$dlc_id"; then
+            if unzip -qo "$dlc_zip" -d "$stage_dir" 2>/dev/null; then
+                echo "  [INFO] Successfully integrated DLC manifest archive: AppID $dlc_id" >&2
+                harvested=$((harvested + 1))
+            fi
+        fi
+    done
+
+    if [ "$harvested" -gt 0 ]; then
+        echo "[VERIFIED] Integrated $harvested additional DLC manifest archive(s) into stage directory." >&2
+    fi
+    return 0
+}
+
+# Standalone-source compatibility: load split manifest submodules when sourced directly outside bin/gamectl
+if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
+    _manifests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    for _manifests_sub in 36_luatools_auth.sh 37_app_types.sh; do
+        if [ -f "$_manifests_dir/$_manifests_sub" ]; then
+            # shellcheck source=/dev/null
+            source "$_manifests_dir/$_manifests_sub"
+        fi
+    done
+    unset _manifests_dir _manifests_sub
+fi
+
+# --- [MODULE] src/steam/36_luatools_auth.sh ---
+# ==============================================================================
+# LuaTools Authentication Session, Token Auto-Refresh & Interactive Wizard
+# ==============================================================================
+
 # Acquire or auto-refresh LuaTools bearer access token
 get_valid_luatools_token() {
     local lumen_auth="${XDG_DATA_HOME:-$HOME/.local/share}/Lumen/luatools/backend/data/lua_tools_auth.json"
@@ -5218,268 +5498,10 @@ EOF
     done
 }
 
-# Fail-fast offline credential preflight for explicit gated manifest providers
-# when no valid local cached/stashed manifest archive exists.
-preflight_manifest_source() {
-    local appid="${1:-}"
-    local pref_source="${2:-auto}"
-    local require_depots="${3:-false}"
-    local src_lc="${pref_source,,}"
-
-    case "$src_lc" in
-        luatools|hubcap) ;;
-        *) return 0 ;;
-    esac
-
-    appid=$(strip_ansi "$appid" | tr -dc "0-9")
-    if [ -n "$appid" ]; then
-        local cache_zip="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl/manifests/${appid}.zip"
-        local stash_zip="$HOME/.local/share/gamectl/manifests/${appid}.zip"
-        if [ -f "$cache_zip" ] && validate_manifest_zip "$cache_zip" "$appid" "$require_depots" >/dev/null 2>&1; then
-            return 0
-        fi
-        if [ -f "$stash_zip" ] && validate_manifest_zip "$stash_zip" "$appid" "$require_depots" >/dev/null 2>&1; then
-            return 0
-        fi
-    fi
-
-    if [ "$src_lc" = "luatools" ] && ! get_valid_luatools_token >/dev/null 2>&1; then
-        echo "[ERROR] LuaTools session unavailable. Authenticate with 'gamectl login-luatools <code | session.json>' and retry." >&2
-        return 1
-    elif [ "$src_lc" = "hubcap" ] && [ -z "$(get_hubcap_api_key 2>/dev/null || true)" ]; then
-        echo "[ERROR] Hubcap API key is not configured. Run 'gamectl config set hubcap_key <smm_key>' and retry." >&2
-        return 1
-    fi
-    return 0
-}
-
-# Multi-Provider Manifest & Key Harvester
-fetch_manifest() {
-    local appid="$1"
-    local dest_file="${2:-}"
-    local pref_source="${3:-auto}"
-    local require_depots="${4:-false}"
-
-    # Strip any ANSI escape sequences
-    appid=$(strip_ansi "$appid" | tr -dc "0-9")
-    if [ -z "$appid" ]; then
-        echo "[ERROR] fetch_manifest: Invalid numeric AppID." >&2
-        return 1
-    fi
-
-    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl/manifests"
-    mkdir -p -m 700 "$cache_dir"
-    local cached_zip="$cache_dir/${appid}.zip"
-
-    # 1. Check valid persistent cache
-    if [ -f "$cached_zip" ] && validate_manifest_zip "$cached_zip" "$appid" "$require_depots"; then
-        echo "[INFO] Using cached manifest archive: $cached_zip" >&2
-        if [ -n "$dest_file" ]; then
-            cp -f "$cached_zip" "$dest_file"
-            echo "$dest_file"
-        else
-            echo "$cached_zip"
-        fi
-        return 0
-    fi
-
-    # 2. Check local repository stash (~/.local/share/gamectl/manifests/)
-    local stash_zip="$HOME/.local/share/gamectl/manifests/${appid}.zip"
-    if [ -f "$stash_zip" ] && validate_manifest_zip "$stash_zip" "$appid" "$require_depots"; then
-        echo "[INFO] Using local stash manifest archive: $stash_zip" >&2
-        cp -f "$stash_zip" "$cached_zip"
-        if [ -n "$dest_file" ]; then
-            cp -f "$stash_zip" "$dest_file"
-            echo "$dest_file"
-        else
-            echo "$stash_zip"
-        fi
-        return 0
-    fi
-
-    preflight_manifest_source "$appid" "$pref_source" "$require_depots" || return 1
-
-    echo "[INFO] Harvesting manifest archive for AppID $appid across multi-provider network..." >&2
-
-    local run_dir
-    run_dir="$(get_runtime_dir)"
-    local dl_tmp="$run_dir/fetch_manifest_${appid}_$$.zip"
-    rm -f "$dl_tmp"
-
-    declare -a src_names src_urls src_headers
-    local src_count=0
-
-    # Source 1: ManifestHub (Official GitHub archive per AppID branch)
-    src_names[src_count]="ManifestHub"
-    src_urls[src_count]="https://codeload.github.com/steamtoolsapp/ManifestHub/zip/refs/heads/${appid}"
-    src_headers[src_count]=""
-    src_count=$((src_count + 1))
-
-    # Source 2: Hubcap Manifest REST API (Community Discord key-gated database)
-    local hubcap_key
-    hubcap_key=$(get_hubcap_api_key 2>/dev/null || true)
-    if [ -n "$hubcap_key" ]; then
-        src_names[src_count]="Hubcap"
-        src_urls[src_count]="https://hubcapmanifest.com/api/v1/manifest/${appid}"
-        src_headers[src_count]="Authorization: Bearer $hubcap_key"
-        src_count=$((src_count + 1))
-    fi
-
-    # Source 3: Ryuu direct mirror
-    src_names[src_count]="Ryuu"
-    src_urls[src_count]="http://167.235.229.108/${appid}"
-    src_headers[src_count]=""
-    src_count=$((src_count + 1))
-
-    # Source 3: Sushi GitHub repository (alt)
-    src_names[src_count]="Sushi"
-    src_urls[src_count]="https://raw.githubusercontent.com/sushi-dev55-alt/sushitools-games-repo-alt/refs/heads/main/${appid}.zip"
-    src_headers[src_count]=""
-    src_count=$((src_count + 1))
-
-    # Source 4: Sushi GitHub repository (main)
-    src_names[src_count]="SushiMain"
-    src_urls[src_count]="https://raw.githubusercontent.com/sushi-dev55/sushitools-games-repo/main/${appid}.zip"
-    src_headers[src_count]=""
-    src_count=$((src_count + 1))
-
-    # Source 5: Lua.tools managed API (if auth session exists)
-    local token
-    token=$(get_valid_luatools_token 2>/dev/null || true)
-    if [ -n "$token" ]; then
-        src_names[src_count]="LuaTools"
-        src_urls[src_count]="https://lua.tools/api/manifest/download?appid=${appid}&source=Luie"
-        src_headers[src_count]="Authorization: Bearer $token"
-        src_count=$((src_count + 1))
-    fi
-
-    local found=0
-    for ((i=0; i<src_count; i++)); do
-        local name="${src_names[i]}"
-        local url="${src_urls[i]}"
-        local hdr="${src_headers[i]}"
-
-        if [ "$pref_source" != "auto" ] && [ "${pref_source,,}" != "${name,,}" ]; then
-            continue
-        fi
-
-        echo "[INFO] Querying provider: $name ($url)..." >&2
-        local curl_args=("-sSL" "--connect-timeout" "5" "--max-time" "25" "-A" "discord(dot)gg/luatools" "-o" "$dl_tmp" "-w" "%{http_code}")
-        if [ -n "$hdr" ]; then
-            curl_args+=("-H" "$hdr")
-        fi
-
-        local http_code
-        http_code=$(curl "${curl_args[@]}" "$url" 2>/dev/null || echo "000")
-
-        if [ "$http_code" = "200" ] && [ -s "$dl_tmp" ]; then
-            # Format adaptation: If payload is a raw Lua script, encapsulate into standardized ZIP
-            if ! unzip -tq "$dl_tmp" >/dev/null 2>&1 && is_valid_lua_manifest "$dl_tmp" "$appid"; then
-                local stage_lua="$run_dir/${appid}.lua"
-                cp -f "$dl_tmp" "$stage_lua"
-                local zip_tmp="$run_dir/wrap_${appid}_$$.zip"
-                (cd "$run_dir" && zip -q -0 "$zip_tmp" "${appid}.lua") 2>/dev/null || true
-                rm -f "$stage_lua"
-                if [ -f "$zip_tmp" ]; then
-                    mv -f "$zip_tmp" "$dl_tmp"
-                fi
-            fi
-
-            if validate_manifest_zip "$dl_tmp" "$appid" "$require_depots"; then
-                echo "[VERIFIED] Manifest archive acquired from $name." >&2
-                cp -f "$dl_tmp" "$cached_zip"
-                if [ -n "$dest_file" ]; then
-                    cp -f "$dl_tmp" "$dest_file"
-                    echo "$dest_file"
-                else
-                    echo "$cached_zip"
-                fi
-                found=1
-                rm -f "$dl_tmp"
-                break
-            else
-                echo "[WARN] Provider $name returned an invalid archive or lacks the required depot manifests." >&2
-                rm -f "$dl_tmp"
-            fi
-        else
-            echo "[INFO] Provider $name returned HTTP $http_code." >&2
-            rm -f "$dl_tmp"
-        fi
-    done
-
-    if [ "$found" -eq 1 ]; then
-        return 0
-    else
-        echo "[ERROR] Manifest archive for AppID $appid not found across available providers." >&2
-        if [ -z "$hubcap_key" ]; then
-            echo "[NOTE] Hubcap provider was skipped (no API key configured)." >&2
-            echo "[NOTE] To configure Hubcap key: run 'gamectl config set hubcap_key smm_...' or open Master Dashboard -> Global Settings." >&2
-        fi
-        local token
-        token=$(get_valid_luatools_token 2>/dev/null || true)
-        if [ -z "$token" ]; then
-            echo "[NOTE] LuaTools extended catalog was skipped (no active session)." >&2
-            echo "[NOTE] To authenticate with LuaTools: run 'gamectl login-luatools' or open Master Dashboard -> Global Settings -> LuaTools Session." >&2
-        fi
-        return 1
-    fi
-}
-
-# Harvest and integrate additional DLC manifest archives for an AppID into stage directory
-harvest_dlc_manifests() {
-    local base_appid="$1"
-    local stage_dir="$2"
-    local source="${3:-auto}"
-    [ -d "$stage_dir" ] || return 0
-
-    local lua_file="$stage_dir/${base_appid}.lua"
-    if [ ! -f "$lua_file" ]; then
-        shopt -s nullglob globstar
-        local found_luas=("$stage_dir"/**/"${base_appid}.lua" "$stage_dir"/**/*.lua "$stage_dir"/*.lua)
-        shopt -u nullglob globstar
-        [ ${#found_luas[@]} -gt 0 ] && lua_file="${found_luas[0]}"
-    fi
-    [ -f "$lua_file" ] || return 0
-
-    # Discover candidate DLC AppIDs from addappid(<id>)
-    local dlc_appids=()
-    while read -r cand_id; do
-        [ -n "$cand_id" ] || continue
-        [ "$cand_id" = "$base_appid" ] && continue
-        dlc_appids+=("$cand_id")
-    done < <(grep -E '^[[:space:]]*addappid\([[:space:]]*[0-9]+[[:space:]]*\)' "$lua_file" 2>/dev/null | sed -E 's/.*addappid\([[:space:]]*([0-9]+).*/\1/')
-
-    if [ ${#dlc_appids[@]} -eq 0 ]; then
-        return 0
-    fi
-
-    echo "[INFO] Discovered ${#dlc_appids[@]} candidate DLC AppID(s) in Lua manifest: ${dlc_appids[*]}" >&2
-
-    local harvested=0
-    for dlc_id in "${dlc_appids[@]}"; do
-        # Avoid re-harvesting if already staged
-        shopt -s nullglob globstar
-        local existing_dlc_lua=("$stage_dir"/**/"${dlc_id}.lua" "$stage_dir"/*"${dlc_id}.lua")
-        shopt -u nullglob globstar
-        if [ ${#existing_dlc_lua[@]} -gt 0 ]; then
-            continue
-        fi
-
-        local dlc_zip
-        dlc_zip=$(fetch_manifest "$dlc_id" "" "$source" 2>/dev/null || true)
-        if [ -n "$dlc_zip" ] && [ -f "$dlc_zip" ] && validate_manifest_zip "$dlc_zip" "$dlc_id"; then
-            if unzip -qo "$dlc_zip" -d "$stage_dir" 2>/dev/null; then
-                echo "  [INFO] Successfully integrated DLC manifest archive: AppID $dlc_id" >&2
-                harvested=$((harvested + 1))
-            fi
-        fi
-    done
-
-    if [ "$harvested" -gt 0 ]; then
-        echo "[VERIFIED] Integrated $harvested additional DLC manifest archive(s) into stage directory." >&2
-    fi
-    return 0
-}
+# --- [MODULE] src/steam/37_app_types.sh ---
+# ==============================================================================
+# Steam Catalog App-Type Canonical SSoT, Batch Classifier & Details Parser
+# ==============================================================================
 
 # Normalize Steam app type values (IStoreBrowseService integer enum or appdetails string)
 # into closed 7-token canonical vocabulary: GAME, DLC, DEMO, MOD, SOUNDTRACK, TOOL, APP.
@@ -7587,6 +7609,21 @@ revert_game_fix() {
     return 0
 }
 
+# Standalone-source compatibility: load split fix TUI/lifecycle submodule when sourced directly outside bin/gamectl
+if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
+    _fixes_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    if [ -f "$_fixes_dir/38_fixes_tui.sh" ]; then
+        # shellcheck source=/dev/null
+        source "$_fixes_dir/38_fixes_tui.sh"
+    fi
+    unset _fixes_dir
+fi
+
+# --- [MODULE] src/steam/38_fixes_tui.sh ---
+# ==============================================================================
+# Community Fixes TUI Harvester, Preview Pane & Steam Client Hot-Reload
+# ==============================================================================
+
 # Graceful Steam Client restart engine with SLSsteam wrapper preservation
 restart_steam_client() {
     echo "[INFO] Initiating graceful Steam Client reload..."
@@ -9557,7 +9594,7 @@ EOF
 # Standalone-source compatibility: load split runner submodules when sourced directly outside bin/gamectl
 if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
     _runners_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-    for _runners_sub in 41_proton_prefix.sh 42_graphics_isolation.sh; do
+    for _runners_sub in 41_proton_prefix.sh 42_graphics_isolation.sh 43_proton_manager.sh; do
         if [ -f "$_runners_dir/$_runners_sub" ]; then
             # shellcheck source=/dev/null
             source "$_runners_dir/$_runners_sub"
@@ -9695,6 +9732,702 @@ detect_dll_overrides() {
     done
     echo "$result"
 }
+
+# Canonical Windows runner environment contract shared by launch_game & manage_prefix
+prepare_windows_runner_env() {
+    local runner_bin="${1:-wine}"
+    local gdir="${2:-}"
+    local raw_appid="${3:-0}"
+    local renderer_mode="${4:-auto}"
+    local prime_active="${5:-0}"
+
+    local clean_appid="${raw_appid//[!0-9]/}"
+    [ -z "$clean_appid" ] && clean_appid="0"
+
+    GAMECTL_WIN_PFX_DIR="$gdir/pfx"
+    GAMECTL_WIN_APPID="$clean_appid"
+    if [ "$clean_appid" != "0" ]; then
+        GAMECTL_WIN_UMU_GAMEID="umu-${clean_appid}"
+    else
+        GAMECTL_WIN_UMU_GAMEID="umu-default"
+    fi
+    GAMECTL_WIN_STEAM_ROOT="${STEAM_CLIENT_INSTALL_PATH:-$(get_steam_root 2>/dev/null || echo "$HOME/.local/share/Steam")}"
+
+    case "$runner_bin" in
+        umu-run|*/umu-run) GAMECTL_WIN_RUNNER_KIND="umu" ;;
+        *proton*)          GAMECTL_WIN_RUNNER_KIND="proton" ;;
+        *)                 GAMECTL_WIN_RUNNER_KIND="wine" ;;
+    esac
+
+    local eff_renderer="${GAMECTL_ACTIVE_RENDERER:-}"
+    if [ -z "$eff_renderer" ]; then
+        if [ -n "${PROTON_USE_WINED3D:-}" ]; then
+            [ "$PROTON_USE_WINED3D" = "1" ] && eff_renderer="wined3d" || eff_renderer="dxvk"
+        elif type resolve_graphics_renderer >/dev/null 2>&1; then
+            eff_renderer="$(resolve_graphics_renderer "$renderer_mode" "$prime_active")"
+        else
+            eff_renderer="dxvk"
+        fi
+    fi
+    GAMECTL_WIN_RENDERER="$eff_renderer"
+    if [ "$eff_renderer" = "wined3d" ]; then
+        GAMECTL_WIN_PROTON_WINED3D="1"
+    else
+        GAMECTL_WIN_PROTON_WINED3D="0"
+    fi
+
+    if [ "$clean_appid" = "0" ] && [ -z "${PROTONFIXES_DISABLE+x}" ]; then
+        GAMECTL_WIN_DISABLE_PROTONFIXES="1"
+    else
+        GAMECTL_WIN_DISABLE_PROTONFIXES=""
+    fi
+}
+
+# Wine Prefix Swiss Army Knife & Wineserver Lifecycle Guard (Chunk 4)
+manage_prefix() {
+    local game_dir="${1:-}"
+    local action="${2:-}"
+    shift 2 2>/dev/null || shift $# 2>/dev/null || true
+
+    if [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
+        echo "[ERROR] Game directory not found or invalid: $game_dir" >&2
+        echo "Usage: gamectl pfx <game_dir> [winecfg|regedit|cmd|shell|kill|clean|winetricks] [args...]" >&2
+        return 1
+    fi
+
+    # Canonicalize game_dir path
+    game_dir="$(cd "$game_dir" 2>/dev/null && pwd || echo "$game_dir")"
+    local pfx_dir="$game_dir/pfx"
+    local runner_bin
+    runner_bin="$(find_runner "$game_dir" 2>/dev/null || true)"
+    [ -z "$runner_bin" ] && runner_bin="wine"
+
+    # AppID resolution (SSoT)
+    local appid
+    appid="$(resolve_game_appid "$game_dir" "0")"
+
+    # Wineserver resolution
+    local ws_bin
+    ws_bin="$(get_wineserver_bin "$runner_bin" 2>/dev/null || echo "")"
+
+    # Interactive menu if action is empty and stdin is terminal
+    if [ -z "$action" ]; then
+        require_tui "Wine prefix manager" || return $?
+        if [ -t 0 ]; then
+            if command -v fzf >/dev/null 2>&1; then
+                flush_tty_input
+                local game_name
+                game_name="$(basename "$game_dir")"
+                local pfx_status="[NOT FOUND]"
+                local pfx_color="\033[38;5;203m"
+                local pfx_size="0 B"
+                if [ -d "$pfx_dir" ]; then
+                    pfx_status="[ACTIVE]"
+                    pfx_color="\033[38;5;120m"
+                    pfx_size="$(du -sh "$pfx_dir" 2>/dev/null | awk '{print $1}' || echo "N/A")"
+                fi
+
+                local pfx_palette
+                pfx_palette=$(cat <<EOF
+winecfg	Wine Configuration	Configure Audio, Graphics, Windows Version & DLL Overrides
+regedit	Registry Editor	Windows Registry Editor (regedit.exe)
+cmd	Command Prompt	Windows Command Prompt (cmd.exe)
+shell	Host Bash Subshell	Spawn bash subshell with active WINEPREFIX & PATH
+winetricks	Winetricks Manager	Launch winetricks GUI / Package Manager helper
+kill	Kill Wineserver	Terminate locked / hung Wineserver process
+clean	Wipe Wine Prefix	Create save snapshot backup & wipe entire pfx directory
+EOF
+)
+
+                export GAMECTL_PFX_NAME="$game_name"
+                export GAMECTL_PFX_DIR="$game_dir"
+                export GAMECTL_PFX_PATH="$pfx_dir"
+                export GAMECTL_PFX_RUNNER="$runner_bin"
+                export GAMECTL_PFX_STATUS="${pfx_color}${pfx_status}"
+                export GAMECTL_PFX_SIZE="$pfx_size"
+
+                local preview_cmd
+                preview_cmd='printf "\033[38;5;60m╭─ WINE PREFIX OVERVIEW ──────────────────────────────╮\033[0m\n  Game Title  : \033[1m%s\033[0m\n  Directory   : %s\n  Prefix Path : %s\n  Active Wine : \033[38;5;111m%s\033[0m\n  Status      : %b\033[0m (Size: %s)\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n\033[38;5;60m╭─ ACTION DETAIL ─────────────────────────────────────╮\033[0m\n  Tool   : \033[1m%s\033[0m - %s\n  Desc   : %s\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n" "$GAMECTL_PFX_NAME" "$GAMECTL_PFX_DIR" "$GAMECTL_PFX_PATH" "$GAMECTL_PFX_RUNNER" "$GAMECTL_PFX_STATUS" "$GAMECTL_PFX_SIZE" {1} {2} {3}'
+
+                local pfx_sel fzf_rc=0
+                pfx_sel=$(echo "$pfx_palette" | fzf \
+                    --delimiter=$'\t' \
+                    --with-nth=1,2 \
+                    --border-label="  ╢ gamectl :: Wine Prefix Manager :: $game_name ╟  " \
+                    --border-label-pos=2 \
+                    --header="Enter: Execute │ Esc: Return" \
+                    --prompt="Prefix > " \
+                    --preview="$preview_cmd" \
+                    --preview-window=down:50%:border-rounded:wrap \
+                    --reverse 2>/dev/null) || fzf_rc=$?
+
+                if [ "$fzf_rc" -eq 130 ]; then
+                    return 0
+                fi
+                if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
+                    echo "[ERROR] Wine prefix manager failed (fzf exit code $fzf_rc)." >&2
+                    return "$fzf_rc"
+                fi
+                [ -z "$pfx_sel" ] && return 0
+
+                action=$(echo "$pfx_sel" | awk -F'\t' '{print $1}')
+            else
+                echo "[ERROR] fzf is required for Wine prefix manager." >&2
+                return 127
+            fi
+        else
+            echo "Usage: gamectl pfx <game_dir> [winecfg|regedit|cmd|shell|kill|clean|winetricks] [args...]" >&2
+            return 1
+        fi
+    fi
+
+    case "$action" in
+        kill)
+            echo "[INFO] Sending force termination signal (wineserver -k) to prefix: $pfx_dir"
+            if [ -d "$pfx_dir" ]; then
+                if [ -n "$ws_bin" ]; then
+                    WINEPREFIX="$pfx_dir" "$ws_bin" -k 2>/dev/null || true
+                elif command -v wineserver >/dev/null 2>&1; then
+                    WINEPREFIX="$pfx_dir" wineserver -k 2>/dev/null || true
+                fi
+            fi
+            echo "[VERIFIED] Wineserver for prefix $pfx_dir has been stopped."
+            return 0
+            ;;
+        clean)
+            echo "[INFO] Starting Wine prefix cleanup: $pfx_dir"
+            if [ ! -d "$pfx_dir" ]; then
+                echo "[INFO] Prefix directory $pfx_dir does not exist, nothing to clean."
+                return 0
+            fi
+
+            local is_dry_run=false auto_yes=false
+            for arg in "$@"; do
+                if [ "$arg" = "--dry-run" ] || [ "$arg" = "-n" ]; then
+                    is_dry_run=true
+                elif [ "$arg" = "-y" ] || [ "$arg" = "--yes" ]; then
+                    auto_yes=true
+                fi
+            done
+
+            if [ "$is_dry_run" = true ]; then
+                local pfx_sz="0"
+                pfx_sz=$(du -sh "$pfx_dir" 2>/dev/null | cut -f1 || echo "unknown")
+                echo "[INFO] [DRY-RUN] Target Wine prefix directory: $pfx_dir (Size: $pfx_sz)"
+                echo "[INFO] [DRY-RUN] Would create pre-wipe savegame backup snapshot via backup_save."
+                echo "[INFO] [DRY-RUN] Would terminate wineserver process."
+                echo "[INFO] [DRY-RUN] Would remove prefix directory: $pfx_dir"
+                echo "[INFO] [DRY-RUN] Wine prefix cleanup simulated successfully (no files deleted)."
+                return 0
+            fi
+
+            # 1. Create save snapshot backup
+            if [ -d "$game_dir/saves" ] || [ -L "$game_dir/saves" ]; then
+                if ! backup_save "$game_dir" true; then
+                    echo "[ERROR] Pre-wipe save snapshot backup failed. Aborting prefix wipe to protect saves." >&2
+                    log_msg "ERROR" "PFX" "Pre-wipe save snapshot backup failed for $(basename "$game_dir")"
+                    return 1
+                fi
+            fi
+
+            # 2. Kill running wineserver
+            if [ -n "$ws_bin" ]; then
+                WINEPREFIX="$pfx_dir" "$ws_bin" -k 2>/dev/null || true
+            elif command -v wineserver >/dev/null 2>&1; then
+                WINEPREFIX="$pfx_dir" wineserver -k 2>/dev/null || true
+            fi
+            sleep 0.2
+
+            # 3. Confirmation check
+            if [ "$auto_yes" = false ] && [ -t 0 ]; then
+                echo -n "[WARN] Wipe entire Wine prefix ($pfx_dir)? Registry and Wine configuration will be reset. [y/N]: "
+                local confirm=""
+                read -t 10 -r confirm || confirm="n"
+                echo
+                if [[ ! "$confirm" =~ ^[yY] ]]; then
+                    echo "[INFO] Prefix cleanup canceled."
+                    return 0
+                fi
+            fi
+
+            # 4. Remove pfx folder safely
+            rm -rf "$pfx_dir"
+            echo "[VERIFIED] Wine prefix wiped successfully ($pfx_dir removed)."
+            return 0
+            ;;
+        shell)
+            prepare_windows_runner_env "$runner_bin" "$game_dir" "$appid" "auto" "0"
+            echo "[INFO] Spawning interactive bash subshell inside prefix environment: $pfx_dir"
+            echo "[INFO] Active environment: WINEPREFIX=$pfx_dir, RUNNER=$runner_bin"
+            echo "[INFO] Type 'exit' to return to gamectl."
+            (
+                export WINEPREFIX="$GAMECTL_WIN_PFX_DIR" \
+                    GAMECTL_RUNNER="$runner_bin" \
+                    GAMEID="$GAMECTL_WIN_UMU_GAMEID" \
+                    STEAM_COMPAT_APP_ID="$GAMECTL_WIN_APPID" \
+                    SteamAppId="$GAMECTL_WIN_APPID" \
+                    SteamGameId="$GAMECTL_WIN_APPID"
+                if [ "$GAMECTL_WIN_RUNNER_KIND" = "proton" ] || [ "$GAMECTL_WIN_RUNNER_KIND" = "umu" ]; then
+                    export PROTON_USE_WINED3D="$GAMECTL_WIN_PROTON_WINED3D"
+                    [ "$GAMECTL_WIN_DISABLE_PROTONFIXES" = "1" ] && export PROTONFIXES_DISABLE=1
+                fi
+                if [ "$GAMECTL_WIN_RUNNER_KIND" = "proton" ]; then
+                    export STEAM_COMPAT_CLIENT_INSTALL_PATH="$GAMECTL_WIN_STEAM_ROOT" \
+                        STEAM_COMPAT_DATA_PATH="$game_dir"
+                    local p_bin_dir
+                    p_bin_dir="$(dirname "$runner_bin")/files/bin"
+                    [ -d "$p_bin_dir" ] && export PATH="$p_bin_dir:$PATH"
+                fi
+                cd "$game_dir" || true
+                exec bash -i
+            )
+            return 0
+            ;;
+        winecfg|regedit|cmd)
+            mkdir -p "$pfx_dir"
+            prepare_windows_runner_env "$runner_bin" "$game_dir" "$appid" "auto" "0"
+            echo "[INFO] Executing $action inside prefix: $pfx_dir (Runner: $runner_bin)..."
+            local target_exec="$action"
+            [ "$action" = "cmd" ] && target_exec="cmd.exe"
+
+            (
+                export WINEPREFIX="$GAMECTL_WIN_PFX_DIR" \
+                    GAMEID="$GAMECTL_WIN_UMU_GAMEID" \
+                    STEAM_COMPAT_APP_ID="$GAMECTL_WIN_APPID" \
+                    SteamAppId="$GAMECTL_WIN_APPID" \
+                    SteamGameId="$GAMECTL_WIN_APPID"
+                if [ "$GAMECTL_WIN_RUNNER_KIND" = "proton" ] || [ "$GAMECTL_WIN_RUNNER_KIND" = "umu" ]; then
+                    export PROTON_USE_WINED3D="$GAMECTL_WIN_PROTON_WINED3D"
+                    [ "$GAMECTL_WIN_DISABLE_PROTONFIXES" = "1" ] && export PROTONFIXES_DISABLE=1
+                fi
+                case "$GAMECTL_WIN_RUNNER_KIND" in
+                    umu)
+                        "$runner_bin" "$target_exec" "$@"
+                        ;;
+                    proton)
+                        export STEAM_COMPAT_CLIENT_INSTALL_PATH="$GAMECTL_WIN_STEAM_ROOT" \
+                            STEAM_COMPAT_DATA_PATH="$game_dir"
+                        "$runner_bin" run "$target_exec" "$@"
+                        ;;
+                    *)
+                        "$runner_bin" "$target_exec" "$@"
+                        ;;
+                esac
+            )
+            ;;
+        winetricks)
+            if ! command -v winetricks >/dev/null 2>&1; then
+                echo "[ERROR] 'winetricks' binary not found on host system." >&2
+                echo "[INFO] Install winetricks via your distribution package manager (e.g. pacman -S winetricks / apt install winetricks)." >&2
+                return 1
+            fi
+            mkdir -p "$pfx_dir"
+            echo "[INFO] Launching winetricks inside prefix: $pfx_dir"
+            WINEPREFIX="$pfx_dir" winetricks "$@"
+            ;;
+        *)
+            echo "[ERROR] Unknown prefix action: '$action'" >&2
+            echo "Supported actions: winecfg, regedit, cmd, shell, kill, clean, winetricks" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Standalone-source compatibility: load split proton manager submodule when sourced directly outside bin/gamectl
+if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
+    _pfx_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    if [ -f "$_pfx_dir/43_proton_manager.sh" ]; then
+        # shellcheck source=/dev/null
+        source "$_pfx_dir/43_proton_manager.sh"
+    fi
+    unset _pfx_dir
+fi
+
+# --- [MODULE] src/runners/42_graphics_isolation.sh ---
+# Check if host GPU is Intel Haswell / 4th Gen Core (prone to Mesa GL threaded asset decompression crashes)
+is_haswell_gpu() {
+    local pci_dir="${GAMECTL_PCI_UEVENT_DIR:-/sys/bus/pci/devices}"
+    if [ -z "${GAMECTL_PCI_UEVENT_DIR:-}" ] && command -v lspci >/dev/null 2>&1; then
+        local gpu_info
+        gpu_info=$(lspci 2>/dev/null | grep -E "VGA|3D" || true)
+        if echo "$gpu_info" | grep -qi -E "Haswell|4th Gen Core"; then
+            return 0
+        fi
+    fi
+    if [ -d "$pci_dir" ]; then
+        local uev
+        for uev in "$pci_dir"/*/uevent; do
+            [ -f "$uev" ] || continue
+            grep -qiE '^PCI_CLASS=0?3(00|02|80)00' "$uev" 2>/dev/null || continue
+            grep -qiE '^PCI_ID=8086:(04|0a|0d)[0-9a-f]{2}$' "$uev" 2>/dev/null && return 0
+        done
+    fi
+    return 1
+}
+
+# Canonical 2-tier host Vulkan capability probe (zero hardcode vendor dependency)
+# Outputs: VULKAN_READY | VULKAN_LEGACY | OPENGL_ONLY
+detect_vulkan_capability() {
+    if [ -n "${GAMECTL_VULKAN_CAPABILITY:-}" ]; then
+        echo "$GAMECTL_VULKAN_CAPABILITY"
+        return 0
+    fi
+
+    # Tier 1: Runtime per-device probe via vulkaninfo --summary when available
+    if command -v vulkaninfo >/dev/null 2>&1; then
+        local v_sum
+        v_sum=$(vulkaninfo --summary 2>&1 || true)
+        if echo "$v_sum" | grep -q -E '(^|[[:space:]])GPU[0-9]+:|PHYSICAL_DEVICE_TYPE_'; then
+            local vk_tier
+            vk_tier=$(printf '%s\n' "$v_sum" | awk '
+                function flush_gpu(    ver_str, p, maj, min, score) {
+                    if (in_gpu != 1) return
+                    if (cur_type !~ /PHYSICAL_DEVICE_TYPE_(DISCRETE|INTEGRATED)_GPU/) return
+                    if (tolower(cur_name) ~ /(llvmpipe|swiftshader)/) return
+                    hw_count++
+                    if (match(cur_ver, /[0-9]+\.[0-9]+\.[0-9]+/)) {
+                        ver_str = substr(cur_ver, RSTART, RLENGTH)
+                        split(ver_str, p, ".")
+                        maj = p[1] + 0
+                        min = p[2] + 0
+                        score = maj * 1000 + min
+                        if (score > max_score) {
+                            max_score = score
+                            max_maj = maj
+                            max_min = min
+                        }
+                        if (cur_type ~ /PHYSICAL_DEVICE_TYPE_DISCRETE_GPU/ && (maj > 1 || (maj == 1 && min >= 3))) {
+                            has_modern_dgpu = 1
+                        }
+                    }
+                }
+                BEGIN {
+                    in_gpu = 0; hw_count = 0; max_score = -1; max_maj = 0; max_min = 0;
+                    has_modern_dgpu = 0; incomplete_warn = 0;
+                    cur_ver = ""; cur_type = ""; cur_name = "";
+                }
+                {
+                    if (tolower($0) ~ /vulkan support is incomplete|non-conformant/) {
+                        incomplete_warn = 1
+                    }
+                }
+                /^[[:space:]]*GPU[0-9]+:/ {
+                    flush_gpu()
+                    in_gpu = 1
+                    cur_ver = ""; cur_type = ""; cur_name = ""
+                    next
+                }
+                in_gpu == 1 && /apiVersion[[:space:]]*=/ { cur_ver = $0; next }
+                in_gpu == 1 && /deviceType[[:space:]]*=/ { cur_type = $0; next }
+                in_gpu == 1 && /deviceName[[:space:]]*=/ { cur_name = $0; next }
+                END {
+                    flush_gpu()
+                    if (hw_count == 0) {
+                        print "OPENGL_ONLY"
+                    } else if (max_maj > 1 || (max_maj == 1 && max_min >= 3)) {
+                        if (incomplete_warn == 1 && has_modern_dgpu == 0) {
+                            print "VULKAN_LEGACY"
+                        } else {
+                            print "VULKAN_READY"
+                        }
+                    } else if (max_maj == 1 && max_min >= 1) {
+                        print "VULKAN_LEGACY"
+                    } else {
+                        print "OPENGL_ONLY"
+                    }
+                }
+            ')
+            if [ -n "$vk_tier" ]; then
+                echo "$vk_tier"
+                return 0
+            fi
+        elif echo "$v_sum" | grep -qiE 'Cannot create Vulkan instance|ERROR_INCOMPATIBLE_DRIVER'; then
+            echo "OPENGL_ONLY"
+            return 0
+        fi
+    fi
+
+    # Tier 2: Kernel DRM driver & Vulkan ICD manifest inspection
+    local icd_files=() icd
+    for icd in /usr/share/vulkan/icd.d/*.json /etc/vulkan/icd.d/*.json; do
+        [ -f "$icd" ] && icd_files+=("$icd")
+    done
+    if [ ${#icd_files[@]} -eq 0 ]; then
+        echo "OPENGL_ONLY"
+        return 0
+    fi
+
+    local has_hw_icd=0 has_modern_icd=0
+    for icd in "${icd_files[@]}"; do
+        local bname
+        bname="$(basename "$icd")"
+        case "$bname" in
+            *lvp*|*swiftshader*|*virtio*) ;;
+            *hasvk*) has_hw_icd=1 ;;
+            *) has_hw_icd=1; has_modern_icd=1 ;;
+        esac
+    done
+    if [ "$has_hw_icd" -eq 0 ]; then
+        echo "OPENGL_ONLY"
+        return 0
+    fi
+
+    local dgpu_vend="none"
+    type detect_dgpu_vendor >/dev/null 2>&1 && dgpu_vend="$(detect_dgpu_vendor 2>/dev/null || echo none)"
+    if [ "$dgpu_vend" = "none" ]; then
+        if is_haswell_gpu; then
+            echo "VULKAN_LEGACY"
+            return 0
+        fi
+        local pci_vga=""
+        command -v lspci >/dev/null 2>&1 && pci_vga=$(lspci 2>/dev/null | grep -E "VGA|3D" || true)
+        if echo "$pci_vga" | grep -qi -E "Ivy Bridge|3rd Gen Core|HD Graphics 2500|HD Graphics 4000"; then
+            echo "VULKAN_LEGACY"
+            return 0
+        fi
+        local has_modern_drv=0 has_legacy_drv=0 drv_link drv_name
+        for drv_link in /sys/class/drm/card[0-9]*/device/driver; do
+            [ -L "$drv_link" ] || continue
+            drv_name="$(basename "$(readlink -f "$drv_link" 2>/dev/null)" 2>/dev/null || true)"
+            case "$drv_name" in
+                amdgpu|nvidia|xe|i915) has_modern_drv=1 ;;
+                radeon|nouveau|vmwgfx|virtio-pci|bochs-drm|qxl|vboxvideo) has_legacy_drv=1 ;;
+            esac
+        done
+        if [ "$has_modern_drv" -eq 0 ] && [ "$has_legacy_drv" -eq 1 ]; then
+            echo "VULKAN_LEGACY"
+            return 0
+        fi
+    fi
+
+    if [ "$has_modern_icd" -eq 1 ]; then
+        echo "VULKAN_READY"
+    else
+        echo "VULKAN_LEGACY"
+    fi
+    return 0
+}
+
+# Resolve effective graphics renderer (dxvk | wined3d) from mode + host capability
+resolve_graphics_renderer() {
+    local mode="${1:-auto}"
+    local prime_active="${2:-0}"
+    mode="${mode,,}"
+
+    case "$mode" in
+        wined3d|opengl|gl)
+            echo "wined3d"
+            ;;
+        dxvk|vulkan|vk)
+            echo "dxvk"
+            ;;
+        auto|"")
+            if [ "$prime_active" = "1" ]; then
+                echo "dxvk"
+            else
+                local cap
+                cap="$(detect_vulkan_capability)"
+                case "$cap" in
+                    VULKAN_READY) echo "dxvk" ;;
+                    *)            echo "wined3d" ;;
+                esac
+            fi
+            ;;
+        *)
+            echo "dxvk"
+            ;;
+    esac
+}
+
+# Dynamically detect host native display resolution via DRM / Wayland / X11
+get_native_resolution() {
+    local res=""
+    # Priority 1: DRM kernel modes (direct & universal across all compositors/X11)
+    for m_file in /sys/class/drm/card*-*/modes; do
+        [ -f "$m_file" ] || continue
+        local s_file="$(dirname "$m_file")/status"
+        if [ -f "$s_file" ] && grep -q "^connected" "$s_file" 2>/dev/null; then
+            local line
+            line=$(head -n 1 "$m_file" 2>/dev/null | tr -d '[:space:]')
+            if [[ "$line" =~ ^[0-9]+x[0-9]+$ ]]; then
+                res="$line"
+                break
+            fi
+        fi
+    done
+
+    # Priority 2: Hyprland monitor inspection
+    if [ -z "$res" ] && command -v hyprctl >/dev/null 2>&1; then
+        res=$(hyprctl monitors 2>/dev/null | grep -E '^[[:space:]]*[0-9]+x[0-9]+@' | head -n 1 | sed -E 's/.*([0-9]+x[0-9]+)@.*/\1/' || true)
+    fi
+
+    # Priority 3: X11 / Xwayland via xrandr
+    if [ -z "$res" ] && command -v xrandr >/dev/null 2>&1; then
+        res=$(xrandr --current 2>/dev/null | grep -E '\bconnected\b' | grep -o -E '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -n 1 | cut -d'+' -f1 || true)
+        [ -z "$res" ] && res=$(xrandr --current 2>/dev/null | grep -E '^[[:space:]]+[0-9]+x[0-9]+' | head -n 1 | awk '{print $1}' || true)
+    fi
+
+    # Fallback default
+    if [[ ! "$res" =~ ^[0-9]+x[0-9]+$ ]]; then
+        res="1920x1080"
+    fi
+    echo "$res"
+}
+
+# Dynamically calculate Gamescope display & FSR render arguments based on native resolution
+get_default_gamescope_args() {
+    local n_res
+    n_res=$(get_native_resolution)
+    local nw="${n_res%x*}"
+    local nh="${n_res#*x}"
+
+    local rw rh
+    if [ "$nw" -ge 3840 ] && [ "$nh" -ge 2160 ]; then
+        rw=2560; rh=1440
+    elif [ "$nw" -ge 2560 ] && [ "$nh" -ge 1440 ]; then
+        rw=1920; rh=1080
+    elif [ "$nw" -eq 1920 ] && [ "$nh" -eq 1080 ]; then
+        rw=1280; rh=720
+    elif [ "$nw" -eq 1600 ] && [ "$nh" -eq 900 ]; then
+        rw=1280; rh=720
+    elif [ "$nw" -eq 1280 ] && [ "$nh" -eq 800 ]; then
+        rw=960; rh=600
+    else
+        rw=$(( (nw * 2 / 3 + 1) / 2 * 2 ))
+        rh=$(( (nh * 2 / 3 + 1) / 2 * 2 ))
+    fi
+    echo "-W $rw -H $rh -w $nw -h $nh -F fsr -f"
+}
+
+# Check if systemd user daemon and cgroups v2 scope unit execution is supported
+check_systemd_scope_support() {
+    if command -v systemd-run >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1; then
+        if systemd-run --user --scope --quiet true 2>/dev/null; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Detect discrete secondary GPU vendor on hybrid systems (NVIDIA, AMD, Intel Arc)
+detect_dgpu_vendor() {
+    if [ -n "${GAMECTL_DGPU_VENDOR:-}" ]; then
+        echo "$GAMECTL_DGPU_VENDOR"
+        return 0
+    fi
+
+    local vga_count=0
+    local vendors=()
+
+    for dev in /sys/bus/pci/devices/*; do
+        [ -f "$dev/class" ] || continue
+        local pci_class
+        pci_class=$(cat "$dev/class" 2>/dev/null || echo "")
+        case "$pci_class" in
+            0x0302*|0x030200*)
+                # Secondary 3D controller (Optimized for 3D acceleration / dGPU)
+                local v_id
+                v_id=$(cat "$dev/vendor" 2>/dev/null || echo "")
+                case "$v_id" in
+                    0x10de) echo "nvidia"; return 0 ;;
+                    0x1002) echo "amd"; return 0 ;;
+                    0x8086) echo "intel"; return 0 ;;
+                esac
+                ;;
+            0x0300*|0x030000*)
+                vga_count=$((vga_count + 1))
+                local v_id
+                v_id=$(cat "$dev/vendor" 2>/dev/null || echo "")
+                vendors+=("$v_id")
+                ;;
+        esac
+    done
+
+    # If multiple display controllers exist without a specific 0x0302 class device
+    if [ "$vga_count" -gt 1 ]; then
+        for v in "${vendors[@]}"; do
+            if [ "$v" = "0x10de" ]; then
+                echo "nvidia"
+                return 0
+            fi
+        done
+        local has_amd=false has_intel=false amd_count=0
+        for v in "${vendors[@]}"; do
+            [ "$v" = "0x1002" ] && { has_amd=true; amd_count=$((amd_count + 1)); }
+            [ "$v" = "0x8086" ] && has_intel=true
+        done
+        if [ "$has_amd" = true ] && [ "$has_intel" = true ]; then
+            echo "amd"
+            return 0
+        fi
+        if [ "$amd_count" -gt 1 ]; then
+            echo "amd"
+            return 0
+        fi
+    fi
+
+    echo "none"
+    return 0
+}
+
+# Construct rootless Bubblewrap (bwrap) security sandbox argument array
+build_sandbox_command() {
+    local gdir="$1"
+    declare -ga GAMECTL_SANDBOX_PREFIX=()
+
+    if ! command -v bwrap >/dev/null 2>&1; then
+        echo "[WARN] bubblewrap (bwrap) not found in PATH. Sandboxing skipped." >&2
+        return 1
+    fi
+
+    local desktop_runtime_dir app_runtime_dir
+    desktop_runtime_dir="$(get_desktop_runtime_dir)"
+    app_runtime_dir="$(get_runtime_dir)"
+    local wayland_socket="${WAYLAND_DISPLAY:-wayland-0}"
+    local xauth_file="${XAUTHORITY:-$HOME/.Xauthority}"
+
+    GAMECTL_SANDBOX_PREFIX=(
+        bwrap
+        --ro-bind /usr /usr
+        --ro-bind-try /lib /lib
+        --ro-bind-try /lib64 /lib64
+        --ro-bind-try /bin /bin
+        --ro-bind-try /sbin /sbin
+        --ro-bind-try /etc /etc
+        --proc /proc
+        --dev /dev
+        --ro-bind /sys /sys
+        --tmpfs /tmp
+        --ro-bind-try /tmp/.X11-unix /tmp/.X11-unix
+        --tmpfs /run
+        --tmpfs "$desktop_runtime_dir"
+        --bind-try "$desktop_runtime_dir/wayland-0" "$desktop_runtime_dir/wayland-0"
+        --bind-try "$desktop_runtime_dir/$wayland_socket" "$desktop_runtime_dir/$wayland_socket"
+        --bind-try "$desktop_runtime_dir/pipewire-0" "$desktop_runtime_dir/pipewire-0"
+        --bind-try "$desktop_runtime_dir/pulse" "$desktop_runtime_dir/pulse"
+        --bind-try "$app_runtime_dir" "$app_runtime_dir"
+        --tmpfs "$HOME"
+        --ro-bind-try "$xauth_file" "$xauth_file"
+        --bind-try "$HOME/.config/gamectl" "$HOME/.config/gamectl"
+        --ro-bind-try "${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners" "${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners"
+        --ro-bind-try "$HOME/.local/share/Steam" "$HOME/.local/share/Steam"
+        --ro-bind-try "$HOME/.local/share/gbe-fork" "$HOME/.local/share/gbe-fork"
+        --ro-bind-try "$HOME/.steam" "$HOME/.steam"
+        --bind-try "$HOME/.local/share/vulkan" "$HOME/.local/share/vulkan"
+        --bind "$gdir" "$gdir"
+        --chdir "$gdir"
+        --unshare-user
+        --unshare-ipc
+        --unshare-pid
+        --die-with-parent
+    )
+    return 0
+}
+
+# --- [MODULE] src/runners/43_proton_manager.sh ---
+# ==============================================================================
+# GE-Proton & Wine Runner Discovery, Installer & Lifecycle Manager
+# ==============================================================================
 
 # Canonical ordered list of standalone XDG and Steam runner parent directories
 list_runner_dirs() {
@@ -10245,687 +10978,6 @@ proton_remove() {
 
     rm -rf "$target_dir"
     echo "[VERIFIED] GE-Proton '$tag' removed successfully ($sz disk space freed)."
-    return 0
-}
-
-# Canonical Windows runner environment contract shared by launch_game & manage_prefix
-prepare_windows_runner_env() {
-    local runner_bin="${1:-wine}"
-    local gdir="${2:-}"
-    local raw_appid="${3:-0}"
-    local renderer_mode="${4:-auto}"
-    local prime_active="${5:-0}"
-
-    local clean_appid="${raw_appid//[!0-9]/}"
-    [ -z "$clean_appid" ] && clean_appid="0"
-
-    GAMECTL_WIN_PFX_DIR="$gdir/pfx"
-    GAMECTL_WIN_APPID="$clean_appid"
-    if [ "$clean_appid" != "0" ]; then
-        GAMECTL_WIN_UMU_GAMEID="umu-${clean_appid}"
-    else
-        GAMECTL_WIN_UMU_GAMEID="umu-default"
-    fi
-    GAMECTL_WIN_STEAM_ROOT="${STEAM_CLIENT_INSTALL_PATH:-$(get_steam_root 2>/dev/null || echo "$HOME/.local/share/Steam")}"
-
-    case "$runner_bin" in
-        umu-run|*/umu-run) GAMECTL_WIN_RUNNER_KIND="umu" ;;
-        *proton*)          GAMECTL_WIN_RUNNER_KIND="proton" ;;
-        *)                 GAMECTL_WIN_RUNNER_KIND="wine" ;;
-    esac
-
-    local eff_renderer="${GAMECTL_ACTIVE_RENDERER:-}"
-    if [ -z "$eff_renderer" ]; then
-        if [ -n "${PROTON_USE_WINED3D:-}" ]; then
-            [ "$PROTON_USE_WINED3D" = "1" ] && eff_renderer="wined3d" || eff_renderer="dxvk"
-        elif type resolve_graphics_renderer >/dev/null 2>&1; then
-            eff_renderer="$(resolve_graphics_renderer "$renderer_mode" "$prime_active")"
-        else
-            eff_renderer="dxvk"
-        fi
-    fi
-    GAMECTL_WIN_RENDERER="$eff_renderer"
-    if [ "$eff_renderer" = "wined3d" ]; then
-        GAMECTL_WIN_PROTON_WINED3D="1"
-    else
-        GAMECTL_WIN_PROTON_WINED3D="0"
-    fi
-
-    if [ "$clean_appid" = "0" ] && [ -z "${PROTONFIXES_DISABLE+x}" ]; then
-        GAMECTL_WIN_DISABLE_PROTONFIXES="1"
-    else
-        GAMECTL_WIN_DISABLE_PROTONFIXES=""
-    fi
-}
-
-# Wine Prefix Swiss Army Knife & Wineserver Lifecycle Guard (Chunk 4)
-manage_prefix() {
-    local game_dir="${1:-}"
-    local action="${2:-}"
-    shift 2 2>/dev/null || shift $# 2>/dev/null || true
-
-    if [ -z "$game_dir" ] || [ ! -d "$game_dir" ]; then
-        echo "[ERROR] Game directory not found or invalid: $game_dir" >&2
-        echo "Usage: gamectl pfx <game_dir> [winecfg|regedit|cmd|shell|kill|clean|winetricks] [args...]" >&2
-        return 1
-    fi
-
-    # Canonicalize game_dir path
-    game_dir="$(cd "$game_dir" 2>/dev/null && pwd || echo "$game_dir")"
-    local pfx_dir="$game_dir/pfx"
-    local runner_bin
-    runner_bin="$(find_runner "$game_dir" 2>/dev/null || true)"
-    [ -z "$runner_bin" ] && runner_bin="wine"
-
-    # AppID resolution (SSoT)
-    local appid
-    appid="$(resolve_game_appid "$game_dir" "0")"
-
-    # Wineserver resolution
-    local ws_bin
-    ws_bin="$(get_wineserver_bin "$runner_bin" 2>/dev/null || echo "")"
-
-    # Interactive menu if action is empty and stdin is terminal
-    if [ -z "$action" ]; then
-        require_tui "Wine prefix manager" || return $?
-        if [ -t 0 ]; then
-            if command -v fzf >/dev/null 2>&1; then
-                flush_tty_input
-                local game_name
-                game_name="$(basename "$game_dir")"
-                local pfx_status="[NOT FOUND]"
-                local pfx_color="\033[38;5;203m"
-                local pfx_size="0 B"
-                if [ -d "$pfx_dir" ]; then
-                    pfx_status="[ACTIVE]"
-                    pfx_color="\033[38;5;120m"
-                    pfx_size="$(du -sh "$pfx_dir" 2>/dev/null | awk '{print $1}' || echo "N/A")"
-                fi
-
-                local pfx_palette
-                pfx_palette=$(cat <<EOF
-winecfg	Wine Configuration	Configure Audio, Graphics, Windows Version & DLL Overrides
-regedit	Registry Editor	Windows Registry Editor (regedit.exe)
-cmd	Command Prompt	Windows Command Prompt (cmd.exe)
-shell	Host Bash Subshell	Spawn bash subshell with active WINEPREFIX & PATH
-winetricks	Winetricks Manager	Launch winetricks GUI / Package Manager helper
-kill	Kill Wineserver	Terminate locked / hung Wineserver process
-clean	Wipe Wine Prefix	Create save snapshot backup & wipe entire pfx directory
-EOF
-)
-
-                export GAMECTL_PFX_NAME="$game_name"
-                export GAMECTL_PFX_DIR="$game_dir"
-                export GAMECTL_PFX_PATH="$pfx_dir"
-                export GAMECTL_PFX_RUNNER="$runner_bin"
-                export GAMECTL_PFX_STATUS="${pfx_color}${pfx_status}"
-                export GAMECTL_PFX_SIZE="$pfx_size"
-
-                local preview_cmd
-                preview_cmd='printf "\033[38;5;60m╭─ WINE PREFIX OVERVIEW ──────────────────────────────╮\033[0m\n  Game Title  : \033[1m%s\033[0m\n  Directory   : %s\n  Prefix Path : %s\n  Active Wine : \033[38;5;111m%s\033[0m\n  Status      : %b\033[0m (Size: %s)\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n\033[38;5;60m╭─ ACTION DETAIL ─────────────────────────────────────╮\033[0m\n  Tool   : \033[1m%s\033[0m - %s\n  Desc   : %s\n\033[38;5;60m╰─────────────────────────────────────────────────────╯\033[0m\n" "$GAMECTL_PFX_NAME" "$GAMECTL_PFX_DIR" "$GAMECTL_PFX_PATH" "$GAMECTL_PFX_RUNNER" "$GAMECTL_PFX_STATUS" "$GAMECTL_PFX_SIZE" {1} {2} {3}'
-
-                local pfx_sel fzf_rc=0
-                pfx_sel=$(echo "$pfx_palette" | fzf \
-                    --delimiter=$'\t' \
-                    --with-nth=1,2 \
-                    --border-label="  ╢ gamectl :: Wine Prefix Manager :: $game_name ╟  " \
-                    --border-label-pos=2 \
-                    --header="Enter: Execute │ Esc: Return" \
-                    --prompt="Prefix > " \
-                    --preview="$preview_cmd" \
-                    --preview-window=down:50%:border-rounded:wrap \
-                    --reverse 2>/dev/null) || fzf_rc=$?
-
-                if [ "$fzf_rc" -eq 130 ]; then
-                    return 0
-                fi
-                if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
-                    echo "[ERROR] Wine prefix manager failed (fzf exit code $fzf_rc)." >&2
-                    return "$fzf_rc"
-                fi
-                [ -z "$pfx_sel" ] && return 0
-
-                action=$(echo "$pfx_sel" | awk -F'\t' '{print $1}')
-            else
-                echo "[ERROR] fzf is required for Wine prefix manager." >&2
-                return 127
-            fi
-        else
-            echo "Usage: gamectl pfx <game_dir> [winecfg|regedit|cmd|shell|kill|clean|winetricks] [args...]" >&2
-            return 1
-        fi
-    fi
-
-    case "$action" in
-        kill)
-            echo "[INFO] Sending force termination signal (wineserver -k) to prefix: $pfx_dir"
-            if [ -d "$pfx_dir" ]; then
-                if [ -n "$ws_bin" ]; then
-                    WINEPREFIX="$pfx_dir" "$ws_bin" -k 2>/dev/null || true
-                elif command -v wineserver >/dev/null 2>&1; then
-                    WINEPREFIX="$pfx_dir" wineserver -k 2>/dev/null || true
-                fi
-            fi
-            echo "[VERIFIED] Wineserver for prefix $pfx_dir has been stopped."
-            return 0
-            ;;
-        clean)
-            echo "[INFO] Starting Wine prefix cleanup: $pfx_dir"
-            if [ ! -d "$pfx_dir" ]; then
-                echo "[INFO] Prefix directory $pfx_dir does not exist, nothing to clean."
-                return 0
-            fi
-
-            local is_dry_run=false auto_yes=false
-            for arg in "$@"; do
-                if [ "$arg" = "--dry-run" ] || [ "$arg" = "-n" ]; then
-                    is_dry_run=true
-                elif [ "$arg" = "-y" ] || [ "$arg" = "--yes" ]; then
-                    auto_yes=true
-                fi
-            done
-
-            if [ "$is_dry_run" = true ]; then
-                local pfx_sz="0"
-                pfx_sz=$(du -sh "$pfx_dir" 2>/dev/null | cut -f1 || echo "unknown")
-                echo "[INFO] [DRY-RUN] Target Wine prefix directory: $pfx_dir (Size: $pfx_sz)"
-                echo "[INFO] [DRY-RUN] Would create pre-wipe savegame backup snapshot via backup_save."
-                echo "[INFO] [DRY-RUN] Would terminate wineserver process."
-                echo "[INFO] [DRY-RUN] Would remove prefix directory: $pfx_dir"
-                echo "[INFO] [DRY-RUN] Wine prefix cleanup simulated successfully (no files deleted)."
-                return 0
-            fi
-
-            # 1. Create save snapshot backup
-            if [ -d "$game_dir/saves" ] || [ -L "$game_dir/saves" ]; then
-                if ! backup_save "$game_dir" true; then
-                    echo "[ERROR] Pre-wipe save snapshot backup failed. Aborting prefix wipe to protect saves." >&2
-                    log_msg "ERROR" "PFX" "Pre-wipe save snapshot backup failed for $(basename "$game_dir")"
-                    return 1
-                fi
-            fi
-
-            # 2. Kill running wineserver
-            if [ -n "$ws_bin" ]; then
-                WINEPREFIX="$pfx_dir" "$ws_bin" -k 2>/dev/null || true
-            elif command -v wineserver >/dev/null 2>&1; then
-                WINEPREFIX="$pfx_dir" wineserver -k 2>/dev/null || true
-            fi
-            sleep 0.2
-
-            # 3. Confirmation check
-            if [ "$auto_yes" = false ] && [ -t 0 ]; then
-                echo -n "[WARN] Wipe entire Wine prefix ($pfx_dir)? Registry and Wine configuration will be reset. [y/N]: "
-                local confirm=""
-                read -t 10 -r confirm || confirm="n"
-                echo
-                if [[ ! "$confirm" =~ ^[yY] ]]; then
-                    echo "[INFO] Prefix cleanup canceled."
-                    return 0
-                fi
-            fi
-
-            # 4. Remove pfx folder safely
-            rm -rf "$pfx_dir"
-            echo "[VERIFIED] Wine prefix wiped successfully ($pfx_dir removed)."
-            return 0
-            ;;
-        shell)
-            prepare_windows_runner_env "$runner_bin" "$game_dir" "$appid" "auto" "0"
-            echo "[INFO] Spawning interactive bash subshell inside prefix environment: $pfx_dir"
-            echo "[INFO] Active environment: WINEPREFIX=$pfx_dir, RUNNER=$runner_bin"
-            echo "[INFO] Type 'exit' to return to gamectl."
-            (
-                export WINEPREFIX="$GAMECTL_WIN_PFX_DIR" \
-                    GAMECTL_RUNNER="$runner_bin" \
-                    GAMEID="$GAMECTL_WIN_UMU_GAMEID" \
-                    STEAM_COMPAT_APP_ID="$GAMECTL_WIN_APPID" \
-                    SteamAppId="$GAMECTL_WIN_APPID" \
-                    SteamGameId="$GAMECTL_WIN_APPID"
-                if [ "$GAMECTL_WIN_RUNNER_KIND" = "proton" ] || [ "$GAMECTL_WIN_RUNNER_KIND" = "umu" ]; then
-                    export PROTON_USE_WINED3D="$GAMECTL_WIN_PROTON_WINED3D"
-                    [ "$GAMECTL_WIN_DISABLE_PROTONFIXES" = "1" ] && export PROTONFIXES_DISABLE=1
-                fi
-                if [ "$GAMECTL_WIN_RUNNER_KIND" = "proton" ]; then
-                    export STEAM_COMPAT_CLIENT_INSTALL_PATH="$GAMECTL_WIN_STEAM_ROOT" \
-                        STEAM_COMPAT_DATA_PATH="$game_dir"
-                    local p_bin_dir
-                    p_bin_dir="$(dirname "$runner_bin")/files/bin"
-                    [ -d "$p_bin_dir" ] && export PATH="$p_bin_dir:$PATH"
-                fi
-                cd "$game_dir" || true
-                exec bash -i
-            )
-            return 0
-            ;;
-        winecfg|regedit|cmd)
-            mkdir -p "$pfx_dir"
-            prepare_windows_runner_env "$runner_bin" "$game_dir" "$appid" "auto" "0"
-            echo "[INFO] Executing $action inside prefix: $pfx_dir (Runner: $runner_bin)..."
-            local target_exec="$action"
-            [ "$action" = "cmd" ] && target_exec="cmd.exe"
-
-            (
-                export WINEPREFIX="$GAMECTL_WIN_PFX_DIR" \
-                    GAMEID="$GAMECTL_WIN_UMU_GAMEID" \
-                    STEAM_COMPAT_APP_ID="$GAMECTL_WIN_APPID" \
-                    SteamAppId="$GAMECTL_WIN_APPID" \
-                    SteamGameId="$GAMECTL_WIN_APPID"
-                if [ "$GAMECTL_WIN_RUNNER_KIND" = "proton" ] || [ "$GAMECTL_WIN_RUNNER_KIND" = "umu" ]; then
-                    export PROTON_USE_WINED3D="$GAMECTL_WIN_PROTON_WINED3D"
-                    [ "$GAMECTL_WIN_DISABLE_PROTONFIXES" = "1" ] && export PROTONFIXES_DISABLE=1
-                fi
-                case "$GAMECTL_WIN_RUNNER_KIND" in
-                    umu)
-                        "$runner_bin" "$target_exec" "$@"
-                        ;;
-                    proton)
-                        export STEAM_COMPAT_CLIENT_INSTALL_PATH="$GAMECTL_WIN_STEAM_ROOT" \
-                            STEAM_COMPAT_DATA_PATH="$game_dir"
-                        "$runner_bin" run "$target_exec" "$@"
-                        ;;
-                    *)
-                        "$runner_bin" "$target_exec" "$@"
-                        ;;
-                esac
-            )
-            ;;
-        winetricks)
-            if ! command -v winetricks >/dev/null 2>&1; then
-                echo "[ERROR] 'winetricks' binary not found on host system." >&2
-                echo "[INFO] Install winetricks via your distribution package manager (e.g. pacman -S winetricks / apt install winetricks)." >&2
-                return 1
-            fi
-            mkdir -p "$pfx_dir"
-            echo "[INFO] Launching winetricks inside prefix: $pfx_dir"
-            WINEPREFIX="$pfx_dir" winetricks "$@"
-            ;;
-        *)
-            echo "[ERROR] Unknown prefix action: '$action'" >&2
-            echo "Supported actions: winecfg, regedit, cmd, shell, kill, clean, winetricks" >&2
-            return 1
-            ;;
-    esac
-}
-
-# --- [MODULE] src/runners/42_graphics_isolation.sh ---
-# Check if host GPU is Intel Haswell / 4th Gen Core (prone to Mesa GL threaded asset decompression crashes)
-is_haswell_gpu() {
-    local pci_dir="${GAMECTL_PCI_UEVENT_DIR:-/sys/bus/pci/devices}"
-    if [ -z "${GAMECTL_PCI_UEVENT_DIR:-}" ] && command -v lspci >/dev/null 2>&1; then
-        local gpu_info
-        gpu_info=$(lspci 2>/dev/null | grep -E "VGA|3D" || true)
-        if echo "$gpu_info" | grep -qi -E "Haswell|4th Gen Core"; then
-            return 0
-        fi
-    fi
-    if [ -d "$pci_dir" ]; then
-        local uev
-        for uev in "$pci_dir"/*/uevent; do
-            [ -f "$uev" ] || continue
-            grep -qiE '^PCI_CLASS=0?3(00|02|80)00' "$uev" 2>/dev/null || continue
-            grep -qiE '^PCI_ID=8086:(04|0a|0d)[0-9a-f]{2}$' "$uev" 2>/dev/null && return 0
-        done
-    fi
-    return 1
-}
-
-# Canonical 2-tier host Vulkan capability probe (zero hardcode vendor dependency)
-# Outputs: VULKAN_READY | VULKAN_LEGACY | OPENGL_ONLY
-detect_vulkan_capability() {
-    if [ -n "${GAMECTL_VULKAN_CAPABILITY:-}" ]; then
-        echo "$GAMECTL_VULKAN_CAPABILITY"
-        return 0
-    fi
-
-    # Tier 1: Runtime per-device probe via vulkaninfo --summary when available
-    if command -v vulkaninfo >/dev/null 2>&1; then
-        local v_sum
-        v_sum=$(vulkaninfo --summary 2>&1 || true)
-        if echo "$v_sum" | grep -q -E '(^|[[:space:]])GPU[0-9]+:|PHYSICAL_DEVICE_TYPE_'; then
-            local vk_tier
-            vk_tier=$(printf '%s\n' "$v_sum" | awk '
-                function flush_gpu(    ver_str, p, maj, min, score) {
-                    if (in_gpu != 1) return
-                    if (cur_type !~ /PHYSICAL_DEVICE_TYPE_(DISCRETE|INTEGRATED)_GPU/) return
-                    if (tolower(cur_name) ~ /(llvmpipe|swiftshader)/) return
-                    hw_count++
-                    if (match(cur_ver, /[0-9]+\.[0-9]+\.[0-9]+/)) {
-                        ver_str = substr(cur_ver, RSTART, RLENGTH)
-                        split(ver_str, p, ".")
-                        maj = p[1] + 0
-                        min = p[2] + 0
-                        score = maj * 1000 + min
-                        if (score > max_score) {
-                            max_score = score
-                            max_maj = maj
-                            max_min = min
-                        }
-                        if (cur_type ~ /PHYSICAL_DEVICE_TYPE_DISCRETE_GPU/ && (maj > 1 || (maj == 1 && min >= 3))) {
-                            has_modern_dgpu = 1
-                        }
-                    }
-                }
-                BEGIN {
-                    in_gpu = 0; hw_count = 0; max_score = -1; max_maj = 0; max_min = 0;
-                    has_modern_dgpu = 0; incomplete_warn = 0;
-                    cur_ver = ""; cur_type = ""; cur_name = "";
-                }
-                {
-                    if (tolower($0) ~ /vulkan support is incomplete|non-conformant/) {
-                        incomplete_warn = 1
-                    }
-                }
-                /^[[:space:]]*GPU[0-9]+:/ {
-                    flush_gpu()
-                    in_gpu = 1
-                    cur_ver = ""; cur_type = ""; cur_name = ""
-                    next
-                }
-                in_gpu == 1 && /apiVersion[[:space:]]*=/ { cur_ver = $0; next }
-                in_gpu == 1 && /deviceType[[:space:]]*=/ { cur_type = $0; next }
-                in_gpu == 1 && /deviceName[[:space:]]*=/ { cur_name = $0; next }
-                END {
-                    flush_gpu()
-                    if (hw_count == 0) {
-                        print "OPENGL_ONLY"
-                    } else if (max_maj > 1 || (max_maj == 1 && max_min >= 3)) {
-                        if (incomplete_warn == 1 && has_modern_dgpu == 0) {
-                            print "VULKAN_LEGACY"
-                        } else {
-                            print "VULKAN_READY"
-                        }
-                    } else if (max_maj == 1 && max_min >= 1) {
-                        print "VULKAN_LEGACY"
-                    } else {
-                        print "OPENGL_ONLY"
-                    }
-                }
-            ')
-            if [ -n "$vk_tier" ]; then
-                echo "$vk_tier"
-                return 0
-            fi
-        elif echo "$v_sum" | grep -qiE 'Cannot create Vulkan instance|ERROR_INCOMPATIBLE_DRIVER'; then
-            echo "OPENGL_ONLY"
-            return 0
-        fi
-    fi
-
-    # Tier 2: Kernel DRM driver & Vulkan ICD manifest inspection
-    local icd_files=() icd
-    for icd in /usr/share/vulkan/icd.d/*.json /etc/vulkan/icd.d/*.json; do
-        [ -f "$icd" ] && icd_files+=("$icd")
-    done
-    if [ ${#icd_files[@]} -eq 0 ]; then
-        echo "OPENGL_ONLY"
-        return 0
-    fi
-
-    local has_hw_icd=0 has_modern_icd=0
-    for icd in "${icd_files[@]}"; do
-        local bname
-        bname="$(basename "$icd")"
-        case "$bname" in
-            *lvp*|*swiftshader*|*virtio*) ;;
-            *hasvk*) has_hw_icd=1 ;;
-            *) has_hw_icd=1; has_modern_icd=1 ;;
-        esac
-    done
-    if [ "$has_hw_icd" -eq 0 ]; then
-        echo "OPENGL_ONLY"
-        return 0
-    fi
-
-    local dgpu_vend="none"
-    type detect_dgpu_vendor >/dev/null 2>&1 && dgpu_vend="$(detect_dgpu_vendor 2>/dev/null || echo none)"
-    if [ "$dgpu_vend" = "none" ]; then
-        if is_haswell_gpu; then
-            echo "VULKAN_LEGACY"
-            return 0
-        fi
-        local pci_vga=""
-        command -v lspci >/dev/null 2>&1 && pci_vga=$(lspci 2>/dev/null | grep -E "VGA|3D" || true)
-        if echo "$pci_vga" | grep -qi -E "Ivy Bridge|3rd Gen Core|HD Graphics 2500|HD Graphics 4000"; then
-            echo "VULKAN_LEGACY"
-            return 0
-        fi
-        local has_modern_drv=0 has_legacy_drv=0 drv_link drv_name
-        for drv_link in /sys/class/drm/card[0-9]*/device/driver; do
-            [ -L "$drv_link" ] || continue
-            drv_name="$(basename "$(readlink -f "$drv_link" 2>/dev/null)" 2>/dev/null || true)"
-            case "$drv_name" in
-                amdgpu|nvidia|xe|i915) has_modern_drv=1 ;;
-                radeon|nouveau|vmwgfx|virtio-pci|bochs-drm|qxl|vboxvideo) has_legacy_drv=1 ;;
-            esac
-        done
-        if [ "$has_modern_drv" -eq 0 ] && [ "$has_legacy_drv" -eq 1 ]; then
-            echo "VULKAN_LEGACY"
-            return 0
-        fi
-    fi
-
-    if [ "$has_modern_icd" -eq 1 ]; then
-        echo "VULKAN_READY"
-    else
-        echo "VULKAN_LEGACY"
-    fi
-    return 0
-}
-
-# Resolve effective graphics renderer (dxvk | wined3d) from mode + host capability
-resolve_graphics_renderer() {
-    local mode="${1:-auto}"
-    local prime_active="${2:-0}"
-    mode="${mode,,}"
-
-    case "$mode" in
-        wined3d|opengl|gl)
-            echo "wined3d"
-            ;;
-        dxvk|vulkan|vk)
-            echo "dxvk"
-            ;;
-        auto|"")
-            if [ "$prime_active" = "1" ]; then
-                echo "dxvk"
-            else
-                local cap
-                cap="$(detect_vulkan_capability)"
-                case "$cap" in
-                    VULKAN_READY) echo "dxvk" ;;
-                    *)            echo "wined3d" ;;
-                esac
-            fi
-            ;;
-        *)
-            echo "dxvk"
-            ;;
-    esac
-}
-
-# Dynamically detect host native display resolution via DRM / Wayland / X11
-get_native_resolution() {
-    local res=""
-    # Priority 1: DRM kernel modes (direct & universal across all compositors/X11)
-    for m_file in /sys/class/drm/card*-*/modes; do
-        [ -f "$m_file" ] || continue
-        local s_file="$(dirname "$m_file")/status"
-        if [ -f "$s_file" ] && grep -q "^connected" "$s_file" 2>/dev/null; then
-            local line
-            line=$(head -n 1 "$m_file" 2>/dev/null | tr -d '[:space:]')
-            if [[ "$line" =~ ^[0-9]+x[0-9]+$ ]]; then
-                res="$line"
-                break
-            fi
-        fi
-    done
-
-    # Priority 2: Hyprland monitor inspection
-    if [ -z "$res" ] && command -v hyprctl >/dev/null 2>&1; then
-        res=$(hyprctl monitors 2>/dev/null | grep -E '^[[:space:]]*[0-9]+x[0-9]+@' | head -n 1 | sed -E 's/.*([0-9]+x[0-9]+)@.*/\1/' || true)
-    fi
-
-    # Priority 3: X11 / Xwayland via xrandr
-    if [ -z "$res" ] && command -v xrandr >/dev/null 2>&1; then
-        res=$(xrandr --current 2>/dev/null | grep -E '\bconnected\b' | grep -o -E '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -n 1 | cut -d'+' -f1 || true)
-        [ -z "$res" ] && res=$(xrandr --current 2>/dev/null | grep -E '^[[:space:]]+[0-9]+x[0-9]+' | head -n 1 | awk '{print $1}' || true)
-    fi
-
-    # Fallback default
-    if [[ ! "$res" =~ ^[0-9]+x[0-9]+$ ]]; then
-        res="1920x1080"
-    fi
-    echo "$res"
-}
-
-# Dynamically calculate Gamescope display & FSR render arguments based on native resolution
-get_default_gamescope_args() {
-    local n_res
-    n_res=$(get_native_resolution)
-    local nw="${n_res%x*}"
-    local nh="${n_res#*x}"
-
-    local rw rh
-    if [ "$nw" -ge 3840 ] && [ "$nh" -ge 2160 ]; then
-        rw=2560; rh=1440
-    elif [ "$nw" -ge 2560 ] && [ "$nh" -ge 1440 ]; then
-        rw=1920; rh=1080
-    elif [ "$nw" -eq 1920 ] && [ "$nh" -eq 1080 ]; then
-        rw=1280; rh=720
-    elif [ "$nw" -eq 1600 ] && [ "$nh" -eq 900 ]; then
-        rw=1280; rh=720
-    elif [ "$nw" -eq 1280 ] && [ "$nh" -eq 800 ]; then
-        rw=960; rh=600
-    else
-        rw=$(( (nw * 2 / 3 + 1) / 2 * 2 ))
-        rh=$(( (nh * 2 / 3 + 1) / 2 * 2 ))
-    fi
-    echo "-W $rw -H $rh -w $nw -h $nh -F fsr -f"
-}
-
-# Check if systemd user daemon and cgroups v2 scope unit execution is supported
-check_systemd_scope_support() {
-    if command -v systemd-run >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1; then
-        if systemd-run --user --scope --quiet true 2>/dev/null; then
-            return 0
-        fi
-    fi
-    return 1
-}
-
-# Detect discrete secondary GPU vendor on hybrid systems (NVIDIA, AMD, Intel Arc)
-detect_dgpu_vendor() {
-    if [ -n "${GAMECTL_DGPU_VENDOR:-}" ]; then
-        echo "$GAMECTL_DGPU_VENDOR"
-        return 0
-    fi
-
-    local vga_count=0
-    local vendors=()
-
-    for dev in /sys/bus/pci/devices/*; do
-        [ -f "$dev/class" ] || continue
-        local pci_class
-        pci_class=$(cat "$dev/class" 2>/dev/null || echo "")
-        case "$pci_class" in
-            0x0302*|0x030200*)
-                # Secondary 3D controller (Optimized for 3D acceleration / dGPU)
-                local v_id
-                v_id=$(cat "$dev/vendor" 2>/dev/null || echo "")
-                case "$v_id" in
-                    0x10de) echo "nvidia"; return 0 ;;
-                    0x1002) echo "amd"; return 0 ;;
-                    0x8086) echo "intel"; return 0 ;;
-                esac
-                ;;
-            0x0300*|0x030000*)
-                vga_count=$((vga_count + 1))
-                local v_id
-                v_id=$(cat "$dev/vendor" 2>/dev/null || echo "")
-                vendors+=("$v_id")
-                ;;
-        esac
-    done
-
-    # If multiple display controllers exist without a specific 0x0302 class device
-    if [ "$vga_count" -gt 1 ]; then
-        for v in "${vendors[@]}"; do
-            if [ "$v" = "0x10de" ]; then
-                echo "nvidia"
-                return 0
-            fi
-        done
-        local has_amd=false has_intel=false amd_count=0
-        for v in "${vendors[@]}"; do
-            [ "$v" = "0x1002" ] && { has_amd=true; amd_count=$((amd_count + 1)); }
-            [ "$v" = "0x8086" ] && has_intel=true
-        done
-        if [ "$has_amd" = true ] && [ "$has_intel" = true ]; then
-            echo "amd"
-            return 0
-        fi
-        if [ "$amd_count" -gt 1 ]; then
-            echo "amd"
-            return 0
-        fi
-    fi
-
-    echo "none"
-    return 0
-}
-
-# Construct rootless Bubblewrap (bwrap) security sandbox argument array
-build_sandbox_command() {
-    local gdir="$1"
-    declare -ga GAMECTL_SANDBOX_PREFIX=()
-
-    if ! command -v bwrap >/dev/null 2>&1; then
-        echo "[WARN] bubblewrap (bwrap) not found in PATH. Sandboxing skipped." >&2
-        return 1
-    fi
-
-    local desktop_runtime_dir app_runtime_dir
-    desktop_runtime_dir="$(get_desktop_runtime_dir)"
-    app_runtime_dir="$(get_runtime_dir)"
-    local wayland_socket="${WAYLAND_DISPLAY:-wayland-0}"
-    local xauth_file="${XAUTHORITY:-$HOME/.Xauthority}"
-
-    GAMECTL_SANDBOX_PREFIX=(
-        bwrap
-        --ro-bind /usr /usr
-        --ro-bind-try /lib /lib
-        --ro-bind-try /lib64 /lib64
-        --ro-bind-try /bin /bin
-        --ro-bind-try /sbin /sbin
-        --ro-bind-try /etc /etc
-        --proc /proc
-        --dev /dev
-        --ro-bind /sys /sys
-        --tmpfs /tmp
-        --ro-bind-try /tmp/.X11-unix /tmp/.X11-unix
-        --tmpfs /run
-        --tmpfs "$desktop_runtime_dir"
-        --bind-try "$desktop_runtime_dir/wayland-0" "$desktop_runtime_dir/wayland-0"
-        --bind-try "$desktop_runtime_dir/$wayland_socket" "$desktop_runtime_dir/$wayland_socket"
-        --bind-try "$desktop_runtime_dir/pipewire-0" "$desktop_runtime_dir/pipewire-0"
-        --bind-try "$desktop_runtime_dir/pulse" "$desktop_runtime_dir/pulse"
-        --bind-try "$app_runtime_dir" "$app_runtime_dir"
-        --tmpfs "$HOME"
-        --ro-bind-try "$xauth_file" "$xauth_file"
-        --bind-try "$HOME/.config/gamectl" "$HOME/.config/gamectl"
-        --ro-bind-try "${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners" "${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runners"
-        --ro-bind-try "$HOME/.local/share/Steam" "$HOME/.local/share/Steam"
-        --ro-bind-try "$HOME/.local/share/gbe-fork" "$HOME/.local/share/gbe-fork"
-        --ro-bind-try "$HOME/.steam" "$HOME/.steam"
-        --bind-try "$HOME/.local/share/vulkan" "$HOME/.local/share/vulkan"
-        --bind "$gdir" "$gdir"
-        --chdir "$gdir"
-        --unshare-user
-        --unshare-ipc
-        --unshare-pid
-        --die-with-parent
-    )
     return 0
 }
 
