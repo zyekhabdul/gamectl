@@ -188,6 +188,11 @@ EOF
                 [ -f "$src_root/regular/x86/libsteam_api.so" ] && cp -f "$src_root/regular/x86/libsteam_api.so" "$dest_dir/regular/x86/"
                 [ -f "$src_root/experimental/x64/libsteam_api.so" ] && cp -f "$src_root/experimental/x64/libsteam_api.so" "$dest_dir/experimental/x64/"
                 [ -f "$src_root/experimental/x86/libsteam_api.so" ] && cp -f "$src_root/experimental/x86/libsteam_api.so" "$dest_dir/experimental/x86/"
+                if [ -d "$src_root/tools/generate_interfaces" ]; then
+                    mkdir -p "$dest_dir/tools/generate_interfaces"
+                    cp -f "$src_root/tools/generate_interfaces/"* "$dest_dir/tools/generate_interfaces/" 2>/dev/null || true
+                    chmod +x "$dest_dir/tools/generate_interfaces"/generate_interfaces_* 2>/dev/null || true
+                fi
                 echo "[PASS] Linux GBE templates provisioned (x64 & x86)."
             else
                 echo "[ERROR] Failed to extract Linux GBE archive." >&2

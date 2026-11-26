@@ -79,6 +79,70 @@ setup_onlinefix() {
     return 0
 }
 
+# Locate GBE Fork generate_interfaces tool binary matching host architecture
+get_gbe_interfaces_tool() {
+    if [ -n "${GAMECTL_GBE_INTERFACES_BIN:-}" ] && [ -x "$GAMECTL_GBE_INTERFACES_BIN" ]; then
+        echo "$GAMECTL_GBE_INTERFACES_BIN"
+        return 0
+    fi
+    local gbe_dir="${GAMECTL_GBE_DIR:-$HOME/.local/share/gbe-fork}"
+    local -a bins=()
+    case "$(uname -m 2>/dev/null || echo x86_64)" in
+        aarch64|arm64) bins=("generate_interfaces_ARM64") ;;
+        i386|i686)     bins=("generate_interfaces_x86") ;;
+        *)             bins=("generate_interfaces_x64" "generate_interfaces_x86") ;;
+    esac
+    local b="" cand=""
+    for b in "${bins[@]}"; do
+        for cand in "$gbe_dir/tools/generate_interfaces/$b" "$gbe_dir/release/tools/generate_interfaces/$b"; do
+            if [ -f "$cand" ]; then
+                [ -x "$cand" ] || chmod +x "$cand" 2>/dev/null || true
+                [ -x "$cand" ] && { echo "$cand"; return 0; }
+            fi
+        done
+    done
+    return 1
+}
+
+# Generate steam_settings/steam_interfaces.txt from original Steamworks library
+generate_gbe_steam_interfaces() {
+    local orig_lib="${1:-}" settings_dir="${2:-}"
+    [ -f "$orig_lib" ] && [ -n "$settings_dir" ] || return 1
+    local tool=""
+    tool=$(get_gbe_interfaces_tool 2>/dev/null || true)
+    [ -n "$tool" ] || return 1
+
+    local abs_orig="" tmp_dir=""
+    abs_orig="$(cd "$(dirname "$orig_lib")" && pwd)/$(basename "$orig_lib")"
+    tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_ifaces.XXXXXX") || return 1
+    ( cd "$tmp_dir" && "$tool" "$abs_orig" >/dev/null 2>&1 ) || true
+    if [ -s "$tmp_dir/steam_interfaces.txt" ]; then
+        mkdir -p "$settings_dir" || { rm -rf "$tmp_dir"; return 1; }
+        mv -f "$tmp_dir/steam_interfaces.txt" "$settings_dir/steam_interfaces.txt" || { rm -rf "$tmp_dir"; return 1; }
+        rm -rf "$tmp_dir"
+        return 0
+    fi
+    rm -rf "$tmp_dir"
+    return 1
+}
+
+# Ensure steam_settings/steam_interfaces.txt exists for GBE Fork games using backed-up .orig libraries
+ensure_gbe_steam_interfaces() {
+    local target_dir="${1:-}" force="${2:-0}"
+    [ -d "$target_dir" ] || return 1
+    [ "$force" != "1" ] && [ -s "$target_dir/steam_settings/steam_interfaces.txt" ] && return 0
+
+    local orig_file=""
+    while IFS= read -r -d '' orig_file; do
+        if generate_gbe_steam_interfaces "$orig_file" "$target_dir/steam_settings"; then
+            return 0
+        fi
+    done < <(find "$target_dir" -maxdepth 4 \
+        \( -name pfx -o -name .git -o -name saves -o -name .save_snapshots \) -prune \
+        -o \( -name "libsteam_api.so.orig" -o -name "steam_api64.dll.orig" -o -name "steam_api.dll.orig" \) -print0 2>/dev/null)
+    return 1
+}
+
 # Inject GBE Fork emulator and portable saves into a game folder
 inject_game() {
     local target_dir="$1"
@@ -330,6 +394,11 @@ EOF
 127.0.0.1
 255.255.255.255
 EOF
+    fi
+
+    # Generate steam_interfaces.txt from original Steamworks library for legacy SDK compatibility
+    if ensure_gbe_steam_interfaces "$target_dir" 1; then
+        echo "[INFO] Generated steam_settings/steam_interfaces.txt from original Steamworks library."
     fi
 
     # 4. Setup isolated portable saves folder and markers
