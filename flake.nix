@@ -48,7 +48,7 @@
         };
         gamectl = pkgs.stdenv.mkDerivation {
           pname = "gamectl";
-          version = "1.4.0";
+          version = "1.5.0";
           src = ./.;
 
           nativeBuildInputs = [ pkgs.makeWrapper ];

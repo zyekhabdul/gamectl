@@ -487,7 +487,7 @@ case "${1:-}" in
         scan_installed_games --formatted "${@:2}"
         ;;
     --version|-v)
-        echo "gamectl v1.4.0 (sovereign native TUI)"
+        echo "gamectl v1.5.0 (sovereign native TUI)"
         ;;
     --help|-h)
         cat <<EOF

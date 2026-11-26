@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Build .deb package using dpkg-deb
 PKG_NAME="gamectl"
-PKG_VER="1.4.0"
+PKG_VER="1.5.0"
 DIST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$DIST_DIR/../.." && pwd)"
 

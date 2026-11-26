@@ -1,6 +1,6 @@
 # Maintainer: Zyekh Abdul <zyekhabdul@users.noreply.github.com>
 pkgname=gamectl-git
-pkgver=1.4.0
+pkgver=1.5.0
 pkgrel=1
 pkgdesc="Sovereign TUI Game Manager & Launcher for Linux (Zero-Bloat, VCS development branch)"
 arch=('x86_64' 'aarch64')
@@ -39,7 +39,7 @@ pkgver() {
     local hash
     hash=$(git rev-parse --short HEAD 2>/dev/null || echo "0000000")
     local tag
-    tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "1.4.0")
+    tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "1.5.0")
     tag="${tag#v}"
     printf "%s.r%s.g%s" "$tag" "$count" "$hash"
 }
