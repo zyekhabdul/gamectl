@@ -202,6 +202,25 @@ inspect_game_log_hint() {
         echo "Executable architecture or permission mismatch -> verify 64-bit binary / chmod +x"
     elif echo "$tail_log" | grep -qiE 'SteamStub|Application load error|steamclient.*fail'; then
         echo "SteamStub/DRM signature detected -> run unpack-stub or Inject GBE (<CTRL-I>)"
+    elif echo "$tail_log" | grep -qiE 'Segmentation fault|SIGSEGV|SIGABRT|SIGBUS|SIGILL|Aborted|core dumped|Illegal instruction|Bus error'; then
+        echo "Process crashed with fatal signal (segfault/abort) -> inspect log or try Steam Runtime / WineD3D"
+    fi
+    return 0
+}
+
+# Return 0 only if PID is alive and not an unreaped zombie/dead task (Z/X/x)
+is_pid_running() {
+    local pid="${1:-}"
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    if [ -r "/proc/$pid/stat" ]; then
+        local stat_line="" state=""
+        IFS= read -r stat_line < "/proc/$pid/stat" 2>/dev/null || return 1
+        stat_line="${stat_line##*) }"
+        state="${stat_line%% *}"
+        case "$state" in
+            Z|X|x) return 1 ;;
+        esac
     fi
     return 0
 }
@@ -232,7 +251,7 @@ list_active_games() {
                 SCOPE_UNIT) p_scope="$v" ;;
             esac
         done < "$inf"
-        if [ -n "$p_pid" ] && kill -0 "$p_pid" 2>/dev/null; then
+        if [ -n "$p_pid" ] && is_pid_running "$p_pid"; then
             printf '%s%s%s%s%s%s%s%s%s%s%s%s%s\n' \
                 "$p_pid" "$sep" "$p_title" "$sep" "$p_dir" "$sep" "$p_bin" "$sep" "$p_log" "$sep" "$inf" "$sep" "$p_scope"
         else
@@ -432,7 +451,7 @@ verify_launched_game_startup() {
         alive=true
         local tick=0
         while [ "$tick" -lt "$probe_ticks" ]; do
-            if ! kill -0 "$v_pid" 2>/dev/null; then
+            if ! is_pid_running "$v_pid"; then
                 alive=false
                 break
             fi
@@ -473,4 +492,84 @@ verify_launched_game_startup() {
     GAMECTL_VERIFY_SUMMARY+=$'\n\n'"Recent Log Output:"$'\n'"$v_tail"$'\n\n'"Full log:"$'\n'"$v_log"
     export GAMECTL_VERIFY_SUMMARY
     return 1
+}
+
+# Record most recent game exit metadata atomically for event-driven consumers
+record_game_exit_event() {
+    local pid="${1:-}" title="${2:-}" gdir="${3:-}" log_file="${4:-}"
+    local hint="" run_dir exit_file tmp_file
+    [ -n "$log_file" ] && hint=$(inspect_game_log_hint "$log_file" 2>/dev/null || true)
+    title="${title//$'\n'/ }"; title="${title//$'\r'/}"
+    hint="${hint//$'\n'/ }"; hint="${hint//$'\r'/}"
+    run_dir="$(get_runtime_dir)"
+    exit_file="$run_dir/last_game_exit.info"
+    tmp_file=$(mktemp "${exit_file}.tmp.XXXXXX" 2>/dev/null) || return 0
+    {
+        printf 'PID=%s\nTITLE=%s\nDIR=%s\nLOG=%s\nHINT=%s\nTS=%s\n' \
+            "$pid" "$title" "$gdir" "$log_file" "$hint" "$(date +%s)"
+    } > "$tmp_file" 2>/dev/null && mv -f "$tmp_file" "$exit_file" 2>/dev/null || rm -f "$tmp_file" 2>/dev/null || true
+    return 0
+}
+
+# Emit recent exit event within max_age_secs as \x1f-delimited row: PID, TITLE, DIR, LOG, HINT, TS
+get_last_game_exit_event() {
+    local max_age="${1:-15}"
+    [[ "$max_age" =~ ^[0-9]+$ ]] || max_age=15
+    local exit_file
+    exit_file="$(get_runtime_dir)/last_game_exit.info"
+    [ -f "$exit_file" ] || return 1
+
+    local e_pid="" e_title="" e_dir="" e_log="" e_hint="" e_ts="" k v
+    while IFS='=' read -r k v; do
+        case "$k" in
+            PID) e_pid="$v" ;;
+            TITLE) e_title="$v" ;;
+            DIR) e_dir="$v" ;;
+            LOG) e_log="$v" ;;
+            HINT) e_hint="$v" ;;
+            TS) e_ts="$v" ;;
+        esac
+    done < "$exit_file"
+    [[ "$e_ts" =~ ^[0-9]+$ ]] || return 1
+    local now; now=$(date +%s)
+    [ $((now - e_ts)) -le "$max_age" ] || return 1
+
+    local sep=$'\x1f'
+    printf '%s%s%s%s%s%s%s%s%s%s%s\n' \
+        "$e_pid" "$sep" "$e_title" "$sep" "$e_dir" "$sep" "$e_log" "$sep" "$e_hint" "$sep" "$e_ts"
+    return 0
+}
+
+# Return 0 if local fzf and curl binaries support Unix-socket --listen live event triggers
+tui_supports_live_events() {
+    local fzf_bin="" curl_bin=""
+    fzf_bin=$(command -v fzf 2>/dev/null || true)
+    curl_bin=$(command -v curl 2>/dev/null || true)
+    [ -n "$fzf_bin" ] && [ -n "$curl_bin" ] || return 1
+    _is_shebang_script "$fzf_bin" && return 1
+    _is_shebang_script "$curl_bin" && return 1
+    "$fzf_bin" --help </dev/null 2>/dev/null | grep -Fq -- '--listen=SOCKET_PATH' || return 1
+    "$curl_bin" --help all </dev/null 2>/dev/null | grep -Fq -- '--unix-socket' || return 1
+    return 0
+}
+
+# Push trigger(f12) event to all active TUI listener sockets and prune dead ones
+notify_tui_listeners() {
+    local ldir
+    ldir="$(get_runtime_dir)/tui_listeners"
+    [ -d "$ldir" ] || return 0
+    command -v curl >/dev/null 2>&1 || return 0
+
+    local had_nullglob=0 sock
+    shopt -q nullglob && had_nullglob=1
+    shopt -s nullglob
+    for sock in "$ldir"/*.sock; do
+        if [ -S "$sock" ]; then
+            curl -sS --max-time 1 --unix-socket "$sock" -X POST http://localhost/ -d 'trigger(f12)' >/dev/null 2>&1 || rm -f "$sock" 2>/dev/null || true
+        else
+            rm -f "$sock" 2>/dev/null || true
+        fi
+    done
+    [ "$had_nullglob" -eq 0 ] && shopt -u nullglob
+    return 0
 }

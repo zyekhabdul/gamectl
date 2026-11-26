@@ -49,9 +49,7 @@ game_controller_hud() {
 
     while true; do
         local is_alive=0
-        if kill -0 "$game_pid" 2>/dev/null; then
-            is_alive=1
-        fi
+        is_pid_running "$game_pid" && is_alive=1
 
         local status_badge="[TERMINATED / EXITED]"
         local status_color="\033[38;5;111m"
@@ -157,7 +155,7 @@ EOF
                 fi
                 kill "$game_pid" 2>/dev/null || true
                 local wait_cnt=0
-                while kill -0 "$game_pid" 2>/dev/null && [ "$wait_cnt" -lt 6 ]; do
+                while is_pid_running "$game_pid" && [ "$wait_cnt" -lt 6 ]; do
                     sleep 0.2
                     wait_cnt=$((wait_cnt + 1))
                 done
@@ -166,8 +164,8 @@ EOF
                     ws_bin="$(get_wineserver_bin "$(find_runner "$gdir" 2>/dev/null || true)" 2>/dev/null || true)"
                     [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -w 2>/dev/null || true # wineserver -w
                 fi
-                if ! kill -0 "$game_pid" 2>/dev/null; then
-                    rm -f "$info_file" 2>/dev/null || true
+                if ! is_pid_running "$game_pid"; then
+                    rm -f "$info_file" 2>/dev/null || true; record_game_exit_event "$game_pid" "$title" "$gdir" "$log_file"; notify_tui_listeners
                     log_msg "INFO" "LAUNCH" "Game '$title' (PID $game_pid) terminated gracefully"
                     tui_modal_notice "Game Stopped" "Game '$title' (PID $game_pid) terminated gracefully." || return $?
                 else
@@ -188,7 +186,7 @@ EOF
                     ws_bin="$(get_wineserver_bin "$(find_runner "$gdir" 2>/dev/null || true)" 2>/dev/null || true)"
                     [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -k 2>/dev/null || true # wineserver -k
                 fi
-                rm -f "$info_file" 2>/dev/null || true
+                rm -f "$info_file" 2>/dev/null || true; record_game_exit_event "$game_pid" "$title" "$gdir" "$log_file"; notify_tui_listeners
                 log_msg "WARN" "LAUNCH" "Game '$title' (PID $game_pid) force-killed"
                 tui_modal_notice "Force Terminated" "Game '$title' (PID $game_pid) force-killed via SIGKILL." || return $?
                 ;;
@@ -646,7 +644,7 @@ launch_game() {
         game_pid=$!
     fi
 
-    if [ -z "$game_pid" ] || ! kill -0 "$game_pid" 2>/dev/null; then
+    if [ -z "$game_pid" ] || ! is_pid_running "$game_pid"; then
         _launch_err "[ERROR] Failed to launch game into background."
         _restore_launch_state
         return 1
@@ -666,6 +664,7 @@ LOG=$log_file
 START=$(date +%s)
 SCOPE_UNIT=$unit_name
 EOF
+    notify_tui_listeners
 
     # Detached background watchdog to restore CPU governor and cleanup when process exits
     _run_launch_watchdog() {
@@ -684,6 +683,7 @@ EOF
             [ -n "$ws_bin" ] && WINEPREFIX="$pfx_dir" "$ws_bin" -w 2>/dev/null || true
         fi
         rm -f "$info_file" 2>/dev/null || true
+        record_game_exit_event "$game_pid" "$title" "$gdir" "$log_file"; notify_tui_listeners
         if [ "$is_win" = true ] && [ "${GAMECTL_ACTIVE_AUTO_LOCATE_SAVES:-0}" = "1" ] && [ -d "$gdir/pfx" ]; then
             collect_prefix_saves "$gdir" true || true
         fi
@@ -771,7 +771,7 @@ cli_launch() {
             local inf="${GAMECTL_LAST_INFO_FILE:-}"
             local lfile="${GAMECTL_LAST_LOG_FILE:-}"
             local rtype="${GAMECTL_LAST_RUN_TYPE:-Native Linux}"
-            if [ -n "$gpid" ] && [ -f "$inf" ] && kill -0 "$gpid" 2>/dev/null; then
+            if [ -n "$gpid" ] && [ -f "$inf" ] && is_pid_running "$gpid"; then
                 game_controller_hud "$gpid" "$l_title" "$lfile" "$l_dir" "$l_bin" "$inf" "$rtype" || true
             fi
         fi
