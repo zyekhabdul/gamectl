@@ -9,10 +9,6 @@ REPO_ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 DEFAULT_MAX_LOC=600
 
 declare -A LEGACY_CEILING=(
-    ["src/core/10_utils.sh"]=959
-    ["src/tui/71_previews.sh"]=891
-    ["src/runners/50_launcher.sh"]=795
-    ["src/runners/40_wrappers.sh"]=723
     ["src/steam/32_steam_bridge.sh"]=694
     ["src/main.sh"]=605
 )
