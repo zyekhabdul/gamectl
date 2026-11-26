@@ -3913,6 +3913,37 @@ test_process_runtime_binary_and_ux_contract() {
         [ ! -e "$XDG_RUNTIME_DIR/active_games/999998.info" ] || exit 1
         grep -Fq '[HINT] Missing runtime DLL/library' <<< "$GAMECTL_VERIFY_SUMMARY" || exit 1
         grep -Fq 'System.DllNotFoundException: libFNA3D.so.0' <<< "$GAMECTL_VERIFY_SUMMARY" || exit 1
+
+        # 6. tui_modal_notice --wrap=word & list_missing_elf_libs ldd diagnostics (with ':' path & dedup)
+        grep -Fq -- '--wrap=word' <(sed -n '/^tui_modal_notice()/,/^}/p' "$REPO_ROOT/src/core/12_tui_primitives.sh") || exit 1
+        ! list_missing_elf_libs "$d_win" "Downwell.exe" >/dev/null 2>&1 || exit 1
+
+        local d_colon="$HOME/Games/Game: Special Edition" stub_bin="$t_dir/ldd_stub_bin"
+        mkdir -p "$d_colon" "$stub_bin"
+        printf '\x7f\x45\x4c\x46\x01\x01\x01' > "$d_colon/game32"
+        chmod 755 "$d_colon/game32"
+        cat <<'EOF_LDD' > "$stub_bin/ldd"
+#!/usr/bin/env bash
+case ":$LD_LIBRARY_PATH:" in
+    *":.:"*|".:"*) ;;
+    *) echo "BAD_LD_PATH=$LD_LIBRARY_PATH" >&2; exit 1 ;;
+esac
+printf '\tlibGLU.so.1 => not found\n\tlibSDL2-2.0.so.0 => not found\n\tlibGLU.so.1 => not found\n\tlibopenal.so.1 => not found\n\tlibsteam_api.so => ./libsteam_api.so (0xf7000000)\n'
+EOF_LDD
+        chmod +x "$stub_bin/ldd"
+
+        local ldd_info="" ldd_log=""
+        ldd_info=$(PATH="$stub_bin:$PATH" list_missing_elf_libs "$d_colon" "game32") || exit 1
+        [ "$ldd_info" = $'32-bit\x1flibGLU.so.1, libSDL2-2.0.so.0, libopenal.so.1' ] || exit 1
+
+        ldd_log="$(get_game_log_file "$d_colon" "game32")"
+        printf './game32: error while loading shared libraries: libGLU.so.1: cannot open shared object file\n' > "$ldd_log"
+        printf 'PID=999997\nTITLE=Special32\nDIR=%s\nBIN=game32\nLOG=%s\n' "$d_colon" "$ldd_log" > "$XDG_RUNTIME_DIR/active_games/999997.info"
+        if PATH="$stub_bin:$PATH" GAMECTL_LAUNCH_PROBE_TICKS=2 verify_launched_game_startup "$d_colon" "game32" "Special32"; then
+            exit 1
+        fi
+        grep -Fq 'Missing Shared Libraries (32-bit):' <<< "$GAMECTL_VERIFY_SUMMARY" || exit 1
+        grep -Fq 'libGLU.so.1, libSDL2-2.0.so.0, libopenal.so.1' <<< "$GAMECTL_VERIFY_SUMMARY" || exit 1
     )
 }
 run_test "Runtime Binary Detection, Running List Badges & Startup Probe" test_process_runtime_binary_and_ux_contract
