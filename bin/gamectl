@@ -2617,6 +2617,25 @@ inspect_game_log_hint() {
         echo "Executable architecture or permission mismatch -> verify 64-bit binary / chmod +x"
     elif echo "$tail_log" | grep -qiE 'SteamStub|Application load error|steamclient.*fail'; then
         echo "SteamStub/DRM signature detected -> run unpack-stub or Inject GBE (<CTRL-I>)"
+    elif echo "$tail_log" | grep -qiE 'Segmentation fault|SIGSEGV|SIGABRT|SIGBUS|SIGILL|Aborted|core dumped|Illegal instruction|Bus error'; then
+        echo "Process crashed with fatal signal (segfault/abort) -> inspect log or try Steam Runtime / WineD3D"
+    fi
+    return 0
+}
+
+# Return 0 only if PID is alive and not an unreaped zombie/dead task (Z/X/x)
+is_pid_running() {
+    local pid="${1:-}"
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    if [ -r "/proc/$pid/stat" ]; then
+        local stat_line="" state=""
+        IFS= read -r stat_line < "/proc/$pid/stat" 2>/dev/null || return 1
+        stat_line="${stat_line##*) }"
+        state="${stat_line%% *}"
+        case "$state" in
+            Z|X|x) return 1 ;;
+        esac
     fi
     return 0
 }
@@ -2647,7 +2666,7 @@ list_active_games() {
                 SCOPE_UNIT) p_scope="$v" ;;
             esac
         done < "$inf"
-        if [ -n "$p_pid" ] && kill -0 "$p_pid" 2>/dev/null; then
+        if [ -n "$p_pid" ] && is_pid_running "$p_pid"; then
             printf '%s%s%s%s%s%s%s%s%s%s%s%s%s\n' \
                 "$p_pid" "$sep" "$p_title" "$sep" "$p_dir" "$sep" "$p_bin" "$sep" "$p_log" "$sep" "$inf" "$sep" "$p_scope"
         else
@@ -2847,7 +2866,7 @@ verify_launched_game_startup() {
         alive=true
         local tick=0
         while [ "$tick" -lt "$probe_ticks" ]; do
-            if ! kill -0 "$v_pid" 2>/dev/null; then
+            if ! is_pid_running "$v_pid"; then
                 alive=false
                 break
             fi
@@ -2888,6 +2907,86 @@ verify_launched_game_startup() {
     GAMECTL_VERIFY_SUMMARY+=$'\n\n'"Recent Log Output:"$'\n'"$v_tail"$'\n\n'"Full log:"$'\n'"$v_log"
     export GAMECTL_VERIFY_SUMMARY
     return 1
+}
+
+# Record most recent game exit metadata atomically for event-driven consumers
+record_game_exit_event() {
+    local pid="${1:-}" title="${2:-}" gdir="${3:-}" log_file="${4:-}"
+    local hint="" run_dir exit_file tmp_file
+    [ -n "$log_file" ] && hint=$(inspect_game_log_hint "$log_file" 2>/dev/null || true)
+    title="${title//$'\n'/ }"; title="${title//$'\r'/}"
+    hint="${hint//$'\n'/ }"; hint="${hint//$'\r'/}"
+    run_dir="$(get_runtime_dir)"
+    exit_file="$run_dir/last_game_exit.info"
+    tmp_file=$(mktemp "${exit_file}.tmp.XXXXXX" 2>/dev/null) || return 0
+    {
+        printf 'PID=%s\nTITLE=%s\nDIR=%s\nLOG=%s\nHINT=%s\nTS=%s\n' \
+            "$pid" "$title" "$gdir" "$log_file" "$hint" "$(date +%s)"
+    } > "$tmp_file" 2>/dev/null && mv -f "$tmp_file" "$exit_file" 2>/dev/null || rm -f "$tmp_file" 2>/dev/null || true
+    return 0
+}
+
+# Emit recent exit event within max_age_secs as \x1f-delimited row: PID, TITLE, DIR, LOG, HINT, TS
+get_last_game_exit_event() {
+    local max_age="${1:-15}"
+    [[ "$max_age" =~ ^[0-9]+$ ]] || max_age=15
+    local exit_file
+    exit_file="$(get_runtime_dir)/last_game_exit.info"
+    [ -f "$exit_file" ] || return 1
+
+    local e_pid="" e_title="" e_dir="" e_log="" e_hint="" e_ts="" k v
+    while IFS='=' read -r k v; do
+        case "$k" in
+            PID) e_pid="$v" ;;
+            TITLE) e_title="$v" ;;
+            DIR) e_dir="$v" ;;
+            LOG) e_log="$v" ;;
+            HINT) e_hint="$v" ;;
+            TS) e_ts="$v" ;;
+        esac
+    done < "$exit_file"
+    [[ "$e_ts" =~ ^[0-9]+$ ]] || return 1
+    local now; now=$(date +%s)
+    [ $((now - e_ts)) -le "$max_age" ] || return 1
+
+    local sep=$'\x1f'
+    printf '%s%s%s%s%s%s%s%s%s%s%s\n' \
+        "$e_pid" "$sep" "$e_title" "$sep" "$e_dir" "$sep" "$e_log" "$sep" "$e_hint" "$sep" "$e_ts"
+    return 0
+}
+
+# Return 0 if local fzf and curl binaries support Unix-socket --listen live event triggers
+tui_supports_live_events() {
+    local fzf_bin="" curl_bin=""
+    fzf_bin=$(command -v fzf 2>/dev/null || true)
+    curl_bin=$(command -v curl 2>/dev/null || true)
+    [ -n "$fzf_bin" ] && [ -n "$curl_bin" ] || return 1
+    _is_shebang_script "$fzf_bin" && return 1
+    _is_shebang_script "$curl_bin" && return 1
+    "$fzf_bin" --help </dev/null 2>/dev/null | grep -Fq -- '--listen=SOCKET_PATH' || return 1
+    "$curl_bin" --help all </dev/null 2>/dev/null | grep -Fq -- '--unix-socket' || return 1
+    return 0
+}
+
+# Push trigger(f12) event to all active TUI listener sockets and prune dead ones
+notify_tui_listeners() {
+    local ldir
+    ldir="$(get_runtime_dir)/tui_listeners"
+    [ -d "$ldir" ] || return 0
+    command -v curl >/dev/null 2>&1 || return 0
+
+    local had_nullglob=0 sock
+    shopt -q nullglob && had_nullglob=1
+    shopt -s nullglob
+    for sock in "$ldir"/*.sock; do
+        if [ -S "$sock" ]; then
+            curl -sS --max-time 1 --unix-socket "$sock" -X POST http://localhost/ -d 'trigger(f12)' >/dev/null 2>&1 || rm -f "$sock" 2>/dev/null || true
+        else
+            rm -f "$sock" 2>/dev/null || true
+        fi
+    done
+    [ "$had_nullglob" -eq 0 ] && shopt -u nullglob
+    return 0
 }
 
 # --- [MODULE] src/steam/20_discovery.sh ---
@@ -11288,9 +11387,7 @@ game_controller_hud() {
 
     while true; do
         local is_alive=0
-        if kill -0 "$game_pid" 2>/dev/null; then
-            is_alive=1
-        fi
+        is_pid_running "$game_pid" && is_alive=1
 
         local status_badge="[TERMINATED / EXITED]"
         local status_color="\033[38;5;111m"
@@ -11396,7 +11493,7 @@ EOF
                 fi
                 kill "$game_pid" 2>/dev/null || true
                 local wait_cnt=0
-                while kill -0 "$game_pid" 2>/dev/null && [ "$wait_cnt" -lt 6 ]; do
+                while is_pid_running "$game_pid" && [ "$wait_cnt" -lt 6 ]; do
                     sleep 0.2
                     wait_cnt=$((wait_cnt + 1))
                 done
@@ -11405,8 +11502,8 @@ EOF
                     ws_bin="$(get_wineserver_bin "$(find_runner "$gdir" 2>/dev/null || true)" 2>/dev/null || true)"
                     [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -w 2>/dev/null || true # wineserver -w
                 fi
-                if ! kill -0 "$game_pid" 2>/dev/null; then
-                    rm -f "$info_file" 2>/dev/null || true
+                if ! is_pid_running "$game_pid"; then
+                    rm -f "$info_file" 2>/dev/null || true; record_game_exit_event "$game_pid" "$title" "$gdir" "$log_file"; notify_tui_listeners
                     log_msg "INFO" "LAUNCH" "Game '$title' (PID $game_pid) terminated gracefully"
                     tui_modal_notice "Game Stopped" "Game '$title' (PID $game_pid) terminated gracefully." || return $?
                 else
@@ -11427,7 +11524,7 @@ EOF
                     ws_bin="$(get_wineserver_bin "$(find_runner "$gdir" 2>/dev/null || true)" 2>/dev/null || true)"
                     [ -n "$ws_bin" ] && WINEPREFIX="$gdir/pfx" "$ws_bin" -k 2>/dev/null || true # wineserver -k
                 fi
-                rm -f "$info_file" 2>/dev/null || true
+                rm -f "$info_file" 2>/dev/null || true; record_game_exit_event "$game_pid" "$title" "$gdir" "$log_file"; notify_tui_listeners
                 log_msg "WARN" "LAUNCH" "Game '$title' (PID $game_pid) force-killed"
                 tui_modal_notice "Force Terminated" "Game '$title' (PID $game_pid) force-killed via SIGKILL." || return $?
                 ;;
@@ -11885,7 +11982,7 @@ launch_game() {
         game_pid=$!
     fi
 
-    if [ -z "$game_pid" ] || ! kill -0 "$game_pid" 2>/dev/null; then
+    if [ -z "$game_pid" ] || ! is_pid_running "$game_pid"; then
         _launch_err "[ERROR] Failed to launch game into background."
         _restore_launch_state
         return 1
@@ -11905,6 +12002,7 @@ LOG=$log_file
 START=$(date +%s)
 SCOPE_UNIT=$unit_name
 EOF
+    notify_tui_listeners
 
     # Detached background watchdog to restore CPU governor and cleanup when process exits
     _run_launch_watchdog() {
@@ -11923,6 +12021,7 @@ EOF
             [ -n "$ws_bin" ] && WINEPREFIX="$pfx_dir" "$ws_bin" -w 2>/dev/null || true
         fi
         rm -f "$info_file" 2>/dev/null || true
+        record_game_exit_event "$game_pid" "$title" "$gdir" "$log_file"; notify_tui_listeners
         if [ "$is_win" = true ] && [ "${GAMECTL_ACTIVE_AUTO_LOCATE_SAVES:-0}" = "1" ] && [ -d "$gdir/pfx" ]; then
             collect_prefix_saves "$gdir" true || true
         fi
@@ -12010,7 +12109,7 @@ cli_launch() {
             local inf="${GAMECTL_LAST_INFO_FILE:-}"
             local lfile="${GAMECTL_LAST_LOG_FILE:-}"
             local rtype="${GAMECTL_LAST_RUN_TYPE:-Native Linux}"
-            if [ -n "$gpid" ] && [ -f "$inf" ] && kill -0 "$gpid" 2>/dev/null; then
+            if [ -n "$gpid" ] && [ -f "$inf" ] && is_pid_running "$gpid"; then
                 game_controller_hud "$gpid" "$l_title" "$lfile" "$l_dir" "$l_bin" "$inf" "$rtype" || true
             fi
         fi
@@ -13460,6 +13559,20 @@ dashboard_menu() {
 EOF
 )
 
+        local dash_sock=""
+        local -a dash_live_args=()
+        if tui_supports_live_events; then
+            local dash_ldir="$(get_runtime_dir)/tui_listeners"
+            mkdir -p -m 700 "$dash_ldir" 2>/dev/null || true
+            dash_sock="$dash_ldir/d_${BASHPID}.sock"
+            if [ "${#dash_sock}" -le 100 ]; then
+                rm -f "$dash_sock" 2>/dev/null || true
+                dash_live_args=("--listen=$dash_sock" "--bind=f12:refresh-preview")
+            else
+                dash_sock=""
+            fi
+        fi
+
         local fzf_out fzf_rc=0
         fzf_out=$(echo "$menu_entries" | fzf \
             --delimiter=$'\t' \
@@ -13471,7 +13584,9 @@ EOF
             --prompt="Dashboard > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview-dashboard {1} "$GAMECTL_GAME_COUNT"' \
             --preview-window=right:55%:border-rounded:wrap \
+            "${dash_live_args[@]}" \
         ) || fzf_rc=$?
+        [ -n "$dash_sock" ] && rm -f "$dash_sock" 2>/dev/null || true
 
         [ "$fzf_rc" -eq 130 ] && break
         if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
@@ -13645,17 +13760,22 @@ library_menu() {
 
     while true; do
         flush_tty_input
-        local active_summary active_cnt=0 active_names="" _a_sep=$'\x1f'
-        active_summary=$(get_active_games_summary)
-        IFS="$_a_sep" read -r active_cnt active_names <<< "$active_summary"
-        local lib_label="  ╢ gamectl :: Game Library [Store: $active_store] ╟  "
-        [ "${active_cnt:-0}" -gt 0 ] && lib_label="  ╢ gamectl :: Game Library [Store: $active_store] [Running: $active_cnt] ╟  "
-        local lib_header="Enter: Launch/Manage │ Tab/Alt-S: Store │ Ctrl-I: Inject GBE │ Ctrl-F: Search │ Esc: Dashboard"
-        if [ -n "$last_status_banner" ]; then
-            lib_header+=$'\n'"$last_status_banner"
-            last_status_banner=""
-        elif [ "${active_cnt:-0}" -gt 0 ]; then
-            lib_header+=$'\n'"[RUNNING ($active_cnt)] $active_names — Press Enter on a running game to Stop / View Logs"
+        _format_library_chrome "$active_store" "$last_status_banner"
+        last_status_banner=""
+        local lib_label="$GAMECTL_LIB_LABEL" lib_header="$GAMECTL_LIB_HEADER"
+        local lib_sock=""
+        local -a fzf_live_args=()
+        if tui_supports_live_events; then
+            local lib_ldir="$(get_runtime_dir)/tui_listeners"
+            mkdir -p -m 700 "$lib_ldir" 2>/dev/null || true
+            lib_sock="$lib_ldir/l_${BASHPID}.sock"
+            if [ "${#lib_sock}" -le 100 ]; then
+                rm -f "$lib_sock" 2>/dev/null || true
+                export GAMECTL_ACTIVE_STORE="$active_store"
+                fzf_live_args=("--listen=$lib_sock" '--bind=f12:transform("$GAMECTL_PREVIEW_BIN" --tui-library-sync "$GAMECTL_ACTIVE_STORE")')
+            else
+                lib_sock=""
+            fi
         fi
         local fzf_out fzf_rc=0
         fzf_out=$(scan_installed_games --formatted --store "$active_store" | fzf \
@@ -13668,7 +13788,9 @@ library_menu() {
             --prompt="Library > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview {1} {2} {3} {4} {5}' \
             --preview-window=right:55%:border-rounded:wrap \
+            "${fzf_live_args[@]}" \
         ) || fzf_rc=$?
+        [ -n "$lib_sock" ] && rm -f "$lib_sock" 2>/dev/null || true
 
         [ "$fzf_rc" -eq 130 ] && break
         if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
@@ -13840,6 +13962,18 @@ library_menu() {
                     if [ "$hud_rc" -eq 10 ]; then
                         break
                     fi
+                    continue
+                elif [[ "$(strip_ansi "$sel_status")" == *"[RUNNING]"* ]]; then
+                    local stale_log="" stale_hint="" stale_tail="" stale_msg=""
+                    stale_log="$(get_game_log_file "$sel_dir" "${sel_bin:-game}")"
+                    stale_hint="$(inspect_game_log_hint "$stale_log" 2>/dev/null || true)"
+                    [ -s "$stale_log" ] && stale_tail=$(tail -n 12 "$stale_log" 2>/dev/null || true)
+                    stale_msg="Game '$sel_title' is no longer running (stale [RUNNING] selection)."
+                    [ -n "$stale_hint" ] && stale_msg+=$'\n\n'"[HINT] $stale_hint"
+                    [ -n "$stale_tail" ] && stale_msg+=$'\n\n'"Recent Log Output:"$'\n'"$stale_tail"
+                    stale_msg+=$'\n\n'"Full log:"$'\n'"$stale_log"
+                    tui_modal_notice "Game No Longer Running ($sel_title)" "$stale_msg" || true
+                    invalidate_scan_cache
                     continue
                 fi
 
@@ -14802,6 +14936,54 @@ search_stores_interactive() {
     fi
 }
 
+# Single SSoT for Game Library border label & header chrome (initial draw & live fzf transform)
+_format_library_chrome() {
+    local store_filter="${1:-ALL}"
+    local explicit_banner="${2:-}"
+    case "$store_filter" in
+        ALL|STEAM|GOG|EPIC|AMAZON|STANDALONE) ;;
+        *) store_filter="ALL" ;;
+    esac
+
+    local active_summary active_cnt=0 active_names="" sep=$'\x1f'
+    active_summary=$(get_active_games_summary)
+    IFS="$sep" read -r active_cnt active_names <<< "$active_summary"
+    [[ "${active_cnt:-0}" =~ ^[0-9]+$ ]] || active_cnt=0
+
+    GAMECTL_LIB_ACTIVE_CNT="$active_cnt"
+    GAMECTL_LIB_LABEL="  ╢ gamectl :: Game Library [Store: $store_filter] ╟  "
+    [ "$active_cnt" -gt 0 ] && GAMECTL_LIB_LABEL="  ╢ gamectl :: Game Library [Store: $store_filter] [Running: $active_cnt] ╟  "
+
+    GAMECTL_LIB_HEADER="Enter: Launch/Manage │ Tab/Alt-S: Store │ Ctrl-I: Inject GBE │ Ctrl-F: Search │ Esc: Dashboard"
+    if [ -n "$explicit_banner" ]; then
+        GAMECTL_LIB_HEADER+=$'\n'"$explicit_banner"
+    elif [ "$active_cnt" -gt 0 ]; then
+        GAMECTL_LIB_HEADER+=$'\n'"[RUNNING ($active_cnt)] $active_names — Press Enter on a running game to Stop / View Logs"
+    else
+        local ex_row="" ex_pid="" ex_title="" ex_dir="" ex_log="" ex_hint="" ex_ts=""
+        if ex_row=$(get_last_game_exit_event 15 2>/dev/null); then
+            IFS="$sep" read -r ex_pid ex_title ex_dir ex_log ex_hint ex_ts <<< "$ex_row"
+            if [ -n "$ex_hint" ]; then
+                GAMECTL_LIB_HEADER+=$'\n'"[CRASHED] $ex_title exited — $ex_hint"
+            elif [ -n "$ex_title" ]; then
+                GAMECTL_LIB_HEADER+=$'\n'"[EXITED] $ex_title exited"
+            fi
+        fi
+    fi
+}
+
+# Emit fzf transform() action string synchronizing library items, preview, label & header
+tui_library_sync_actions() {
+    local store_filter="${1:-ALL}"
+    case "$store_filter" in
+        ALL|STEAM|GOG|EPIC|AMAZON|STANDALONE) ;;
+        *) store_filter="ALL" ;;
+    esac
+    _format_library_chrome "$store_filter" ""
+    printf 'reload("$GAMECTL_PREVIEW_BIN" --list-formatted --store "%s")+refresh-preview+change-border-label(%s)+change-header:%s' \
+        "$store_filter" "$GAMECTL_LIB_LABEL" "$GAMECTL_LIB_HEADER"
+}
+
 # --- [MODULE] src/tui/73_search_tui.sh ---
 # ==============================================================================
 # Live Steam Store Search & Actionable TUI Picker (Split from 70_dashboard.sh)
@@ -15468,6 +15650,9 @@ case "${1:-}" in
     --preview-fix)
         preview_fix_entry "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" "${8:-}"
         ;;
+    --tui-library-sync)
+        tui_library_sync_actions "${2:-ALL}"
+        ;;
     set-id)
         if [ -n "${2:-}" ]; then
             set_id "${@:2}"
@@ -15626,7 +15811,7 @@ case "${1:-}" in
                     a_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
                     a_title=$(grep -E '^TITLE=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
                     a_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-                    if [ -n "$a_pid" ] && kill -0 "$a_pid" 2>/dev/null; then
+                    if [ -n "$a_pid" ] && is_pid_running "$a_pid"; then
                         printf "%s\t%s\t%s\n" "$a_pid" "$a_title" "$a_dir"
                     fi
                 done
