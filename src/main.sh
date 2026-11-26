@@ -197,6 +197,9 @@ case "${1:-}" in
     --preview-fix)
         preview_fix_entry "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" "${8:-}"
         ;;
+    --tui-library-sync)
+        tui_library_sync_actions "${2:-ALL}"
+        ;;
     set-id)
         if [ -n "${2:-}" ]; then
             set_id "${@:2}"
@@ -355,7 +358,7 @@ case "${1:-}" in
                     a_pid=$(grep -E '^PID=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
                     a_title=$(grep -E '^TITLE=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
                     a_dir=$(grep -E '^DIR=' "$inf" 2>/dev/null | head -n 1 | cut -d'=' -f2-)
-                    if [ -n "$a_pid" ] && kill -0 "$a_pid" 2>/dev/null; then
+                    if [ -n "$a_pid" ] && is_pid_running "$a_pid"; then
                         printf "%s\t%s\t%s\n" "$a_pid" "$a_title" "$a_dir"
                     fi
                 done

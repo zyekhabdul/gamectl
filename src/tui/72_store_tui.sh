@@ -40,3 +40,51 @@ search_stores_interactive() {
         tui_exec_action "$r_store Download ($r_title)" store_dispatch "${r_store,,}" download "$r_id" "$dest_dir"
     fi
 }
+
+# Single SSoT for Game Library border label & header chrome (initial draw & live fzf transform)
+_format_library_chrome() {
+    local store_filter="${1:-ALL}"
+    local explicit_banner="${2:-}"
+    case "$store_filter" in
+        ALL|STEAM|GOG|EPIC|AMAZON|STANDALONE) ;;
+        *) store_filter="ALL" ;;
+    esac
+
+    local active_summary active_cnt=0 active_names="" sep=$'\x1f'
+    active_summary=$(get_active_games_summary)
+    IFS="$sep" read -r active_cnt active_names <<< "$active_summary"
+    [[ "${active_cnt:-0}" =~ ^[0-9]+$ ]] || active_cnt=0
+
+    GAMECTL_LIB_ACTIVE_CNT="$active_cnt"
+    GAMECTL_LIB_LABEL="  ╢ gamectl :: Game Library [Store: $store_filter] ╟  "
+    [ "$active_cnt" -gt 0 ] && GAMECTL_LIB_LABEL="  ╢ gamectl :: Game Library [Store: $store_filter] [Running: $active_cnt] ╟  "
+
+    GAMECTL_LIB_HEADER="Enter: Launch/Manage │ Tab/Alt-S: Store │ Ctrl-I: Inject GBE │ Ctrl-F: Search │ Esc: Dashboard"
+    if [ -n "$explicit_banner" ]; then
+        GAMECTL_LIB_HEADER+=$'\n'"$explicit_banner"
+    elif [ "$active_cnt" -gt 0 ]; then
+        GAMECTL_LIB_HEADER+=$'\n'"[RUNNING ($active_cnt)] $active_names — Press Enter on a running game to Stop / View Logs"
+    else
+        local ex_row="" ex_pid="" ex_title="" ex_dir="" ex_log="" ex_hint="" ex_ts=""
+        if ex_row=$(get_last_game_exit_event 15 2>/dev/null); then
+            IFS="$sep" read -r ex_pid ex_title ex_dir ex_log ex_hint ex_ts <<< "$ex_row"
+            if [ -n "$ex_hint" ]; then
+                GAMECTL_LIB_HEADER+=$'\n'"[CRASHED] $ex_title exited — $ex_hint"
+            elif [ -n "$ex_title" ]; then
+                GAMECTL_LIB_HEADER+=$'\n'"[EXITED] $ex_title exited"
+            fi
+        fi
+    fi
+}
+
+# Emit fzf transform() action string synchronizing library items, preview, label & header
+tui_library_sync_actions() {
+    local store_filter="${1:-ALL}"
+    case "$store_filter" in
+        ALL|STEAM|GOG|EPIC|AMAZON|STANDALONE) ;;
+        *) store_filter="ALL" ;;
+    esac
+    _format_library_chrome "$store_filter" ""
+    printf 'reload("$GAMECTL_PREVIEW_BIN" --list-formatted --store "%s")+refresh-preview+change-border-label(%s)+change-header:%s' \
+        "$store_filter" "$GAMECTL_LIB_LABEL" "$GAMECTL_LIB_HEADER"
+}

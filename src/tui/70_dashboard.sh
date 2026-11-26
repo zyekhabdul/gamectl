@@ -136,6 +136,20 @@ dashboard_menu() {
 EOF
 )
 
+        local dash_sock=""
+        local -a dash_live_args=()
+        if tui_supports_live_events; then
+            local dash_ldir="$(get_runtime_dir)/tui_listeners"
+            mkdir -p -m 700 "$dash_ldir" 2>/dev/null || true
+            dash_sock="$dash_ldir/d_${BASHPID}.sock"
+            if [ "${#dash_sock}" -le 100 ]; then
+                rm -f "$dash_sock" 2>/dev/null || true
+                dash_live_args=("--listen=$dash_sock" "--bind=f12:refresh-preview")
+            else
+                dash_sock=""
+            fi
+        fi
+
         local fzf_out fzf_rc=0
         fzf_out=$(echo "$menu_entries" | fzf \
             --delimiter=$'\t' \
@@ -147,7 +161,9 @@ EOF
             --prompt="Dashboard > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview-dashboard {1} "$GAMECTL_GAME_COUNT"' \
             --preview-window=right:55%:border-rounded:wrap \
+            "${dash_live_args[@]}" \
         ) || fzf_rc=$?
+        [ -n "$dash_sock" ] && rm -f "$dash_sock" 2>/dev/null || true
 
         [ "$fzf_rc" -eq 130 ] && break
         if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
@@ -321,17 +337,22 @@ library_menu() {
 
     while true; do
         flush_tty_input
-        local active_summary active_cnt=0 active_names="" _a_sep=$'\x1f'
-        active_summary=$(get_active_games_summary)
-        IFS="$_a_sep" read -r active_cnt active_names <<< "$active_summary"
-        local lib_label="  ╢ gamectl :: Game Library [Store: $active_store] ╟  "
-        [ "${active_cnt:-0}" -gt 0 ] && lib_label="  ╢ gamectl :: Game Library [Store: $active_store] [Running: $active_cnt] ╟  "
-        local lib_header="Enter: Launch/Manage │ Tab/Alt-S: Store │ Ctrl-I: Inject GBE │ Ctrl-F: Search │ Esc: Dashboard"
-        if [ -n "$last_status_banner" ]; then
-            lib_header+=$'\n'"$last_status_banner"
-            last_status_banner=""
-        elif [ "${active_cnt:-0}" -gt 0 ]; then
-            lib_header+=$'\n'"[RUNNING ($active_cnt)] $active_names — Press Enter on a running game to Stop / View Logs"
+        _format_library_chrome "$active_store" "$last_status_banner"
+        last_status_banner=""
+        local lib_label="$GAMECTL_LIB_LABEL" lib_header="$GAMECTL_LIB_HEADER"
+        local lib_sock=""
+        local -a fzf_live_args=()
+        if tui_supports_live_events; then
+            local lib_ldir="$(get_runtime_dir)/tui_listeners"
+            mkdir -p -m 700 "$lib_ldir" 2>/dev/null || true
+            lib_sock="$lib_ldir/l_${BASHPID}.sock"
+            if [ "${#lib_sock}" -le 100 ]; then
+                rm -f "$lib_sock" 2>/dev/null || true
+                export GAMECTL_ACTIVE_STORE="$active_store"
+                fzf_live_args=("--listen=$lib_sock" '--bind=f12:transform("$GAMECTL_PREVIEW_BIN" --tui-library-sync "$GAMECTL_ACTIVE_STORE")')
+            else
+                lib_sock=""
+            fi
         fi
         local fzf_out fzf_rc=0
         fzf_out=$(scan_installed_games --formatted --store "$active_store" | fzf \
@@ -344,7 +365,9 @@ library_menu() {
             --prompt="Library > " \
             --preview='"$GAMECTL_PREVIEW_BIN" --preview {1} {2} {3} {4} {5}' \
             --preview-window=right:55%:border-rounded:wrap \
+            "${fzf_live_args[@]}" \
         ) || fzf_rc=$?
+        [ -n "$lib_sock" ] && rm -f "$lib_sock" 2>/dev/null || true
 
         [ "$fzf_rc" -eq 130 ] && break
         if [ "$fzf_rc" -ne 0 ] && [ "$fzf_rc" -ne 1 ]; then
@@ -516,6 +539,18 @@ library_menu() {
                     if [ "$hud_rc" -eq 10 ]; then
                         break
                     fi
+                    continue
+                elif [[ "$(strip_ansi "$sel_status")" == *"[RUNNING]"* ]]; then
+                    local stale_log="" stale_hint="" stale_tail="" stale_msg=""
+                    stale_log="$(get_game_log_file "$sel_dir" "${sel_bin:-game}")"
+                    stale_hint="$(inspect_game_log_hint "$stale_log" 2>/dev/null || true)"
+                    [ -s "$stale_log" ] && stale_tail=$(tail -n 12 "$stale_log" 2>/dev/null || true)
+                    stale_msg="Game '$sel_title' is no longer running (stale [RUNNING] selection)."
+                    [ -n "$stale_hint" ] && stale_msg+=$'\n\n'"[HINT] $stale_hint"
+                    [ -n "$stale_tail" ] && stale_msg+=$'\n\n'"Recent Log Output:"$'\n'"$stale_tail"
+                    stale_msg+=$'\n\n'"Full log:"$'\n'"$stale_log"
+                    tui_modal_notice "Game No Longer Running ($sel_title)" "$stale_msg" || true
+                    invalidate_scan_cache
                     continue
                 fi
 
