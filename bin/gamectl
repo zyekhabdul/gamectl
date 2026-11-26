@@ -248,6 +248,11 @@ EOF
                 [ -f "$src_root/regular/x86/libsteam_api.so" ] && cp -f "$src_root/regular/x86/libsteam_api.so" "$dest_dir/regular/x86/"
                 [ -f "$src_root/experimental/x64/libsteam_api.so" ] && cp -f "$src_root/experimental/x64/libsteam_api.so" "$dest_dir/experimental/x64/"
                 [ -f "$src_root/experimental/x86/libsteam_api.so" ] && cp -f "$src_root/experimental/x86/libsteam_api.so" "$dest_dir/experimental/x86/"
+                if [ -d "$src_root/tools/generate_interfaces" ]; then
+                    mkdir -p "$dest_dir/tools/generate_interfaces"
+                    cp -f "$src_root/tools/generate_interfaces/"* "$dest_dir/tools/generate_interfaces/" 2>/dev/null || true
+                    chmod +x "$dest_dir/tools/generate_interfaces"/generate_interfaces_* 2>/dev/null || true
+                fi
                 echo "[PASS] Linux GBE templates provisioned (x64 & x86)."
             else
                 echo "[ERROR] Failed to extract Linux GBE archive." >&2
@@ -2695,6 +2700,71 @@ get_active_games_summary() {
     printf '%d%s%s\n' "$count" "$sep" "$titles"
 }
 
+# Resolve Valve Steam Runtime run.sh wrapper for Native Linux games (opt-out via native_runtime=host)
+find_steam_runtime_run() {
+    local gdir="${1:-}" rt_mode="" w_cfg k v
+    local -a w_cfgs=("$HOME/.config/gamectl/wrappers")
+    [ -n "$gdir" ] && w_cfgs+=("$gdir/.wrappers")
+    for w_cfg in "${w_cfgs[@]}"; do
+        [ -f "$w_cfg" ] || continue
+        while IFS='=' read -r k v || [ -n "$k" ]; do
+            k="${k//[[:space:]]/}"
+            [ "$k" = "native_runtime" ] || continue
+            v="${v//$'\r'/}"
+            v="${v#"${v%%[![:space:]]*}"}"
+            v="${v%"${v##*[![:space:]]}"}"
+            v="${v#\"}"
+            v="${v%\"}"
+            v="${v#\'}"
+            v="${v%\'}"
+            rt_mode="$v"
+        done < "$w_cfg"
+    done
+    [ -n "${GAMECTL_NATIVE_RUNTIME:-}" ] && rt_mode="$GAMECTL_NATIVE_RUNTIME"
+    case "${rt_mode,,}" in
+        host|0|off|none|direct|disabled) return 1 ;;
+    esac
+
+    if [ -n "${GAMECTL_STEAM_RUNTIME_RUN:-}" ] && [ -x "$GAMECTL_STEAM_RUNTIME_RUN" ]; then
+        echo "$GAMECTL_STEAM_RUNTIME_RUN"
+        return 0
+    fi
+
+    local s_root="" cand=""
+    local -a candidates=()
+    if declare -F get_steam_root >/dev/null 2>&1; then
+        s_root="$(get_steam_root 2>/dev/null || true)"
+        [ -n "$s_root" ] && candidates+=("$s_root/ubuntu12_32/steam-runtime/run.sh")
+    fi
+    candidates+=(
+        "$HOME/.local/share/Steam/ubuntu12_32/steam-runtime/run.sh"
+        "$HOME/.steam/root/ubuntu12_32/steam-runtime/run.sh"
+        "$HOME/.steam/steam/ubuntu12_32/steam-runtime/run.sh"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/ubuntu12_32/steam-runtime/run.sh"
+        "$HOME/snap/steam/common/.local/share/Steam/ubuntu12_32/steam-runtime/run.sh"
+    )
+    for cand in "${candidates[@]}"; do
+        [ -n "$cand" ] && [ -x "$cand" ] && { echo "$cand"; return 0; }
+    done
+    return 1
+}
+
+# Resolve effective LD_LIBRARY_PATH for Native Linux ELF execution (host + Steam Runtime fallback)
+resolve_native_linux_ld_path() {
+    local gdir="${1:-}" rel_ld="${2:-.:lib64:lib}"
+    local base_ld="${rel_ld}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    local sr_run="" sr_ld=""
+    sr_run=$(find_steam_runtime_run "$gdir" 2>/dev/null || true)
+    if [ -n "$sr_run" ]; then
+        sr_ld=$(LD_LIBRARY_PATH="$base_ld" "$sr_run" --print-steam-runtime-library-paths 2>/dev/null || true)
+        if [ -n "$sr_ld" ]; then
+            printf '%s\n' "$sr_ld"
+            return 0
+        fi
+    fi
+    printf '%s\n' "$base_ld"
+}
+
 # Audit a Native Linux ELF executable via ldd and emit "ARCH\x1flib1, lib2" for missing shared libraries
 list_missing_elf_libs() {
     local gdir="${1:-}"
@@ -2712,8 +2782,9 @@ list_missing_elf_libs() {
     esac
 
     # Use cd + relative LD_LIBRARY_PATH so directory names with ':' never split lookup entries
-    local ldd_out="" missing_joined=""
-    ldd_out=$(cd "$gdir" && LC_ALL=C LD_LIBRARY_PATH="${rel_ld}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd -- "./$gbin" 2>/dev/null || true)
+    local ldd_out="" missing_joined="" eff_ld=""
+    eff_ld=$(resolve_native_linux_ld_path "$gdir" "$rel_ld")
+    ldd_out=$(cd "$gdir" && LC_ALL=C LD_LIBRARY_PATH="$eff_ld" ldd -- "./$gbin" 2>/dev/null || true)
     [ -n "$ldd_out" ] || return 1
 
     missing_joined=$(awk '/=> not found/ {
@@ -11299,8 +11370,6 @@ launch_game() {
     setup_steam_interceptor "$interceptor_dir"
     export PATH="$interceptor_dir:$PATH"
 
-
-
     # Capture current CPU scaling governor for clean restoration
     local prev_governor=""
     if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
@@ -11474,6 +11543,7 @@ launch_game() {
                 _launch_echo "  ${UI_GREEN}[VERIFIED] GBE Fork emulator shield successfully engaged.${UI_RST}"
             fi
         else
+            ensure_gbe_steam_interfaces "$gdir" 0 >/dev/null 2>&1 || true
             _launch_echo "  ${UI_GREEN}[VERIFIED] GBE Fork emulator shield confirmed active.${UI_RST}"
         fi
     fi
@@ -11617,14 +11687,16 @@ launch_game() {
                 ;;
         esac
     else
-        _launch_echo "[INFO] Launching $title (Native Linux) in background..."
+        local -a native_rt=(); local sr_run; sr_run=$(find_steam_runtime_run "$gdir" 2>/dev/null || true)
+        [ -n "$sr_run" ] && native_rt=("$sr_run") && run_type="Native Linux (Steam Runtime)"
+        _launch_echo "[INFO] Launching $title ($run_type) in background..."
         _launch_echo "[INFO] Log stream: $log_file"
         (
-            export LD_LIBRARY_PATH=".:$gdir:${LD_LIBRARY_PATH:-}"
+            export LD_LIBRARY_PATH=".:lib64:lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             [ -n "${GAMECTL_DEV_RESOLVED_WINEDEBUG:-}" ] && export WINEDEBUG="$GAMECTL_DEV_RESOLVED_WINEDEBUG"
             [ -n "${GAMECTL_DEV_RESOLVED_VK_DEBUG:-}" ] && export VK_LOADER_DEBUG="$GAMECTL_DEV_RESOLVED_VK_DEBUG"
             [ "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" = "1" ] && export GAMECTL_GBE_LOG=1 GBE_LOG_FILE="$dev_trace_log"
-            _exec_in_scope "${wrappers[@]}" ./"$gbin" "${game_args[@]}"
+            _exec_in_scope "${wrappers[@]}" "${native_rt[@]}" ./"$gbin" "${game_args[@]}"
         ) > "$log_file" 2>&1 &
         game_pid=$!
     fi
@@ -11764,7 +11836,6 @@ cli_launch() {
         return 1
     fi
 }
-
 
 # Standalone-source compatibility: load split launcher submodules when sourced directly outside bin/gamectl
 if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
@@ -12283,6 +12354,70 @@ setup_onlinefix() {
     return 0
 }
 
+# Locate GBE Fork generate_interfaces tool binary matching host architecture
+get_gbe_interfaces_tool() {
+    if [ -n "${GAMECTL_GBE_INTERFACES_BIN:-}" ] && [ -x "$GAMECTL_GBE_INTERFACES_BIN" ]; then
+        echo "$GAMECTL_GBE_INTERFACES_BIN"
+        return 0
+    fi
+    local gbe_dir="${GAMECTL_GBE_DIR:-$HOME/.local/share/gbe-fork}"
+    local -a bins=()
+    case "$(uname -m 2>/dev/null || echo x86_64)" in
+        aarch64|arm64) bins=("generate_interfaces_ARM64") ;;
+        i386|i686)     bins=("generate_interfaces_x86") ;;
+        *)             bins=("generate_interfaces_x64" "generate_interfaces_x86") ;;
+    esac
+    local b="" cand=""
+    for b in "${bins[@]}"; do
+        for cand in "$gbe_dir/tools/generate_interfaces/$b" "$gbe_dir/release/tools/generate_interfaces/$b"; do
+            if [ -f "$cand" ]; then
+                [ -x "$cand" ] || chmod +x "$cand" 2>/dev/null || true
+                [ -x "$cand" ] && { echo "$cand"; return 0; }
+            fi
+        done
+    done
+    return 1
+}
+
+# Generate steam_settings/steam_interfaces.txt from original Steamworks library
+generate_gbe_steam_interfaces() {
+    local orig_lib="${1:-}" settings_dir="${2:-}"
+    [ -f "$orig_lib" ] && [ -n "$settings_dir" ] || return 1
+    local tool=""
+    tool=$(get_gbe_interfaces_tool 2>/dev/null || true)
+    [ -n "$tool" ] || return 1
+
+    local abs_orig="" tmp_dir=""
+    abs_orig="$(cd "$(dirname "$orig_lib")" && pwd)/$(basename "$orig_lib")"
+    tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_ifaces.XXXXXX") || return 1
+    ( cd "$tmp_dir" && "$tool" "$abs_orig" >/dev/null 2>&1 ) || true
+    if [ -s "$tmp_dir/steam_interfaces.txt" ]; then
+        mkdir -p "$settings_dir" || { rm -rf "$tmp_dir"; return 1; }
+        mv -f "$tmp_dir/steam_interfaces.txt" "$settings_dir/steam_interfaces.txt" || { rm -rf "$tmp_dir"; return 1; }
+        rm -rf "$tmp_dir"
+        return 0
+    fi
+    rm -rf "$tmp_dir"
+    return 1
+}
+
+# Ensure steam_settings/steam_interfaces.txt exists for GBE Fork games using backed-up .orig libraries
+ensure_gbe_steam_interfaces() {
+    local target_dir="${1:-}" force="${2:-0}"
+    [ -d "$target_dir" ] || return 1
+    [ "$force" != "1" ] && [ -s "$target_dir/steam_settings/steam_interfaces.txt" ] && return 0
+
+    local orig_file=""
+    while IFS= read -r -d '' orig_file; do
+        if generate_gbe_steam_interfaces "$orig_file" "$target_dir/steam_settings"; then
+            return 0
+        fi
+    done < <(find "$target_dir" -maxdepth 4 \
+        \( -name pfx -o -name .git -o -name saves -o -name .save_snapshots \) -prune \
+        -o \( -name "libsteam_api.so.orig" -o -name "steam_api64.dll.orig" -o -name "steam_api.dll.orig" \) -print0 2>/dev/null)
+    return 1
+}
+
 # Inject GBE Fork emulator and portable saves into a game folder
 inject_game() {
     local target_dir="$1"
@@ -12534,6 +12669,11 @@ EOF
 127.0.0.1
 255.255.255.255
 EOF
+    fi
+
+    # Generate steam_interfaces.txt from original Steamworks library for legacy SDK compatibility
+    if ensure_gbe_steam_interfaces "$target_dir" 1; then
+        echo "[INFO] Generated steam_settings/steam_interfaces.txt from original Steamworks library."
     fi
 
     # 4. Setup isolated portable saves folder and markers
