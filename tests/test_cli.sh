@@ -227,8 +227,8 @@ test_pgrep_regex_strictness() {
 run_test "Process Invariant: Strict word-boundary pgrep queries" test_pgrep_regex_strictness
 
 test_game_controller_hud() {
-    grep -q "game_controller_hud" "$REPO_ROOT/src/runners/50_launcher.sh" && \
-    grep -q "Return to Master Dashboard" "$REPO_ROOT/src/runners/50_launcher.sh"
+    grep -q "game_controller_hud" "$REPO_ROOT"/src/runners/5[03]_*.sh && \
+    grep -q "Return to Master Dashboard" "$REPO_ROOT"/src/runners/5[03]_*.sh
 }
 run_test "Launcher Invariant: Detached Live Controller HUD" test_game_controller_hud
 
@@ -400,8 +400,8 @@ test_prefix_clean_lifecycle() {
 run_test "Prefix Manager: Clean command backup and wipe lifecycle" test_prefix_clean_lifecycle
 
 test_wineserver_lifecycle_guard() {
-    grep -q 'wineserver -w' "$REPO_ROOT/src/runners/50_launcher.sh" && \
-    grep -q 'wineserver -k' "$REPO_ROOT/src/runners/50_launcher.sh"
+    grep -q 'wineserver -w' "$REPO_ROOT"/src/runners/5[03]_*.sh && \
+    grep -q 'wineserver -k' "$REPO_ROOT"/src/runners/5[03]_*.sh
 }
 run_test "Wineserver Guard (DEFECT-02): Integrated flush (-w) and kill (-k)" test_wineserver_lifecycle_guard
 
@@ -767,8 +767,8 @@ test_fzf_menu_loop_break_invariants() {
     cat "$REPO_ROOT"/src/tui/*.sh | grep -q '\[ -z "$selection" \] && continue' && \
     cat "$REPO_ROOT"/src/tui/*.sh | grep -q '\[ -z "$fzf_out" \] && continue' && \
     cat "$REPO_ROOT"/src/steam/3[034]_*.sh | grep -q '\[ -z "$selection" \] && continue' && \
-    grep -q '0|q|Q|cancel)' "$REPO_ROOT/src/runners/40_wrappers.sh" && \
-    grep -q 'continue' "$REPO_ROOT/src/runners/40_wrappers.sh"
+    grep -q '0|q|Q|cancel)' "$REPO_ROOT"/src/runners/4[05]_*.sh && \
+    grep -q 'continue' "$REPO_ROOT"/src/runners/4[05]_*.sh
 }
 run_test "TUI Menu Loops: Universal zero-match Enter decoupling across all fzf loops" test_fzf_menu_loop_break_invariants
 
@@ -1252,7 +1252,7 @@ run_test "ACF Telemetry: format_bytes integer conversion" test_format_bytes_repr
 
 test_tui_dashboard_and_cli_help_integration() {
     # Invariant: Dashboard cockpit exposes SLSsteam and Steam Client indicators
-    grep -q 'SLSsteam \$sls_status • Steam Client \$steam_status' "$REPO_ROOT/src/tui/71_previews.sh" && \
+    grep -q 'SLSsteam \$sls_status • Steam Client \$steam_status' "$REPO_ROOT"/src/tui/7[14]_*.sh && \
     grep -q 'fetch-manifest <appid>' "$REPO_ROOT/src/main.sh" && \
     grep -q 'deploy-manifest <appid>' "$REPO_ROOT/src/main.sh" && \
     "$GAMECTL" --help | grep -q 'fetch-manifest' && \
@@ -2028,7 +2028,7 @@ test_zero_flicker_tui_actions_contract() {
     grep -q -- '--expect=ctrl-k' "$REPO_ROOT"/src/steam/3[034]_*.sh || return 1
 
     # 4. Zero clear calls in game_controller_hud and manage_prefix
-    if grep -n 'clear' "$REPO_ROOT/src/runners/50_launcher.sh" | grep -v 'clean'; then
+    if grep -n 'clear' "$REPO_ROOT"/src/runners/5[03]_*.sh | grep -v 'clean'; then
         return 1
     fi
     if sed -n '/manage_prefix()/,/^}/p' "$REPO_ROOT/src/runners/41_proton_prefix.sh" | grep -E '^[[:space:]]+clear$'; then
@@ -2067,7 +2067,7 @@ test_dual_input_acf_adoption_contract() {
     grep -q 'SELECT GAME FOR ACF ADOPTION' "$REPO_ROOT/src/steam/32_steam_bridge.sh" || return 1
 
     # 4. Dashboard preview reflects dual-input capability
-    grep -q 'Dual-input adoption by Game Title or numeric AppID' "$REPO_ROOT/src/tui/71_previews.sh" || return 1
+    grep -q 'Dual-input adoption by Game Title or numeric AppID' "$REPO_ROOT"/src/tui/7[14]_*.sh || return 1
 
     return 0
 }

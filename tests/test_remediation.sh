@@ -966,7 +966,7 @@ EOF
         # 4. Hygiene & dashboard optional bridge labeling
         grep -q 'src/gamectl.egg-info' "$REPO_ROOT/Makefile" || exit 1
         grep -q 'src/gamectl_runner/bin' "$REPO_ROOT/Makefile" || exit 1
-        grep -q 'Bridge (Opt)' "$REPO_ROOT/src/tui/71_previews.sh" || exit 1
+        grep -q 'Bridge (Opt)' "$REPO_ROOT"/src/tui/7[14]_*.sh || exit 1
     )
 }
 run_test "Detection & Hygiene (WP31 Packet 31C): GBE markers, XDG runners, child env & Makefile clean" test_detection_integrity_runners_and_env_hygiene_contract
