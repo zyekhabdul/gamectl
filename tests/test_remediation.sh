@@ -4068,6 +4068,99 @@ EOF_BIN
 }
 run_test "Steam Runtime Native Linux Layer & GBE Interfaces Generation" test_native_steam_runtime_and_gbe_interfaces_contract
 
+# Test 44: Standalone Native Runtime Provisioner (SHA-256, Tar Audit, Post-Swap setup.sh & XDG Precedence)
+test_standalone_native_runtime_provisioner_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_rt_prov_XXXXXX")
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_DATA_HOME="$t_dir/xdg_data"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        export XDG_CACHE_HOME="$t_dir/cache"
+        mkdir -p "$HOME/.config/gamectl" "$XDG_RUNTIME_DIR/active_games" "$XDG_CACHE_HOME/gamectl"
+        unset GAMECTL_BUNDLED GAMECTL_RUNTIME_DIR GAMECTL_STEAM_RUNTIME_RUN GAMECTL_NATIVE_RUNTIME
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/core/18_process_runtime.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/runners/40_wrappers.sh"
+        source "$REPO_ROOT/src/diagnostics/60_doctor.sh"
+
+        declare -F setup_native_runtime >/dev/null || exit 1
+        local dest="$XDG_DATA_HOME/gamectl/runtime/steam-runtime"
+        [ "$(get_standalone_runtime_dir)" = "$dest" ] || exit 1
+
+        # 1. --help and --dry-run (no filesystem mutation)
+        setup_native_runtime --help | grep -Fq "Usage: gamectl setup-runtime" || exit 1
+        setup_native_runtime --dry-run --dest "$dest" | grep -Fq "[DRY-RUN]" || exit 1
+        [ ! -e "$dest" ] || exit 1
+
+        # 2. Build valid runtime tar.xz + malicious tar.xz archives via Python
+        local ok_tar="$t_dir/steam-runtime.tar.xz" trav_tar="$t_dir/trav.tar.xz" sym_tar="$t_dir/sym.tar.xz"
+        python3 - "$ok_tar" "$trav_tar" "$sym_tar" <<'PY'
+import io, sys, tarfile
+
+def add_file(tf, name, data, mode=0o755):
+    ti = tarfile.TarInfo(name)
+    ti.size = len(data)
+    ti.mode = mode
+    tf.addfile(ti, io.BytesIO(data))
+
+with tarfile.open(sys.argv[1], "w:xz") as tf:
+    add_file(tf, "steam-runtime/run.sh", b"#!/bin/sh\nexit 0\n")
+    add_file(tf, "steam-runtime/setup.sh", b"#!/bin/sh\nprintf '%s\\n' \"$PWD\" > \"$PWD/.setup_pwd\"\n")
+    add_file(tf, "steam-runtime/marker.txt", b"v1\n", 0o644)
+
+with tarfile.open(sys.argv[2], "w:xz") as tf:
+    add_file(tf, "steam-runtime/../escape.txt", b"bad\n", 0o644)
+
+with tarfile.open(sys.argv[3], "w:xz") as tf:
+    add_file(tf, "steam-runtime/run.sh", b"#!/bin/sh\nexit 0\n")
+    ti = tarfile.TarInfo("steam-runtime/bad_link")
+    ti.type = tarfile.SYMTYPE
+    ti.linkname = "../../outside"
+    tf.addfile(ti)
+PY
+        local ok_sha
+        ok_sha=$(sha256sum "$ok_tar" | awk '{print $1}')
+
+        # 3. Reject wrong SHA-256 without creating dest
+        if setup_native_runtime --source "$ok_tar" --sha256 "0000000000000000000000000000000000000000000000000000000000000000" >/dev/null 2>&1; then
+            exit 1
+        fi
+        [ ! -e "$dest" ] || exit 1
+
+        # 4. Install valid archive, verify setup.sh ran at final $dest, idempotency, and --force
+        setup_native_runtime --source "$ok_tar" --sha256 "$ok_sha" >/dev/null 2>&1 || exit 1
+        [ -x "$dest/run.sh" ] || exit 1
+        [ "$(cat "$dest/.setup_pwd")" = "$dest" ] || exit 1
+        setup_native_runtime --source "$ok_tar" | grep -Fq "already provisioned" || exit 1
+        rm -f "$dest/.setup_pwd"
+        setup_native_runtime --force --source "$ok_tar" --sha256 "$ok_sha" >/dev/null 2>&1 || exit 1
+        [ "$(cat "$dest/.setup_pwd")" = "$dest" ] || exit 1
+
+        # 5. Reject traversal and escaping symlinks while preserving existing runtime
+        if setup_native_runtime --force --source "$trav_tar" >/dev/null 2>&1; then exit 1; fi
+        if setup_native_runtime --force --source "$sym_tar" >/dev/null 2>&1; then exit 1; fi
+        [ -f "$dest/marker.txt" ] || exit 1
+
+        # 6. XDG standalone takes precedence over Steam Client + doctor_audit reporting
+        mkdir -p "$HOME/.local/share/Steam/ubuntu12_32/steam-runtime"
+        printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/share/Steam/ubuntu12_32/steam-runtime/run.sh"
+        chmod +x "$HOME/.local/share/Steam/ubuntu12_32/steam-runtime/run.sh"
+        [ "$(find_steam_runtime_run "")" = "$dest/run.sh" ] || exit 1
+        local doc_out=""
+        doc_out=$(doctor_audit 2>&1 || true)
+        grep -Fq "Standalone: $dest/run.sh" <<< "$doc_out" || exit 1
+
+        rm -rf "$dest" "$HOME/.local/share/Steam"
+        doc_out=$(doctor_audit 2>&1 || true)
+        grep -Fq "gamectl setup-runtime" <<< "$doc_out" || exit 1
+    )
+}
+run_test "Standalone Native Runtime Provisioner (SHA-256, Tar Audit & XDG Precedence)" test_standalone_native_runtime_provisioner_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"
