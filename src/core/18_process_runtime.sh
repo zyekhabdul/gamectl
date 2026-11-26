@@ -197,7 +197,7 @@ inspect_game_log_hint() {
     if echo "$tail_log" | grep -qiE '0x887a0002|DXGI_ERROR|Vulkan support is incomplete|dxvk.*(failed|error|unable)|vkCreateInstance'; then
         echo "Graphics API error detected -> switch Renderer to WineD3D (<CTRL-O> or --wined3d)"
     elif echo "$tail_log" | grep -qiE 'err:module:import_dll|cannot open shared object file|error while loading shared libraries|libGL\.so\.1|System\.DllNotFoundException|DllNotFoundException|Unable to load shared library'; then
-        echo "Missing runtime DLL/library -> run Community Fixes (<CTRL-X>) or install 32-bit multilib"
+        echo "Missing runtime DLL/library -> run 'gamectl setup-runtime', Community Fixes (<CTRL-X>), or install 32-bit multilib"
     elif echo "$tail_log" | grep -qiE 'Exec format error|cannot execute binary file|Permission denied'; then
         echo "Executable architecture or permission mismatch -> verify 64-bit binary / chmod +x"
     elif echo "$tail_log" | grep -qiE 'SteamStub|Application load error|steamclient.*fail'; then
@@ -285,6 +285,15 @@ get_active_games_summary() {
     printf '%d%s%s\n' "$count" "$sep" "$titles"
 }
 
+# Canonical XDG directory for gamectl's standalone Native Linux Steam Runtime (Scout)
+get_standalone_runtime_dir() {
+    if [ -n "${GAMECTL_RUNTIME_DIR:-}" ]; then
+        echo "$GAMECTL_RUNTIME_DIR"
+    else
+        echo "${XDG_DATA_HOME:-$HOME/.local/share}/gamectl/runtime/steam-runtime"
+    fi
+}
+
 # Resolve Valve Steam Runtime run.sh wrapper for Native Linux games (opt-out via native_runtime=host)
 find_steam_runtime_run() {
     local gdir="${1:-}" rt_mode="" w_cfg k v
@@ -312,6 +321,13 @@ find_steam_runtime_run() {
 
     if [ -n "${GAMECTL_STEAM_RUNTIME_RUN:-}" ] && [ -x "$GAMECTL_STEAM_RUNTIME_RUN" ]; then
         echo "$GAMECTL_STEAM_RUNTIME_RUN"
+        return 0
+    fi
+
+    local standalone_dir=""
+    standalone_dir="$(get_standalone_runtime_dir)"
+    if [ -n "$standalone_dir" ] && [ -x "$standalone_dir/run.sh" ]; then
+        echo "$standalone_dir/run.sh"
         return 0
     fi
 
@@ -443,7 +459,7 @@ verify_launched_game_startup() {
     missing_info=$(list_missing_elf_libs "$gdir" "$gbin" 2>/dev/null || true)
     if [ -n "$missing_info" ]; then
         IFS="$sep" read -r m_arch m_libs <<< "$missing_info"
-        [ -z "$v_hint" ] && v_hint="Missing $m_arch shared libraries -> install required multilib/system packages"
+        [ -z "$v_hint" ] && v_hint="Missing $m_arch shared libraries -> run 'gamectl setup-runtime' or install required multilib packages"
     fi
     if [ -s "$v_log" ]; then
         v_tail=$(tail -n 12 "$v_log" 2>/dev/null || true)

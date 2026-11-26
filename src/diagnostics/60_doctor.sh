@@ -120,6 +120,20 @@ doctor_audit() {
         warn_cnt=$((warn_cnt + 1))
     fi
 
+    local standalone_rt_dir="" active_rt_run=""
+    standalone_rt_dir="$(get_standalone_runtime_dir 2>/dev/null || true)"
+    active_rt_run="$(find_steam_runtime_run "" 2>/dev/null || true)"
+    if [ -n "$standalone_rt_dir" ] && [ -x "$standalone_rt_dir/run.sh" ]; then
+        echo "    • $(printf '%-10s' "Native RT") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}(Standalone: $standalone_rt_dir/run.sh)${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
+    elif [ -n "$active_rt_run" ]; then
+        echo "    • $(printf '%-10s' "Native RT") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}(Steam fallback: $active_rt_run; run 'gamectl setup-runtime' for standalone)${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "    • $(printf '%-10s' "Native RT") : ${UI_AMBER}[WARN]${UI_RST} Not provisioned for legacy 32-bit/native games (Run 'gamectl setup-runtime')"
+        warn_cnt=$((warn_cnt + 1))
+    fi
+
     # Layer 5: Performance & Display Wrappers
     echo
     echo "  ${UI_PURPLE}[LAYER 5] Performance & Display Wrappers${UI_RST}"
