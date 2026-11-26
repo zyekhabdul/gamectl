@@ -21,11 +21,12 @@ Alur inti tidak boleh bergantung pada Steam Client, SLSsteam, atau hook pola mem
 src/
 ├── core/
 │   ├── 00_header.sh            # SSoT Constants, Tokyo Night ANSI styling palette, FZF base configuration
-│   ├── 10_utils.sh             # GBE template resolver, atomic config/KV helpers, zip audit, ephemeral cache tier
+│   ├── 10_utils.sh             # Atomic config/KV helpers, zip audit, ephemeral cache tier, DRM/AppID SSoTs
 │   ├── 12_tui_primitives.sh    # Zero-flicker FZF dialogs, tty input flush, tui_run_engine, screen lifecycle
 │   ├── 14_saves.sh             # 3-slot savegame snapshot rotation, rollback recovery, Wine prefix save collector
 │   ├── 16_steamstub.sh         # SteamStub (.bind ELF & PE) forensic detector and unpacker
-│   └── 18_process_runtime.sh   # Binary resolution, ELF/shebang arch detection, active process & crash SSoT
+│   ├── 18_process_runtime.sh   # Binary resolution, ELF/shebang arch detection, active process & crash SSoT
+│   └── 19_gbe_templates.sh     # GBE Fork template resolver, byte verification, and setup-gbe provisioner
 ├── steam/
 │   ├── 20_discovery.sh         # Multi-path Steam, Epic, Amazon & standalone scanner, active process guard
 │   ├── 21_shortcuts_artwork.sh # FreeDesktop .desktop generator, Steam Grid artwork & shortcuts.vdf writer
@@ -46,21 +47,24 @@ src/
 │   ├── 30_store_epic.sh        # Optional Epic Games adapter (legendary) & gamectl epic CLI
 │   └── 40_store_amazon.sh      # Optional Amazon Prime Gaming adapter (nile) & gamectl amazon CLI
 ├── runners/
-│   ├── 40_wrappers.sh          # Wrapper config loader, developer profiler, wrapper builder, global settings
+│   ├── 40_wrappers.sh          # Wrapper config loader, developer profiler, and runtime wrapper command builder
 │   ├── 41_proton_prefix.sh     # DLL overrides detector, Windows runner env contract & manage_prefix
 │   ├── 42_graphics_isolation.sh # Vulkan/GPU capability probe, Gamescope args, cgroups v2 scope, Bubblewrap sandbox
 │   ├── 43_proton_manager.sh    # GE-Proton & Wine runner discovery, SHA-512 installer & lifecycle manager
 │   ├── 44_native_runtime.sh    # Standalone Steam Runtime (Scout) SHA-256 provisioner & lifecycle
-│   ├── 50_launcher.sh          # Process HUD, launch_game lifecycle, PipeWire audio, wineserver guard, cli_launch
+│   ├── 45_wrapper_tui.sh       # Interactive runtime wrapper and global settings TUI menus
+│   ├── 50_launcher.sh          # launch_game lifecycle, PipeWire audio, wineserver guard & cli_launch
 │   ├── 51_remote_sync.sh       # SSH/Rsync & Rclone save synchronization and companion pull helpers
-│   └── 52_inject_runtime.sh    # Offline GBE Fork injector and mod/OnlineFix DLL override setup
+│   ├── 52_inject_runtime.sh    # Offline GBE Fork injector and mod/OnlineFix DLL override setup
+│   └── 53_process_hud.sh       # Running process controller HUD and log context preview
 ├── diagnostics/
 │   └── 60_doctor.sh            # 8-layer system & GPU health diagnostics and cached query_protondb
 ├── tui/
 │   ├── 70_dashboard.sh         # Interactive dashboard hub, library menu, remote sync palette
-│   ├── 71_previews.sh          # Read-only FZF preview renderers (game, dashboard, store search, logs)
+│   ├── 71_previews.sh          # Read-only FZF preview renderers (game, store search, logs)
 │   ├── 72_store_tui.sh         # Multi-store TUI views & cross-store search switcher (search_stores_interactive)
-│   └── 73_search_tui.sh        # Live Steam Store search & actionable TUI picker (search_steam)
+│   ├── 73_search_tui.sh        # Live Steam Store search & actionable TUI picker (search_steam)
+│   └── 74_dashboard_preview.sh # Master dashboard live cockpit telemetry preview renderer
 └── main.sh                     # Subshell exports (export -f) and top-level CLI command dispatcher
 ```
 

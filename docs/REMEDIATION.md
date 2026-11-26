@@ -380,3 +380,18 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
   - Split `src/runners/41_proton_prefix.sh` (980 LOC) -> `41_proton_prefix.sh` + `43_proton_manager.sh` (semua <= 600 LOC) dengan sibling auto-loader `GAMECTL_BUNDLED` & `40_wrappers.sh`.
   - Promosikan `31_manifests.sh`, `35_fixes.sh`, dan `41_proton_prefix.sh` keluar dari `LEGACY_CEILING` di `scripts/check_loc_budget.sh` dan perketat batas modul di Test 41 (`<= 900` LOC).
   - Dekomposisi `crates/depot-dl/src/download.rs` (1.382 LOC) menjadi modul direktori `crates/depot-dl/src/download/` (`mod.rs`, `planner.rs`, `worker.rs`, `io.rs`, `tests.rs`); diverifikasi dan dikompilasi di node `serv` (`rustc 1.99.1`, Debian GLIBC 2.41).
+
+---
+
+# REMEDIATION WORK PACKET 3.3: REMAINING SUB-600 LOC PROMOTIONS (`10_utils`, `40_wrappers`, `50_launcher`, `71_previews`)
+
+- **Track**: Remediation / Sub-600 LOC Legacy Promotion (`10_utils.sh`, `40_wrappers.sh`, `50_launcher.sh`, `71_previews.sh`)
+- **Status**: [ COMPLETED & VERIFIED ]
+- **Prasyarat**: Remediation Work Packet 3.2 (`df315a4`)
+- **Ringkasan Eksekusi**:
+  - Migrasi assertion static-grep path di `tests/test_cli.sh` dan `tests/test_remediation.sh` ke glob domain (`src/runners/4[05]_*.sh`, `src/runners/5[03]_*.sh`, `src/tui/7[14]_*.sh`).
+  - Split `src/core/10_utils.sh` (851 LOC) -> `10_utils.sh` (590 LOC) + `19_gbe_templates.sh` (264 LOC) dengan sibling auto-loader `GAMECTL_BUNDLED`.
+  - Split `src/runners/40_wrappers.sh` (723 LOC) -> `40_wrappers.sh` (335 LOC) + `45_wrapper_tui.sh` (390 LOC) dengan sibling auto-loader `GAMECTL_BUNDLED`.
+  - Split `src/runners/50_launcher.sh` (795 LOC) -> `50_launcher.sh` (596 LOC) + `53_process_hud.sh` (202 LOC) dengan sibling auto-loader `GAMECTL_BUNDLED`.
+  - Split `src/tui/71_previews.sh` (877 LOC) -> `71_previews.sh` (391 LOC) + `74_dashboard_preview.sh` (498 LOC) dengan sibling auto-loader `GAMECTL_BUNDLED` di `71_previews.sh` dan `70_dashboard.sh`.
+  - Promosikan `10_utils.sh`, `40_wrappers.sh`, `50_launcher.sh`, dan `71_previews.sh` keluar dari `LEGACY_CEILING` di `scripts/check_loc_budget.sh` (tersisa `32_steam_bridge.sh` 694 LOC dan `main.sh` 605 LOC) dan perketat Test 41 (`<= 700` LOC pada `src/*/*.sh`).
