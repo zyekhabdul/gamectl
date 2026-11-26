@@ -1007,6 +1007,7 @@ tui_modal_notice() {
         --disabled \
         --no-info \
         --no-sort \
+        --wrap=word \
         --pointer=' ' \
         --prompt='' \
         --border-label="  ╢ $title ╟  " \
@@ -2694,6 +2695,40 @@ get_active_games_summary() {
     printf '%d%s%s\n' "$count" "$sep" "$titles"
 }
 
+# Audit a Native Linux ELF executable via ldd and emit "ARCH\x1flib1, lib2" for missing shared libraries
+list_missing_elf_libs() {
+    local gdir="${1:-}"
+    local gbin="${2:-}"
+    [ -n "$gdir" ] && [ -n "$gbin" ] && [ -d "$gdir" ] && [ -f "$gdir/$gbin" ] || return 1
+    command -v ldd >/dev/null 2>&1 || return 1
+
+    local elf_cls=""
+    elf_cls=$(_read_elf_class "$gdir/$gbin") || return 1
+
+    local arch_label="ELF" rel_ld=".:lib64:lib"
+    case "$elf_cls" in
+        32) arch_label="32-bit"; rel_ld=".:lib" ;;
+        64) arch_label="64-bit"; rel_ld=".:lib64:lib" ;;
+    esac
+
+    # Use cd + relative LD_LIBRARY_PATH so directory names with ':' never split lookup entries
+    local ldd_out="" missing_joined=""
+    ldd_out=$(cd "$gdir" && LC_ALL=C LD_LIBRARY_PATH="${rel_ld}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd -- "./$gbin" 2>/dev/null || true)
+    [ -n "$ldd_out" ] || return 1
+
+    missing_joined=$(awk '/=> not found/ {
+        sub(/^[ \t]+/, "", $1)
+        if ($1 != "" && !seen[$1]++) {
+            out = (out == "" ? $1 : out ", " $1)
+        }
+    }
+    END { print out }' <<< "$ldd_out")
+
+    [ -n "$missing_joined" ] || return 1
+    printf '%s\x1f%s\n' "$arch_label" "$missing_joined"
+    return 0
+}
+
 # Probe newly launched game across startup window to catch early crashes cleanly
 verify_launched_game_startup() {
     local gdir="${1:-}"
@@ -2747,8 +2782,13 @@ verify_launched_game_startup() {
     GAMECTL_VERIFY_LOG="$v_log"
     export GAMECTL_VERIFY_LOG
 
-    local v_hint="" v_tail=""
+    local v_hint="" v_tail="" missing_info="" m_arch="" m_libs=""
     v_hint=$(inspect_game_log_hint "$v_log" 2>/dev/null || true)
+    missing_info=$(list_missing_elf_libs "$gdir" "$gbin" 2>/dev/null || true)
+    if [ -n "$missing_info" ]; then
+        IFS="$sep" read -r m_arch m_libs <<< "$missing_info"
+        [ -z "$v_hint" ] && v_hint="Missing $m_arch shared libraries -> install required multilib/system packages"
+    fi
     if [ -s "$v_log" ]; then
         v_tail=$(tail -n 12 "$v_log" 2>/dev/null || true)
     else
@@ -2757,6 +2797,7 @@ verify_launched_game_startup() {
 
     GAMECTL_VERIFY_SUMMARY="Game '$title' exited immediately after launch."
     [ -n "$v_hint" ] && GAMECTL_VERIFY_SUMMARY+=$'\n\n'"[HINT] $v_hint"
+    [ -n "$m_libs" ] && GAMECTL_VERIFY_SUMMARY+=$'\n\n'"Missing Shared Libraries ($m_arch):"$'\n'"$m_libs"
     GAMECTL_VERIFY_SUMMARY+=$'\n\n'"Recent Log Output:"$'\n'"$v_tail"$'\n\n'"Full log:"$'\n'"$v_log"
     export GAMECTL_VERIFY_SUMMARY
     return 1

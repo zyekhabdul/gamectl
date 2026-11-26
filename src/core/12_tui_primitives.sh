@@ -99,6 +99,7 @@ tui_modal_notice() {
         --disabled \
         --no-info \
         --no-sort \
+        --wrap=word \
         --pointer=' ' \
         --prompt='' \
         --border-label="  ╢ $title ╟  " \
