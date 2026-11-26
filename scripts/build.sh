@@ -38,6 +38,7 @@ MODULES=(
     "$REPO_ROOT/src/runners/41_proton_prefix.sh"
     "$REPO_ROOT/src/runners/42_graphics_isolation.sh"
     "$REPO_ROOT/src/runners/43_proton_manager.sh"
+    "$REPO_ROOT/src/runners/44_native_runtime.sh"
     "$REPO_ROOT/src/runners/50_launcher.sh"
     "$REPO_ROOT/src/runners/51_remote_sync.sh"
     "$REPO_ROOT/src/runners/52_inject_runtime.sh"

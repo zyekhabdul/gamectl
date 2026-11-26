@@ -713,7 +713,7 @@ EOF
 # Standalone-source compatibility: load split runner submodules when sourced directly outside bin/gamectl
 if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
     _runners_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-    for _runners_sub in 41_proton_prefix.sh 42_graphics_isolation.sh 43_proton_manager.sh; do
+    for _runners_sub in 41_proton_prefix.sh 42_graphics_isolation.sh 43_proton_manager.sh 44_native_runtime.sh; do
         if [ -f "$_runners_dir/$_runners_sub" ]; then
             # shellcheck source=/dev/null
             source "$_runners_dir/$_runners_sub"
