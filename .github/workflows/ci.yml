@@ -37,6 +37,8 @@ jobs:
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache Cargo build artifacts
         uses: actions/cache@v4
@@ -57,8 +59,14 @@ jobs:
       - name: Verify source-to-bundle synchronization
         run: ./scripts/build.sh --check
 
+      - name: Check Rust formatting (cargo fmt)
+        run: cargo fmt --manifest-path crates/depot-dl/Cargo.toml --check
+
+      - name: Lint Rust crate (cargo clippy)
+        run: cargo clippy --manifest-path crates/depot-dl/Cargo.toml --locked --all-targets -- -D warnings
+
       - name: Execute Rust depot-dl crate test suite
-        run: cargo test --manifest-path crates/depot-dl/Cargo.toml --verbose
+        run: cargo test --manifest-path crates/depot-dl/Cargo.toml --locked --verbose
 
       - name: Compile native depot downloader binary
         run: |
