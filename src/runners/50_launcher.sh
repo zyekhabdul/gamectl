@@ -315,8 +315,6 @@ launch_game() {
     setup_steam_interceptor "$interceptor_dir"
     export PATH="$interceptor_dir:$PATH"
 
-
-
     # Capture current CPU scaling governor for clean restoration
     local prev_governor=""
     if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
@@ -490,6 +488,7 @@ launch_game() {
                 _launch_echo "  ${UI_GREEN}[VERIFIED] GBE Fork emulator shield successfully engaged.${UI_RST}"
             fi
         else
+            ensure_gbe_steam_interfaces "$gdir" 0 >/dev/null 2>&1 || true
             _launch_echo "  ${UI_GREEN}[VERIFIED] GBE Fork emulator shield confirmed active.${UI_RST}"
         fi
     fi
@@ -633,14 +632,16 @@ launch_game() {
                 ;;
         esac
     else
-        _launch_echo "[INFO] Launching $title (Native Linux) in background..."
+        local -a native_rt=(); local sr_run; sr_run=$(find_steam_runtime_run "$gdir" 2>/dev/null || true)
+        [ -n "$sr_run" ] && native_rt=("$sr_run") && run_type="Native Linux (Steam Runtime)"
+        _launch_echo "[INFO] Launching $title ($run_type) in background..."
         _launch_echo "[INFO] Log stream: $log_file"
         (
-            export LD_LIBRARY_PATH=".:$gdir:${LD_LIBRARY_PATH:-}"
+            export LD_LIBRARY_PATH=".:lib64:lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             [ -n "${GAMECTL_DEV_RESOLVED_WINEDEBUG:-}" ] && export WINEDEBUG="$GAMECTL_DEV_RESOLVED_WINEDEBUG"
             [ -n "${GAMECTL_DEV_RESOLVED_VK_DEBUG:-}" ] && export VK_LOADER_DEBUG="$GAMECTL_DEV_RESOLVED_VK_DEBUG"
             [ "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" = "1" ] && export GAMECTL_GBE_LOG=1 GBE_LOG_FILE="$dev_trace_log"
-            _exec_in_scope "${wrappers[@]}" ./"$gbin" "${game_args[@]}"
+            _exec_in_scope "${wrappers[@]}" "${native_rt[@]}" ./"$gbin" "${game_args[@]}"
         ) > "$log_file" 2>&1 &
         game_pid=$!
     fi
@@ -780,7 +781,6 @@ cli_launch() {
         return 1
     fi
 }
-
 
 # Standalone-source compatibility: load split launcher submodules when sourced directly outside bin/gamectl
 if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then

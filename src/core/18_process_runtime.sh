@@ -285,6 +285,71 @@ get_active_games_summary() {
     printf '%d%s%s\n' "$count" "$sep" "$titles"
 }
 
+# Resolve Valve Steam Runtime run.sh wrapper for Native Linux games (opt-out via native_runtime=host)
+find_steam_runtime_run() {
+    local gdir="${1:-}" rt_mode="" w_cfg k v
+    local -a w_cfgs=("$HOME/.config/gamectl/wrappers")
+    [ -n "$gdir" ] && w_cfgs+=("$gdir/.wrappers")
+    for w_cfg in "${w_cfgs[@]}"; do
+        [ -f "$w_cfg" ] || continue
+        while IFS='=' read -r k v || [ -n "$k" ]; do
+            k="${k//[[:space:]]/}"
+            [ "$k" = "native_runtime" ] || continue
+            v="${v//$'\r'/}"
+            v="${v#"${v%%[![:space:]]*}"}"
+            v="${v%"${v##*[![:space:]]}"}"
+            v="${v#\"}"
+            v="${v%\"}"
+            v="${v#\'}"
+            v="${v%\'}"
+            rt_mode="$v"
+        done < "$w_cfg"
+    done
+    [ -n "${GAMECTL_NATIVE_RUNTIME:-}" ] && rt_mode="$GAMECTL_NATIVE_RUNTIME"
+    case "${rt_mode,,}" in
+        host|0|off|none|direct|disabled) return 1 ;;
+    esac
+
+    if [ -n "${GAMECTL_STEAM_RUNTIME_RUN:-}" ] && [ -x "$GAMECTL_STEAM_RUNTIME_RUN" ]; then
+        echo "$GAMECTL_STEAM_RUNTIME_RUN"
+        return 0
+    fi
+
+    local s_root="" cand=""
+    local -a candidates=()
+    if declare -F get_steam_root >/dev/null 2>&1; then
+        s_root="$(get_steam_root 2>/dev/null || true)"
+        [ -n "$s_root" ] && candidates+=("$s_root/ubuntu12_32/steam-runtime/run.sh")
+    fi
+    candidates+=(
+        "$HOME/.local/share/Steam/ubuntu12_32/steam-runtime/run.sh"
+        "$HOME/.steam/root/ubuntu12_32/steam-runtime/run.sh"
+        "$HOME/.steam/steam/ubuntu12_32/steam-runtime/run.sh"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/ubuntu12_32/steam-runtime/run.sh"
+        "$HOME/snap/steam/common/.local/share/Steam/ubuntu12_32/steam-runtime/run.sh"
+    )
+    for cand in "${candidates[@]}"; do
+        [ -n "$cand" ] && [ -x "$cand" ] && { echo "$cand"; return 0; }
+    done
+    return 1
+}
+
+# Resolve effective LD_LIBRARY_PATH for Native Linux ELF execution (host + Steam Runtime fallback)
+resolve_native_linux_ld_path() {
+    local gdir="${1:-}" rel_ld="${2:-.:lib64:lib}"
+    local base_ld="${rel_ld}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    local sr_run="" sr_ld=""
+    sr_run=$(find_steam_runtime_run "$gdir" 2>/dev/null || true)
+    if [ -n "$sr_run" ]; then
+        sr_ld=$(LD_LIBRARY_PATH="$base_ld" "$sr_run" --print-steam-runtime-library-paths 2>/dev/null || true)
+        if [ -n "$sr_ld" ]; then
+            printf '%s\n' "$sr_ld"
+            return 0
+        fi
+    fi
+    printf '%s\n' "$base_ld"
+}
+
 # Audit a Native Linux ELF executable via ldd and emit "ARCH\x1flib1, lib2" for missing shared libraries
 list_missing_elf_libs() {
     local gdir="${1:-}"
@@ -302,8 +367,9 @@ list_missing_elf_libs() {
     esac
 
     # Use cd + relative LD_LIBRARY_PATH so directory names with ':' never split lookup entries
-    local ldd_out="" missing_joined=""
-    ldd_out=$(cd "$gdir" && LC_ALL=C LD_LIBRARY_PATH="${rel_ld}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd -- "./$gbin" 2>/dev/null || true)
+    local ldd_out="" missing_joined="" eff_ld=""
+    eff_ld=$(resolve_native_linux_ld_path "$gdir" "$rel_ld")
+    ldd_out=$(cd "$gdir" && LC_ALL=C LD_LIBRARY_PATH="$eff_ld" ldd -- "./$gbin" 2>/dev/null || true)
     [ -n "$ldd_out" ] || return 1
 
     missing_joined=$(awk '/=> not found/ {
