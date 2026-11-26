@@ -3964,6 +3964,110 @@ EOF_LDD
 }
 run_test "Runtime Binary Detection, Running List Badges & Startup Probe" test_process_runtime_binary_and_ux_contract
 
+# Test 43: Steam Runtime Native Linux Layer & GBE steam_interfaces.txt Auto-Generation
+test_native_steam_runtime_and_gbe_interfaces_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_sr_iface_XXXXXX")
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        export XDG_CACHE_HOME="$t_dir/cache"
+        mkdir -p "$HOME/.config/gamectl" "$HOME/.local/share/Steam/ubuntu12_32/steam-runtime" \
+                 "$HOME/Games/Colon: Title" "$XDG_RUNTIME_DIR/active_games" "$XDG_CACHE_HOME/gamectl"
+        unset GAMECTL_BUNDLED GAMECTL_NATIVE_RUNTIME GAMECTL_STEAM_RUNTIME_RUN GAMECTL_GBE_INTERFACES_BIN
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/steam/25_identity.sh"
+        source "$REPO_ROOT/src/steam/30_downloader.sh"
+        source "$REPO_ROOT/src/runners/40_wrappers.sh"
+        source "$REPO_ROOT/src/runners/42_graphics_isolation.sh"
+        source "$REPO_ROOT/src/runners/50_launcher.sh"
+
+        local sr_run="$HOME/.local/share/Steam/ubuntu12_32/steam-runtime/run.sh"
+        cat <<'EOF_SR' > "$sr_run"
+#!/usr/bin/env bash
+if [ "${1:-}" = "--print-steam-runtime-library-paths" ]; then
+    printf '/mock_sr/pinned_32:%s:/mock_sr/lib32\n' "${LD_LIBRARY_PATH:-}"
+    exit 0
+fi
+printf 'SR_INVOKED=%s\nSR_LD=%s\nSR_ARG=%s\n' "$0" "${LD_LIBRARY_PATH:-}" "${1:-}"
+EOF_SR
+        chmod +x "$sr_run"
+
+        local gdir="$HOME/Games/Colon: Title"
+        printf '\x7f\x45\x4c\x46\x01\x01\x01' > "$gdir/game32"
+        chmod +x "$gdir/game32"
+
+        # 1. Steam Runtime discovery + opt-out controls
+        [ "$(find_steam_runtime_run "$gdir")" = "$sr_run" ] || exit 1
+        printf 'native_runtime=host\n' > "$gdir/.wrappers"
+        ! find_steam_runtime_run "$gdir" >/dev/null 2>&1 || exit 1
+        rm -f "$gdir/.wrappers"
+        GAMECTL_NATIVE_RUNTIME=host find_steam_runtime_run "$gdir" >/dev/null 2>&1 && exit 1
+
+        # 2. resolve_native_linux_ld_path + list_missing_elf_libs use Steam Runtime paths
+        local stub_bin="$t_dir/stub_bin"
+        mkdir -p "$stub_bin"
+        cat <<'EOF_LDD2' > "$stub_bin/ldd"
+#!/usr/bin/env bash
+if [[ ":${LD_LIBRARY_PATH:-}:" != *":/mock_sr/lib32:"* ]]; then
+    printf '\tlibopenal.so.1 => not found\n'
+else
+    printf '\tlibopenal.so.1 => /mock_sr/lib32/libopenal.so.1 (0xf7000000)\n'
+fi
+EOF_LDD2
+        chmod +x "$stub_bin/ldd"
+        ! PATH="$stub_bin:$PATH" list_missing_elf_libs "$gdir" "game32" >/dev/null 2>&1 || exit 1
+        PATH="$stub_bin:$PATH" GAMECTL_NATIVE_RUNTIME=host list_missing_elf_libs "$gdir" "game32" | grep -Fq 'libopenal.so.1' || exit 1
+
+        # 3. inject_game & ensure_gbe_steam_interfaces generate steam_interfaces.txt from .orig
+        local t_gbe="$t_dir/gbe_template.so" mock_gen="$t_dir/gen_ifaces"
+        printf 'GBE_MOCK_BYTES' > "$t_gbe"
+        printf 'ORIG_VALVE_BYTES' > "$gdir/libsteam_api.so"
+        cat <<'EOF_GEN' > "$mock_gen"
+#!/usr/bin/env bash
+[ -f "${1:-}" ] || exit 1
+printf 'SteamClient012\nSTEAMUSERSTATS_INTERFACE_VERSION011\n' > steam_interfaces.txt
+EOF_GEN
+        chmod +x "$mock_gen"
+        get_gbe_template() { printf '%s\n' "$t_gbe"; }
+        GAMECTL_GBE_INTERFACES_BIN="$mock_gen" inject_game "$gdir" "234390" --no-sync >/dev/null 2>&1 || exit 1
+        grep -Fq 'STEAMUSERSTATS_INTERFACE_VERSION011' "$gdir/steam_settings/steam_interfaces.txt" || exit 1
+
+        rm -f "$gdir/steam_settings/steam_interfaces.txt"
+        GAMECTL_GBE_INTERFACES_BIN="$mock_gen" ensure_gbe_steam_interfaces "$gdir" 0 || exit 1
+        grep -Fq 'SteamClient012' "$gdir/steam_settings/steam_interfaces.txt" || exit 1
+
+        # Graceful skip when generate_interfaces tool is absent
+        rm -f "$gdir/steam_settings/steam_interfaces.txt"
+        GAMECTL_GBE_DIR="$t_dir/no_gbe" inject_game "$gdir" "234390" --no-sync >/dev/null 2>&1 || exit 1
+
+        # 4. launch_game invokes Steam Runtime with relative LD_LIBRARY_PATH (no raw ':' gdir)
+        cat <<'EOF_BIN' > "$gdir/run.sh"
+#!/usr/bin/env bash
+echo "DIRECT_HOST_RUN"
+EOF_BIN
+        chmod +x "$gdir/run.sh"
+        launch_game "$gdir" "run.sh" "ColonTitle" --no-scope >/dev/null 2>&1 || exit 1
+        sleep 0.2
+        local l_log="${GAMECTL_LAST_LOG_FILE:-}"
+        [ -f "$l_log" ] || exit 1
+        grep -Fq "SR_INVOKED=$sr_run" "$l_log" || exit 1
+        grep -Fq 'SR_ARG=./run.sh' "$l_log" || exit 1
+        local sr_ld_line
+        sr_ld_line=$(grep -F 'SR_LD=' "$l_log" | head -n 1)
+        [[ "$sr_ld_line" == *"SR_LD=.:lib64:lib"* ]] || exit 1
+        [[ "$sr_ld_line" != *"Colon: Title"* ]] || exit 1
+
+        GAMECTL_NATIVE_RUNTIME=host launch_game "$gdir" "run.sh" "ColonTitle" --no-scope >/dev/null 2>&1 || exit 1
+        sleep 0.2
+        grep -Fq 'DIRECT_HOST_RUN' "$l_log" || exit 1
+    )
+}
+run_test "Steam Runtime Native Linux Layer & GBE Interfaces Generation" test_native_steam_runtime_and_gbe_interfaces_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"
