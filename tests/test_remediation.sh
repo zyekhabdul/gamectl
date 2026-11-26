@@ -3772,12 +3772,14 @@ test_r3_loc_budget_and_submodule_autoloader_contract() {
         rm -rf "$t_dir/src" && mkdir -p "$t_dir/src"
         ! bash "$REPO_ROOT/scripts/check_loc_budget.sh" "$t_dir" 2>/dev/null || exit 1
 
-        # Unbundled sibling auto-loaders load 21_shortcuts_artwork.sh, 33/34, 36/37, 38, 43, and 72/73
+        # Unbundled sibling auto-loaders load 19, 21, 33/34, 36/37, 38, 43/45, 53, and 72/73/74
         bash -c '
             set -e
             unset GAMECTL_BUNDLED
             source "$1/src/core/00_header.sh"
             source "$1/src/core/10_utils.sh"
+            declare -F get_gbe_template >/dev/null
+            declare -F setup_gbe_templates >/dev/null
             source "$1/src/steam/20_discovery.sh"
             declare -F create_desktop_entry >/dev/null
             declare -F fetch_steam_artwork >/dev/null
@@ -3793,18 +3795,36 @@ test_r3_loc_budget_and_submodule_autoloader_contract() {
             declare -F restart_steam_client >/dev/null
             declare -F preview_fix_entry >/dev/null
             declare -F manage_game_fixes_interactive >/dev/null
+            source "$1/src/runners/40_wrappers.sh"
+            declare -F configure_wrappers >/dev/null
+            declare -F configure_global >/dev/null
             source "$1/src/runners/41_proton_prefix.sh"
             declare -F list_runner_dirs >/dev/null
             declare -F find_runner >/dev/null
             declare -F proton_list >/dev/null
             declare -F proton_install >/dev/null
             declare -F proton_remove >/dev/null
+            source "$1/src/runners/50_launcher.sh"
+            declare -F preview_process_log >/dev/null
+            declare -F game_controller_hud >/dev/null
             source "$1/src/tui/70_dashboard.sh"
             declare -F search_steam >/dev/null
             declare -F search_stores_interactive >/dev/null
+            declare -F preview_dashboard >/dev/null
+        ' _ "$REPO_ROOT" || exit 1
+        bash -c '
+            set -e
+            unset GAMECTL_BUNDLED
+            source "$1/src/core/00_header.sh"
+            source "$1/src/tui/71_previews.sh"
+            declare -F preview_dashboard >/dev/null
         ' _ "$REPO_ROOT" || exit 1
 
         grep -Fq '_scan_json_store_entries' "$REPO_ROOT/src/steam/20_discovery.sh" || exit 1
+        ! grep -Fq 'src/core/10_utils.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
+        ! grep -Fq 'src/runners/40_wrappers.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
+        ! grep -Fq 'src/runners/50_launcher.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
+        ! grep -Fq 'src/tui/71_previews.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
         ! grep -Fq 'src/steam/20_discovery.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
         ! grep -Fq 'src/steam/30_downloader.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
         ! grep -Fq 'src/steam/31_manifests.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
@@ -3814,7 +3834,7 @@ test_r3_loc_budget_and_submodule_autoloader_contract() {
         local f f_loc
         for f in "$REPO_ROOT"/src/*/*.sh; do
             f_loc=$(wc -l < "$f")
-            [ "$f_loc" -le 900 ] || exit 1
+            [ "$f_loc" -le 700 ] || exit 1
         done
     )
 }
