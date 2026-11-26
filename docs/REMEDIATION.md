@@ -366,3 +366,17 @@ Menghentikan siklus *monkey-patch treadmill* secara permanen dengan menerapkan p
 - `[x] Packet R3.1B`: Split `src/steam/30_downloader.sh` (1.249 LOC) menjadi `30_downloader.sh` (594 LOC), `33_download_telemetry.sh` (264 LOC), dan `34_download_monitor.sh` (399 LOC) via sibling auto-loader `GAMECTL_BUNDLED`, plus promosi keluar dari `LEGACY_CEILING`.
 - `[x] Packet R3.1C`: Split `src/tui/70_dashboard.sh` (1.018 LOC) menjadi `70_dashboard.sh` (556 LOC) dan `73_search_tui.sh` (464 LOC) via sibling auto-loader `GAMECTL_BUNDLED`, plus promosi keluar dari `LEGACY_CEILING`.
 - `[x] Packet R3.1D`: Perketat Test 41 (auto-loader `30_downloader.sh`/`70_dashboard.sh` & 0 modul >1.000 LOC), perbarui `DEVELOPMENT.md`, rebuild `bin/gamectl`, dan lulus `STRICT_LINT=1 make lint`, `./scripts/build.sh --check`, serta `make test`.
+
+---
+
+# REMEDIATION WORK PACKET 3.2: LEGACY LOC DEGRADATION (`31_manifests`, `35_fixes`, `41_proton_prefix`, `download.rs`)
+
+- **Track**: Remediation / Sub-600 LOC Legacy Promotion & Rust Engine Decomposition
+- **Status**: [ COMPLETED & VERIFIED ]
+- **Prasyarat**: Remediation Work Packet 3.1 (`4e1ba4f`)
+- **Ringkasan Eksekusi**:
+  - Split `src/steam/31_manifests.sh` (989 LOC) -> `31_manifests.sh` + `36_luatools_auth.sh` + `37_app_types.sh` (semua <= 600 LOC) dengan sibling auto-loader `GAMECTL_BUNDLED`.
+  - Split `src/steam/35_fixes.sh` (981 LOC) -> `35_fixes.sh` + `38_fixes_tui.sh` (semua <= 600 LOC) dengan sibling auto-loader `GAMECTL_BUNDLED`.
+  - Split `src/runners/41_proton_prefix.sh` (980 LOC) -> `41_proton_prefix.sh` + `43_proton_manager.sh` (semua <= 600 LOC) dengan sibling auto-loader `GAMECTL_BUNDLED` & `40_wrappers.sh`.
+  - Promosikan `31_manifests.sh`, `35_fixes.sh`, dan `41_proton_prefix.sh` keluar dari `LEGACY_CEILING` di `scripts/check_loc_budget.sh` dan perketat batas modul di Test 41 (`<= 900` LOC).
+  - Dekomposisi `crates/depot-dl/src/download.rs` (1.382 LOC) menjadi modul direktori `crates/depot-dl/src/download/` (`mod.rs`, `planner.rs`, `worker.rs`, `io.rs`, `tests.rs`); diverifikasi dan dikompilasi di node `serv` (`rustc 1.99.1`, Debian GLIBC 2.41).

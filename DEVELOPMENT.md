@@ -24,17 +24,21 @@ src/
 │   ├── 10_utils.sh             # GBE template resolver, atomic config/KV helpers, zip audit, ephemeral cache tier
 │   ├── 12_tui_primitives.sh    # Zero-flicker FZF dialogs, tty input flush, tui_run_engine, screen lifecycle
 │   ├── 14_saves.sh             # 3-slot savegame snapshot rotation, rollback recovery, Wine prefix save collector
-│   └── 16_steamstub.sh         # SteamStub (.bind ELF & PE) forensic detector and unpacker
+│   ├── 16_steamstub.sh         # SteamStub (.bind ELF & PE) forensic detector and unpacker
+│   └── 18_process_runtime.sh   # Binary resolution, ELF/shebang arch detection, active process & crash SSoT
 ├── steam/
 │   ├── 20_discovery.sh         # Multi-path Steam, Epic, Amazon & standalone scanner, active process guard
 │   ├── 21_shortcuts_artwork.sh # FreeDesktop .desktop generator, Steam Grid artwork & shortcuts.vdf writer
 │   ├── 25_identity.sh          # SteamID64 generation, active SteamID resolution, persona configuration, set-id
 │   ├── 30_downloader.sh        # Standalone native CDN downloader, depot OS filtering, local library routing
-│   ├── 31_manifests.sh         # Multi-provider manifest harvester, DLC extractor, LuaTools auth session
+│   ├── 31_manifests.sh         # Multi-provider manifest harvester, DLC extractor & ZIP/Lua payload audit
 │   ├── 32_steam_bridge.sh      # Explicit opt-in Steam Client & SLSsteam compatibility bridge
 │   ├── 33_download_telemetry.sh # ACF download state, bytes formatter & depot-dl progress parser
 │   ├── 34_download_monitor.sh  # Interactive download monitor TUI & telemetry preview
-│   └── 35_fixes.sh             # Community & Online-Fix harvester, backup snapshot, atomic revert
+│   ├── 35_fixes.sh             # Community & Online-Fix harvester, backup snapshot, atomic revert
+│   ├── 36_luatools_auth.sh     # LuaTools authentication session, token auto-refresh & TUI wizard
+│   ├── 37_app_types.sh         # Steam catalog app-type SSoT, batch classifier & appdetails parser
+│   └── 38_fixes_tui.sh         # Community fixes TUI picker, preview pane & Steam client hot-reload
 ├── stores/
 │   ├── 00_store_interface.sh   # Unified store adapter registry, capability probe & store_dispatch()
 │   ├── 10_store_steam.sh       # Built-in Steam/Standalone adapter wrapping CDN downloader & offline DLC sync
@@ -43,8 +47,9 @@ src/
 │   └── 40_store_amazon.sh      # Optional Amazon Prime Gaming adapter (nile) & gamectl amazon CLI
 ├── runners/
 │   ├── 40_wrappers.sh          # Wrapper config loader, developer profiler, wrapper builder, global settings
-│   ├── 41_proton_prefix.sh     # Windows runner, wineserver resolver, DLL overrides, GE-Proton manager, manage_prefix
+│   ├── 41_proton_prefix.sh     # DLL overrides detector, Windows runner env contract & manage_prefix
 │   ├── 42_graphics_isolation.sh # Vulkan/GPU capability probe, Gamescope args, cgroups v2 scope, Bubblewrap sandbox
+│   ├── 43_proton_manager.sh    # GE-Proton & Wine runner discovery, SHA-512 installer & lifecycle manager
 │   ├── 50_launcher.sh          # Process HUD, launch_game lifecycle, PipeWire audio, wineserver guard, cli_launch
 │   ├── 51_remote_sync.sh       # SSH/Rsync & Rclone save synchronization and companion pull helpers
 │   └── 52_inject_runtime.sh    # Offline GBE Fork injector and mod/OnlineFix DLL override setup
