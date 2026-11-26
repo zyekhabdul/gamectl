@@ -50,6 +50,7 @@ src/
 │   ├── 41_proton_prefix.sh     # DLL overrides detector, Windows runner env contract & manage_prefix
 │   ├── 42_graphics_isolation.sh # Vulkan/GPU capability probe, Gamescope args, cgroups v2 scope, Bubblewrap sandbox
 │   ├── 43_proton_manager.sh    # GE-Proton & Wine runner discovery, SHA-512 installer & lifecycle manager
+│   ├── 44_native_runtime.sh    # Standalone Steam Runtime (Scout) SHA-256 provisioner & lifecycle
 │   ├── 50_launcher.sh          # Process HUD, launch_game lifecycle, PipeWire audio, wineserver guard, cli_launch
 │   ├── 51_remote_sync.sh       # SSH/Rsync & Rclone save synchronization and companion pull helpers
 │   └── 52_inject_runtime.sh    # Offline GBE Fork injector and mod/OnlineFix DLL override setup

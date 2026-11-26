@@ -18,9 +18,8 @@ case "${1:-}" in
             exit 1
         fi
         ;;
-    setup-gbe|gbe-setup|gbe-install|install-gbe)
-        setup_gbe_templates "${@:2}"
-        ;;
+    setup-gbe|gbe-setup|gbe-install|install-gbe) setup_gbe_templates "${@:2}" ;;
+    setup-runtime|runtime-setup|install-runtime) setup_native_runtime "${@:2}" ;;
     mod-overrides|onlinefix|onlinefix-setup)
         if [ -n "${2:-}" ]; then
             setup_onlinefix "$2" "${@:3}"
@@ -99,9 +98,7 @@ case "${1:-}" in
             exit 1
         fi
         ;;
-    get-steam-grid)
-        get_steam_grid_dir
-        ;;
+    get-steam-grid) get_steam_grid_dir ;;
     add-to-steam|add-steam|shortcut-steam)
         if [ -n "${2:-}" ]; then
             add_steam_shortcut "$2" "${3:-}"
@@ -110,9 +107,7 @@ case "${1:-}" in
             exit 1
         fi
         ;;
-    get-steam-shortcuts)
-        get_steam_shortcuts_vdf
-        ;;
+    get-steam-shortcuts) get_steam_shortcuts_vdf ;;
     dashboard|menu|--dashboard)
         dashboard_menu
         ;;
@@ -544,6 +539,8 @@ Usage:
                       Inject offline LAN runtime & saves; --all explicitly syncs Steam
   gamectl setup-gbe [--yes] [--force] [--linux-only|--win-only] [--dest <dir>]
                       Auto-download & provision Goldberg Emulator templates into ~/.local/share/gbe-fork/
+  gamectl setup-runtime [--yes] [--force] [--dry-run] [--source <file|url>] [--dest <dir>]
+                      Provision standalone Steam Runtime (Scout) into ~/.local/share/gamectl/runtime/
   gamectl mod-overrides <dir>
                       Setup P2P multiplayer compatibility & mod DLL overrides (alias: onlinefix)
   gamectl onlinefix <dir> (Alias for mod-overrides)
