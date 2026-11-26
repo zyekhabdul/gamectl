@@ -1725,8 +1725,8 @@ test_wp34c_tui_engine_routing_unification_contract() {
             echo "Found launch_rc check_fzf_status layer violation in 70_dashboard.sh" >&2
             exit 1
         fi
-        if grep -nE 'if (revert_game_fix|install_game_fix) ' "$REPO_ROOT/src/steam/35_fixes.sh" | grep -q .; then
-            echo "Found unrouted fix engine call in 35_fixes.sh" >&2
+        if grep -nE 'if (revert_game_fix|install_game_fix) ' "$REPO_ROOT"/src/steam/3[58]_*.sh | grep -q .; then
+            echo "Found unrouted fix engine call in src/steam/3[58]_*.sh" >&2
             exit 1
         fi
 
@@ -3772,7 +3772,7 @@ test_r3_loc_budget_and_submodule_autoloader_contract() {
         rm -rf "$t_dir/src" && mkdir -p "$t_dir/src"
         ! bash "$REPO_ROOT/scripts/check_loc_budget.sh" "$t_dir" 2>/dev/null || exit 1
 
-        # Unbundled sibling auto-loaders load 21_shortcuts_artwork.sh, 33/34, and 72/73
+        # Unbundled sibling auto-loaders load 21_shortcuts_artwork.sh, 33/34, 36/37, 38, 43, and 72/73
         bash -c '
             set -e
             unset GAMECTL_BUNDLED
@@ -3786,6 +3786,19 @@ test_r3_loc_budget_and_submodule_autoloader_contract() {
             declare -F list_downloads >/dev/null
             declare -F preview_download >/dev/null
             declare -F list_downloads_interactive >/dev/null
+            source "$1/src/steam/31_manifests.sh"
+            declare -F get_valid_luatools_token >/dev/null
+            declare -F classify_steam_app_types >/dev/null
+            source "$1/src/steam/35_fixes.sh"
+            declare -F restart_steam_client >/dev/null
+            declare -F preview_fix_entry >/dev/null
+            declare -F manage_game_fixes_interactive >/dev/null
+            source "$1/src/runners/41_proton_prefix.sh"
+            declare -F list_runner_dirs >/dev/null
+            declare -F find_runner >/dev/null
+            declare -F proton_list >/dev/null
+            declare -F proton_install >/dev/null
+            declare -F proton_remove >/dev/null
             source "$1/src/tui/70_dashboard.sh"
             declare -F search_steam >/dev/null
             declare -F search_stores_interactive >/dev/null
@@ -3794,11 +3807,14 @@ test_r3_loc_budget_and_submodule_autoloader_contract() {
         grep -Fq '_scan_json_store_entries' "$REPO_ROOT/src/steam/20_discovery.sh" || exit 1
         ! grep -Fq 'src/steam/20_discovery.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
         ! grep -Fq 'src/steam/30_downloader.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
+        ! grep -Fq 'src/steam/31_manifests.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
+        ! grep -Fq 'src/steam/35_fixes.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
+        ! grep -Fq 'src/runners/41_proton_prefix.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
         ! grep -Fq 'src/tui/70_dashboard.sh' "$REPO_ROOT/scripts/check_loc_budget.sh" || exit 1
         local f f_loc
         for f in "$REPO_ROOT"/src/*/*.sh; do
             f_loc=$(wc -l < "$f")
-            [ "$f_loc" -le 1000 ] || exit 1
+            [ "$f_loc" -le 900 ] || exit 1
         done
     )
 }
