@@ -4161,6 +4161,191 @@ PY
 }
 run_test "Standalone Native Runtime Provisioner (SHA-256, Tar Audit & XDG Precedence)" test_standalone_native_runtime_provisioner_contract
 
+# Test 44: Zombie-Safe Liveness, Event-Driven fzf --listen Refresh & Stale-Selection Guard
+test_event_driven_tui_process_exit_sync_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_ev_tui_XXXXXX")
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        export XDG_CACHE_HOME="$t_dir/cache"
+        mkdir -p "$HOME/Games/CrashGame" "$XDG_RUNTIME_DIR/active_games" "$XDG_RUNTIME_DIR/tui_listeners" "$XDG_CACHE_HOME/gamectl"
+        printf '#!/usr/bin/env bash\nexit 0\n' > "$HOME/Games/CrashGame/crash.sh"
+        chmod +x "$HOME/Games/CrashGame/crash.sh"
+        printf '233150\n' > "$HOME/Games/CrashGame/steam_appid.txt"
+
+        unset GAMECTL_BUNDLED
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/steam/30_downloader.sh"
+        source "$REPO_ROOT/src/runners/40_wrappers.sh"
+        source "$REPO_ROOT/src/runners/50_launcher.sh"
+        source "$REPO_ROOT/src/tui/70_dashboard.sh"
+
+        # 1. SoC invariant: core process runtime has zero TUI chrome strings
+        if grep -qE 'Game Library|Press Enter on a running game' "$REPO_ROOT/src/core/18_process_runtime.sh"; then
+            exit 1
+        fi
+
+        # 2. Crash hint detection
+        local crash_log
+        crash_log="$(get_game_log_file "$HOME/Games/CrashGame" "crash.sh")"
+        printf './launch.sh: line 79: 12345 Segmentation fault         (core dumped) ./game\n' > "$crash_log"
+        inspect_game_log_hint "$crash_log" | grep -Fq 'fatal signal' || exit 1
+
+        # 3. Zombie PID rejection & list_active_games pruning
+        python3 - "$XDG_RUNTIME_DIR" "$HOME/Games/CrashGame" "$crash_log" "$REPO_ROOT" <<'PY_ZOMBIE'
+import os, subprocess, sys, time
+rdir, gdir, clog, root = sys.argv[1:5]
+proc = subprocess.Popen(["true"])
+for _ in range(40):
+    with open(f"/proc/{proc.pid}/stat") as fh:
+        st = fh.read().split(") ")[1].split()[0]
+    if st == "Z":
+        break
+    time.sleep(0.02)
+os.kill(proc.pid, 0)
+with open(f"{rdir}/active_games/{proc.pid}.info", "w") as fh:
+    fh.write(f"PID={proc.pid}\nTITLE=CrashGame\nDIR={gdir}\nBIN=crash.sh\nLOG={clog}\n")
+env = os.environ.copy()
+env["XDG_RUNTIME_DIR"] = rdir
+res = subprocess.run(
+    ["bash", "-c", f'source "{root}/src/core/00_header.sh"; source "{root}/src/core/10_utils.sh"; source "{root}/src/core/18_process_runtime.sh"; ! is_pid_running {proc.pid} && [ -z "$(list_active_games)" ]'],
+    env=env, text=True, capture_output=True
+)
+proc.wait()
+assert res.returncode == 0, res.stderr
+assert not os.path.exists(f"{rdir}/active_games/{proc.pid}.info")
+PY_ZOMBIE
+
+        # 4. Event-driven fzf --listen live reload + header update via notify_tui_listeners (zero polling)
+        if tui_supports_live_events; then
+            python3 - "$REPO_ROOT" "$t_dir" "$crash_log" <<'PY_FZF'
+import json, os, pty, select, subprocess, sys, time
+root, t_dir, crash_log = sys.argv[1:4]
+sock = os.path.join(t_dir, "runtime", "tui_listeners", "l_test.sock")
+master, slave = pty.openpty()
+env = os.environ.copy()
+env["TERM"] = "xterm-256color"
+env["GAMECTL_PREVIEW_BIN"] = os.path.join(root, "bin", "gamectl")
+env["GAMECTL_ACTIVE_STORE"] = "ALL"
+proc = subprocess.Popen(
+    [
+        "fzf", "--delimiter=\t", "--with-nth=1,2,3",
+        f"--listen={sock}",
+        "--border-label=  ╢ gamectl :: Game Library [Store: ALL] [Running: 1] ╟  ",
+        "--header=Enter: Launch/Manage │ Esc: Dashboard\n[RUNNING (1)] CrashGame",
+        '--bind=f12:transform("$GAMECTL_PREVIEW_BIN" --tui-library-sync "$GAMECTL_ACTIVE_STORE")',
+    ],
+    stdin=subprocess.PIPE, stdout=slave, stderr=slave, env=env, close_fds=True
+)
+os.close(slave)
+proc.stdin.write(f"233150\tCrashGame\t[RUNNING] [STANDALONE]\t{env['HOME']}/Games/CrashGame\tcrash.sh\n".encode())
+proc.stdin.close()
+
+for _ in range(40):
+    if os.path.exists(sock):
+        break
+    time.sleep(0.05)
+assert os.path.exists(sock), "fzf listener socket missing"
+time.sleep(0.15)
+
+ev_rc = subprocess.run(
+    ["bash", "-c", f'source "{root}/src/core/00_header.sh"; source "{root}/src/core/10_utils.sh"; source "{root}/src/core/18_process_runtime.sh"; record_game_exit_event 77777 "CrashGame" "$HOME/Games/CrashGame" "{crash_log}"; notify_tui_listeners'],
+    env=env, text=True, capture_output=True
+)
+assert ev_rc.returncode == 0, ev_rc.stderr
+
+reloaded = False
+for _ in range(30):
+    st = subprocess.run(["curl", "-sS", "--unix-socket", sock, "http://localhost/"], capture_output=True, text=True)
+    if st.returncode == 0 and st.stdout:
+        data = json.loads(st.stdout)
+        cur = (data.get("current") or {}).get("text", "")
+        if "CrashGame" in cur and "[RUNNING]" not in cur:
+            reloaded = True
+            break
+    time.sleep(0.05)
+
+subprocess.run(["curl", "-sS", "--unix-socket", sock, "-X", "POST", "http://localhost/", "-d", "abort"], capture_output=True)
+proc.wait(timeout=3)
+
+chunks = []
+while select.select([master], [], [], 0.05)[0]:
+    try:
+        data = os.read(master, 65536)
+    except OSError:
+        break
+    if not data:
+        break
+    chunks.append(data.decode("utf-8", errors="replace"))
+os.close(master)
+screen = "".join(chunks)
+assert reloaded, f"fzf did not reload clean row; screen={screen}"
+assert "[CRASHED] CrashGame exited" in screen, f"header missing crash banner; screen={screen}"
+PY_FZF
+        fi
+
+        # 5. Stale-Selection Guard: [RUNNING] row with empty active_games never relaunches
+        local fake_bin="$t_dir/mock_bin"
+        mkdir -p "$fake_bin"
+        cat <<EOF_FZF > "$fake_bin/fzf"
+#!/usr/bin/env bash
+cat >/dev/null
+cnt_f="$t_dir/fzf_calls"
+c=0; [ -f "\$cnt_f" ] && c=\$(cat "\$cnt_f")
+c=\$((c + 1)); echo "\$c" > "\$cnt_f"
+if [ "\$c" -eq 1 ]; then
+    printf '\n233150\tCrashGame\t[RUNNING] [STANDALONE]\t%s/Games/CrashGame\tcrash.sh\n' "$HOME"
+    exit 0
+fi
+exit 130
+EOF_FZF
+        chmod +x "$fake_bin/fzf"
+        T_RELAUNCH_FLAG="$t_dir/relaunched" T_MODAL_OUT="$t_dir/modal.txt" PATH="$fake_bin:$PATH" python3 - "$REPO_ROOT" <<'PY_STALE' || exit 1
+import os, pty, select, subprocess, sys
+root = sys.argv[1]
+master, slave = pty.openpty()
+script = f'''
+set -e
+unset GAMECTL_BUNDLED
+source "{root}/src/core/00_header.sh"
+source "{root}/src/core/10_utils.sh"
+source "{root}/src/steam/20_discovery.sh"
+source "{root}/src/steam/30_downloader.sh"
+source "{root}/src/runners/40_wrappers.sh"
+source "{root}/src/runners/50_launcher.sh"
+source "{root}/src/tui/70_dashboard.sh"
+launch_game() {{ touch "$T_RELAUNCH_FLAG"; return 1; }}
+tui_modal_notice() {{ printf "%s\\n%s\\n" "$1" "$2" > "$T_MODAL_OUT"; return 0; }}
+library_menu false
+'''
+proc = subprocess.Popen(["bash", "-c", script], stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+os.close(slave)
+while True:
+    if select.select([master], [], [], 0.05)[0]:
+        try:
+            if not os.read(master, 4096):
+                break
+        except OSError:
+            break
+    elif proc.poll() is not None:
+        break
+proc.wait(timeout=3)
+os.close(master)
+assert proc.returncode == 0, f"library_menu exited {proc.returncode}"
+assert not os.path.exists(os.environ["T_RELAUNCH_FLAG"]), "stale [RUNNING] row triggered relaunch"
+with open(os.environ["T_MODAL_OUT"]) as fh:
+    modal = fh.read()
+assert "Game No Longer Running (CrashGame)" in modal, modal
+assert "fatal signal" in modal, modal
+PY_STALE
+    )
+}
+run_test "Event-Driven TUI Process Exit Sync & Stale Guard" test_event_driven_tui_process_exit_sync_contract
+
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "${C_GREEN}[ VERIFIED ] All remediation contracts passed with Exit 0 ($PASSED_TESTS/$TOTAL_TESTS).${C_RST}"
