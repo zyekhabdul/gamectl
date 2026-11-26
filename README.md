@@ -68,17 +68,19 @@ Low memory use and fast startup are design goals. Publish measured values only w
 ## Core Capabilities
 
 - **Small Native Runtime**: Bash, `fzf`, `jq`, and a native Rust downloader; no embedded browser runtime.
-- **Dynamic Multi-Library Autodetection**: Automatically scans and aggregates games across all Steam library partitions (`libraryfolders.vdf` + ACF manifests), portable directories (`~/Games/`), Lutris paths, and custom locations via `~/.config/gamectl/libraries` or `GAMECTL_LIBRARY_DIRS`.
-- **Split-Pane Live Inspection Cockpit**: Left pane lists your library with ANSI status badges; right pane streams real-time binary architectures (ELF 32/64-bit, PE32/PE32+), runner paths, wrapper profiles, LAN multiplayer personas, and savegame sizes.
+- **Dynamic Multi-Library & Multi-Store Discovery**: Automatically scans Steam (`libraryfolders.vdf` + ACF), optional GOG (`gogdl`/`lgogdownloader`), Epic (`legendary`), Amazon (`nile`), Lutris, and standalone directories (`~/Games/`, `~/.config/gamectl/libraries`, `GAMECTL_LIBRARY_DIRS`) without duplicate entries.
+- **Split-Pane Live Inspection & Event-Driven Exit Sync**: Left pane lists your library with ANSI status badges (`[RUNNING]`, `[CRASHED]`, `[EXITED]`); `fzf --listen` refreshes automatically when a game exits, surfaces missing ELF shared libraries and crash hints, and guards against stale selections.
+- **Standalone Steam Runtime (Scout) & Native Fallback (`gamectl setup-runtime`)**: Provisions Valve's Steam Runtime into `~/.local/share/gamectl/runtime/steam-runtime` with SHA-256 verification and tar traversal/link checks. Native Linux launches prioritize the standalone runtime before Steam installs (opt out with `native_runtime=host` or `GAMECTL_NATIVE_RUNTIME=host`).
 - **cgroups v2 Process Tree Isolation (`gamectl launch --scope`)**: Encapsulates game execution in a dedicated systemd user scope (`gamectl-<title>-<pid>`), terminating all background helpers (`winedevice.exe`, `explorer.exe`, crash reporters) atomically on exit with zero zombie processes.
 - **Automated PRIME Hybrid dGPU Offload (`gamectl launch --prime`)**: Auto-probes `/sys/bus/pci/devices/` and routes rendering to secondary discrete NVIDIA (`__NV_PRIME_RENDER_OFFLOAD=1`), AMD, or Intel Arc (`DRI_PRIME=1`) controllers without manual environment variable hacking.
 - **Rootless Bubblewrap Security Sandbox (`gamectl launch --sandbox`)**: Mounts host root as read-only and shields private directories (`~/.ssh`, `~/.gnupg`, browser cookies, and `.env` credentials) inside a hardened tmpfs namespace while transparently passing Wayland/X11 and PipeWire audio sockets.
 - **Disaster-Proof Savegame Snapshots**: Automatically creates a 3-slot rotating backup (`slot1`, `slot2`, `slot3`) before each game launch, safeguarding your save states against crashes and dirty shutdowns.
-- **Decentralized LAN Steam Emulator (`gamectl inject`)**: Converts Valve binaries (Linux native `.so` and Windows `.dll` x86/x64) into portable standalone runtimes featuring local `./saves` redirection and automated `steam_settings/DLC.txt` generation.
+- **Decentralized LAN Steam Emulator (`gamectl inject`, `gamectl setup-gbe`)**: Auto-provisions GBE Fork templates, generates `steam_settings/steam_interfaces.txt` from original Steamworks binaries, redirects saves to `./saves`, generates `steam_settings/DLC.txt`, and guards against unshielded Steamworks or SteamStub binaries (`detect-steamstub` / `unpack-stub`).
 - **Isolated Windows Runner & Prefix Engine**: Discovers installed Windows compatibility runners (`umu-run` -> `GE-Proton` / Steam `Proton` -> `wine`) and maintains strictly isolated prefixes in `$GAME_DIR/pfx`, keeping host `~/.wine` pristine.
 - **Modular Performance Wrappers**: On-the-fly toggle for `gamemoderun`, `mangohud`, `gamescope` dynamic FSR upscaling, and Mesa multithreaded GL via interactive dialogs (`<Ctrl-O>`) or CLI flags.
 - **LAN Multi-Identity & SteamID Manager (`gamectl set-id`)**: Generates deterministic 17-digit SteamID64 tokens and distinct LAN gamer tags to prevent co-op network collisions, with custom peer discovery (`custom_broadcasts.txt`).
-- **Standalone CDN Downloader (`gamectl download`)**: Uses manifest providers and native Rust streaming (`gamectl-depot-dl`) without requiring Steam Client. Missing manifests, keys, or failed provisioning produce errors instead of switching clients.
+- **Standalone CDN Downloader (`gamectl download`)**: Uses manifest providers and native Rust streaming (`gamectl-depot-dl`) without requiring Steam Client, enforcing an engine-level DLC guard (`--allow-dlc` to opt in). Missing manifests, keys, or failed provisioning produce errors instead of switching clients.
+- **Optional Multi-Store Adapters & Unified Auth Hub (`gamectl auth`, `gamectl search-stores`)**: Integrates optional GOG (`gogdl`/`lgogdownloader`), Epic (`legendary`), and Amazon (`nile`) CLIs alongside Steam/Standalone, with offline-safe session checks and cross-store search (`GAME`/`DLC`/`DEMO`/`MOD`/`SOUNDTRACK`/`TOOL`/`APP`).
 - **Mod DLL Overrides & Local P2P Configuration (`gamectl mod-overrides`)**: Detects mod loaders and local compatibility files and prepares `WINEDLLOVERRIDES` without registering Steam entitlements.
 - **Headless GE-Proton Release Manager (`gamectl proton-*`)**: Fetches upstream GitHub releases, streams tarball installation directly into `~/.local/share/Steam/compatibilitytools.d/`, and prunes older versions safely.
 - **Wine Prefix Swiss Army Knife (`gamectl pfx`) & Wineserver Guard**: Dedicated maintenance toolkit (`winecfg`, `regedit`, `cmd`, `shell`, `winetricks`, `kill`, `clean`) with deterministic wineserver teardown (`wineserver -w` / `-k`) to eliminate registry lock contention.
@@ -94,14 +96,16 @@ The interactive TUI library navigation provides instantaneous single-keystroke o
 
 | Shortcut | Action Description |
 | :--- | :--- |
-| `<ENTER>` | Launch Game (Automatic save snapshot + runner resolution + wrappers) |
+| `<ENTER>` | Launch Game (or open Running Process Controller if `[RUNNING]`) |
+| `<Tab>` | Cycle Store Filter (`ALL -> STEAM -> GOG -> EPIC -> AMAZON -> STANDALONE`) |
+| `<Alt-S>` | Open Store Filter Picker (Library) / Switch to Cross-Store Search (Search) |
 | `<Ctrl-O>` | Configure Runtime Wrappers (GameMode / MangoHud / Gamescope FSR / Mesa GL) |
-| `<Ctrl-P>` | Configure LAN Multiplayer Gamer Tag & SteamID64 Persona |
-| `<Ctrl-I>` | Inject Decentralized LAN Runtime & Entitlement Sync |
-| `<Ctrl-S>` | Sync Portable Savegame to Remote Companion Host via SSH |
-| `<Ctrl-B>` | Create Manual Savegame Snapshot Slot |
-| `<Ctrl-F>` | Search Steam Store Catalog & Audit ProtonDB Rating |
-| `<Ctrl-D>` | Open Background Download Monitor |
+| `<Ctrl-P>` | Configure LAN Multiplayer Gamer Tag & SteamID64 Persona (Process HUD on Dashboard) |
+| `<Ctrl-I>` | Inject Decentralized LAN Runtime & Portable Saves |
+| `<Ctrl-S>` | Sync Portable Savegame to Remote Companion Host via SSH / Rclone |
+| `<Ctrl-B>` / `<Ctrl-R>` | Create Manual Save Snapshot (`Ctrl-B`) / Restore Snapshot Slot (`Ctrl-R`) |
+| `<Ctrl-F>` / `<Ctrl-X>` | Search Steam Store & ProtonDB (`Ctrl-F`) / Community Fixes (`Ctrl-X`) |
+| `<Ctrl-D>` / `<Ctrl-L>` | Create Desktop Entry (`Ctrl-D`) / View Activity Logs (`Ctrl-L`) |
 | `<ESC>` / `<Ctrl-C>` | Return to Master Dashboard Hub / Exit |
 
 ---
@@ -125,7 +129,7 @@ paru -S gamectl-git
 ```bash
 # Build and install Debian package:
 make pkg-deb
-sudo dpkg -i packaging/debian/gamectl_1.4.0_amd64.deb
+sudo dpkg -i packaging/debian/gamectl_1.5.0_amd64.deb
 sudo apt install -f
 ```
 
@@ -179,6 +183,7 @@ gamectl               # Launch Master Dashboard Hub TUI
 gamectl library       # Open Game Library TUI directly (alias: list-ui)
 gamectl config        # Open global configuration editor (alias: configure)
 gamectl doctor        # Run 8-layer system & GPU health diagnostics (alias: audit)
+gamectl logs          # View centralized runtime activity logs
 ```
 
 ### 2. Launching Games
@@ -267,6 +272,14 @@ gamectl pfx "$HOME/Games/MyGame" clean -y
 # Prepare the standalone LAN runtime and portable saves without Steam sync:
 gamectl inject "$HOME/Games/Limbo" 48000
 
+# Provision Goldberg templates and standalone Steam Runtime (Scout):
+gamectl setup-gbe
+gamectl setup-runtime
+
+# Inspect or unpack SteamStub DRM binaries (Windows PE & Linux ELF .bind):
+gamectl detect-steamstub "$HOME/Games/MyGame/game.bin"
+gamectl unpack-stub "$HOME/Games/MyGame/game.bin"
+
 # Inject standalone LAN runtime only (zero Steam client sync):
 gamectl inject "$HOME/Games/Limbo" 48000 --no-sync
 
@@ -281,6 +294,9 @@ gamectl set-id "MyGamerTag" auto --global
 # Download supported game files and prepare the standalone runtime:
 gamectl download 48000 "$HOME/Games/Limbo" "LIMBO"
 
+# Allow downloading a DLC AppID explicitly (otherwise blocked with base-game hint):
+gamectl download 123456 "$HOME/Games/MyGame" --allow-dlc
+
 # Download game assets only without injection:
 gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" --raw
 
@@ -289,6 +305,29 @@ gamectl download 48000 "$HOME/Games/Limbo" "LIMBO" -f
 
 # Monitor active and completed download tasks:
 gamectl downloads
+gamectl download-status
+```
+
+### 8a. Multi-Store Adapters, Unified Auth & Cross-Store Search
+```bash
+# Inspect registered stores (steam, gog, epic, amazon) and offline auth state:
+gamectl stores status
+gamectl auth status
+
+# Delegate authentication to native optional store CLIs or LuaTools:
+gamectl auth gog        # or: gamectl gog auth
+gamectl auth epic       # or: gamectl epic auth
+gamectl auth amazon     # or: gamectl amazon auth
+gamectl auth luatools <code|token|session.json>
+
+# Search across all available stores (or filter to one store):
+gamectl search-stores "Hollow Knight"
+gamectl search-stores "Cyberpunk" --store gog
+
+# Store-specific CLI commands (optional CLIs: gogdl/lgogdownloader, legendary, nile):
+gamectl gog <status|auth|search|download|sync>
+gamectl epic <status|auth|search|download|sync|launch>
+gamectl amazon <status|auth|search|download|sync>
 ```
 
 ### 9. Legacy Steam Bridge Commands (Explicit Opt-In)
@@ -338,9 +377,12 @@ gamectl restart-steam
 ```bash
 # Synchronize local savegame snapshots to configured remote companion host:
 gamectl --sync "$HOME/Games/Terraria" "Terraria"
+gamectl sync-pull "$HOME/Games/Terraria" "Terraria"
 
-# Create immediate manual save snapshot:
+# Create or restore savegame snapshot slots (1-3) and inspect Wine prefix saves:
 gamectl --backup "$HOME/Games/Terraria"
+gamectl restore "$HOME/Games/Terraria" 1
+gamectl scan-saves "$HOME/Games/WindowsGame"
 ```
 
 ---
@@ -356,7 +398,9 @@ gamectl --backup "$HOME/Games/Terraria"
 | `~/.config/gamectl/remote_host` | Hostname or IP of companion remote sync node (`user@hostname`). |
 | `~/.config/gamectl/persona` | Global default player gamer tag and SteamID64. |
 | `GAMECTL_LIBRARY_DIRS` | Environment variable to inject extra library search paths dynamically. |
-| `XDG_RUNTIME_DIR/gamectl-$UID/` | Ephemeral runtime directory for active game tracking and locks. |
+| `GAMECTL_RUNTIME_DIR` | Override standalone Steam Runtime directory (default `~/.local/share/gamectl/runtime/steam-runtime`). |
+| `GAMECTL_NATIVE_RUNTIME` | Set to `host` / `off` to bypass Steam Runtime wrapper for native Linux games. |
+| `XDG_RUNTIME_DIR/gamectl-$UID/` | Ephemeral runtime directory for active game tracking, exit events, and locks. |
 
 ---
 
@@ -368,20 +412,24 @@ gamectl/
 │   └── gamectl          # Monolithic standalone compiled executable (source-to-bundle)
 ├── completions/
 │   └── gamectl.bash     # Shell autocompletion script (Bash / Zsh)
+├── crates/depot-dl/     # Native Rust Valve CDN downloader (gamectl-depot-dl)
 ├── docs/
 │   ├── ARCHITECTURE.md  # Deep dive into headless Linux game management architecture
 │   └── GUIDE.md         # Operational handbook, prefix isolation, and disaster recovery
 ├── packaging/
-│   └── arch/            # Arch Linux PKGBUILD packaging recipes
+│   ├── arch/            # Arch Linux PKGBUILD & AUR recipes
+│   └── debian/          # Debian .deb packaging script
 ├── scripts/
 │   ├── build.sh         # Source-to-bundle deterministic compilation script
-│   └── build-depot-dl.sh # Native Rust Steam CDN depot downloader compiler
+│   ├── build-depot-dl.sh # Native Rust Steam CDN depot downloader compiler
+│   └── check_loc_budget.sh # Module LOC budget & legacy ratchet guard
 ├── src/
-│   ├── core/            # Header constants, ANSI palette, snapshot engine, utils
+│   ├── core/            # Constants, utils, TUI primitives, saves, SteamStub, process runtime
 │   ├── diagnostics/     # 8-layer system health audit and ProtonDB client
-│   ├── runners/         # Windows runners, prefix manager, DLL overrides, launcher HUD
-│   ├── steam/           # Multi-path discovery, identity, and headless downloader
-│   ├── tui/             # Master dashboard hub, preview cards, interactive search
+│   ├── runners/         # Wrappers, Proton/Wine prefix & runtime provisioners, launcher, sync, GBE
+│   ├── steam/           # Multi-path discovery, identity, CDN downloader, manifests, fixes
+│   ├── stores/          # Store interface registry & Steam/GOG/Epic/Amazon adapters
+│   ├── tui/             # Master dashboard hub, preview cards, multi-store & Steam search
 │   └── main.sh          # Subshell exports and CLI command dispatcher
 ├── tests/
 │   └── test_cli.sh      # Comprehensive regression & integrity harness (50+ tests)
