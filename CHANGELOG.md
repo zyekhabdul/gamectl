@@ -6,6 +6,29 @@ All notable changes to `gamectl` are documented in this file according to [Keep 
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-26
+
+### Added
+- **Standalone CDN downloader (`gamectl download`)**: the native Rust helper `gamectl-depot-dl` streams depots from Valve CDN without Steam Client. Standalone mode is the default (`--standalone`; legacy bridge only via `--sls`). Includes platform depot filtering (`--os linux|windows`), `+x` for downloaded Linux ELFs, full DLC manifest resolution (`harvest-dlc`), Hubcap/Ryuu/Sushi/LuaTools manifest providers, and download telemetry (`downloads`, `download-status`).
+- **Optional multi-store adapters**: `gamectl stores [list|status]`, `gamectl gog` (gogdl / lgogdownloader), `gamectl epic` (legendary, including `launch`), and `gamectl amazon` (nile). External CLIs are optional; when one is missing, `doctor` reports `[OPT]` instead of a warning. The scanner tags installed GOG/Epic/Amazon games with their store and stops listing them a second time as `STANDALONE`.
+- **Unified auth hub (`gamectl auth [status|gog|epic|amazon|luatools]`)**: shows session status for every store without network access and hands login to each store's own CLI. gamectl never stores or prints secrets.
+- **Cross-store search (`gamectl search-stores <query> [--store all|steam|gog|epic|amazon]`)**: validated 7-column TSV with canonical item types (`GAME`, `DLC`, `DEMO`, `MOD`, `SOUNDTRACK`, `TOOL`, `APP`), plus a cross-store switcher in the search TUI.
+- **Library store filter**: `Tab` cycles `ALL -> STEAM -> GOG -> EPIC -> AMAZON -> STANDALONE`; `Alt-S` opens a store picker. `Ctrl-S` remains the remote sync palette.
+- **Steam catalog types and DLC guard**: `[GAME]`/`[DLC]` badges and a `Tab` type filter in Steam search. `gamectl download` refuses DLC AppIDs, suggests the base game, and accepts `--allow-dlc` to override. With no network, downloads continue without the type check.
+- **Standalone Steam Runtime (`gamectl setup-runtime`)**: installs Steam Runtime (Scout) into `~/.local/share/gamectl/runtime/steam-runtime` after SHA-256 verification and a tar traversal/link audit, using a staged install with rollback. Native Linux launches look for a runtime in this order: `GAMECTL_STEAM_RUNTIME_RUN`, the standalone runtime, then an existing Steam install. Opt out with `native_runtime=host` or `GAMECTL_NATIVE_RUNTIME=host`. `doctor` audits the runtime.
+- **GBE Fork provisioning**: `gamectl setup-gbe` installs emulator templates. Injection generates `steam_settings/steam_interfaces.txt` from the original Steamworks library, and launch is blocked (hard-stop) for unshielded Steamworks binaries.
+- **SteamStub tooling**: `detect-steamstub` and `unpack-stub` for Windows PE and 32/64-bit Linux ELF `.bind` binaries.
+- **Save recovery and sync**: `restore <dir> [slot]`, `sync-pull`, Wine prefix save discovery (`scan-saves`, `collect-saves`, `restore-prefix-saves`), custom remote base paths, an optional rclone backend, and `--dry-run` for `pfx clean`, `fix-revert`, and sync.
+- **Diagnostics**: `doctor` layer 8 (sandbox and process isolation), a Vulkan/multilib audit, capability-based DXVK vs WineD3D selection, and `dev-profile` for WINEDEBUG/Vulkan loader/GBE logging.
+- **Live TUI process sync**: the library refreshes when a launched game exits (fzf `--listen` socket events), shows running/crash badges, and reports missing ELF shared libraries and crash log hints when a game fails to start.
+- **Centralized runtime logs**: `gamectl logs` and an in-dashboard activity log viewer.
+
+### Changed
+- Standalone operation is the architectural default. Steam Client / SLSsteam bridge commands (`entitle`, `sync-steam`, `deploy-manifest`, `restart-steam`, `inject --all`) run only when explicitly requested.
+- Split the sources into domain modules under a LOC budget (`scripts/check_loc_budget.sh`, at most 600 lines per new module). `make lint` runs ShellCheck in parallel, and `STRICT_LINT=1` fails when ShellCheck is missing.
+- Packaging: the `.deb` is built for the native architecture (amd64/arm64); Arch packages target `x86_64`/`aarch64` and build `gamectl-depot-dl` from locked Cargo sources; Nix builds it with `buildRustPackage`; the PyPI wheel contains only Python and the Bash bundle, with no native ELF.
+- `gamectl-depot-dl`: upgraded to `zip` 9.x and patched `rustls`, `tokio`, and `zstd` releases (OSV audit: 0 vulnerable crates). Added retries with exponential backoff, CDN server rotation, and a file-handle limit to prevent `EMFILE`.
+
 ### Fixed
 - Make the standalone project purpose authoritative, remove unsupported readiness/performance claims, and stop treating optional bridge YAML or Steam lock cleanup as standalone requirements.
 - Keep GBE injection and OnlineFix setup offline by default; Steam synchronization requires an explicit bridge action or `inject --all`.
@@ -14,6 +37,11 @@ All notable changes to `gamectl` are documented in this file according to [Keep 
 - Reject unsupported save recovery slots and path-like slot arguments before modifying current saves.
 - Load the core logging utilities in downloader regression fixtures, matching the bundled application's module dependencies.
 - Make `make lint` validate every shell file individually, including tests and shell completions. Previously, Bash parsed only the first file and treated the remaining paths as script arguments.
+- Stage and verify save restores before replacing live saves, and refuse to restore while the game is running.
+- Remote sync now reports transfer and backup failures, resolves remote home paths correctly, and makes no local changes during `--dry-run`.
+- Check PID liveness safely when processes become zombies, and guard against stale library selections after a game exits.
+- Detect multi-arch Linux launch targets by ELF class and shebang scripts.
+- Restore terminal state on exit, errors, and signals, and show captured TUI action output with the real exit code.
 
 ## [1.4.0] - 2026-11-07
 
