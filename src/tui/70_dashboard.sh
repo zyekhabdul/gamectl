@@ -139,7 +139,7 @@ EOF
         local dash_sock=""
         local -a dash_live_args=()
         if tui_supports_live_events; then
-            local dash_ldir="$(get_runtime_dir)/tui_listeners"
+            local dash_ldir; dash_ldir="$(get_runtime_dir)/tui_listeners"
             mkdir -p -m 700 "$dash_ldir" 2>/dev/null || true
             dash_sock="$dash_ldir/d_${BASHPID}.sock"
             if [ "${#dash_sock}" -le 100 ]; then
@@ -343,7 +343,7 @@ library_menu() {
         local lib_sock=""
         local -a fzf_live_args=()
         if tui_supports_live_events; then
-            local lib_ldir="$(get_runtime_dir)/tui_listeners"
+            local lib_ldir; lib_ldir="$(get_runtime_dir)/tui_listeners"
             mkdir -p -m 700 "$lib_ldir" 2>/dev/null || true
             lib_sock="$lib_ldir/l_${BASHPID}.sock"
             if [ "${#lib_sock}" -le 100 ]; then

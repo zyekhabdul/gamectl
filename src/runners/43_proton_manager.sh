@@ -456,7 +456,7 @@ PY
         fi
         [ -f "$extracted_folder/proton" ] && chmod +x "$extracted_folder/proton"
 
-        local final_folder="$compat_dir/$(basename "$extracted_folder")"
+        local final_folder; final_folder="$compat_dir/$(basename "$extracted_folder")"
         if [ -e "$final_folder" ]; then
             mv "$final_folder" "$stage_dir/old_backup" 2>/dev/null || {
                 echo "[ERROR] Failed to replace existing runner directory: $final_folder" >&2

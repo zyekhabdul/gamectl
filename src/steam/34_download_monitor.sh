@@ -93,7 +93,7 @@ preview_download() {
             local dl_fmt tot_fmt
             dl_fmt=$(format_bytes "$a_dl")
             tot_fmt=$(format_bytes "$a_tot")
-            local install_path="$(dirname "$ref_path")/common/$a_dir"
+            local install_path; install_path="$(dirname "$ref_path")/common/$a_dir"
 
             printf "%s╭─ STEAM CLIENT DOWNLOAD TELEMETRY ───────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
             printf "│ %s%s%s %s(AppID: %s)%s\n" "${UI_BOLD}" "$a_name" "${UI_RST}" "${UI_DIM}" "$a_id" "${UI_RST}"

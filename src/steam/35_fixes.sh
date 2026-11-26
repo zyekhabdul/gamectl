@@ -94,7 +94,7 @@ resolve_game_install_dir() {
                 local installdir
                 installdir=$(echo "$state_data" | cut -f 8)
                 if [ -n "$installdir" ]; then
-                    local cand_dir="$(dirname "$acf_file")/common/$installdir"
+                    local cand_dir; cand_dir="$(dirname "$acf_file")/common/$installdir"
                     if [ -d "$cand_dir" ]; then
                         echo "$cand_dir"
                         return 0

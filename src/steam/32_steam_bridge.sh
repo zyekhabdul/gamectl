@@ -197,7 +197,7 @@ sync_steam() {
     [ -z "$dlc_json" ] && dlc_json="{}"
 
     # 2. Update ~/.config/SLSsteam/config.yaml using ruamel.yaml
-    local sls_cfg="$(get_sls_root 2>/dev/null || echo "$HOME/.config/SLSsteam")/config.yaml"
+    local sls_cfg; sls_cfg="$(get_sls_root 2>/dev/null || echo "$HOME/.config/SLSsteam")/config.yaml"
     if [ -f "$sls_cfg" ]; then
         python3 -c "
 import sys, json
@@ -326,7 +326,7 @@ except Exception as e:
     # Ghost ACF Defense: do not generate empty 1GB dummy ACF if files do not exist physically
     if [ -n "$resolved_dir" ] && [ -d "$resolved_dir" ]; then
         local acf_file="$steam_apps/appmanifest_${appid}.acf"
-        local install_name="$(basename "$resolved_dir")"
+        local install_name; install_name="$(basename "$resolved_dir")"
         local size_bytes
         size_bytes=$(du -sb "$resolved_dir" 2>/dev/null | awk '{print $1}')
         [ -z "$size_bytes" ] || [ "$size_bytes" -le 0 ] && size_bytes=1000000000

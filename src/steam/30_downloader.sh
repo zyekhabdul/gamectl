@@ -436,7 +436,7 @@ download_game() {
         local skipped_os_count=0
         for mf in "${mf_files[@]}"; do
             [ -f "$mf" ] || continue
-            local mf_name="$(basename "$mf")"
+            local mf_name; mf_name="$(basename "$mf")"
             [[ -v seen_mf["$mf_name"] ]] && continue
             seen_mf["$mf_name"]=1
 

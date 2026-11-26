@@ -309,7 +309,7 @@ launch_game() {
 
     # Sovereign Steam Interceptor: traps and silences unshielded Steam Client calls
     local prev_path="$PATH"
-    local interceptor_dir="$(get_runtime_dir)/interceptor"
+    local interceptor_dir; interceptor_dir="$(get_runtime_dir)/interceptor"
     setup_steam_interceptor "$interceptor_dir"
     export PATH="$interceptor_dir:$PATH"
 
@@ -368,7 +368,7 @@ launch_game() {
         _launch_echo "[INFO] Active wrappers: ${wrappers[*]}"
     fi
 
-    cd "$gdir"
+    cd "$gdir" || { echo "[ERROR] Cannot enter game directory: $gdir" >&2; _restore_launch_state; return 1; }
 
     # Pre-flight SteamStub DRM inspection & mitigation
     if [ -f "$gdir/$gbin" ] && detect_steamstub_drm "$gdir/$gbin"; then

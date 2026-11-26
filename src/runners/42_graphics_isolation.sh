@@ -199,7 +199,7 @@ get_native_resolution() {
     # Priority 1: DRM kernel modes (direct & universal across all compositors/X11)
     for m_file in /sys/class/drm/card*-*/modes; do
         [ -f "$m_file" ] || continue
-        local s_file="$(dirname "$m_file")/status"
+        local s_file; s_file="$(dirname "$m_file")/status"
         if [ -f "$s_file" ] && grep -q "^connected" "$s_file" 2>/dev/null; then
             local line
             line=$(head -n 1 "$m_file" 2>/dev/null | tr -d '[:space:]')
@@ -278,7 +278,7 @@ detect_dgpu_vendor() {
         local pci_class
         pci_class=$(cat "$dev/class" 2>/dev/null || echo "")
         case "$pci_class" in
-            0x0302*|0x030200*)
+            0x0302*)
                 # Secondary 3D controller (Optimized for 3D acceleration / dGPU)
                 local v_id
                 v_id=$(cat "$dev/vendor" 2>/dev/null || echo "")
@@ -288,7 +288,7 @@ detect_dgpu_vendor() {
                     0x8086) echo "intel"; return 0 ;;
                 esac
                 ;;
-            0x0300*|0x030000*)
+            0x0300*)
                 vga_count=$((vga_count + 1))
                 local v_id
                 v_id=$(cat "$dev/vendor" 2>/dev/null || echo "")

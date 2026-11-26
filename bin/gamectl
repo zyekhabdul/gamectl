@@ -4737,7 +4737,7 @@ download_game() {
         local skipped_os_count=0
         for mf in "${mf_files[@]}"; do
             [ -f "$mf" ] || continue
-            local mf_name="$(basename "$mf")"
+            local mf_name; mf_name="$(basename "$mf")"
             [[ -v seen_mf["$mf_name"] ]] && continue
             seen_mf["$mf_name"]=1
 
@@ -6107,7 +6107,7 @@ sync_steam() {
     [ -z "$dlc_json" ] && dlc_json="{}"
 
     # 2. Update ~/.config/SLSsteam/config.yaml using ruamel.yaml
-    local sls_cfg="$(get_sls_root 2>/dev/null || echo "$HOME/.config/SLSsteam")/config.yaml"
+    local sls_cfg; sls_cfg="$(get_sls_root 2>/dev/null || echo "$HOME/.config/SLSsteam")/config.yaml"
     if [ -f "$sls_cfg" ]; then
         python3 -c "
 import sys, json
@@ -6236,7 +6236,7 @@ except Exception as e:
     # Ghost ACF Defense: do not generate empty 1GB dummy ACF if files do not exist physically
     if [ -n "$resolved_dir" ] && [ -d "$resolved_dir" ]; then
         local acf_file="$steam_apps/appmanifest_${appid}.acf"
-        local install_name="$(basename "$resolved_dir")"
+        local install_name; install_name="$(basename "$resolved_dir")"
         local size_bytes
         size_bytes=$(du -sb "$resolved_dir" 2>/dev/null | awk '{print $1}')
         [ -z "$size_bytes" ] || [ "$size_bytes" -le 0 ] && size_bytes=1000000000
@@ -6965,7 +6965,7 @@ preview_download() {
             local dl_fmt tot_fmt
             dl_fmt=$(format_bytes "$a_dl")
             tot_fmt=$(format_bytes "$a_tot")
-            local install_path="$(dirname "$ref_path")/common/$a_dir"
+            local install_path; install_path="$(dirname "$ref_path")/common/$a_dir"
 
             printf "%s╭─ STEAM CLIENT DOWNLOAD TELEMETRY ───────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
             printf "│ %s%s%s %s(AppID: %s)%s\n" "${UI_BOLD}" "$a_name" "${UI_RST}" "${UI_DIM}" "$a_id" "${UI_RST}"
@@ -7367,7 +7367,7 @@ resolve_game_install_dir() {
                 local installdir
                 installdir=$(echo "$state_data" | cut -f 8)
                 if [ -n "$installdir" ]; then
-                    local cand_dir="$(dirname "$acf_file")/common/$installdir"
+                    local cand_dir; cand_dir="$(dirname "$acf_file")/common/$installdir"
                     if [ -d "$cand_dir" ]; then
                         echo "$cand_dir"
                         return 0
@@ -10431,7 +10431,7 @@ get_native_resolution() {
     # Priority 1: DRM kernel modes (direct & universal across all compositors/X11)
     for m_file in /sys/class/drm/card*-*/modes; do
         [ -f "$m_file" ] || continue
-        local s_file="$(dirname "$m_file")/status"
+        local s_file; s_file="$(dirname "$m_file")/status"
         if [ -f "$s_file" ] && grep -q "^connected" "$s_file" 2>/dev/null; then
             local line
             line=$(head -n 1 "$m_file" 2>/dev/null | tr -d '[:space:]')
@@ -10510,7 +10510,7 @@ detect_dgpu_vendor() {
         local pci_class
         pci_class=$(cat "$dev/class" 2>/dev/null || echo "")
         case "$pci_class" in
-            0x0302*|0x030200*)
+            0x0302*)
                 # Secondary 3D controller (Optimized for 3D acceleration / dGPU)
                 local v_id
                 v_id=$(cat "$dev/vendor" 2>/dev/null || echo "")
@@ -10520,7 +10520,7 @@ detect_dgpu_vendor() {
                     0x8086) echo "intel"; return 0 ;;
                 esac
                 ;;
-            0x0300*|0x030000*)
+            0x0300*)
                 vga_count=$((vga_count + 1))
                 local v_id
                 v_id=$(cat "$dev/vendor" 2>/dev/null || echo "")
@@ -11069,7 +11069,7 @@ PY
         fi
         [ -f "$extracted_folder/proton" ] && chmod +x "$extracted_folder/proton"
 
-        local final_folder="$compat_dir/$(basename "$extracted_folder")"
+        local final_folder; final_folder="$compat_dir/$(basename "$extracted_folder")"
         if [ -e "$final_folder" ]; then
             mv "$final_folder" "$stage_dir/old_backup" 2>/dev/null || {
                 echo "[ERROR] Failed to replace existing runner directory: $final_folder" >&2
@@ -11647,7 +11647,7 @@ launch_game() {
 
     # Sovereign Steam Interceptor: traps and silences unshielded Steam Client calls
     local prev_path="$PATH"
-    local interceptor_dir="$(get_runtime_dir)/interceptor"
+    local interceptor_dir; interceptor_dir="$(get_runtime_dir)/interceptor"
     setup_steam_interceptor "$interceptor_dir"
     export PATH="$interceptor_dir:$PATH"
 
@@ -11706,7 +11706,7 @@ launch_game() {
         _launch_echo "[INFO] Active wrappers: ${wrappers[*]}"
     fi
 
-    cd "$gdir"
+    cd "$gdir" || { echo "[ERROR] Cannot enter game directory: $gdir" >&2; _restore_launch_state; return 1; }
 
     # Pre-flight SteamStub DRM inspection & mitigation
     if [ -f "$gdir/$gbin" ] && detect_steamstub_drm "$gdir/$gbin"; then
@@ -13562,7 +13562,7 @@ EOF
         local dash_sock=""
         local -a dash_live_args=()
         if tui_supports_live_events; then
-            local dash_ldir="$(get_runtime_dir)/tui_listeners"
+            local dash_ldir; dash_ldir="$(get_runtime_dir)/tui_listeners"
             mkdir -p -m 700 "$dash_ldir" 2>/dev/null || true
             dash_sock="$dash_ldir/d_${BASHPID}.sock"
             if [ "${#dash_sock}" -le 100 ]; then
@@ -13766,7 +13766,7 @@ library_menu() {
         local lib_sock=""
         local -a fzf_live_args=()
         if tui_supports_live_events; then
-            local lib_ldir="$(get_runtime_dir)/tui_listeners"
+            local lib_ldir; lib_ldir="$(get_runtime_dir)/tui_listeners"
             mkdir -p -m 700 "$lib_ldir" 2>/dev/null || true
             lib_sock="$lib_ldir/l_${BASHPID}.sock"
             if [ "${#lib_sock}" -le 100 ]; then
