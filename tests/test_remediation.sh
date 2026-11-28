@@ -2775,7 +2775,17 @@ EOF
         grep -q -- '--expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x,tab,alt-s' "$REPO_ROOT/src/tui/70_dashboard.sh" || exit 1
         grep -A3 'ctrl-s)' "$REPO_ROOT/src/tui/70_dashboard.sh" | grep -Fq 'remote_sync_interactive' || exit 1
 
-        # 5. Live library_menu Tab cycling under PTY + stub fzf
+        # 5. Live library_menu Tab cycling under PTY + stub fzf (seed GOG/EPIC/AMAZON for full 6-store cycle)
+        mkdir -p "$t_dir/home/GOG Games/GogTab" "$t_dir/home/.config/legendary" "$t_dir/home/.config/nile" \
+                 "$t_dir/home/EpicTab" "$t_dir/home/AmzTab"
+        touch "$t_dir/home/GOG Games/GogTab/goggame.bin" "$t_dir/home/EpicTab/epic.bin" "$t_dir/home/AmzTab/amz.bin"
+        chmod +x "$t_dir/home/GOG Games/GogTab/goggame.bin" "$t_dir/home/EpicTab/epic.bin" "$t_dir/home/AmzTab/amz.bin"
+        printf '{"gameId":"777111","name":"GogTab"}\n' > "$t_dir/home/GOG Games/GogTab/goggame-777111.info"
+        printf '{"EpicTab":{"app_name":"EpicTab","title":"EpicTab","install_path":"%s/home/EpicTab","executable":"epic.bin"}}\n' "$t_dir" > "$t_dir/home/.config/legendary/installed.json"
+        printf '[{"product":{"id":"AmzTab","title":"AmzTab"},"path":"%s/home/AmzTab"}]\n' "$t_dir" > "$t_dir/home/.config/nile/installed.json"
+        export LEGENDARY_CONFIG_PATH="$t_dir/home/.config/legendary" NILE_CONFIG_PATH="$t_dir/home/.config/nile"
+        invalidate_scan_cache || true
+
         cat <<'EOF' > "$t_dir/bin/fzf"
 #!/usr/bin/env python3
 import os, pathlib, sys
@@ -4365,6 +4375,528 @@ PY_STALE
     )
 }
 run_test "Event-Driven TUI Process Exit Sync & Stale Guard" test_event_driven_tui_process_exit_sync_contract
+
+# Test 44: Subdir Linux Binary Discovery, Execstack Tunable & Rich Multi-Store Metadata
+test_subdir_linux_execstack_and_store_metadata_contract() {
+    local t_dir
+    t_dir=$(mktemp -d)
+    trap 'rm -rf "$t_dir"' RETURN
+    mkdir -p "$t_dir/home/Games" "$t_dir/runtime" "$t_dir/cache/gamectl" "$t_dir/bin"
+    (
+        export HOME="$t_dir/home"
+        export XDG_RUNTIME_DIR="$t_dir/runtime"
+        export XDG_CACHE_HOME="$t_dir/cache"
+        export GAMECTL_IN_ALT_SCREEN=0
+        export GAMECTL_ALLOW_UNSHIELDED=1
+
+        source "$REPO_ROOT/src/core/00_header.sh"
+        source "$REPO_ROOT/src/core/10_utils.sh"
+        source "$REPO_ROOT/src/core/12_tui_primitives.sh"
+        source "$REPO_ROOT/src/core/14_saves.sh"
+        source "$REPO_ROOT/src/core/16_steamstub.sh"
+        source "$REPO_ROOT/src/core/18_process_runtime.sh"
+        source "$REPO_ROOT/src/core/19_gbe_templates.sh"
+        source "$REPO_ROOT/src/steam/20_discovery.sh"
+        source "$REPO_ROOT/src/steam/30_downloader.sh"
+        source "$REPO_ROOT/src/steam/37_app_types.sh"
+        source "$REPO_ROOT/src/stores/00_store_interface.sh"
+        source "$REPO_ROOT/src/runners/40_wrappers.sh"
+        source "$REPO_ROOT/src/runners/50_launcher.sh"
+        source "$REPO_ROOT/src/tui/71_previews.sh"
+        source "$REPO_ROOT/src/tui/72_store_tui.sh"
+        source "$REPO_ROOT/src/tui/74_dashboard_preview.sh"
+
+        # 1. Subdirectory native Linux binary discovery (bin/Shattered Pixel Dungeon & bin/x64/game)
+        local d_spd="$HOME/Games/Shattered Pixel Dungeon"
+        mkdir -p "$d_spd/bin" "$d_spd/lib"
+        printf '\x7f\x45\x4c\x46\x02\x01\x01' > "$d_spd/bin/Shattered Pixel Dungeon"
+        printf '\x7f\x45\x4c\x46\x02\x01\x01' > "$d_spd/bin/crashpad_handler"
+        chmod 755 "$d_spd/bin/Shattered Pixel Dungeon" "$d_spd/bin/crashpad_handler"
+        printf '1769170\n' > "$d_spd/steam_appid.txt"
+        [ "$(find_game_binary "$d_spd")" = "bin/Shattered Pixel Dungeon" ] || exit 1
+
+        local scan_out
+        scan_out=$(scan_installed_games --refresh)
+        grep -Fq '1769170' <<< "$scan_out" || exit 1
+        grep -Fq 'Shattered Pixel Dungeon' <<< "$scan_out" || exit 1
+        grep -Fq 'bin/Shattered Pixel Dungeon' <<< "$scan_out" || exit 1
+
+        local d_x64="$t_dir/sub_x64"
+        mkdir -p "$d_x64/bin/x64"
+        printf '\x7f\x45\x4c\x46\x02\x01\x01' > "$d_x64/bin/x64/runner"
+        chmod 755 "$d_x64/bin/x64/runner"
+        [ "$(find_game_binary "$d_x64")" = "bin/x64/runner" ] || exit 1
+
+        # Windows subdirectory fallback remains intact
+        local d_win_sub="$t_dir/win_sub"
+        mkdir -p "$d_win_sub/Binaries/Win64"
+        printf 'MZ' > "$d_win_sub/Binaries/Win64/Game.exe"
+        [ "$(find_game_binary "$d_win_sub")" = "Binaries/Win64/Game.exe" ] || exit 1
+
+        # 2. GLIBC_TUNABLES execstack injection, preservation, override, and log hint
+        local d_sd="$t_dir/slice"
+        mkdir -p "$d_sd"
+        cat <<'SH_GAME' > "$d_sd/SliceAndDice"
+#!/usr/bin/env bash
+printf '%s\n' "${GLIBC_TUNABLES:-}" > "$PWD/tunables.out"
+exit 0
+SH_GAME
+        chmod 755 "$d_sd/SliceAndDice"
+        find_steam_runtime_run() { return 1; }
+
+        unset GLIBC_TUNABLES
+        launch_game "$d_sd" "SliceAndDice" "Slice & Dice" >/dev/null 2>&1 || exit 1
+        sleep 0.2
+        [ "$(cat "$d_sd/tunables.out" 2>/dev/null)" = "glibc.rtld.execstack=2" ] || exit 1
+
+        GLIBC_TUNABLES="glibc.malloc.check=1" launch_game "$d_sd" "SliceAndDice" "Slice & Dice" >/dev/null 2>&1 || exit 1
+        sleep 0.2
+        [ "$(cat "$d_sd/tunables.out" 2>/dev/null)" = "glibc.malloc.check=1:glibc.rtld.execstack=2" ] || exit 1
+
+        GLIBC_TUNABLES="glibc.rtld.execstack=0" launch_game "$d_sd" "SliceAndDice" "Slice & Dice" >/dev/null 2>&1 || exit 1
+        sleep 0.2
+        [ "$(cat "$d_sd/tunables.out" 2>/dev/null)" = "glibc.rtld.execstack=0" ] || exit 1
+
+        local l_execstack="$t_dir/execstack.log"
+        printf 'libjvm.so preloadLibrary(jre/lib/amd64/default/libj9vm29.so): cannot enable executable stack as shared object requires: Invalid argument\n' > "$l_execstack"
+        inspect_game_log_hint "$l_execstack" | grep -Fq 'glibc.rtld.execstack=2' || exit 1
+
+        # 3. parse_steam_app_metadata_json & preview_search_game (Game, DLC, empty reqs, non-Steam)
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/steam_details_777001.json"
+{"777001":{"success":true,"data":{"type":"game","name":"Test Odyssey","is_free":false,"controller_support":"full","dlc":[1,2,3],"developers":["Dev Studio"],"publishers":["Pub House"],"release_date":{"coming_soon":false,"date":"20 Mar, 2024"},"price_overview":{"final_formatted":"Rp 42 250","initial_formatted":"Rp 169 000","discount_percent":75},"metacritic":{"score":88},"recommendations":{"total":2554},"short_description":"<b>Bold</b> adventure &amp; fun.","platforms":{"windows":true,"linux":true},"genres":[{"description":"Action"}],"pc_requirements":{"minimum":"<strong>Storage:</strong> 100 MB available space"},"linux_requirements":{"minimum":"<strong>Storage:</strong> 1 GB available space"}}}}
+EOF
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/protondb_777001.json"
+{"tier":"platinum","score":0.95,"confidence":"strong","total":120}
+EOF
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/steam_details_777002.json"
+{"777002":{"success":true,"data":{"type":"dlc","name":"Test DLC","fullgame":{"appid":"777001","name":"Test Odyssey"},"is_free":true,"release_date":{"coming_soon":false,"date":"1 Mar, 2025"},"platforms":{"windows":true,"linux":false},"genres":[{"description":"RPG"}],"pc_requirements":[],"linux_requirements":[]}}}
+EOF
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/gog_details_1207658691.json"
+{"title":"Test GOG","release_date":"2020-05-01T00:00:00+0000","content_system_compatibility":{"windows":true,"linux":true},"downloads":{"installers":[{"total_size":524288000}]}}
+EOF
+
+        local p_game p_dlc p_gog p_dash
+        p_game=$(preview_search_game 777001 "Test Odyssey" "[NOT INSTALLED]" "STEAM" | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+        grep -Fq "Est. Size   : 1 GB (Linux) • 100 MB (Win)" <<< "$p_game" || exit 1
+        grep -Fq "Price       : Rp 42 250 (-75% from Rp 169 000)" <<< "$p_game" || exit 1
+        grep -Fq "Release     : 20 Mar, 2024" <<< "$p_game" || exit 1
+        grep -Fq "Developer   : Dev Studio • Pub: Pub House" <<< "$p_game" || exit 1
+        grep -Fq "DLCs        : 3 available" <<< "$p_game" || exit 1
+        grep -Fq "Controller  : full" <<< "$p_game" || exit 1
+        grep -Fq "Reviews     : 2554 recs • Metacritic: 88" <<< "$p_game" || exit 1
+        grep -Fq "Summary     : Bold adventure & fun." <<< "$p_game" || exit 1
+
+        p_dlc=$(preview_search_game 777002 "Test DLC" "[NOT INSTALLED]" "STEAM" | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+        grep -Fq "Type        : [DLC] (Base: Test Odyssey • 777001)" <<< "$p_dlc" || exit 1
+        grep -Fq "Est. Size   : Not listed by store" <<< "$p_dlc" || exit 1
+        grep -Fq "Price       : Free" <<< "$p_dlc" || exit 1
+
+        p_gog=$(preview_search_game 1207658691 "Test GOG" "[AVAILABLE]" "GOG" | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+        grep -Fq "Store       : GOG" <<< "$p_gog" || exit 1
+        grep -Fq "Est. Size   : 500 MB (Installers)" <<< "$p_gog" || exit 1
+        grep -Fq "DRM         : DRM-Free (GOG)" <<< "$p_gog" || exit 1
+
+        # 3b. Real 3240220-shaped empty-HTML linux/mac reqs + enriched metadata, all-empty HTML reqs, disk free, Epic cached info
+        curl() { return 1; }
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/steam_details_777003.json"
+{"777003":{"success":true,"data":{"type":"game","name":"GTA V Enhanced Test","is_free":false,"ext_user_account_notice":"Rockstar Games","developers":["Rockstar Games"],"release_date":{"coming_soon":false,"date":"4 Mar, 2025"},"price_overview":{"final_formatted":"Rp 289 960","initial_formatted":"Rp 659 000","discount_percent":56},"platforms":{"windows":true,"linux":false},"genres":[{"description":"Action"}],"categories":[{"id":2,"description":"Single-player"},{"id":38,"description":"Online Co-op"},{"id":18,"description":"Partial Controller Support"}],"pc_requirements":{"minimum":"<strong>Minimum:</strong><br><strong>Memory:</strong> 8 GB RAM<br><strong>Graphics:</strong> NVIDIA GeForce GTX 1630 (4GB VRAM)<br><strong>Storage:</strong> 105 GB available space<br><strong>Additional Notes:</strong> SSD Required"},"linux_requirements":{"minimum":"<strong>Minimum:</strong><br><ul class=\"bb_ul\"></ul>","recommended":"<strong>Recommended:</strong><br><ul class=\"bb_ul\"></ul>"},"mac_requirements":{"minimum":"<strong>Minimum:</strong><br><ul class=\"bb_ul\"></ul>","recommended":"<strong>Recommended:</strong><br><ul class=\"bb_ul\"></ul>"}}}}
+EOF
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/protondb_777003.json"
+{"tier":"gold","trendingTier":"gold","bestReportedTier":"platinum","score":0.64,"confidence":"strong","total":417}
+EOF
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/steam_deck_777003.json"
+{"success":1,"results":{"appid":777003,"steamos_resolved_category":1,"steamos_resolved_items":[{"display_type":2,"loc_token":"#SteamOS_TestResult_UnsupportedAntiCheatConfiguration"}]}}
+EOF
+        mkdir -p "$XDG_CACHE_HOME/gamectl/manifests"
+        printf 'PK' > "$XDG_CACHE_HOME/gamectl/manifests/777003.zip"
+
+        local p_gta p_empty p_epic d_low d_ok
+        p_gta=$(preview_search_game 777003 "GTA V Enhanced Test" "[NOT INSTALLED]" "STEAM" | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+        grep -Fq "Est. Size   : 105 GB (Req. Storage)" <<< "$p_gta" || exit 1
+        grep -Fq "Free Disk   :" <<< "$p_gta" || exit 1
+        grep -Fq "Min Specs   : 8 GB RAM" <<< "$p_gta" || exit 1
+        grep -Fq "SSD Req" <<< "$p_gta" || exit 1
+        grep -Fq "DRM / Acct  : [WARN] Rockstar Games" <<< "$p_gta" || exit 1
+        grep -Fq "Modes       : Single-player, Online Co-op" <<< "$p_gta" || exit 1
+        grep -Fq "Controller  : partial" <<< "$p_gta" || exit 1
+        grep -Fq "Local Cache : [MANIFEST READY]" <<< "$p_gta" || exit 1
+        grep -Fq "Trend / Best  : Trending: [GOLD] • Best: [PLATINUM]" <<< "$p_gta" || exit 1
+        grep -Fq "SteamOS/Deck  : [UNSUPPORTED] (Unsupported Anti-Cheat)" <<< "$p_gta" || exit 1
+
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/steam_details_777004.json"
+{"777004":{"success":true,"data":{"type":"game","name":"Empty Reqs Test","is_free":true,"release_date":{"coming_soon":false,"date":"1 Jan, 2026"},"platforms":{"windows":true,"linux":false},"pc_requirements":{"minimum":"<strong>Minimum:</strong><br><ul class=\"bb_ul\"></ul>"},"linux_requirements":{"minimum":"<strong>Minimum:</strong><br><ul class=\"bb_ul\"></ul>"}}}}
+EOF
+        p_empty=$(preview_search_game 777004 "Empty Reqs Test" "[NOT INSTALLED]" "STEAM" | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+        grep -Fq "Est. Size   : Not listed by store" <<< "$p_empty" || exit 1
+        grep -Fq "Price       : Free" <<< "$p_empty" || exit 1
+        grep -Fq "Release     : 1 Jan, 2026" <<< "$p_empty" || exit 1
+
+        d_low=$(get_library_disk_free_info 999999999999999999)
+        [ "${d_low##*$'\t'}" = "1" ] || exit 1
+        d_ok=$(get_library_disk_free_info 1)
+        [ "${d_ok##*$'\t'}" = "0" ] || exit 1
+
+        cat <<'EOF' > "$XDG_CACHE_HOME/gamectl/epic_info_SampleEpic.json"
+{"manifest":{"download_size":104857600,"disk_size":524288000,"version":"1.2.3"},"game":{"developer":"Epic Indie","dlc_list":[{"id":"dlc1"},{"id":"dlc2"}]}}
+EOF
+        p_epic=$(preview_search_game SampleEpic "Sample Epic" "[AVAILABLE]" "EPIC" | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+        grep -Fq "Est. Size   : 100 MB (Download) • 500 MB (Disk)" <<< "$p_epic" || exit 1
+        grep -Fq "Developer   : Epic Indie" <<< "$p_epic" || exit 1
+        grep -Fq "DLCs        : 2 available" <<< "$p_epic" || exit 1
+        grep -Fq "Version     : 1.2.3" <<< "$p_epic" || exit 1
+
+        # 4. Multi-store preview wiring & dashboard module 2
+        grep -Fq -- '--preview-search {2} {4} {6} {1}' "$REPO_ROOT/src/tui/72_store_tui.sh" || exit 1
+        p_dash=$(preview_dashboard 2 1 | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+        grep -Fq "MULTI-STORE CATALOG & PROTONDB" <<< "$p_dash" || exit 1
+        grep -Fq "Store Adapters     :" <<< "$p_dash" || exit 1
+    )
+}
+run_test "Subdir Linux Binary Discovery, Execstack Tunable & Store Metadata" test_subdir_linux_execstack_and_store_metadata_contract
+
+# Test 43: GOG Offline Installer Extractor (install-gog: innoextract & MojoSetup .sh)
+test_gog_offline_installer_extractor_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_gog_offline_XXXXXX")
+    mkdir -p "$t_dir/home/.config/gamectl" "$t_dir/bin" "$t_dir/installers" "$t_dir/runtime" "$t_dir/sh_src/data/noarch"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home" XDG_CONFIG_HOME="$t_dir/home/.config" XDG_RUNTIME_DIR="$t_dir/runtime"
+        export PATH="$t_dir/bin:$PATH"
+
+        cat <<'EOF' > "$t_dir/bin/innoextract"
+#!/usr/bin/env bash
+out=""
+while [ $# -gt 0 ]; do
+    [ "$1" = "-d" ] && { out="$2"; shift 2; continue; }
+    shift
+done
+mkdir -p "$out/app"
+printf 'PE_STUB' > "$out/app/MyGame.exe"
+printf '{"gameId":"142050","name":"Sample GOG Offline"}\n' > "$out/app/goggame-142050.info"
+if [ "${INNO_EVIL_SYMLINK:-0}" = "1" ]; then
+    ln -s /etc/passwd "$out/app/escape_link"
+fi
+EOF
+        cat <<'EOF' > "$t_dir/bin/wine"
+#!/usr/bin/env bash
+mkdir -p "$WINEPREFIX/drive_c"
+exit 0
+EOF
+        chmod +x "$t_dir/bin/innoextract" "$t_dir/bin/wine"
+
+        # Build dummy .exe and real MojoSetup-style .sh (shell stub + ZIP archive)
+        printf 'MZ_FAKE_SETUP' > "$t_dir/installers/setup_sample_1.0.exe"
+        printf 'Real Linux GOG\n' > "$t_dir/sh_src/data/noarch/gameinfo"
+        printf '#!/usr/bin/env bash\necho gog_sh_ok\n' > "$t_dir/sh_src/data/noarch/start.sh"
+        (cd "$t_dir/sh_src" && zip -q -r "$t_dir/installers/payload.zip" data)
+        {
+            printf '#!/bin/sh\nexit 0\n'
+            cat "$t_dir/installers/payload.zip"
+        } > "$t_dir/installers/setup_linux_gog_1.2.sh"
+
+        # 1. Missing/invalid installer fails cleanly
+        "$REPO_ROOT/bin/gamectl" install-gog "$t_dir/installers/missing.exe" 2>/dev/null && exit 1 || true
+        printf 'plain' > "$t_dir/installers/bad.txt"
+        "$REPO_ROOT/bin/gamectl" install-gog "$t_dir/installers/bad.txt" 2>/dev/null && exit 1 || true
+
+        # 2. Dry-run and real .exe install (plus gamectl import alias) with prefix/saves init & GOG discovery
+        "$REPO_ROOT/bin/gamectl" install-gog "$t_dir/installers/setup_sample_1.0.exe" --dry-run | grep -Fq "[DRY-RUN]"
+        "$REPO_ROOT/bin/gamectl" install-gog "$t_dir/installers/setup_sample_1.0.exe" >/dev/null
+        [ -f "$HOME/GOG Games/Sample GOG Offline/MyGame.exe" ]
+        [ -d "$HOME/GOG Games/Sample GOG Offline/pfx/drive_c" ]
+        [ -d "$HOME/GOG Games/Sample GOG Offline/saves" ]
+
+        "$REPO_ROOT/bin/gamectl" import "$t_dir/installers/setup_sample_1.0.exe" "$t_dir/imported_gog" >/dev/null
+        [ -f "$t_dir/imported_gog/MyGame.exe" ]
+        [ -d "$t_dir/imported_gog/saves" ]
+        [ -d "$t_dir/imported_gog/pfx/drive_c" ]
+
+        # 3. Symlink escape inside installer must fail
+        INNO_EVIL_SYMLINK=1 "$REPO_ROOT/bin/gamectl" install-gog "$t_dir/installers/setup_sample_1.0.exe" "$t_dir/bad_out" 2>/dev/null && exit 1 || true
+
+        # 4. Real MojoSetup .sh extraction, +x grant, and scanner STORE=GOG
+        "$REPO_ROOT/bin/gamectl" gog install-offline "$t_dir/installers/setup_linux_gog_1.2.sh" >/dev/null
+        [ -x "$HOME/GOG Games/Real Linux GOG/start.sh" ]
+        [ -d "$HOME/GOG Games/Real Linux GOG/saves" ]
+        local list_out
+        list_out=$("$REPO_ROOT/bin/gamectl" --list)
+        grep -Fq '142050' <<< "$list_out" || exit 1
+        grep -Fq $'\tGOG' <<< "$list_out" || exit 1
+    )
+}
+run_test "GOG Offline Installer Extractor (innoextract & MojoSetup .sh)" test_gog_offline_installer_extractor_contract
+
+# Test 44: P2P LAN Mesh (peers, lan-pull & Manifest 404 Fallback)
+test_p2p_lan_mesh_and_manifest_fallback_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_lan_mesh_XXXXXX")
+    mkdir -p "$t_dir/home/.config/gamectl" "$t_dir/bin" "$t_dir/peer_game/saves" "$t_dir/peer_game/pfx" "$t_dir/runtime"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home" XDG_CONFIG_HOME="$t_dir/home/.config" XDG_RUNTIME_DIR="$t_dir/runtime"
+        export PATH="$t_dir/bin:$PATH"
+
+        printf '#!/usr/bin/env bash\necho ok\n' > "$t_dir/peer_game/bosonx"
+        printf '105600\n' > "$t_dir/peer_game/steam_appid.txt"
+        printf 'remote_save\n' > "$t_dir/peer_game/saves/save.dat"
+        printf 'foreign_pfx\n' > "$t_dir/peer_game/pfx/user.reg"
+
+        # 1. Peer registry CRUD & injection guards
+        "$REPO_ROOT/bin/gamectl" peers add "-oProxyCommand=evil" 2>/dev/null && exit 1 || true
+        "$REPO_ROOT/bin/gamectl" peers add "thilin" | grep -Fq "thilin"
+        "$REPO_ROOT/bin/gamectl" peers list | grep -Fxq "thilin"
+
+        cat <<EOF > "$t_dir/bin/ssh"
+#!/usr/bin/env bash
+peer=""
+for a in "\$@"; do
+    case "\$a" in
+        -*) ;;
+        LogLevel=*|ConnectTimeout=*|BatchMode=*) ;;
+        *) peer="\$a"; break ;;
+    esac
+done
+[ "\$peer" = "thilin" ] || exit 1
+cat >/dev/null
+if [ "\${LAN_MODE:-game}" = "mf" ]; then
+    printf 'ZIP\t/remote/cache/246100.zip\n'
+else
+    printf '246100\tBoson X\t%s\n' "$t_dir/peer_game"
+fi
+EOF
+        cat <<EOF > "$t_dir/bin/rsync"
+#!/usr/bin/env bash
+src="" dst="" dry=0 skip_pfx=0
+for a in "\$@"; do
+    case "\$a" in
+        -n|--dry-run) dry=1 ;;
+        --exclude=pfx/) skip_pfx=1 ;;
+        thilin:*) src="\${a#thilin:}"; src="\${src%/}" ;;
+        /*) dst="\${a%/}" ;;
+    esac
+done
+[ "\$dry" -eq 1 ] && exit 0
+if [ "\$src" = "/remote/cache/246100.zip" ]; then
+    mkdir -p "$t_dir/mf_stage"
+    printf 'addappid(246100, 1, "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")\n' > "$t_dir/mf_stage/246100.lua"
+    printf '\xd0\x17\xf6\x71PAYLOAD' > "$t_dir/mf_stage/246101_1.manifest"
+    (cd "$t_dir/mf_stage" && zip -q "\$dst" 246100.lua 246101_1.manifest)
+    exit 0
+fi
+mkdir -p "\$dst"
+cp -a "\$src"/. "\$dst/"
+[ "\$skip_pfx" -eq 1 ] && rm -rf "\$dst/pfx"
+exit 0
+EOF
+        chmod +x "$t_dir/bin/ssh" "$t_dir/bin/rsync"
+
+        # 2. Dry-run and full lan-pull (excludes pfx/, grants +x on Linux ELF/shebang)
+        "$REPO_ROOT/bin/gamectl" lan-pull "Boson X" thilin --target "$t_dir/local_boson" --dry-run | grep -Fq "[DRY-RUN]"
+        [ ! -d "$t_dir/local_boson" ]
+        "$REPO_ROOT/bin/gamectl" lan-pull 246100 --target "$t_dir/local_boson" >/dev/null
+        [ -x "$t_dir/local_boson/bosonx" ]
+        [ ! -d "$t_dir/local_boson/pfx" ]
+
+        # 3. Manifest 404 fallback pulls cached zip from peer when providers fail
+        LAN_MODE=mf bash -c '
+            set -e
+            source "$1/src/core/10_utils.sh"
+            source "$1/src/steam/31_manifests.sh"
+            source "$1/src/runners/54_lan_mesh.sh"
+            source "$1/src/steam/30_downloader.sh"
+            z=$(lan_fallback_for_download 246100 "$2/fb_dest" "Boson X")
+            [ -f "$z" ]
+            validate_manifest_zip "$z" 246100 true
+        ' _ "$REPO_ROOT" "$t_dir" || exit 1
+
+        "$REPO_ROOT/bin/gamectl" peers remove "thilin" >/dev/null
+        ! "$REPO_ROOT/bin/gamectl" peers list | grep -Fxq "thilin"
+    )
+}
+run_test "P2P LAN Mesh (peers, lan-pull & Manifest 404 Fallback)" test_p2p_lan_mesh_and_manifest_fallback_contract
+
+# Test 45: Native MIT Rust Epic Engine (gamectl-core) Integration
+test_native_gamectl_core_epic_integration_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_core_epic_XXXXXX")
+    mkdir -p "$t_dir/home/.config/gamectl" "$t_dir/bin" "$t_dir/runtime"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home" XDG_CONFIG_HOME="$t_dir/home/.config" XDG_RUNTIME_DIR="$t_dir/runtime"
+
+        # 1. Verify real compiled bin/gamectl-core CLI & JSON manifest inspection if built
+        if [ -x "$REPO_ROOT/bin/gamectl-core" ]; then
+            local c_ver c_mf c_st
+            c_ver=$("$REPO_ROOT/bin/gamectl-core" --version)
+            grep -Fq "gamectl-core" <<< "$c_ver" || exit 1
+            cat <<'EOF' > "$t_dir/sample.manifest"
+{"ManifestFileVersion":"18","AppNameString":"NativeSample","BuildVersionString":"1.0","LaunchExeString":"game.sh","FileManifestList":[{"Filename":"game.sh","FileChunkParts":[]}]}
+EOF
+            c_mf=$("$REPO_ROOT/bin/gamectl-core" epic manifest-inspect "$t_dir/sample.manifest")
+            grep -Fq '"app_name": "NativeSample"' <<< "$c_mf" || exit 1
+            c_st=$("$REPO_ROOT/bin/gamectl-core" epic status)
+            grep -Fq "unconfigured" <<< "$c_st" || exit 1
+        fi
+
+        # 2. Verify 30_store_epic.sh selects gamectl-core natively when legendary is absent
+        cat <<'EOF' > "$t_dir/bin/gamectl-core"
+#!/usr/bin/env bash
+case "$2" in
+    status) echo "session present (native engine, account: TestUser)" ;;
+    list) printf '[{"app_name":"CoreApp","app_title":"Core Native Game","asset_infos":{"Windows":{}}}]\n' ;;
+    info) printf '{"manifest":{"download_size":1024,"disk_size":2048,"version":"2.0"},"game":{"developer":"CoreDev","dlc_list":[]}}\n' ;;
+    install)
+        app="$3"; shift 3; dir=""
+        while [ $# -gt 0 ]; do [ "$1" = "--dir" ] && { dir="$2"; shift 2; continue; }; shift; done
+        mkdir -p "$dir"
+        printf '#!/usr/bin/env bash\necho ok\n' > "$dir/core_game.sh"
+        chmod +x "$dir/core_game.sh"
+        printf '{"%s":{"app_name":"%s","title":"Core Native Game","install_path":"%s","executable":"core_game.sh"}}\n' "$app" "$app" "$dir" > "${XDG_CONFIG_HOME}/gamectl/epic_installed.json"
+        ;;
+esac
+EOF
+        chmod +x "$t_dir/bin/gamectl-core"
+        export GAMECTL_CORE_BIN="$t_dir/bin/gamectl-core" GAMECTL_EPIC_ENGINE="core"
+
+        local e_st e_srch e_list e_doc
+        e_st=$("$REPO_ROOT/bin/gamectl" epic status)
+        grep -Fq "ready (gamectl-core:" <<< "$e_st" || exit 1
+        e_srch=$("$REPO_ROOT/bin/gamectl" epic search "Core")
+        grep -Fq $'EPIC\tCoreApp\tCore Native Game\twindows\tAVAILABLE' <<< "$e_srch" || exit 1
+        "$REPO_ROOT/bin/gamectl" epic download "CoreApp" "$t_dir/core_dest" >/dev/null
+        [ -x "$t_dir/core_dest/core_game.sh" ]
+        e_list=$("$REPO_ROOT/bin/gamectl" --list)
+        grep -Fq "CoreApp" <<< "$e_list" || exit 1
+        grep -Fq "Core Native Game" <<< "$e_list" || exit 1
+        grep -Fq $'\tEPIC' <<< "$e_list" || exit 1
+        e_doc=$("$REPO_ROOT/bin/gamectl" doctor || true)
+        grep -Fq "native: $t_dir/bin/gamectl-core" <<< "$e_doc" || exit 1
+    )
+}
+run_test "Native MIT Rust Epic Engine (gamectl-core) Integration" test_native_gamectl_core_epic_integration_contract
+
+# Test 46: WP43A — Dynamic Auto-Prune Multi-Store (Installed-or-Authenticated Tab & Alt-S)
+test_wp43a_dynamic_store_auto_prune_contract() {
+    local t_dir
+    t_dir=$(mktemp -d "${TMPDIR:-/tmp}/gamectl_wp43a_prune_XXXXXX")
+    mkdir -p "$t_dir/home/.config/gamectl" "$t_dir/home/.config/legendary" "$t_dir/home/.config/nile" \
+             "$t_dir/home/.config/gogdl" "$t_dir/home/Games/SoloOnly" "$t_dir/steam/steamapps/common/SteamOnly" \
+             "$t_dir/runtime" "$t_dir/bin"
+    (
+        trap 'rm -rf "$t_dir"' EXIT
+        export HOME="$t_dir/home" XDG_CONFIG_HOME="$t_dir/home/.config" XDG_RUNTIME_DIR="$t_dir/runtime"
+        export STEAM_ROOT="$t_dir/steam"
+        export LEGENDARY_CONFIG_PATH="$t_dir/home/.config/legendary" NILE_CONFIG_PATH="$t_dir/home/.config/nile"
+
+        touch "$t_dir/steam/steamapps/common/SteamOnly/game.bin" "$t_dir/home/Games/SoloOnly/solo.bin"
+        chmod +x "$t_dir/steam/steamapps/common/SteamOnly/game.bin" "$t_dir/home/Games/SoloOnly/solo.bin"
+        cat <<'EOF' > "$t_dir/steam/steamapps/appmanifest_77701.acf"
+"AppState"
+{
+    "appid" "77701"
+    "name" "SteamOnly"
+    "installdir" "SteamOnly"
+}
+EOF
+
+        # Even when gamectl-core binary exists, EPIC must stay pruned if unauthenticated & 0 games
+        cat <<'EOF' > "$t_dir/bin/gamectl-core"
+#!/usr/bin/env bash
+echo "unconfigured"
+EOF
+        chmod +x "$t_dir/bin/gamectl-core"
+        export GAMECTL_CORE_BIN="$t_dir/bin/gamectl-core"
+
+        # 1. Pruned list contains ONLY ALL, STEAM, STANDALONE
+        local pruned_out
+        pruned_out=$(bash -c '
+            set -e
+            source "$1/src/core/00_header.sh"
+            source "$1/src/core/10_utils.sh"
+            source "$1/src/steam/20_discovery.sh"
+            source "$1/src/stores/00_store_interface.sh"
+            source "$1/src/tui/70_dashboard.sh"
+            get_visible_store_filters
+        ' _ "$REPO_ROOT") || exit 1
+        [ "$pruned_out" = $'ALL\nSTEAM\nSTANDALONE' ] || exit 1
+
+        # 2. PTY Tab + Alt-S with stub fzf cycles ONLY ALL -> STEAM -> STANDALONE -> ALL and Alt-S shows only 3 rows
+        cat <<'EOF' > "$t_dir/bin/fzf"
+#!/usr/bin/env python3
+import os, pathlib, sys
+args = " ".join(sys.argv[1:])
+stdin_data = sys.stdin.read()
+if "Store > " in args:
+    pathlib.Path(os.environ["ALTS_LOG"]).write_text(stdin_data)
+    sys.exit(130)
+cnt_p = pathlib.Path(os.environ["FZF_CNT"])
+idx = int(cnt_p.read_text()) if cnt_p.exists() else 0
+cnt_p.write_text(str(idx + 1))
+with pathlib.Path(os.environ["TAB_LOG"]).open("a") as fh:
+    fh.write(args + "\n")
+if idx < 3:
+    sys.stdout.write("tab\n")
+    sys.exit(0)
+if idx == 3:
+    sys.stdout.write("alt-s\n")
+    sys.exit(0)
+sys.exit(130)
+EOF
+        chmod +x "$t_dir/bin/fzf"
+        export FZF_CNT="$t_dir/fzf_cnt" TAB_LOG="$t_dir/tab.log" ALTS_LOG="$t_dir/alts.log"
+        export PATH="$t_dir/bin:$PATH"
+
+        python3 - "$REPO_ROOT/bin/gamectl" <<'PY' || exit 1
+import os, pty, select, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("bash", ["bash", "-c", f'source "{sys.argv[1]}"; clean_stale_locks() {{ :; }}; library_menu'], os.environ)
+while select.select([fd], [], [], 5)[0]:
+    try:
+        if not os.read(fd, 4096):
+            break
+    except OSError:
+        break
+_, st = os.waitpid(pid, 0)
+os.close(fd)
+assert os.waitstatus_to_exitcode(st) == 0
+PY
+        local tab_log alts_log
+        tab_log=$(cat "$t_dir/tab.log")
+        alts_log=$(cat "$t_dir/alts.log")
+        grep -Fq '[Store: ALL]' <<< "$tab_log" || exit 1
+        grep -Fq '[Store: STEAM]' <<< "$tab_log" || exit 1
+        grep -Fq '[Store: STANDALONE]' <<< "$tab_log" || exit 1
+        ! grep -Fq '[Store: GOG]' <<< "$tab_log" || exit 1
+        ! grep -Fq '[Store: EPIC]' <<< "$tab_log" || exit 1
+        ! grep -Fq '[Store: AMAZON]' <<< "$tab_log" || exit 1
+        grep -Fq $'STEAM\tSteam Library' <<< "$alts_log" || exit 1
+        ! grep -Fq 'GOG' <<< "$alts_log" || exit 1
+        ! grep -Fq 'EPIC' <<< "$alts_log" || exit 1
+
+        # 3. Logging into Epic (epic_auth.json) + installing a GOG game activates EPIC & GOG automatically
+        printf '{"access_token":"tok","refresh_token":"ref"}\n' > "$t_dir/home/.config/gamectl/epic_auth.json"
+        mkdir -p "$t_dir/home/GOG Games/PruneGog"
+        touch "$t_dir/home/GOG Games/PruneGog/gog.bin"
+        chmod +x "$t_dir/home/GOG Games/PruneGog/gog.bin"
+        printf '{"gameId":"991122","name":"PruneGog"}\n' > "$t_dir/home/GOG Games/PruneGog/goggame-991122.info"
+
+        local active_out
+        active_out=$(bash -c '
+            set -e
+            source "$1/src/core/00_header.sh"
+            source "$1/src/core/10_utils.sh"
+            source "$1/src/steam/20_discovery.sh"
+            source "$1/src/stores/00_store_interface.sh"
+            source "$1/src/tui/70_dashboard.sh"
+            invalidate_scan_cache || true
+            get_visible_store_filters
+        ' _ "$REPO_ROOT") || exit 1
+        [ "$active_out" = $'ALL\nSTEAM\nGOG\nEPIC\nSTANDALONE' ] || exit 1
+    )
+}
+run_test "Dynamic Auto-Prune Multi-Store (Tab & Alt-S, WP43A)" test_wp43a_dynamic_store_auto_prune_contract
 
 echo
 if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then

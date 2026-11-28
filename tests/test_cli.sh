@@ -747,14 +747,14 @@ run_test "Library Scanner Optimization: Single-pass parser & runtime disk cache"
 
 test_fzf_interactive_input_contract() {
     # Invariant: Free-text fzf input prompts must not contaminate stdin and must distinguish ESC (130) from Enter (0 or 1)
-    ! cat "$REPO_ROOT"/src/tui/*.sh | grep -q 'query_raw=$(echo "Search Steam Store' && \
+    ! grep -q 'query_raw=$(echo "Search Steam Store' "$REPO_ROOT"/src/tui/*.sh && \
     ! grep -q 'u_appid_raw=$(echo "Enter Steam AppID' "$REPO_ROOT/src/steam/32_steam_bridge.sh" && \
-    cat "$REPO_ROOT"/src/tui/*.sh | grep -q '\[ "$fzf_rc" -eq 130 \] && return 0' && \
+    grep -q '\[ "$fzf_rc" -eq 130 \] && return 0' "$REPO_ROOT"/src/tui/*.sh && \
     grep -q '\[ "$fzf_rc" -eq 130 \] && return 0' "$REPO_ROOT/src/steam/32_steam_bridge.sh" && \
-    cat "$REPO_ROOT"/src/tui/*.sh | grep -q ': | fzf' && \
+    grep -q ': | fzf' "$REPO_ROOT"/src/tui/*.sh && \
     grep -q ': | fzf' "$REPO_ROOT/src/steam/32_steam_bridge.sh" && \
-    cat "$REPO_ROOT"/src/tui/*.sh | grep -q '\[ "$fzf_rc" -eq 130 \] && break' && \
-    cat "$REPO_ROOT"/src/tui/*.sh | grep -q '\[ -z "$selection" \] && continue'
+    grep -q '\[ "$fzf_rc" -eq 130 \] && break' "$REPO_ROOT"/src/tui/*.sh && \
+    grep -q '\[ -z "$selection" \] && continue' "$REPO_ROOT"/src/tui/*.sh
 }
 run_test "TUI Input Invariant: Resilient fzf exit-code handling on free-text entry" test_fzf_interactive_input_contract
 
@@ -764,9 +764,9 @@ test_fzf_menu_loop_break_invariants() {
     count_dash=$(cat "$REPO_ROOT"/src/tui/*.sh | grep -c '\[ "$fzf_rc" -eq 130 \] && break')
     count_down=$(cat "$REPO_ROOT"/src/steam/3[034]_*.sh | grep -c '\[ "$fzf_rc" -eq 130 \] && break')
     [ "$count_dash" -eq 3 ] && [ "$count_down" -eq 1 ] && \
-    cat "$REPO_ROOT"/src/tui/*.sh | grep -q '\[ -z "$selection" \] && continue' && \
-    cat "$REPO_ROOT"/src/tui/*.sh | grep -q '\[ -z "$fzf_out" \] && continue' && \
-    cat "$REPO_ROOT"/src/steam/3[034]_*.sh | grep -q '\[ -z "$selection" \] && continue' && \
+    grep -q '\[ -z "$selection" \] && continue' "$REPO_ROOT"/src/tui/*.sh && \
+    grep -q '\[ -z "$fzf_out" \] && continue' "$REPO_ROOT"/src/tui/*.sh && \
+    grep -q '\[ -z "$selection" \] && continue' "$REPO_ROOT"/src/steam/3[034]_*.sh && \
     grep -q '0|q|Q|cancel)' "$REPO_ROOT"/src/runners/4[05]_*.sh && \
     grep -q 'continue' "$REPO_ROOT"/src/runners/4[05]_*.sh
 }
@@ -2583,10 +2583,11 @@ test_preview_dashboard_dynamic_metrics_contract() {
     grep -F -q "Platform Ratio" <<< "$p1" || return 1
     grep -F -q "GBE Fork Injected" <<< "$p1" || return 1
 
-    # 2. Module 2: Steam Store & ProtonDB
+    # 2. Module 2: Multi-Store Catalog & ProtonDB
     local p2
     p2=$("$GAMECTL" --preview-dashboard 2 4 2>&1 || true)
-    grep -F -q "STEAM STORE & PROTONDB" <<< "$p2" || return 1
+    grep -F -q "MULTI-STORE CATALOG & PROTONDB" <<< "$p2" || return 1
+    grep -F -q "Store Adapters" <<< "$p2" || return 1
     grep -F -q "Steam Store API" <<< "$p2" || return 1
     grep -F -q "ProtonDB API" <<< "$p2" || return 1
     grep -F -q "Local Cache Dir" <<< "$p2" || return 1
@@ -2726,12 +2727,12 @@ run_test "System Diagnostics (Chunk 6): Layer 8 Security Sandboxing & Process Is
 test_tui_game_fixes_exposure_contract() {
     # 1. Verify library_menu hotkey and header exposure
     grep -q -- '--expect=ctrl-f,ctrl-d,ctrl-l,ctrl-o,ctrl-p,ctrl-i,ctrl-s,ctrl-b,ctrl-r,ctrl-x' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
-    cat "$REPO_ROOT"/src/tui/*.sh | grep -F -q 'Community Fixes' || return 1
+    grep -F -q 'Community Fixes' "$REPO_ROOT"/src/tui/*.sh || return 1
     grep -F -q 'manage_game_fixes_interactive "$sel_appid" "$sel_title" "$sel_dir"' "$REPO_ROOT/src/tui/70_dashboard.sh" || return 1
 
     # 2. Verify search_steam action palette exposure for installed and uninstalled games
-    cat "$REPO_ROOT"/src/tui/*.sh | grep -F -q 'Check Community Fixes & Online-Fix Catalog' || return 1
-    cat "$REPO_ROOT"/src/tui/*.sh | grep -F -q '[Fixes & OnlineFix] Check Community Fixes & Online-Fix Catalog' || return 1
+    grep -F -q 'Check Community Fixes & Online-Fix Catalog' "$REPO_ROOT"/src/tui/*.sh || return 1
+    grep -F -q '[Fixes & OnlineFix] Check Community Fixes & Online-Fix Catalog' "$REPO_ROOT"/src/tui/*.sh || return 1
 
     # 3. Verify main.sh CLI registration and exports
     grep -q -- '--preview-fix' "$REPO_ROOT/src/main.sh" || return 1
