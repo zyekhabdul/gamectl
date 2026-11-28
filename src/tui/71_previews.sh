@@ -237,17 +237,82 @@ preview_game() {
     echo "========================================================"
 }
 
-# Preview pane generator for Steam Store Search & ProtonDB compatibility
+# Preview pane generator for Store Catalog Search & ProtonDB compatibility
 preview_search_game() {
     local appid="${1:-}"
     local title="${2:-}"
     local app_status="${3:-[NOT INSTALLED]}"
+    local store="${4:-STEAM}"
 
     appid=$(strip_ansi "$appid" | tr -d '[:space:]')
     title=$(strip_ansi "$title" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     app_status=$(strip_ansi "$app_status" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    store=$(strip_ansi "$store" | tr -d '[:space:]')
+    store="${store^^}"
+    [ -z "$store" ] && store="STEAM"
 
-    printf "%s╭─ STEAM METADATA & PROTONDB AUDIT ───────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
+    if [ "$store" != "STEAM" ]; then
+        printf "%s╭─ STORE METADATA (%s) ───────────────────────────────╮%s\n" "${UI_BOX}" "$store" "${UI_RST}"
+        printf "│ %s%s%s %s(ID: %s)%s\n" "${UI_BOLD}" "$title" "${UI_RST}" "${UI_DIM}" "${appid:-N/A}" "${UI_RST}"
+        printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
+        printf "  %sLocal State%s : %s\n" "${UI_CYAN}" "${UI_RST}" "$app_status"
+        printf "  %sStore      %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_PURPLE}" "$store" "${UI_RST}"
+
+        if [ "$store" = "GOG" ] && [[ "$appid" =~ ^[0-9]+$ ]]; then
+            local gog_json=""
+            gog_json=$(fetch_cached_json "https://api.gog.com/products/${appid}?expand=downloads" "gog_details_${appid}" 3600 2>/dev/null || true)
+            if [ -n "$gog_json" ] && [ "$gog_json" != "null" ]; then
+                local g_row g_rel="" g_bytes="" g_plats=""
+                g_row=$(printf '%s' "$gog_json" | jq -r '
+                    [
+                        ((.release_date // "") | tostring | gsub("[\\t\\r\\n]"; " ") | sub("T.*$"; "")),
+                        (([.downloads.installers[]?.total_size // 0 | tonumber? // 0] | add // 0) | tostring),
+                        ([(.content_system_compatibility // {} | to_entries[] | select(.value == true) | .key)] | join(", "))
+                    ] | join("\u001f")
+                ' 2>/dev/null || true)
+                IFS=$'\x1f' read -r g_rel g_bytes g_plats <<< "$g_row"
+                if [[ "$g_bytes" =~ ^[0-9]+$ ]] && [ "$g_bytes" -gt 0 ]; then
+                    local g_sz="$g_bytes"
+                    declare -F format_bytes >/dev/null 2>&1 && g_sz=$(format_bytes "$g_bytes")
+                    printf "  %sEst. Size  %s : %s%s%s %s(Installers)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_BOLD}" "$g_sz" "${UI_RST}" "${UI_DIM}" "${UI_RST}"
+                fi
+                [ -n "$g_rel" ] && printf "  %sRelease    %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$g_rel" "${UI_RST}"
+                [ -n "$g_plats" ] && printf "  %sPlatforms  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_GREEN}" "$g_plats" "${UI_RST}"
+            fi
+            printf "  %sDRM        %s : %sDRM-Free (GOG)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_GREEN}" "${UI_RST}"
+        elif [ "$store" = "EPIC" ]; then
+            if declare -F fetch_epic_app_metadata >/dev/null 2>&1; then
+                local e_row=""
+                e_row=$(fetch_epic_app_metadata "$appid" 2>/dev/null || true)
+                if [ -n "$e_row" ]; then
+                    local e_dl="0" e_disk="0" e_dev="" e_dlc="0" e_ver="" _e_end=""
+                    IFS=$'\x1f' read -r e_dl e_disk e_dev e_dlc e_ver _e_end <<< "$e_row"
+                    local e_sz_parts="" e_dl_h="" e_disk_h=""
+                    if [[ "$e_dl" =~ ^[0-9]+$ ]] && [ "$e_dl" -gt 0 ]; then
+                        e_dl_h="$e_dl"; declare -F format_bytes >/dev/null 2>&1 && e_dl_h=$(format_bytes "$e_dl")
+                        e_sz_parts="${e_dl_h} (Download)"
+                    fi
+                    if [[ "$e_disk" =~ ^[0-9]+$ ]] && [ "$e_disk" -gt 0 ]; then
+                        e_disk_h="$e_disk"; declare -F format_bytes >/dev/null 2>&1 && e_disk_h=$(format_bytes "$e_disk")
+                        e_sz_parts="${e_sz_parts:+${e_sz_parts} • }${e_disk_h} (Disk)"
+                    fi
+                    [ -n "$e_sz_parts" ] && printf "  %sEst. Size  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_BOLD}" "$e_sz_parts" "${UI_RST}"
+                    [ -n "$e_dev" ] && printf "  %sDeveloper  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$e_dev" "${UI_RST}"
+                    if [[ "$e_dlc" =~ ^[0-9]+$ ]] && [ "$e_dlc" -gt 0 ]; then
+                        printf "  %sDLCs       %s : %s%s available%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_ICE}" "$e_dlc" "${UI_RST}"
+                    fi
+                    [ -n "$e_ver" ] && printf "  %sVersion    %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$e_ver" "${UI_RST}"
+                fi
+            fi
+            printf "  %sAdapter    %s : %slegendary (Epic Games Store)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "${UI_RST}"
+        elif [ "$store" = "AMAZON" ]; then
+            printf "  %sAdapter    %s : %snile (Amazon Prime Gaming)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "${UI_RST}"
+        fi
+        printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
+        return 0
+    fi
+
+    printf "%s╭─ STORE METADATA & PROTONDB AUDIT (STEAM) ───────────╮%s\n" "${UI_BOX}" "${UI_RST}"
     printf "│ %s%s%s %s(AppID: %s)%s\n" "${UI_BOLD}" "$title" "${UI_RST}" "${UI_DIM}" "$appid" "${UI_RST}"
     printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
     printf "  %sLocal State%s : %s\n" "${UI_CYAN}" "${UI_RST}" "$app_status"
@@ -284,17 +349,86 @@ preview_search_game() {
             elif [ "$is_win" = "true" ]; then
                 printf "  %sPlatform   %s : %sWindows PE (Requires Proton/Wine)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_PURPLE}" "${UI_RST}"
             fi
+
+            if declare -F parse_steam_app_metadata_json >/dev/null 2>&1; then
+                local meta_row=""
+                meta_row=$(parse_steam_app_metadata_json "$details" 2>/dev/null || true)
+                if [ -n "$meta_row" ]; then
+                    local st_lin="" st_win="" st_mac="" rel_str="" price_str="" devs="" pubs="" dlc_cnt="0" ctrl="" meta_sc="" recs="" short_d="" has_req="0" drm_warn="" min_specs="" modes="" cat_ctrl="" st_req_bytes="" _meta_end=""
+                    IFS=$'\x1f' read -r st_lin st_win st_mac rel_str price_str devs pubs dlc_cnt ctrl meta_sc recs short_d has_req drm_warn min_specs modes cat_ctrl st_req_bytes _meta_end <<< "$meta_row"
+                    ctrl="${ctrl:-$cat_ctrl}"
+
+                    local size_disp=""
+                    if [ -n "$st_lin" ] && [ -n "$st_win" ] && [ "${st_lin,,}" != "${st_win,,}" ]; then
+                        size_disp="${st_lin} (Linux) • ${st_win} (Win)"
+                    elif [ -n "$st_lin" ]; then
+                        size_disp="${st_lin} (Req. Storage)"
+                    elif [ -n "$st_win" ]; then
+                        size_disp="${st_win} (Req. Storage)"
+                    elif [ -n "$st_mac" ]; then
+                        size_disp="${st_mac} (Mac Storage)"
+                    elif [ "$has_req" = "1" ]; then
+                        size_disp="Not listed by store"
+                    fi
+                    [ -n "$size_disp" ] && printf "  %sEst. Size  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_BOLD}" "$size_disp" "${UI_RST}"
+                    if [[ "$st_req_bytes" =~ ^[0-9]+$ ]] && [ "$st_req_bytes" -gt 0 ] && declare -F get_library_disk_free_info >/dev/null 2>&1; then
+                        local disk_info="" free_h="" is_low="0"
+                        disk_info=$(get_library_disk_free_info "$st_req_bytes" 2>/dev/null || true)
+                        if [ -n "$disk_info" ]; then
+                            IFS=$'\t' read -r free_h is_low <<< "$disk_info"
+                            if [ "$is_low" = "1" ]; then
+                                printf "  %sFree Disk  %s : %s%s [LOW DISK]%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_RED}" "$free_h" "${UI_RST}"
+                            else
+                                printf "  %sFree Disk  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$free_h" "${UI_RST}"
+                            fi
+                        fi
+                    fi
+                    [ -n "$min_specs" ] && printf "  %sMin Specs  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$min_specs" "${UI_RST}"
+                    [ -n "$drm_warn" ] && printf "  %sDRM / Acct %s : %s[WARN] %s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_AMBER}" "$drm_warn" "${UI_RST}"
+                    [ -n "$modes" ] && printf "  %sModes      %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$modes" "${UI_RST}"
+
+                    if [ "$price_str" = "Free" ]; then
+                        printf "  %sPrice      %s : %sFree%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_GREEN}" "${UI_RST}"
+                    elif [ -n "$price_str" ]; then
+                        printf "  %sPrice      %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_AMBER}" "$price_str" "${UI_RST}"
+                    fi
+                    [ -n "$rel_str" ] && printf "  %sRelease    %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$rel_str" "${UI_RST}"
+                    if [ -n "$devs" ]; then
+                        local dev_line="$devs"
+                        [ -n "$pubs" ] && [ "$pubs" != "$devs" ] && dev_line+=" • Pub: $pubs"
+                        printf "  %sDeveloper  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$dev_line" "${UI_RST}"
+                    elif [ -n "$pubs" ]; then
+                        printf "  %sPublisher  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$pubs" "${UI_RST}"
+                    fi
+                    if [[ "$dlc_cnt" =~ ^[0-9]+$ ]] && [ "$dlc_cnt" -gt 0 ] && [ "$norm_type" = "GAME" ]; then
+                        printf "  %sDLCs       %s : %s%s available%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_ICE}" "$dlc_cnt" "${UI_RST}"
+                    fi
+                    [ -n "$ctrl" ] && printf "  %sController %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$ctrl" "${UI_RST}"
+                    if [ -n "$recs" ] || [ -n "$meta_sc" ]; then
+                        local rev_parts=""
+                        [ -n "$recs" ] && rev_parts="${recs} recs"
+                        [ -n "$meta_sc" ] && rev_parts="${rev_parts:+${rev_parts} • }Metacritic: ${meta_sc}"
+                        printf "  %sReviews    %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$rev_parts" "${UI_RST}"
+                    fi
+                    [ -n "$short_d" ] && printf "  %sSummary    %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$short_d" "${UI_RST}"
+                fi
+            fi
+        fi
+        if [ -s "${XDG_CACHE_HOME:-$HOME/.cache}/gamectl/manifests/${appid}.zip" ]; then
+            printf "  %sLocal Cache%s : %s[MANIFEST READY]%s %s(Offline manifest cached)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_GREEN}" "${UI_RST}" "${UI_DIM}" "${UI_RST}"
         fi
 
         printf "\n%s╭─ COMMUNITY COMPATIBILITY ───────────────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
         local pdb
         pdb=$(fetch_cached_json "https://www.protondb.com/api/v1/reports/summaries/${appid}.json" "protondb_${appid}" 3600 2>/dev/null || true)
         if [ -n "$pdb" ] && [ "$pdb" != "null" ]; then
-            local tier score conf total tier_upper c_tier
+            local tier score conf total tier_upper c_tier trend_t="" best_t=""
             tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null || echo "Unknown")
             score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null || echo "-")
             conf=$(echo "$pdb" | jq -r ".confidence // \"-\"" 2>/dev/null || echo "-")
             total=$(echo "$pdb" | jq -r ".total // \"-\"" 2>/dev/null || echo "-")
+            trend_t=$(echo "$pdb" | jq -r ".trendingTier // \"\"" 2>/dev/null || true)
+            best_t=$(echo "$pdb" | jq -r ".bestReportedTier // \"\"" 2>/dev/null || true)
             tier_upper="${tier^^}"
             c_tier="${UI_GREEN}[$tier_upper]${UI_RST}"
             case "$tier_upper" in
@@ -308,8 +442,33 @@ preview_search_game() {
             local rep_str=""
             [ "$total" != "-" ] && rep_str=" • Reports: $total"
             printf "  %sRating Score  %s: %s%s%s %s(Confidence: %s%s)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_BOLD}" "$score" "${UI_RST}" "${UI_DIM}" "$conf" "$rep_str" "${UI_RST}"
+            if [ -n "$trend_t" ] || [ -n "$best_t" ]; then
+                if { [ -n "$trend_t" ] && [ "${trend_t,,}" != "${tier,,}" ]; } || { [ -n "$best_t" ] && [ "${best_t,,}" != "${tier,,}" ]; }; then
+                    local tb_parts=""
+                    [ -n "$trend_t" ] && tb_parts="Trending: [${trend_t^^}]"
+                    [ -n "$best_t" ] && tb_parts="${tb_parts:+${tb_parts} • }Best: [${best_t^^}]"
+                    printf "  %sTrend / Best  %s: %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$tb_parts" "${UI_RST}"
+                fi
+            fi
         else
             printf "  %sProtonDB Tier %s: %s[NO REPORTS YET]%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "${UI_RST}"
+        fi
+        if declare -F fetch_steam_deck_compat >/dev/null 2>&1; then
+            local deck_row="" deck_cat="" deck_note="" deck_col="${UI_DIM}"
+            deck_row=$(fetch_steam_deck_compat "$appid" 2>/dev/null || true)
+            if [ -n "$deck_row" ]; then
+                IFS=$'\t' read -r deck_cat deck_note <<< "$deck_row"
+                case "$deck_cat" in
+                    VERIFIED) deck_col="${UI_GREEN}" ;;
+                    PLAYABLE) deck_col="${UI_CYAN}" ;;
+                    UNSUPPORTED) deck_col="${UI_RED}" ;;
+                esac
+                if [ -n "$deck_note" ]; then
+                    printf "  %sSteamOS/Deck  %s: %s[%s]%s %s(%s)%s\n" "${UI_CYAN}" "${UI_RST}" "$deck_col" "$deck_cat" "${UI_RST}" "${UI_DIM}" "$deck_note" "${UI_RST}"
+                else
+                    printf "  %sSteamOS/Deck  %s: %s[%s]%s\n" "${UI_CYAN}" "${UI_RST}" "$deck_col" "$deck_cat" "${UI_RST}"
+                fi
+            fi
         fi
         printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
     else
@@ -359,7 +518,7 @@ preview_log_entry() {
                 advice="Savegame snapshot error. Verify disk space in target directory or storage quota."
                 ;;
             *STORE*|*DOWNLOAD*|*DEPOT*)
-                advice="Network or CDN timeout. Check connectivity to Steam Store or CDN endpoints."
+                advice="Network or CDN timeout. Check connectivity to Store API or CDN endpoints."
                 ;;
             *GBE*|*INJECT*)
                 advice="GBE injection failure. Check file permissions or verify 32-bit vs 64-bit architecture."

@@ -8,7 +8,7 @@
 # - Savegame snapshot rotation (auto-backup before launch)
 # - Performance profile wrapper (Mesa GL thread, CPU governor)
 # - 1-key sync to remote companion host via rsync over SSH
-# - Live Steam Store search + ProtonDB rating via fzf
+# - Live Multi-Store catalog search (Steam/GOG/Epic/Amazon) + ProtonDB rating via fzf
 # ==============================================================================
 
 set -uo pipefail

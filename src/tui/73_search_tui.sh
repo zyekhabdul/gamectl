@@ -1,5 +1,5 @@
 # ==============================================================================
-# Live Steam Store Search & Actionable TUI Picker (Split from 70_dashboard.sh)
+# Live Store Catalog Search & Actionable TUI Picker (Split from 70_dashboard.sh)
 # ==============================================================================
 
 # Live Steam Search View (Actionable TUI Search)
@@ -20,7 +20,7 @@ search_steam() {
     if [ -z "$query" ]; then
         local fzf_rc=0
         # Input primitive canonicalized via tui_prompt_input (: | fzf wrapper)
-        query=$(tui_prompt_input "gamectl :: Steam Store Search" "Type game title to search (Enter: Search │ Esc: Cancel)" "" "Search Store > ") || fzf_rc=$?
+        query=$(tui_prompt_input "gamectl :: Store Catalog Search" "Type game title to search (Enter: Search │ Esc: Cancel)" "" "Search Catalog > ") || fzf_rc=$?
         [ "$fzf_rc" -eq 130 ] && return 0
         if [ "$fzf_rc" -ne 0 ]; then
             [ "$standalone" = "true" ] && exit_tui_screen
@@ -47,7 +47,7 @@ search_steam() {
 
     if [ -z "$items" ]; then
         log_msg "WARN" "STORE" "Game '$query' not found on Steam Store API."
-        tui_modal_notice "Steam Store Search" "Game '$query' was not found on Steam Store." || return $?
+        tui_modal_notice "Store Catalog Search" "Game '$query' was not found on Steam catalog." || return $?
         [ "$standalone" = "true" ] && exit_tui_screen
         return 0
     fi
@@ -144,7 +144,7 @@ search_steam() {
             --with-nth=1,2,3,4 \
             --expect=tab,alt-s,ctrl-a,ctrl-u,ctrl-s,ctrl-d,ctrl-f \
             --bind="tab:accept,alt-s:accept,ctrl-a:accept,ctrl-u:accept,ctrl-s:accept,ctrl-d:accept,ctrl-f:accept" \
-            --border-label="  ╢ gamectl :: Steam Store Catalog [Type: $type_filter] ╟  " \
+            --border-label="  ╢ gamectl :: Store Catalog [Steam │ Type: $type_filter] ╟  " \
             --border-label-pos=2 \
             --header="$fzf_header" \
             --prompt="Filter Results > " \
@@ -180,7 +180,7 @@ search_steam() {
 
         if [ "$trigger_key" = "ctrl-f" ]; then
             local new_q n_rc=0
-            new_q=$(tui_prompt_input "gamectl :: Steam Store Search" "Type game title to search (Enter: Search │ Esc: Keep Current List)" "" "Search Store > ") || n_rc=$?
+            new_q=$(tui_prompt_input "gamectl :: Store Catalog Search" "Type game title to search (Enter: Search │ Esc: Keep Current List)" "" "Search Catalog > ") || n_rc=$?
             if [ "$n_rc" -eq 130 ]; then
                 continue
             fi
@@ -202,7 +202,7 @@ search_steam() {
 
             if [ -z "$new_items" ]; then
                 log_msg "WARN" "STORE" "Game '$new_q' not found on Steam Store API."
-                tui_modal_notice "Steam Store Search" "Game '$new_q' was not found on Steam Store." || true
+                tui_modal_notice "Store Catalog Search" "Game '$new_q' was not found on Steam catalog." || true
                 continue
             fi
 

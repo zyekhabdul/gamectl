@@ -129,7 +129,7 @@ preview_dashboard() {
             echo "  • ${UI_CYAN}Ctrl-P${UI_RST} LAN Persona       • ${UI_CYAN}Ctrl-S${UI_RST} Savegame Snapshots"
             ;;
         *2*|*SEARCH*|*PENCARIAN*)
-            echo "${UI_BOX}╭─ SELECTED MODULE: [02] STEAM STORE & PROTONDB ────────╮${UI_RST}"
+            echo "${UI_BOX}╭─ SELECTED MODULE: [02] MULTI-STORE CATALOG & PROTONDB ╮${UI_RST}"
             echo "│ ${UI_BOLD}REMOTE CATALOG & COMPATIBILITY TELEMETRY${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
 
@@ -171,6 +171,22 @@ preview_dashboard() {
                 printf "%s %s %s\n" "$c_size" "$c_steam" "$c_pdb" > "$c_cache" 2>/dev/null || true
             fi
 
+            local store_adapters="" s_name s_label
+            for s_name in steam gog epic amazon; do
+                case "$s_name" in
+                    steam) s_label="Steam" ;;
+                    gog) s_label="GOG" ;;
+                    epic) s_label="Epic" ;;
+                    amazon) s_label="Amazon" ;;
+                esac
+                if declare -F store_dispatch >/dev/null 2>&1 && store_dispatch "$s_name" available >/dev/null 2>&1; then
+                    store_adapters+="${store_adapters:+ • }${s_label} ${UI_GREEN}[READY]${UI_RST}"
+                else
+                    store_adapters+="${store_adapters:+ • }${s_label} ${UI_DIM}[OPT]${UI_RST}"
+                fi
+            done
+
+            echo "  ${UI_CYAN}Store Adapters     ${UI_RST}: $store_adapters"
             echo "  ${UI_CYAN}Steam Store API    ${UI_RST}: $steam_st ${UI_DIM}(store.steampowered.com)${UI_RST}"
             echo "  ${UI_CYAN}ProtonDB API       ${UI_RST}: $pdb_st ${UI_DIM}(protondb.com/api/v1)${UI_RST}"
             echo "  ${UI_CYAN}Local Cache Dir    ${UI_RST}: ${UI_BOLD}~/.cache/gamectl/${UI_RST} ${UI_DIM}($c_size total)${UI_RST}"
@@ -178,9 +194,9 @@ preview_dashboard() {
             echo "  ${UI_CYAN}Cached ProtonDB    ${UI_RST}: ${UI_BOLD}$c_pdb ratings${UI_RST}"
             echo
             echo "  ${UI_DIM}Catalog Features:${UI_RST}"
-            echo "  • Live ProtonDB tier badges: Platinum, Gold, Silver, Bronze, Borked"
-            echo "  • Direct metadata retrieval: Genres, Platform (Linux ELF vs Windows PE)"
-            echo "  • Headless downloads via Standalone CDN or Steam native install"
+            echo "  • Multi-Store Search (Alt-S): Steam, GOG, Epic & Amazon adapters"
+            echo "  • Essential Metadata: Est. Size, Release, Price, DLC count & ProtonDB tier"
+            echo "  • Headless downloads via Standalone CDN or store adapter CLIs"
             ;;
         *3*|*DOWNLOAD*|*UNDUHAN*)
             echo "${UI_BOX}╭─ SELECTED MODULE: [03] DOWNLOAD MONITOR ──────────────╮${UI_RST}"

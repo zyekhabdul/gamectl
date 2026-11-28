@@ -127,8 +127,8 @@ dashboard_menu() {
         local menu_entries
         menu_entries=$(cat <<EOF
 1	${UI_PURPLE}[01]${UI_RST} ${UI_BOLD}GAME LIBRARY${UI_RST}	${UI_DIM}Browse, inject and launch installed games${UI_RST}
-2	${UI_PURPLE}[02]${UI_RST} ${UI_BOLD}STEAM STORE SEARCH${UI_RST}	${UI_DIM}Search games & check ProtonDB compatibility${UI_RST}
-3	${UI_PURPLE}[03]${UI_RST} ${UI_BOLD}DOWNLOAD MONITOR${UI_RST}	${UI_DIM}Track Steam native downloads & ACF telemetry${UI_RST}
+2	${UI_PURPLE}[02]${UI_RST} ${UI_BOLD}STORE CATALOG SEARCH${UI_RST}	${UI_DIM}Search Steam & Multi-Store (GOG/Epic/Amazon) + ProtonDB${UI_RST}
+3	${UI_PURPLE}[03]${UI_RST} ${UI_BOLD}DOWNLOAD MONITOR${UI_RST}	${UI_DIM}Track Standalone CDN & Steam download telemetry${UI_RST}
 4	${UI_PURPLE}[04]${UI_RST} ${UI_BOLD}STEAM ACF ADOPTION & ASSET MANAGER${UI_RST}	${UI_DIM}Adopt physical files, shaders & bridge downloads${UI_RST}
 5	${UI_PURPLE}[05]${UI_RST} ${UI_BOLD}GLOBAL SETTINGS${UI_RST}	${UI_DIM}Configure LAN persona, default wrappers & remote host${UI_RST}
 6	${UI_PURPLE}[06]${UI_RST} ${UI_BOLD}SYSTEM DIAGNOSTICS${UI_RST}	${UI_DIM}Audit 7-layer dependencies, runners & GPU health${UI_RST}
@@ -316,6 +316,18 @@ remote_sync_interactive() {
     done
 }
 
+# Canonical store filter labels for dynamic Alt-S picker (Packet 43A)
+_store_filter_label_row() {
+    case "${1:-ALL}" in
+        ALL)        printf 'ALL\tAll Stores (Unified)\n' ;;
+        STEAM)      printf 'STEAM\tSteam Library\n' ;;
+        GOG)        printf 'GOG\tGOG Library (DRM-Free)\n' ;;
+        EPIC)       printf 'EPIC\tEpic Games Library (Native/Legendary)\n' ;;
+        AMAZON)     printf 'AMAZON\tAmazon Games Library (Nile)\n' ;;
+        STANDALONE) printf 'STANDALONE\tStandalone / Portable\n' ;;
+    esac
+}
+
 # Main Library View
 library_menu() {
     if [ ! -t 0 ] || [ ! -t 1 ]; then
@@ -337,6 +349,7 @@ library_menu() {
 
     while true; do
         flush_tty_input
+        active_store="$(validate_visible_store_filter "$active_store")"
         _format_library_chrome "$active_store" "$last_status_banner"
         last_status_banner=""
         local lib_label="$GAMECTL_LIB_LABEL" lib_header="$GAMECTL_LIB_HEADER"
@@ -388,29 +401,17 @@ library_menu() {
             search_steam "" false || hk_rc=$?
             invalidate_scan_cache
         elif [ "$trigger_key" = "tab" ]; then
-            case "$active_store" in
-                ALL) active_store="STEAM" ;;
-                STEAM) active_store="GOG" ;;
-                GOG) active_store="EPIC" ;;
-                EPIC) active_store="AMAZON" ;;
-                AMAZON) active_store="STANDALONE" ;;
-                *) active_store="ALL" ;;
-            esac
+            active_store="$(get_next_visible_store_filter "$active_store")"
             continue
         elif [ "$trigger_key" = "alt-s" ]; then
-            local store_pick=""
-            store_pick=$(tui_action_palette \
-                "Store Filter" \
-                "Select Store View (Enter: Apply │ Esc: Cancel)" \
-                "$(printf 'ALL\tAll Stores (Unified)\nSTEAM\tSteam Library\nGOG\tGOG Library (DRM-Free)\nEPIC\tEpic Games Library (Legendary)\nAMAZON\tAmazon Games Library (Nile)\nSTANDALONE\tStandalone / Portable\n')" \
-                "" \
-                "Store > ") || hk_rc=$?
+            local store_pick="" store_palette=""
+            store_palette="$(build_visible_store_palette)"
+            [ -n "$store_palette" ] || store_palette="$(_store_filter_label_row ALL)"
+            store_pick=$(tui_action_palette "Store Filter" "Select Store View (Enter: Apply │ Esc: Cancel)" "$store_palette" "" "Store > ") || hk_rc=$?
             if [ "$hk_rc" -ne 0 ] && [ "$hk_rc" -ne 1 ] && [ "$hk_rc" -ne 130 ]; then
                 return "$hk_rc"
             fi
-            if [ "$hk_rc" -eq 0 ] && [ -n "$store_pick" ]; then
-                active_store=$(printf '%s' "$store_pick" | cut -f1)
-            fi
+            [ "$hk_rc" -eq 0 ] && [ -n "$store_pick" ] && active_store=$(printf '%s' "$store_pick" | cut -f1)
             continue
         fi
         if [ "$hk_rc" -ne 0 ] && [ "$hk_rc" -ne 1 ] && [ "$hk_rc" -ne 130 ]; then

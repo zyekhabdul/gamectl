@@ -437,6 +437,7 @@ launch_game() {
         _launch_echo "[INFO] Log stream: $log_file"
         (
             export LD_LIBRARY_PATH=".:lib64:lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            [[ ":${GLIBC_TUNABLES:-}:" == *:glibc.rtld.execstack=* ]] || export GLIBC_TUNABLES="${GLIBC_TUNABLES:+${GLIBC_TUNABLES}:}glibc.rtld.execstack=2"
             [ -n "${GAMECTL_DEV_RESOLVED_WINEDEBUG:-}" ] && export WINEDEBUG="$GAMECTL_DEV_RESOLVED_WINEDEBUG"
             [ -n "${GAMECTL_DEV_RESOLVED_VK_DEBUG:-}" ] && export VK_LOADER_DEBUG="$GAMECTL_DEV_RESOLVED_VK_DEBUG"
             [ "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" = "1" ] && export GAMECTL_GBE_LOG=1 GBE_LOG_FILE="$dev_trace_log"

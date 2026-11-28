@@ -23,10 +23,13 @@ search_stores_interactive() {
         rows+="${r_store}"$'\t'"${r_id}"$'\t'"${badge}"$'\t'"${r_title}"$'\t'"${r_plats}"$'\t'"${r_status}"$'\t'"${r_type}"$'\t'"${r_parent}"$'\n'
     done <<< "$raw_rows"
 
+    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
     local pick p_rc=0
     pick=$(printf '%s' "$rows" | fzf --delimiter=$'\t' --with-nth=1,2,3,4,5,6 \
         --border-label="  ╢ gamectl :: Cross-Store Catalog ($target_store) ╟  " --border-label-pos=2 \
-        --header="Enter: Download via Store Adapter │ Esc: Return" --prompt="Cross-Store > ") || p_rc=$?
+        --header="Enter: Download via Store Adapter │ Esc: Return" --prompt="Cross-Store > " \
+        --preview='"$GAMECTL_PREVIEW_BIN" --preview-search {2} {4} {6} {1}' \
+        --preview-window=right:52%:border-rounded:wrap) || p_rc=$?
     [ "$p_rc" -eq 130 ] && return 0
     [ "$p_rc" -ne 0 ] && [ "$p_rc" -ne 1 ] && return "$p_rc"
     [ -n "$pick" ] || return 0
@@ -87,4 +90,103 @@ tui_library_sync_actions() {
     _format_library_chrome "$store_filter" ""
     printf 'reload("$GAMECTL_PREVIEW_BIN" --list-formatted --store "%s")+refresh-preview+change-border-label(%s)+change-header:%s' \
         "$store_filter" "$GAMECTL_LIB_LABEL" "$GAMECTL_LIB_HEADER"
+}
+
+# Compute active store filter tokens using Installed-or-Authenticated pruning (Packet 43A)
+get_visible_store_filters() {
+    local -A store_counts=()
+    local _id _title _st _dir _bin c_store
+    if declare -F scan_installed_games >/dev/null 2>&1; then
+        while IFS=$'\t' read -r _id _title _st _dir _bin c_store; do
+            [[ "$_id" == \#* ]] && continue
+            [ -n "$_dir" ] || continue
+            c_store="${c_store:-STANDALONE}"
+            c_store="${c_store^^}"
+            store_counts["$c_store"]=$(( ${store_counts["$c_store"]:-0} + 1 ))
+        done < <(scan_installed_games 2>/dev/null || true)
+    fi
+
+    printf '%s\n' "ALL"
+
+    local has_steam_lib=0
+    if [ "${store_counts[STEAM]:-0}" -gt 0 ]; then
+        has_steam_lib=1
+    elif declare -F get_steam_libraries >/dev/null 2>&1; then
+        local slib
+        while IFS= read -r slib; do
+            if [ -n "$slib" ] && [ -d "$slib" ]; then
+                has_steam_lib=1
+                break
+            fi
+        done < <(get_steam_libraries 2>/dev/null || true)
+    fi
+    [ "$has_steam_lib" -eq 1 ] && printf '%s\n' "STEAM"
+
+    if [ "${store_counts[GOG]:-0}" -gt 0 ] || \
+       { declare -F _gog_resolve_cli >/dev/null 2>&1 && _gog_resolve_cli >/dev/null 2>&1 && \
+         declare -F _gog_auth_session_present >/dev/null 2>&1 && _gog_auth_session_present; }; then
+        printf '%s\n' "GOG"
+    fi
+
+    # Keep EPIC hidden when only gamectl-core binary exists without games or active auth
+    if [ "${store_counts[EPIC]:-0}" -gt 0 ] || \
+       { declare -F store_epic_available >/dev/null 2>&1 && store_epic_available >/dev/null 2>&1 && \
+         declare -F _epic_auth_session_present >/dev/null 2>&1 && _epic_auth_session_present; }; then
+        printf '%s\n' "EPIC"
+    fi
+
+    if [ "${store_counts[AMAZON]:-0}" -gt 0 ] || \
+       { declare -F store_amazon_available >/dev/null 2>&1 && store_amazon_available >/dev/null 2>&1 && \
+         declare -F _amazon_auth_session_present >/dev/null 2>&1 && _amazon_auth_session_present; }; then
+        printf '%s\n' "AMAZON"
+    fi
+
+    if [ "${store_counts[STANDALONE]:-0}" -gt 0 ]; then
+        printf '%s\n' "STANDALONE"
+    fi
+}
+
+# Cycle to the next visible store filter token wrapping back to ALL
+get_next_visible_store_filter() {
+    local current="${1:-ALL}"
+    local -a visible=()
+    local item
+    while IFS= read -r item; do
+        [ -n "$item" ] && visible+=("$item")
+    done < <(get_visible_store_filters)
+
+    [ "${#visible[@]}" -gt 0 ] || { printf '%s\n' "ALL"; return 0; }
+
+    local i idx=-1
+    for i in "${!visible[@]}"; do
+        if [ "${visible[$i]}" = "$current" ]; then
+            idx="$i"
+            break
+        fi
+    done
+
+    if [ "$idx" -lt 0 ]; then
+        printf '%s\n' "ALL"
+    else
+        local next_idx=$(( (idx + 1) % ${#visible[@]} ))
+        printf '%s\n' "${visible[$next_idx]}"
+    fi
+}
+
+# Build visible store picker TSV rows for Alt-S palette (Packet 43A)
+build_visible_store_palette() {
+    local s_tok=""
+    while IFS= read -r s_tok; do
+        [ -n "$s_tok" ] && _store_filter_label_row "$s_tok"
+    done < <(get_visible_store_filters)
+}
+
+# Reset active store filter back to ALL if no longer visible (Packet 43A)
+validate_visible_store_filter() {
+    local current="${1:-ALL}" item=""
+    [ "$current" = "ALL" ] && { printf '%s\n' "ALL"; return 0; }
+    while IFS= read -r item; do
+        [ "$item" = "$current" ] && { printf '%s\n' "$current"; return 0; }
+    done < <(get_visible_store_filters)
+    printf '%s\n' "ALL"
 }

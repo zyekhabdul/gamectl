@@ -25,7 +25,7 @@ _read_elf_class() {
 _is_ignored_binary_name() {
     case "${1:-}" in
         *.so|*.so.*|*.dll|*.dylib|*.exe|*.EXE|*.lock|*.log|installscript.vdf|*.png|*.bmp|*.txt|*.pkg|\
-        createdump|monoconfig|monomachineconfig|*.vdf|*.json|*.cfg|*.ini|*.xml|*.md|*.README|*.config|*.orig)
+        createdump|monoconfig|monomachineconfig|*.vdf|*.json|*.cfg|*.ini|*.xml|*.md|*.README|*.config|*.orig|crashpad_handler|chrome-sandbox)
             return 0 ;;
     esac
     return 1
@@ -150,8 +150,24 @@ find_game_binary() {
         esac
     done
 
+    # Priority 5a: Subdirectory native Linux executables (ELF / shebang)
+    local sub sub_bin
+    for sub in "bin" "bin/x64" "bin/x86_64" "bin/linux64" "bin/linux" "x86_64" "x64" "linux64" "linux" "game"; do
+        [ -d "$dir/$sub" ] || continue
+        for c in "$base" "$clean_base" "$lower_base" "$lower_clean"; do
+            if [ -f "$dir/$sub/$c" ] && [ ! -d "$dir/$sub/$c" ] && validate_tui_fields "$c"; then
+                [ ! -x "$dir/$sub/$c" ] && _is_shebang_script "$dir/$sub/$c" && chmod +x "$dir/$sub/$c" 2>/dev/null || true
+                if [ -x "$dir/$sub/$c" ]; then
+                    echo "$sub/$c"; return 0
+                fi
+            fi
+        done
+        if sub_bin=$(_pick_native_linux_binary "$dir/$sub"); then
+            echo "$sub/$sub_bin"; return 0
+        fi
+    done
+
     # Priority 5: Subdirectory .exe in standard game binary folders
-    local sub
     for sub in "bin" "bin/x64" "bin/Win64" "Binaries/Win64" "Binaries/Win32" "x64"; do
         if [ -d "$dir/$sub" ]; then
             for f in "$dir/$sub"/*.exe "$dir/$sub"/*.EXE; do
@@ -198,6 +214,8 @@ inspect_game_log_hint() {
         echo "Graphics API error detected -> switch Renderer to WineD3D (<CTRL-O> or --wined3d)"
     elif echo "$tail_log" | grep -qiE 'err:module:import_dll|cannot open shared object file|error while loading shared libraries|libGL\.so\.1|System\.DllNotFoundException|DllNotFoundException|Unable to load shared library'; then
         echo "Missing runtime DLL/library -> run 'gamectl setup-runtime', Community Fixes (<CTRL-X>), or install 32-bit multilib"
+    elif echo "$tail_log" | grep -qiE 'cannot enable executable stack|execstack'; then
+        echo "Legacy executable-stack library blocked by glibc 2.41+ -> retry with GLIBC_TUNABLES=glibc.rtld.execstack=2"
     elif echo "$tail_log" | grep -qiE 'Exec format error|cannot execute binary file|Permission denied'; then
         echo "Executable architecture or permission mismatch -> verify 64-bit binary / chmod +x"
     elif echo "$tail_log" | grep -qiE 'SteamStub|Application load error|steamclient.*fail'; then
