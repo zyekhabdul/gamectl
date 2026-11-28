@@ -195,42 +195,26 @@ download_game() {
     local engine="standalone"   # Default to Pure Standalone CDN engine (Zero Steam Client)
     local is_strict_standalone=true
     local allow_dlc=false
+    local allow_lan_fallback=true
 
     while [ $# -gt 0 ]; do
         case "$1" in
             --allow-dlc)
                 allow_dlc=true
                 ;;
-            --engine)
-                shift
-                case "${1:-}" in
-                    depot)
-                        echo "[WARN] DepotDownloader is deprecated and removed. Routing to native Steam CDN engine." >&2
-                        ;;
-                    steam|sls)
-                        engine="sls"
-                        is_strict_standalone=false
-                        ;;
-                    standalone|direct)
-                        engine="standalone"
-                        is_strict_standalone=true
-                        ;;
-                esac
+            --no-lan)
+                allow_lan_fallback=false
                 ;;
-            --engine=*)
+            --engine|--engine=*)
                 local eng_val="${1#--engine=}"
+                if [ "$1" = "--engine" ]; then
+                    shift
+                    eng_val="${1:-}"
+                fi
                 case "$eng_val" in
-                    depot)
-                        echo "[WARN] DepotDownloader is deprecated and removed. Routing to native Steam CDN engine." >&2
-                        ;;
-                    steam|sls)
-                        engine="sls"
-                        is_strict_standalone=false
-                        ;;
-                    standalone|direct)
-                        engine="standalone"
-                        is_strict_standalone=true
-                        ;;
+                    depot) echo "[WARN] DepotDownloader is deprecated and removed. Routing to native Steam CDN engine." >&2 ;;
+                    steam|sls) engine="sls"; is_strict_standalone=false ;;
+                    standalone|direct) engine="standalone"; is_strict_standalone=true ;;
                 esac
                 ;;
             --sls|--steam)
@@ -348,9 +332,16 @@ download_game() {
 
     # Route 1: Standalone Native Steam CDN Engine (Zero Steam Client required)
     if [ "$engine" = "standalone" ]; then
-        local manifest_zip
+        local manifest_zip=""
         echo "[INFO] Manifest archive not provided. Attempting automatic harvest (source: $source)..." >&2
-        manifest_zip=$(fetch_manifest "$appid" "" "$source" true) || return 1
+        manifest_zip=$(fetch_manifest "$appid" "" "$source" true || true)
+        if [ -z "$manifest_zip" ] || [ ! -f "$manifest_zip" ]; then
+            if [ "$allow_lan_fallback" = true ] && declare -F lan_fallback_for_download >/dev/null 2>&1; then
+                local lan_rc=0
+                manifest_zip=$(lan_fallback_for_download "$appid" "$target_dir" "$title") || lan_rc=$?
+                [ "$lan_rc" -eq 2 ] && return 0
+            fi
+        fi
         if [ -z "$manifest_zip" ] || [ ! -f "$manifest_zip" ]; then
             echo "[ERROR] Manifest archive for AppID $appid could not be acquired across providers." >&2
             return 1

@@ -12,6 +12,7 @@ OUTPUT_BIN="$REPO_ROOT/bin/gamectl"
 # Source modules in strict dependency order
 MODULES=(
     "$REPO_ROOT/src/core/00_header.sh"
+    "$REPO_ROOT/src/core/05_cli_help.sh"
     "$REPO_ROOT/src/core/10_utils.sh"
     "$REPO_ROOT/src/core/12_tui_primitives.sh"
     "$REPO_ROOT/src/core/14_saves.sh"
@@ -33,6 +34,7 @@ MODULES=(
     "$REPO_ROOT/src/stores/00_store_interface.sh"
     "$REPO_ROOT/src/stores/10_store_steam.sh"
     "$REPO_ROOT/src/stores/20_store_gog.sh"
+    "$REPO_ROOT/src/stores/21_gog_installer.sh"
     "$REPO_ROOT/src/stores/30_store_epic.sh"
     "$REPO_ROOT/src/stores/40_store_amazon.sh"
     "$REPO_ROOT/src/runners/40_wrappers.sh"
@@ -43,6 +45,7 @@ MODULES=(
     "$REPO_ROOT/src/runners/45_wrapper_tui.sh"
     "$REPO_ROOT/src/runners/50_launcher.sh"
     "$REPO_ROOT/src/runners/51_remote_sync.sh"
+    "$REPO_ROOT/src/runners/54_lan_mesh.sh"
     "$REPO_ROOT/src/runners/52_inject_runtime.sh"
     "$REPO_ROOT/src/runners/53_process_hud.sh"
     "$REPO_ROOT/src/diagnostics/60_doctor.sh"

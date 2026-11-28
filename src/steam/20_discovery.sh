@@ -146,6 +146,7 @@ scan_installed_games() {
     local epic_cfg_dir="${LEGENDARY_CONFIG_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/legendary}"
     declare -F _epic_config_dir >/dev/null 2>&1 && epic_cfg_dir="$(_epic_config_dir)"
     local epic_installed="$epic_cfg_dir/installed.json"
+    local epic_native_installed="${GAMECTL_EPIC_INSTALLED_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/gamectl/epic_installed.json}"
 
     local amazon_cfg_dir="${NILE_CONFIG_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/nile}"
     declare -F _amazon_config_dir >/dev/null 2>&1 && amazon_cfg_dir="$(_amazon_config_dir)"
@@ -168,6 +169,9 @@ scan_installed_games() {
                 fi
             done
             if [ "$use_cached" = true ] && [ -f "$epic_installed" ] && [ "$epic_installed" -nt "$cache_file" ]; then
+                use_cached=false
+            fi
+            if [ "$use_cached" = true ] && [ -f "$epic_native_installed" ] && [ "$epic_native_installed" -nt "$cache_file" ]; then
                 use_cached=false
             fi
             if [ "$use_cached" = true ] && [ -f "$amazon_installed" ] && [ "$amazon_installed" -nt "$cache_file" ]; then
@@ -273,6 +277,7 @@ scan_installed_games() {
                 printf '[ERROR] Invalid %s installed.json payload in %s\n' "$s_label" "$s_file" >&2
             fi
         }
+        _scan_json_store_entries "Epic" "EPIC" "$epic_native_installed" "0"
         _scan_json_store_entries "Epic" "EPIC" "$epic_installed" "0"
         _scan_json_store_entries "Amazon" "AMAZON" "$amazon_installed" "1"
 

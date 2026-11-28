@@ -9,6 +9,8 @@
 # Packaging and build artifacts
 bin/gamectl-depot-dl
 bin/gamectl-depot-dl.exe
+bin/gamectl-core
+bin/gamectl-core.exe
 target/
 crates/**/target/
 packaging/debian/*.deb

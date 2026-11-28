@@ -14,8 +14,8 @@ _gamectl_completions() {
         cword=$COMP_CWORD
     fi
 
-    local commands="menu dashboard library list-ui config configure doctor audit stores gog epic amazon auth search-stores search_stores launch run configure-wrappers set-id set-id-interactive generate-steamid get-gamescope-args get-resolution get-steam-root get-steam-libraries steam-libs download downloads download-status entitle adopt-steam unlock inject fetch-dlc sync-steam ensure-downloader detect-gpu check-scope check-sandbox list list-formatted search logs fix-check check-fix fix-install install-fix apply-fix fix-revert revert-fix restart-steam reload-steam fetch-manifest manifest deploy-manifest deploy-sls harvest-dlc dlc-manifests fetch-dlc-manifests login-luatools auth-luatools auth-status luatools-status detect-steamstub steamstub check-stub unpack-stub unpack steamless setup-gbe gbe-setup gbe-install install-gbe setup-runtime runtime-setup install-runtime backup backup-save restore restore-save sync sync-remote sync-companion sync-tuf sync-pull pull-remote pull-companion pull-tuf mod-overrides onlinefix onlinefix-setup detect-overrides dll-overrides proton-list proton-install proton-remove pfx prefix protondb pdb make-desktop desktop-entry fetch-art fetch-artwork get-art get-steam-grid add-to-steam add-steam get-steam-shortcuts --help --version -h -v --list --list-formatted --search --logs --sync --sync-pull --backup --restore --download --downloads --download-status --inject --fetch-dlc --sync-steam --dashboard --preview --preview-dashboard --preview-search --preview-download"
-    local download_opts="--raw --inject-only --all --foreground -f --standalone --sls --source --os --allow-dlc"
+    local commands="menu dashboard library list-ui config configure doctor audit stores gog install-gog gog-install import gog-import epic amazon auth search-stores search_stores launch run configure-wrappers set-id set-id-interactive generate-steamid get-gamescope-args get-resolution get-steam-root get-steam-libraries steam-libs download downloads download-status entitle adopt-steam unlock inject fetch-dlc sync-steam ensure-downloader detect-gpu check-scope check-sandbox list list-formatted search logs fix-check check-fix fix-install install-fix apply-fix fix-revert revert-fix restart-steam reload-steam fetch-manifest manifest deploy-manifest deploy-sls harvest-dlc dlc-manifests fetch-dlc-manifests login-luatools auth-luatools auth-status luatools-status detect-steamstub steamstub check-stub unpack-stub unpack steamless setup-gbe gbe-setup gbe-install install-gbe setup-runtime runtime-setup install-runtime backup backup-save restore restore-save sync sync-remote sync-companion sync-tuf sync-pull pull-remote pull-companion pull-tuf lan-pull mesh-pull peers mod-overrides onlinefix onlinefix-setup detect-overrides dll-overrides proton-list proton-install proton-remove pfx prefix protondb pdb make-desktop desktop-entry fetch-art fetch-artwork get-art get-steam-grid add-to-steam add-steam get-steam-shortcuts --help --version -h -v --list --list-formatted --search --logs --sync --sync-pull --backup --restore --download --downloads --download-status --inject --fetch-dlc --sync-steam --dashboard --preview --preview-dashboard --preview-search --preview-download"
+    local download_opts="--raw --inject-only --all --foreground -f --standalone --sls --source --os --allow-dlc --no-lan"
     local inject_opts="--all --no-sync"
     local launch_opts="--hud --no-hud --mangohud --no-mangohud --gamemode --no-gamemode --gamescope --no-gamescope --fsr --no-fsr --glthread --no-glthread --scope --no-scope --prime --no-prime --sandbox --no-sandbox"
     local set_id_opts="--broadcast --global"
@@ -71,6 +71,20 @@ _gamectl_completions() {
                 COMPREPLY=( $(compgen -W "--dry-run -n" -- "$cur") )
             else
                 _complete_path
+            fi
+            return 0
+            ;;
+        lan-pull|mesh-pull)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--manifest-only -m --target -d --peer -p --with-pfx --dry-run -n --help -h" -- "$cur") )
+            elif [ "$prev" = "--target" ] || [ "$prev" = "-d" ]; then
+                _complete_path
+            fi
+            return 0
+            ;;
+        peers)
+            if [ "$cword" -eq 2 ]; then
+                COMPREPLY=( $(compgen -W "list add remove --help" -- "$cur") )
             fi
             return 0
             ;;
@@ -170,8 +184,16 @@ _gamectl_completions() {
             ;;
         gog)
             if [ "$cword" -eq 2 ]; then
-                COMPREPLY=( $(compgen -W "status auth search download sync --help" -- "$cur") )
+                COMPREPLY=( $(compgen -W "status auth search download sync install-offline --help" -- "$cur") )
             elif [ "$cword" -ge 4 ]; then
+                _complete_path
+            fi
+            return 0
+            ;;
+        install-gog|gog-install|import|gog-import)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--title --no-prefix --dry-run -n --help -h" -- "$cur") )
+            else
                 _complete_path
             fi
             return 0

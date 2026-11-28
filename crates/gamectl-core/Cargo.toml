@@ -1,0 +1,35 @@
+[package]
+name = "gamectl-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+description = "MIT-licensed cross-platform core engine for gamectl (native Epic Games Store OAuth, manifest parser, and chunk downloader)."
+license = "MIT"
+repository = "https://github.com/zyekhabdul/gamectl"
+
+[dependencies]
+base64 = "0.22"
+flate2 = "1"
+futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "fs", "io-util", "time", "macros"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "deny"
+unused_imports = "warn"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unwrap_used = "warn"
+
+[[bin]]
+name = "gamectl-core"
+path = "src/bin/gamectl-core.rs"

@@ -10,7 +10,6 @@ DEFAULT_MAX_LOC=600
 
 declare -A LEGACY_CEILING=(
     ["src/steam/32_steam_bridge.sh"]=694
-    ["src/main.sh"]=605
 )
 
 shopt -s nullglob

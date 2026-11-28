@@ -185,11 +185,23 @@ doctor_audit() {
         echo "    • $(printf '%-18s' "GOG Store CLI") : ${UI_DIM}[OPT]${UI_RST} Optional (Install gogdl or lgogdownloader for GOG support)"
     fi
 
+    if command -v innoextract >/dev/null 2>&1; then
+        echo "    • $(printf '%-18s' "GOG Extractor") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(command -v innoextract))${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "    • $(printf '%-18s' "GOG Extractor") : ${UI_DIM}[OPT]${UI_RST} Optional (Install innoextract for offline GOG .exe installers)"
+    fi
+
+    local epic_native_bin=""
+    declare -F resolve_gamectl_core_bin >/dev/null 2>&1 && epic_native_bin="$(resolve_gamectl_core_bin 2>/dev/null || true)"
     if command -v legendary >/dev/null 2>&1; then
         echo "    • $(printf '%-18s' "Epic Store CLI") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(command -v legendary))${UI_RST}"
         pass_cnt=$((pass_cnt + 1))
+    elif [ -n "$epic_native_bin" ] && [ -x "$epic_native_bin" ]; then
+        echo "    • $(printf '%-18s' "Epic Store CLI") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}(native: $epic_native_bin)${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
     else
-        echo "    • $(printf '%-18s' "Epic Store CLI") : ${UI_DIM}[OPT]${UI_RST} Optional (Install legendary for Epic Games support)"
+        echo "    • $(printf '%-18s' "Epic Store CLI") : ${UI_DIM}[OPT]${UI_RST} Optional (Build gamectl-core or install legendary for Epic Games support)"
     fi
 
     if command -v nile >/dev/null 2>&1; then

@@ -63,6 +63,7 @@ if [ -n "$SCRIPT_SOURCE" ] && [ "$SCRIPT_SOURCE" != "bash" ] && [ -f "$SCRIPT_SO
         IS_LOCAL=true
         SRC_BIN="$SRC_DIR/bin/gamectl"
         SRC_DEPOT_DL="$SRC_DIR/bin/gamectl-depot-dl"
+        SRC_CORE_BIN="$SRC_DIR/bin/gamectl-core"
     fi
 fi
 
@@ -85,6 +86,16 @@ if [ "$IS_LOCAL" = true ]; then
             else
                 echo "[INFO] Compiling native depot downloader into bin/gamectl-depot-dl..."
                 "$SRC_DIR/scripts/build-depot-dl.sh" || true
+            fi
+        fi
+    fi
+    if [ -f "$SRC_DIR/scripts/build-core.sh" ] && [ -d "$SRC_DIR/crates/gamectl-core" ]; then
+        if [ ! -f "$SRC_CORE_BIN" ] || ! "$SRC_DIR/scripts/build-core.sh" --check >/dev/null 2>&1; then
+            if [ "$DRY_RUN" = true ]; then
+                echo "[INFO] [DRY-RUN] Would compile MIT native core engine into bin/gamectl-core"
+            else
+                echo "[INFO] Compiling MIT native core engine into bin/gamectl-core..."
+                "$SRC_DIR/scripts/build-core.sh" || true
             fi
         fi
     fi
@@ -318,6 +329,11 @@ else
             chmod +x "$SRC_DEPOT_DL"
             ln -sf "$SRC_DEPOT_DL" "$BIN_DIR/gamectl-depot-dl"
             echo "[VERIFIED] Depot downloader installed: $BIN_DIR/gamectl-depot-dl"
+        fi
+        if [ -n "${SRC_CORE_BIN:-}" ] && [ -f "$SRC_CORE_BIN" ]; then
+            chmod +x "$SRC_CORE_BIN"
+            ln -sf "$SRC_CORE_BIN" "$BIN_DIR/gamectl-core"
+            echo "[VERIFIED] Native core engine installed: $BIN_DIR/gamectl-core"
         fi
     else
         echo "[INFO] Downloading standalone binary from $REPO_RAW_URL/bin/gamectl..."

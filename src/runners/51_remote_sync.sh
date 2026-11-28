@@ -419,3 +419,12 @@ pull_from_companion() {
 pull_from_tuf() {
     pull_save_remote "$@"
 }
+
+if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
+    _sync_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    if [ -f "$_sync_dir/54_lan_mesh.sh" ]; then
+        # shellcheck source=/dev/null
+        source "$_sync_dir/54_lan_mesh.sh"
+    fi
+    unset _sync_dir
+fi

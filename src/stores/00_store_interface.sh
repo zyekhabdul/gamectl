@@ -209,7 +209,7 @@ store_search_all() {
 # Standalone-source compatibility: load split store adapters when sourced directly outside bin/gamectl
 if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
     _stores_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-    for _stores_sub in 10_store_steam.sh 20_store_gog.sh 30_store_epic.sh 40_store_amazon.sh; do
+    for _stores_sub in 10_store_steam.sh 20_store_gog.sh 21_gog_installer.sh 30_store_epic.sh 40_store_amazon.sh; do
         if [ -f "$_stores_dir/$_stores_sub" ]; then
             # shellcheck source=/dev/null
             source "$_stores_dir/$_stores_sub"

@@ -22,9 +22,13 @@ store_gog_status() {
         cli_path="$(command -v "$cli_name" 2>/dev/null || echo "$cli_name")"
         cli_status="ready ($cli_name: $cli_path)"
     fi
+    local ext_status="missing (optional: install innoextract for offline .exe installers)"
+    if command -v innoextract >/dev/null 2>&1; then
+        ext_status="ready (innoextract: $(command -v innoextract 2>/dev/null || echo innoextract))"
+    fi
     local auth_status="unconfigured (run 'gamectl gog auth')"
     _gog_auth_session_present && auth_status="session present (external tool-managed)"
-    printf 'store=gog\n  cli      : %s\n  auth     : %s\n' "$cli_status" "$auth_status"
+    printf 'store=gog\n  cli      : %s\n  extractor: %s\n  auth     : %s\n' "$cli_status" "$ext_status" "$auth_status"
     return 0
 }
 
@@ -139,7 +143,17 @@ gog_cli() {
         search) store_dispatch gog search "$@" ;;
         download) store_dispatch gog download "$@" ;;
         sync) store_dispatch gog sync "$@" ;;
-        --help|-h|help) echo "Usage: gamectl gog <status|auth|search|download|sync> [args...]" ;;
-        *) echo "[ERROR] Unknown gog subcommand '$action'. Usage: gamectl gog <status|auth|search|download|sync> [args...]" >&2; return 1 ;;
+        install-offline|install) install_gog_offline "$@" ;;
+        --help|-h|help) echo "Usage: gamectl gog <status|auth|search|download|sync|install-offline> [args...]" ;;
+        *) echo "[ERROR] Unknown gog subcommand '$action'. Usage: gamectl gog <status|auth|search|download|sync|install-offline> [args...]" >&2; return 1 ;;
     esac
 }
+
+if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
+    _gog_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    if [ -f "$_gog_dir/21_gog_installer.sh" ]; then
+        # shellcheck source=/dev/null
+        source "$_gog_dir/21_gog_installer.sh"
+    fi
+    unset _gog_dir
+fi

@@ -1,4 +1,4 @@
-.PHONY: help build build-depot-dl test lint clean distclean pkg-deb pkg-aur pkg-all install uninstall
+.PHONY: help build build-depot-dl build-core test lint clean distclean pkg-deb pkg-aur pkg-all install uninstall
 
 help:
 	@echo "gamectl - Sovereign TUI Game Manager & Launcher for Linux"
@@ -6,6 +6,7 @@ help:
 	@echo "Usage:"
 	@echo "  make build          - Compile modular sources into standalone bin/gamectl"
 	@echo "  make build-depot-dl - Compile native Rust Steam CDN depot downloader"
+	@echo "  make build-core     - Compile MIT native Rust core engine (gamectl-core)"
 	@echo "  make test           - Execute regression & integrity test suite"
 	@echo "  make lint           - Validate bash syntax on all modules"
 	@echo "  make pkg-deb        - Build Debian/Ubuntu .deb package"
@@ -19,9 +20,13 @@ help:
 build:
 	./scripts/build.sh
 	@if [ -f ./scripts/build-depot-dl.sh ]; then ./scripts/build-depot-dl.sh --check >/dev/null 2>&1 || ./scripts/build-depot-dl.sh; fi
+	@if [ -f ./scripts/build-core.sh ]; then ./scripts/build-core.sh --check >/dev/null 2>&1 || ./scripts/build-core.sh; fi
 
 build-depot-dl:
 	./scripts/build-depot-dl.sh
+
+build-core:
+	./scripts/build-core.sh
 
 test:
 	./tests/test_cli.sh < /dev/null
@@ -66,7 +71,7 @@ install:
 	./install.sh
 
 uninstall:
-	rm -f $(HOME)/.local/bin/gamectl $(HOME)/.local/bin/game $(HOME)/.local/bin/gamectl-depot-dl
+	rm -f $(HOME)/.local/bin/gamectl $(HOME)/.local/bin/game $(HOME)/.local/bin/gamectl-depot-dl $(HOME)/.local/bin/gamectl-core
 	rm -f $(HOME)/.local/share/bash-completion/completions/gamectl $(HOME)/.local/share/bash-completion/completions/game
 	rm -f $(HOME)/.local/share/applications/gamectl.desktop
 
@@ -74,6 +79,9 @@ clean:
 	rm -rf packaging/debian/build_deb packaging/debian/*.deb packaging/arch/*.pkg.tar* packaging/aur-git/*.pkg.tar* packaging/aur-git/src packaging/aur-git/pkg src/gamectl.egg-info src/gamectl_runner/bin src/gamectl_runner/__pycache__
 	@if [ -f crates/depot-dl/Cargo.toml ] && command -v cargo >/dev/null 2>&1; then \
 		cargo clean --manifest-path crates/depot-dl/Cargo.toml; \
+	fi
+	@if [ -f crates/gamectl-core/Cargo.toml ] && command -v cargo >/dev/null 2>&1; then \
+		cargo clean --manifest-path crates/gamectl-core/Cargo.toml; \
 	fi
 
 distclean: clean
