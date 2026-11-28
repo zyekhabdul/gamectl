@@ -1,81 +1,73 @@
-# WORK PACKET 41: MULTI-STORE PHASE 4 (AMAZON NILE, UNIFIED AUTH HUB & CROSS-STORE SEARCH)
+# WORK PACKET 43: STRATEGI 4-PILAR (AUTO-PRUNE TUI, GOG IMPORT, LAN-SHARE & EPIC SCREAMAPI)
 
-- **Track**: Multi-Store Phase 4 / Amazon Adapter (`nile`), Unified Auth Hub & Search Aggregation
-- **Status**: COMPLETED [4/4 PACKETS]
-- **Prasyarat**: WP40 (Optional Epic Adapter via `legendary` — COMPLETED, `76a0630`) & Remediation Work Packet 2 (Steam App-Type SSoT & Engine-Level DLC Guard — COMPLETED, `457001c`)
-- **Riwayat Selesai**: WP33..WP40, SIGPIPE/ShellCheck & `0755` Bundle (`d5aaccc..096ef82`), Parallel Lint & TUI Safety Perf (`0137446..3c9299e`), Multi-Store Phase 2 GOG WP39 (`5823b26..cefff4a`), Arch/AUR Cargo Source-Build & Locked `depot-dl` (`52b9883..c83a363`), Multi-Store Phase 3 Epic WP40 (`5c2701a..76a0630`), dan Remediation Work Packet 2 (`dbd262c..457001c`).
-- **Basis**: `docs/RFC_MULTISTORE_SUPPORT.md` (v2.0), `docs/REMEDIATION.md` (Work Packet 2), dan `docs/SOVEREIGN_ORIGINAL_PURPOSE.md`.
-- **Target Files**: `src/stores/40_store_amazon.sh`, `src/stores/00_store_interface.sh`, `src/stores/10_store_steam.sh`, `src/stores/20_store_gog.sh`, `src/stores/30_store_epic.sh`, `src/steam/20_discovery.sh`, `src/tui/70_dashboard.sh`, `src/diagnostics/60_doctor.sh`, `src/main.sh`, `scripts/build.sh`, `completions/gamectl.bash`, `tests/test_remediation.sh`, `DEVELOPMENT.md`, `bin/gamectl`
-
----
-
-## 1. Tujuan & Invarian Phase 4
-
-1. **Optional External CLI Invariant**:
-   - `nile` berstatus **opsional penuh** (`optdepends`). Mesin tanpa `nile` harus tetap lulus 100% test suite standalone dan menjalankan seluruh alur Steam/GOG/Epic/Standalone tanpa warning palsu.
-2. **Zero Plaintext Credential Storage**:
-   - `gamectl` dilarang menyimpan token atau kredensial Amazon sendiri; autentikasi didelegasikan ke CLI native (`nile auth`, `gogdl auth`/`lgogdownloader --login`, `legendary auth`, `login_luatools`) via `gamectl auth`. Status sesi dibaca secara offline-safe dari direktori konfigurasi tool terkait tanpa mencetak isi secret.
-3. **Canonical App-Type Taxonomy & Input Sanitization**:
-   - Pencarian lintas store mewarisi kosakata token tipe kanonik tertutup dari `src/steam/31_manifests.sh` (`GAME`, `DLC`, `DEMO`, `MOD`, `SOUNDTRACK`, `TOOL`, `APP`). Seluruh field metadata (`app_id`, `title`, `platforms`, `install_path`, `executable`) wajib menolak `[\t\r\n]` di `jq` dan lolos `validate_tui_fields`; payload JSON cacat ditolak langsung.
-4. **Zero Key Collision & Deduplikasi**:
-   - `Tab` dan `Alt-S` pada `library_menu` memperluas siklus filter (`ALL -> STEAM -> GOG -> EPIC -> AMAZON -> STANDALONE -> ALL`), menjaga `Ctrl-S` tetap eksklusif untuk Unified Remote Sync Palette. Game Amazon di dalam `~/Games/` tidak boleh terduplikasi sebagai `STANDALONE`.
-5. **Pre-Commit Hook Hygiene**:
-   - Jaga `src/stores/40_store_amazon.sh` <= 145 baris; pecah commit implementasi (`41A`, `41B`, `41C`), `bin/gamectl`, `tests/test_remediation.sh`, dan docs agar tiap commit source <= 150 baris diff dan edit tes terpisah dari source code.
+- **Track**: Maintenance / Sovereign 4-Pillar Strategy
+- **Status**: IN PROGRESS [2/4 PACKETS]
+- **Prasyarat**: WP42 (`05_cli_help.sh`, `21_gog_installer.sh`, `54_lan_mesh.sh`, `crates/gamectl-core/`) — terverifikasi `make test` & `STRICT_LINT=1 make lint` (Exit 0).
+- **Riwayat Selesai**: WP33..WP41 (`597b73f`), WP42 (Pemangkasan LOC `src/main.sh` via `src/core/05_cli_help.sh`, GOG Offline Extractor `src/stores/21_gog_installer.sh`, P2P LAN Mesh `src/runners/54_lan_mesh.sh`, dan MIT Rust Epic Core `crates/gamectl-core/`).
+- **Basis**: `docs/SOVEREIGN_ORIGINAL_PURPOSE.md` dan Strategi 4-Pilar Peluang `gamectl` (Steam Utama, Epic Giveaway, GOG DRM-Free, LAN Mesh Jaring Pengaman).
+- **Target Files**: `src/tui/72_store_tui.sh`, `src/tui/70_dashboard.sh`, `src/stores/21_gog_installer.sh`, `src/runners/54_lan_mesh.sh`, `src/stores/31_epic_screamapi.sh`, `src/stores/30_store_epic.sh`, `src/stores/00_store_interface.sh`, `src/runners/41_proton_prefix.sh`, `src/core/05_cli_help.sh`, `src/main.sh`, `scripts/build.sh`, `completions/gamectl.bash`, `tests/test_remediation.sh`, `DEVELOPMENT.md`, `bin/gamectl`
 
 ---
 
-## 2. Rencana Eksekusi Detail (Packet 41A - 41D)
+## 1. Tujuan & Pilihan Model Arsitektur
 
-### [x] Packet 41A: Amazon Prime Gaming Adapter (`src/stores/40_store_amazon.sh`) & Registry
-- **Target Files**: `src/stores/40_store_amazon.sh`, `src/stores/00_store_interface.sh`, `scripts/build.sh`
-- **Langkah Teknis**:
-  1. Buat `src/stores/40_store_amazon.sh` (<= 145 LOC) yang mengimplementasikan kontrak `store_amazon_*`:
-     - `_amazon_config_dir()`: resolve `${NILE_CONFIG_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/nile}`.
-     - `_amazon_resolve_cli()` & `store_amazon_available()`: probe `command -v nile >/dev/null 2>&1`.
-     - `store_amazon_status()`: laporkan `store=amazon`, status CLI (`ready`/`missing`), dan keberadaan `user.json` di `_amazon_config_dir()` secara offline-safe (`always exit 0`, zero network).
-     - `store_amazon_search <query>`: tolak query kosong & CLI absen; query `nile library list --json` (atau fallback `nile list-games --json`), filter case-insensitive pada `product.id`/`product.title` di `jq` sambil menolak `[\t\r\n]`, sanitasi via `validate_tui_fields`, tandai `INSTALLED`/`AVAILABLE` dari `scan_installed_games --store AMAZON`, dan cetak TSV `AMAZON\t<APP_ID>\t<TITLE>\t<PLATFORMS>\t<STATUS>`.
-     - `store_amazon_list_installed()`: delegasi ke `scan_installed_games --store AMAZON "$@"`.
-     - `store_amazon_download <app_id> [target_dir] [opts...]`: validasi `app_id` (`^[0-9A-Za-z._-]+$`, tolak `..`), default `target_dir="${GAMECTL_LIBRARY_DIR:-$HOME/Games}/$app_id"`, delegasi ke `nile install "$app_id" --path "$target_dir" "$@"`, lalu `invalidate_scan_cache`.
-     - `store_amazon_sync <app_id> <game_dir> [opts...]`: validasi argumen & direktori, jalankan `backup_save "$game_dir" true || return $?` sebelum operasi verifikasi/repair (`nile verify "$app_id" --path "$game_dir"` atau laporan terstruktur bila CLI tidak mendukung).
-     - `amazon_cli <status|auth|search|download|sync|--help>`: delegasi `status/search/download/sync` ke `store_dispatch amazon` dan `auth` ke `nile auth "$@"`.
-  2. Daftarkan `"amazon"` di `store_list_registered()` dan `40_store_amazon.sh` di sibling auto-loader `src/stores/00_store_interface.sh`.
-  3. Tambahkan `"$REPO_ROOT/src/stores/40_store_amazon.sh"` ke `MODULES=(...)` di `scripts/build.sh` tepat setelah `30_store_epic.sh`.
-- **Definition of Done (DoD)**:
-  - `store_list_registered` mengembalikan `steam`, `gog`, `epic`, `amazon`; `store_dispatch amazon ...` bekerja bersih dengan mock `nile` dan gagal terstruktur ke `stderr` saat `nile` absen.
+1. **Dynamic Auto-Prune Multi-Store (Model *Installed-or-Authenticated*)**:
+   - Menghilangkan store kosong dari siklus `Tab` dan picker `Alt-S` di Library TUI.
+   - Aturan visibilitas tab:
+     - `ALL`: selalu tampil.
+     - `STEAM`: tampil jika ada game `STEAM` terpasang atau direktori Steam library ditemukan.
+     - `GOG`: tampil jika ada game `GOG` terpasang atau CLI `gogdl`/`lgogdownloader` memiliki sesi aktif.
+     - `EPIC`: tampil jika ada game `EPIC` terpasang atau (`store_epic_available` **dan** `_epic_auth_session_present`), sehingga keberadaan `bin/gamectl-core` tidak memunculkan tab kosong saat belum login.
+     - `AMAZON`: tampil jika ada game `AMAZON` terpasang atau (`store_amazon_available` **dan** `user.json` ada).
+     - `STANDALONE`: tampil jika ada game `STANDALONE` (atau fallback saat library kosong).
+2. **GOG Offline Importer (`gamectl import`)**:
+   - Menjadikan [21_gog_installer.sh](file:///home/aomiqaza/Projects/gamectl/src/stores/21_gog_installer.sh) sebagai Single Source of Truth dengan alias CLI `gamectl import <setup.exe|installer.sh>` dan inisialisasi direktori `saves/`.
+3. **LAN Mesh `lan-share` (Model A: *Encrypted SSH/rsync Push*)**:
+   - Simetris dengan `lan-pull` ([54_lan_mesh.sh](file:///home/aomiqaza/Projects/gamectl/src/runners/54_lan_mesh.sh)): mendorong game terinstal atau manifest ke peer companion (`~/.config/gamectl/peers`) lewat SSH/`rsync` tanpa membuka port HTTP atau daemon tambahan.
+4. **Epic ScreamAPI DLC Unlocker (Model *Opt-In Provisioner + Anti-Cheat Hard-Stop*)**:
+   - Meniru pola [19_gbe_templates.sh](file:///home/aomiqaza/Projects/gamectl/src/core/19_gbe_templates.sh) dan [52_inject_runtime.sh](file:///home/aomiqaza/Projects/gamectl/src/runners/52_inject_runtime.sh): injeksi eksplisit (`gamectl epic screamapi`), deteksi keras Anti-Cheat (`EasyAntiCheat`/`BattlEye`/`EOSAntiCheat`) untuk melindungi akun, backup `EOSSDK-*.dll.orig_gamectl`, dan dukungan `--revert`.
 
-### [x] Packet 41B: Amazon Discovery, `gamectl amazon`, TUI Filter & Optional Doctor Probe
-- **Target Files**: `src/steam/20_discovery.sh`, `src/main.sh`, `src/tui/70_dashboard.sh`, `src/diagnostics/60_doctor.sh`, `completions/gamectl.bash`
-- **Langkah Teknis**:
-  1. Di `src/steam/20_discovery.sh`:
-     - Tambahkan pengecekan mtime `$(_amazon_config_dir)/installed.json` pada validasi cache `scan_installed_games()`.
-     - Pindai `installed.json` milik `nile` **sebelum** loop `custom_search_dirs` agar `seen_dirs` mencatat path kanonis game Amazon dan folder di `~/Games/` tidak terduplikasi sebagai `STANDALONE`. Tolak entry korup / berkarakter `[\t\r\n]` ke `stderr` (`[ERROR]`) tanpa menggagalkan entry valid; set `STATUS=AMAZON` (bila `STANDALONE`) dan Kolom 6 `STORE=AMAZON`.
-     - Tambahkan badge `*AMAZON*)` pada mode `--formatted` sambil mempertahankan header `# gamectl scanner v3`.
-  2. Di `src/main.sh` & `completions/gamectl.bash`: tambahkan subcommand `gamectl amazon <status|auth|search|download|sync>` + `--help` dan completion `amazon`.
-  3. Di `src/tui/70_dashboard.sh`: perluas siklus `Tab` pada `library_menu()` menjadi `ALL -> STEAM -> GOG -> EPIC -> AMAZON -> STANDALONE -> ALL` dan tambahkan `AMAZON\tAmazon Games Library (Nile)` di `Alt-S` tanpa menyentuh `Ctrl-S`.
-  4. Di `src/diagnostics/60_doctor.sh`: tambahkan probe opsional `[OPT]`/`[READY]` untuk `nile` pada Layer 6 tepat setelah `Epic Store CLI` tanpa menambah `warn_cnt`/`miss_cnt` saat absen.
-- **Definition of Done (DoD)**:
-  - `gamectl doctor` tetap pass tanpa `nile`; `installed.json` Amazon terindeks sebagai `STORE=AMAZON` tanpa duplikasi di `STANDALONE`; `Tab`/`Alt-S` memfilter `AMAZON` dengan nol bentrokan `Ctrl-S`.
+---
 
-### [x] Packet 41C: Unified Auth Hub (`gamectl auth`) & Cross-Store Search (`search_stores`)
-- **Target Files**: `src/stores/00_store_interface.sh`, `src/stores/10_store_steam.sh`, `src/stores/20_store_gog.sh`, `src/stores/30_store_epic.sh`, `src/stores/40_store_amazon.sh`, `src/main.sh`, `src/tui/70_dashboard.sh`, `completions/gamectl.bash`
-- **Langkah Teknis**:
-  1. Tambahkan `auth_hub_cli <status|gog|epic|amazon|luatools>` di `src/stores/00_store_interface.sh` dan wire ke `gamectl auth` di `src/main.sh` + `completions/gamectl.bash`:
-     - `status`: merangkum status offline seluruh store (`steam/luatools`, `gog`, `epic`, `amazon`) tanpa mencetak secret.
-     - `<store>`: mendelegasikan login ke `gog_cli auth`, `epic_cli auth`, `amazon_cli auth`, atau `login_luatools` / `login_luatools_interactive`.
-  2. Tambahkan `store_search_all <query> [--store <all|steam|gog|epic|amazon>]` di `src/stores/00_store_interface.sh` (dan alias CLI `gamectl search-stores <query>` / `search_stores`):
-     - Mengagregasi adapter yang `available` (atau store spesifik yang diminta) dengan tetap menjaga kontrak 5-kolom existing `store_<name>_search` (`STORE\tAPP_ID\tTITLE\tPLATFORMS\tSTATUS`).
-     - Memperkaya output gabungan menjadi TSV 7-kolom tervalidasi `STORE\tAPP_ID\tTITLE\tPLATFORMS\tSTATUS\tITEM_TYPE\tPARENT_APPID`: baris `STEAM` diklasifikasikan batch via `classify_steam_app_types` (fallback `APP` saat offline), sedangkan `GOG`/`EPIC`/`AMAZON` dipetakan ke token kanonik `GAME` (tanpa duplikasi parser).
-  3. Di `src/tui/70_dashboard.sh`: hubungkan opsi switcher/pencarian lintas store opsional agar item non-Steam dari `search_stores` dapat diarahkan ke `store_dispatch <store> download`, sementara item `STEAM` tetap memakai `download_game` (beserta engine-level DLC guard).
-- **Definition of Done (DoD)**:
-  - `gamectl auth status` bekerja 100% offline tanpa store CLI eksternal; `gamectl search-stores <query>` mengembalikan TSV 7-kolom tervalidasi dengan klasifikasi kanonik lintas store tanpa merusak test 5-kolom `store_<name>_search` yang sudah ada.
+## 2. Rencana Eksekusi Detail (Packet 43A - 43D)
 
-### [x] Packet 41D: Contract Tests, Docs, Rebuild & Full Verification
-- **Target Files**: `tests/test_remediation.sh`, `DEVELOPMENT.md`, `PLAN.md`, `bin/gamectl`
+### [x] Packet 43A: Dynamic Auto-Prune Multi-Store (`Tab` & `Alt-S`)
+- **Target Files**: `src/tui/72_store_tui.sh`, `src/tui/70_dashboard.sh`, `tests/test_remediation.sh`
 - **Langkah Teknis**:
-  1. Perbarui Test 32 di `tests/test_remediation.sh` (`if idx < 5:` dan cek `[Store: AMAZON]`) serta tambahkan Tests 39–40:
-     - **Test 39 (41A/41B)**: kontrak `store_dispatch amazon`, `store_amazon_status` offline-safe, error saat `nile` absen, `doctor_audit` `[OPT]`, mock `nile` (`library list --json`, penolakan `\t`/`\n`, `install`, `verify` dengan `backup_save`), `installed.json` discovery (`$6 == "AMAZON"`), deduplikasi `~/Games/`, dan `Tab`/`Alt-S` (`AMAZON`).
-     - **Test 40 (41C)**: `gamectl auth status` offline-safe + delegasi `auth`, serta `store_search_all` / `gamectl search-stores` 7-kolom lintas store dengan klasifikasi `GAME`/`DLC` Steam dan `GAME` store lain.
-  2. Perbarui peta modul `src/stores/40_store_amazon.sh` di `DEVELOPMENT.md` dan tandai WP41 selesai di `PLAN.md`.
-  3. Kompilasi ulang `bin/gamectl` (`./scripts/build.sh && ./scripts/build.sh --check`) dan jalankan full gate (`STRICT_LINT=1 make lint`, `make test`, dan bersihkan `.deb`).
+  1. Tambahkan `get_visible_store_filters()`, `get_next_visible_store_filter()`, `build_visible_store_palette()`, dan `validate_visible_store_filter()` di `src/tui/72_store_tui.sh` dengan model *Installed-or-Authenticated*.
+  2. Perbarui siklus `tab)` dan picker `alt-s)` di `src/tui/70_dashboard.sh` (disertai `_store_filter_label_row()`).
+  3. Tambahkan Test 46 di `tests/test_remediation.sh` dan perbarui fixture 6-store pada Test 32.
 - **Definition of Done (DoD)**:
-  - Seluruh lint, bundle check, suite Bash (`test_cli.sh`, `test_remediation.sh`, `test_tui_ergonomics.sh`, `test_depot_filter.sh`, `test_hubcap.sh`), dan Python safety tests lulus Exit Code `0` tanpa ketergantungan CLI eksternal nyata.
+  - `Tab` dan `Alt-S` hanya menampilkan store yang relevan; `STRICT_LINT=1 make lint`, `build.sh --check`, dan seluruh test lulus Exit 0.
+
+### [x] Packet 43B: GOG Importer Ergonomics (`gamectl import`)
+- **Target Files**: `src/stores/21_gog_installer.sh`, `src/core/05_cli_help.sh`, `src/main.sh`, `completions/gamectl.bash`, `tests/test_remediation.sh`
+- **Langkah Teknis**:
+  1. Pastikan `install_gog_offline` menginisialisasi direktori `saves/` (`mkdir -p "$target_dir" "$target_dir/saves"`) untuk portabilitas snapshot.
+  2. Daftarkan alias CLI `import|gog-import` di `src/main.sh`, dokumentasikan di `src/core/05_cli_help.sh`, dan tambahkan completion di `completions/gamectl.bash`.
+  3. Perbarui Test 43 di `tests/test_remediation.sh` untuk memverifikasi `gamectl import` dan keberadaan `$target_dir/saves`.
+- **Definition of Done (DoD)**:
+  - `gamectl import <setup.exe|installer.sh>` mengekstrak, menyiapkan prefix/saves, dan mendaftarkan game dengan badge `[GOG]`.
+
+### [ ] Packet 43C: P2P LAN Mesh `gamectl lan-share`
+- **Target Files**: `src/runners/54_lan_mesh.sh`, `src/core/05_cli_help.sh`, `src/main.sh`, `completions/gamectl.bash`, `tests/test_remediation.sh`
+- **Langkah Teknis**:
+  1. Implementasikan `lan_share <appid|title|dir> [peer] [--manifest-only] [--target <remote_dir>] [--dry-run]` di `src/runners/54_lan_mesh.sh`:
+     - Validasi peer via `_lan_validate_peer`, tolak target lokal jika game aktif (`is_game_active_for_dir`), kirim via `rsync -s -e ... -avzP` (mengecualikan `pfx/` dan `.save_snapshots/`).
+     - Untuk `--manifest-only`, kirim arsip manifest/lua ke `~/.cache/gamectl/` atau `stplug-in/` pada peer tujuan.
+  2. Wire `lan-share|mesh-share` ke `src/main.sh`, `src/core/05_cli_help.sh`, dan `completions/gamectl.bash`.
+  3. Perluas Test 44 di `tests/test_remediation.sh` dengan uji `lan-share` dan `lan-share --manifest-only` (mock `ssh`/`rsync`).
+- **Definition of Done (DoD)**:
+  - `gamectl lan-share` mendukung dry-run, transfer game penuh, dan transfer manifest ke peer LAN dengan sanitasi path penuh.
+
+### [ ] Packet 43D: Epic ScreamAPI DLC Unlocker (`src/stores/31_epic_screamapi.sh`)
+- **Target Files**: `src/stores/31_epic_screamapi.sh`, `src/stores/30_store_epic.sh`, `src/stores/00_store_interface.sh`, `src/runners/41_proton_prefix.sh`, `src/core/05_cli_help.sh`, `src/main.sh`, `scripts/build.sh`, `completions/gamectl.bash`, `tests/test_remediation.sh`
+- **Langkah Teknis**:
+  1. Buat `src/stores/31_epic_screamapi.sh` (<= 300 LOC):
+     - `setup_screamapi_templates`: unduh/staging template ke `~/.local/share/gamectl/screamapi/` dengan audit zip-slip & SHA-256 (override via `GAMECTL_SCREAMAPI_DIR`).
+     - `_epic_detect_anticheat <game_dir>`: deteksi `EasyAntiCheat`, `BattlEye`, atau `EOSAntiCheat` untuk hard-stop default (override hanya dengan `--force`).
+     - `epic_screamapi_inject <game_dir> [--revert] [--dry-run] [--force]`: backup `EOSSDK-Win*-Shipping.dll` ke `*.orig_gamectl`, pasang proxy DLL + `ScreamAPI.json`, dan dukung `--revert` atomik.
+  2. Tambahkan `WINEDLLOVERRIDES` saat `ScreamAPI.json` / proxy aktif di `detect_dll_overrides()` (`src/runners/41_proton_prefix.sh`).
+  3. Wire `gamectl setup-screamapi` dan `gamectl epic screamapi`, daftarkan di `scripts/build.sh` & `DEVELOPMENT.md`, lalu tambahkan contract test di `tests/test_remediation.sh`.
+- **Definition of Done (DoD)**:
+  - ScreamAPI hanya berjalan secara opt-in, menolak game ber-Anti-Cheat secara default, dan dapat di-revert bersih ke DLL asli.

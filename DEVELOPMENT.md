@@ -21,6 +21,7 @@ Alur inti tidak boleh bergantung pada Steam Client, SLSsteam, atau hook pola mem
 src/
 ├── core/
 │   ├── 00_header.sh            # SSoT Constants, Tokyo Night ANSI styling palette, FZF base configuration
+│   ├── 05_cli_help.sh          # CLI usage/help output module (split from src/main.sh)
 │   ├── 10_utils.sh             # Atomic config/KV helpers, zip audit, ephemeral cache tier, DRM/AppID SSoTs
 │   ├── 12_tui_primitives.sh    # Zero-flicker FZF dialogs, tty input flush, tui_run_engine, screen lifecycle
 │   ├── 14_saves.sh             # 3-slot savegame snapshot rotation, rollback recovery, Wine prefix save collector
@@ -44,7 +45,8 @@ src/
 │   ├── 00_store_interface.sh   # Unified store adapter registry, capability probe & store_dispatch()
 │   ├── 10_store_steam.sh       # Built-in Steam/Standalone adapter wrapping CDN downloader & offline DLC sync
 │   ├── 20_store_gog.sh         # Optional DRM-free GOG adapter (gogdl / lgogdownloader) & gamectl gog CLI
-│   ├── 30_store_epic.sh        # Optional Epic Games adapter (legendary) & gamectl epic CLI
+│   ├── 21_gog_installer.sh     # Zero-login GOG offline installer extractor (innoextract .exe & MojoSetup .sh)
+│   ├── 30_store_epic.sh        # Epic Games adapter (native MIT gamectl-core engine or legendary fallback)
 │   └── 40_store_amazon.sh      # Optional Amazon Prime Gaming adapter (nile) & gamectl amazon CLI
 ├── runners/
 │   ├── 40_wrappers.sh          # Wrapper config loader, developer profiler, and runtime wrapper command builder
@@ -56,7 +58,8 @@ src/
 │   ├── 50_launcher.sh          # launch_game lifecycle, PipeWire audio, wineserver guard & cli_launch
 │   ├── 51_remote_sync.sh       # SSH/Rsync & Rclone save synchronization and companion pull helpers
 │   ├── 52_inject_runtime.sh    # Offline GBE Fork injector and mod/OnlineFix DLL override setup
-│   └── 53_process_hud.sh       # Running process controller HUD and log context preview
+│   ├── 53_process_hud.sh       # Running process controller HUD and log context preview
+│   └── 54_lan_mesh.sh          # P2P LAN mesh peer manager, gamectl lan-pull, & manifest 404 fallback
 ├── diagnostics/
 │   └── 60_doctor.sh            # 8-layer system & GPU health diagnostics and cached query_protondb
 ├── tui/

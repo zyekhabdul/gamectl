@@ -16,7 +16,7 @@ GAMECTL_BUNDLED=1
 # - Savegame snapshot rotation (auto-backup before launch)
 # - Performance profile wrapper (Mesa GL thread, CPU governor)
 # - 1-key sync to remote companion host via rsync over SSH
-# - Live Steam Store search + ProtonDB rating via fzf
+# - Live Multi-Store catalog search (Steam/GOG/Epic/Amazon) + ProtonDB rating via fzf
 # ==============================================================================
 
 set -uo pipefail
@@ -56,6 +56,127 @@ UI_PILL_ESC=$'\033[1;38;5;232;48;5;248m ESC \033[0m'
 # Central Modern FZF Configuration (Seamless transparent theme with rounded borders)
 export FZF_DEFAULT_OPTS="--ansi --layout=reverse --border=rounded --info=inline-right --scrollbar=│ --prompt=' > ' --pointer='▶' --marker='*' --color='bg+:#282a36,bg:-1,spinner:#bd93f9,hl:#ff79c6' --color='fg:#f8f8f2,header:#8be9fd,info:#bd93f9,pointer:#50fa7b' --color='marker:#50fa7b,fg+:#ffffff,prompt:#bd93f9,hl+:#ff79c6' --color='border:#6272a4,label:#bd93f9,header-border:#6272a4,preview-border:#6272a4'"
 
+
+# --- [MODULE] src/core/05_cli_help.sh ---
+# ==============================================================================
+# gamectl - CLI Usage & Help Output Module (Split from src/main.sh)
+# ==============================================================================
+
+print_cli_help() {
+    cat <<'EOF'
+gamectl - Sovereign TUI Game Manager & Launcher (Zero-Bloat)
+
+Usage:
+  gamectl [menu]      Open Master Dashboard Hub TUI (alias: dashboard)
+  gamectl library     Open Game Library TUI directly (alias: list-ui)
+  gamectl config [set <k> <v>|get <k>|list]
+                      Open global configuration menu or read/write settings (~/.config/gamectl/config)
+  gamectl doctor      Run 8-layer system & GPU health diagnostics (alias: audit)
+  gamectl stores [list|status]
+                      Inspect registered store adapters and offline readiness
+  gamectl gog <status|auth|search|download|sync|install-offline> [args...]
+                      GOG adapter (gogdl/lgogdownloader or native offline extractor)
+  gamectl install-gog <setup.exe|installer.sh> [target_dir] [--title <name>] [--no-prefix]
+                      Extract DRM-free GOG offline installer without login & setup prefix (alias: import)
+  gamectl epic <status|auth|search|download|sync|launch> [args...]
+                      Epic Games adapter (native gamectl-core engine or legendary fallback)
+  gamectl amazon <status|auth|search|download|sync> [args...]
+                      Optional Amazon Prime Gaming adapter (delegates to nile)
+  gamectl auth [status|gog|epic|amazon|luatools] [args...]
+                      Unified offline auth status and native CLI login delegation
+  gamectl search-stores <query> [--store <all|steam|gog|epic|amazon>]
+                      Cross-store catalog search with canonical app-type taxonomy
+  gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread] [--scope|--no-scope] [--prime|--no-prime] [--sandbox|--no-sandbox]
+                      Launch game with isolated prefix and runtime wrapper options
+  gamectl configure-wrappers <dir> [title]
+                      Configure per-game wrappers (GameMode/MangoHud/Gamescope FSR/MesaGL)
+  gamectl dev-profile <dir> [status|basic|full|off]
+                      Inspect or toggle developer profiler (WINEDEBUG/VK_LOADER_DEBUG/GBE log)
+  gamectl scan-saves <dir>
+                      Discover savegame directories inside a Wine/Proton prefix (read-only)
+  gamectl collect-saves <dir>
+                      Collect discovered Wine prefix saves into <dir>/saves/_prefix_saves/
+  gamectl restore-prefix-saves <dir>
+                      Restore staged Wine prefix saves back into <dir>/pfx/drive_c/users/
+  gamectl download <appid> [dir] [title] [--source <auto|...>] [--allow-dlc] [--standalone|--sls] [--raw|--inject-only] [--no-lan]
+                      Download game via native Valve CDN (default: Pure Standalone zero-client)
+  gamectl lan-pull <appid|title> [peer] [--manifest-only] [--target <dir>] [--dry-run]
+                      Pull game assets or manifests from a companion LAN peer via SSH/rsync
+  gamectl peers [list|add <host>|remove <host>]
+                      Manage companion LAN peer hosts (~/.config/gamectl/peers)
+  gamectl downloads   Monitor active & recent downloads (Interactive TUI)
+  gamectl download-status
+                      Display active download tasks across Steam & Standalone engines
+  gamectl fetch-manifest <appid> [dest] [source]
+                      Harvest manifest archive across Hubcap/Ryuu/Sushi/LuaTools providers
+  gamectl auth-status Display current LuaTools authentication session & auto-refresh status
+  gamectl login-luatools <code|token|file>
+                      Authenticate standalone LuaTools provider (6-char code, refresh token, or json)
+  gamectl deploy-manifest <appid> [manifest_zip] [title]
+                      Deploy manifest & stplug-in keys into SLSsteam & Steam depotcache
+  gamectl entitle <appid> [title]
+                      Adopt local assets, Steam Input & shaders via Steam entitlement & ACF (aliases: unlock, adopt-steam)
+  gamectl unlock <appid> [title] (Alias for entitle)
+  gamectl inject <dir> [appid] [--no-sync|--all]
+                      Inject offline LAN runtime & saves; --all explicitly syncs Steam
+  gamectl setup-gbe [--yes] [--force] [--linux-only|--win-only] [--dest <dir>]
+                      Auto-download & provision Goldberg Emulator templates into ~/.local/share/gbe-fork/
+  gamectl setup-runtime [--yes] [--force] [--dry-run] [--source <file|url>] [--dest <dir>]
+                      Provision standalone Steam Runtime (Scout) into ~/.local/share/gamectl/runtime/
+  gamectl mod-overrides <dir>
+                      Setup P2P multiplayer compatibility & mod DLL overrides (alias: onlinefix)
+  gamectl onlinefix <dir> (Alias for mod-overrides)
+  gamectl fix-check <appid>
+                      Query available community, Denuvo, & Online-Fix bypasses (Public)
+  gamectl fix-install <appid> [dir] [--type online|generic] [--yes] [--restart]
+                      Download, verify, backup, & deploy Online-Fix/bypass directly to game
+  gamectl fix-revert <dir|appid> [--dry-run]
+                      Safely revert game fix and restore pristine vanilla files from snapshot
+  gamectl restart-steam
+                      Graceful Steam client hot-reload (SLSsteam & Game Mode supervisor)
+  gamectl proton-list List local & latest upstream GE-Proton releases
+  gamectl proton-install [tag|latest] Headless GE-Proton installer
+  gamectl proton-remove <tag> Safely remove an installed GE-Proton version
+  gamectl pfx <dir> [action] [args...] [--dry-run]
+                      Wine prefix Swiss Army knife (winecfg/regedit/cmd/shell/kill/clean/winetricks)
+  gamectl protondb <appid|dir>
+                      Query ProtonDB community rating & launch recommendations
+  gamectl make-desktop <dir> [title]
+                      Generate FreeDesktop .desktop application shortcut
+  gamectl add-to-steam <dir> [title]
+                      Register standalone game as non-Steam shortcut in Steam Deck Game Mode
+  gamectl fetch-art <dir|appid> [appid]
+                      Download official Steam capsule, banner, hero, & logo artwork
+  gamectl set-id <player> [steamid] [dir] [--broadcast <ip>] [--global]
+                      Configure LAN player name & SteamID for offline co-op
+  gamectl fetch-dlc <dir> [appid] Fetch & generate steam_settings/DLC.txt
+  gamectl harvest-dlc <appid> [dir]
+                      Harvest & unpack multi-depot DLC manifests across CDN providers
+  gamectl sync-steam <appid> [title] [dir] Sync Steam Client & SLSsteam entitlements
+  gamectl get-resolution Print detected native display resolution
+  gamectl get-gamescope-args Print dynamically scaled Gamescope FSR parameters
+  gamectl get-steam-root   Print detected active Steam root directory
+  gamectl get-steam-libraries Print all detected Steam library folders
+  gamectl detect-gpu       Audit and print detected secondary discrete GPU vendor
+  gamectl check-scope      Check if cgroups v2 / systemd-run user scope isolation is supported
+  gamectl check-sandbox    Check if bubblewrap (bwrap) rootless security sandbox is available
+  gamectl search [query]   Search Store catalog (Steam + Multi-Store) & ProtonDB
+  gamectl --search         Search Store catalog (interactive TUI prompt)
+  gamectl --list      Print detected installed games list
+  gamectl list-formatted  Print formatted games list with ANSI badges
+  gamectl detect-steamstub <bin>
+                      Audit SteamStub (.bind ELF & PE markers) and print forensic diagnostics
+  gamectl unpack-stub <bin>
+                      Unpack SteamStub DRM binary (Linux ELF .bind or Windows PE)
+  gamectl --sync <dir> [title] [host]   Push saves to remote companion host (alias: sync)
+  gamectl sync-pull <dir> [title] [host] Pull saves from remote companion host (alias: --sync-pull)
+  gamectl backup <dir>        Create manual savegame backup snapshot (alias: --backup)
+  gamectl restore <dir> [slot]  Restore savegame snapshot from recovery slot (1-3)
+  gamectl logs        View centralized runtime activity logs
+  gamectl --help      Show this help documentation
+  gamectl --version   Print active version
+EOF
+}
 
 # --- [MODULE] src/core/10_utils.sh ---
 # Resolve remote sync host (optional)
@@ -2179,7 +2300,7 @@ _read_elf_class() {
 _is_ignored_binary_name() {
     case "${1:-}" in
         *.so|*.so.*|*.dll|*.dylib|*.exe|*.EXE|*.lock|*.log|installscript.vdf|*.png|*.bmp|*.txt|*.pkg|\
-        createdump|monoconfig|monomachineconfig|*.vdf|*.json|*.cfg|*.ini|*.xml|*.md|*.README|*.config|*.orig)
+        createdump|monoconfig|monomachineconfig|*.vdf|*.json|*.cfg|*.ini|*.xml|*.md|*.README|*.config|*.orig|crashpad_handler|chrome-sandbox)
             return 0 ;;
     esac
     return 1
@@ -2304,8 +2425,24 @@ find_game_binary() {
         esac
     done
 
+    # Priority 5a: Subdirectory native Linux executables (ELF / shebang)
+    local sub sub_bin
+    for sub in "bin" "bin/x64" "bin/x86_64" "bin/linux64" "bin/linux" "x86_64" "x64" "linux64" "linux" "game"; do
+        [ -d "$dir/$sub" ] || continue
+        for c in "$base" "$clean_base" "$lower_base" "$lower_clean"; do
+            if [ -f "$dir/$sub/$c" ] && [ ! -d "$dir/$sub/$c" ] && validate_tui_fields "$c"; then
+                [ ! -x "$dir/$sub/$c" ] && _is_shebang_script "$dir/$sub/$c" && chmod +x "$dir/$sub/$c" 2>/dev/null || true
+                if [ -x "$dir/$sub/$c" ]; then
+                    echo "$sub/$c"; return 0
+                fi
+            fi
+        done
+        if sub_bin=$(_pick_native_linux_binary "$dir/$sub"); then
+            echo "$sub/$sub_bin"; return 0
+        fi
+    done
+
     # Priority 5: Subdirectory .exe in standard game binary folders
-    local sub
     for sub in "bin" "bin/x64" "bin/Win64" "Binaries/Win64" "Binaries/Win32" "x64"; do
         if [ -d "$dir/$sub" ]; then
             for f in "$dir/$sub"/*.exe "$dir/$sub"/*.EXE; do
@@ -2352,6 +2489,8 @@ inspect_game_log_hint() {
         echo "Graphics API error detected -> switch Renderer to WineD3D (<CTRL-O> or --wined3d)"
     elif echo "$tail_log" | grep -qiE 'err:module:import_dll|cannot open shared object file|error while loading shared libraries|libGL\.so\.1|System\.DllNotFoundException|DllNotFoundException|Unable to load shared library'; then
         echo "Missing runtime DLL/library -> run 'gamectl setup-runtime', Community Fixes (<CTRL-X>), or install 32-bit multilib"
+    elif echo "$tail_log" | grep -qiE 'cannot enable executable stack|execstack'; then
+        echo "Legacy executable-stack library blocked by glibc 2.41+ -> retry with GLIBC_TUNABLES=glibc.rtld.execstack=2"
     elif echo "$tail_log" | grep -qiE 'Exec format error|cannot execute binary file|Permission denied'; then
         echo "Executable architecture or permission mismatch -> verify 64-bit binary / chmod +x"
     elif echo "$tail_log" | grep -qiE 'SteamStub|Application load error|steamclient.*fail'; then
@@ -3143,6 +3282,7 @@ scan_installed_games() {
     local epic_cfg_dir="${LEGENDARY_CONFIG_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/legendary}"
     declare -F _epic_config_dir >/dev/null 2>&1 && epic_cfg_dir="$(_epic_config_dir)"
     local epic_installed="$epic_cfg_dir/installed.json"
+    local epic_native_installed="${GAMECTL_EPIC_INSTALLED_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/gamectl/epic_installed.json}"
 
     local amazon_cfg_dir="${NILE_CONFIG_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/nile}"
     declare -F _amazon_config_dir >/dev/null 2>&1 && amazon_cfg_dir="$(_amazon_config_dir)"
@@ -3165,6 +3305,9 @@ scan_installed_games() {
                 fi
             done
             if [ "$use_cached" = true ] && [ -f "$epic_installed" ] && [ "$epic_installed" -nt "$cache_file" ]; then
+                use_cached=false
+            fi
+            if [ "$use_cached" = true ] && [ -f "$epic_native_installed" ] && [ "$epic_native_installed" -nt "$cache_file" ]; then
                 use_cached=false
             fi
             if [ "$use_cached" = true ] && [ -f "$amazon_installed" ] && [ "$amazon_installed" -nt "$cache_file" ]; then
@@ -3270,6 +3413,7 @@ scan_installed_games() {
                 printf '[ERROR] Invalid %s installed.json payload in %s\n' "$s_label" "$s_file" >&2
             fi
         }
+        _scan_json_store_entries "Epic" "EPIC" "$epic_native_installed" "0"
         _scan_json_store_entries "Epic" "EPIC" "$epic_installed" "0"
         _scan_json_store_entries "Amazon" "AMAZON" "$amazon_installed" "1"
 
@@ -4501,42 +4645,26 @@ download_game() {
     local engine="standalone"   # Default to Pure Standalone CDN engine (Zero Steam Client)
     local is_strict_standalone=true
     local allow_dlc=false
+    local allow_lan_fallback=true
 
     while [ $# -gt 0 ]; do
         case "$1" in
             --allow-dlc)
                 allow_dlc=true
                 ;;
-            --engine)
-                shift
-                case "${1:-}" in
-                    depot)
-                        echo "[WARN] DepotDownloader is deprecated and removed. Routing to native Steam CDN engine." >&2
-                        ;;
-                    steam|sls)
-                        engine="sls"
-                        is_strict_standalone=false
-                        ;;
-                    standalone|direct)
-                        engine="standalone"
-                        is_strict_standalone=true
-                        ;;
-                esac
+            --no-lan)
+                allow_lan_fallback=false
                 ;;
-            --engine=*)
+            --engine|--engine=*)
                 local eng_val="${1#--engine=}"
+                if [ "$1" = "--engine" ]; then
+                    shift
+                    eng_val="${1:-}"
+                fi
                 case "$eng_val" in
-                    depot)
-                        echo "[WARN] DepotDownloader is deprecated and removed. Routing to native Steam CDN engine." >&2
-                        ;;
-                    steam|sls)
-                        engine="sls"
-                        is_strict_standalone=false
-                        ;;
-                    standalone|direct)
-                        engine="standalone"
-                        is_strict_standalone=true
-                        ;;
+                    depot) echo "[WARN] DepotDownloader is deprecated and removed. Routing to native Steam CDN engine." >&2 ;;
+                    steam|sls) engine="sls"; is_strict_standalone=false ;;
+                    standalone|direct) engine="standalone"; is_strict_standalone=true ;;
                 esac
                 ;;
             --sls|--steam)
@@ -4654,9 +4782,16 @@ download_game() {
 
     # Route 1: Standalone Native Steam CDN Engine (Zero Steam Client required)
     if [ "$engine" = "standalone" ]; then
-        local manifest_zip
+        local manifest_zip=""
         echo "[INFO] Manifest archive not provided. Attempting automatic harvest (source: $source)..." >&2
-        manifest_zip=$(fetch_manifest "$appid" "" "$source" true) || return 1
+        manifest_zip=$(fetch_manifest "$appid" "" "$source" true || true)
+        if [ -z "$manifest_zip" ] || [ ! -f "$manifest_zip" ]; then
+            if [ "$allow_lan_fallback" = true ] && declare -F lan_fallback_for_download >/dev/null 2>&1; then
+                local lan_rc=0
+                manifest_zip=$(lan_fallback_for_download "$appid" "$target_dir" "$title") || lan_rc=$?
+                [ "$lan_rc" -eq 2 ] && return 0
+            fi
+        fi
         if [ -z "$manifest_zip" ] || [ ! -f "$manifest_zip" ]; then
             echo "[ERROR] Manifest archive for AppID $appid could not be acquired across providers." >&2
             return 1
@@ -5820,7 +5955,7 @@ fetch_steam_app_details() {
 
     local raw_json details
     raw_json=$(fetch_cached_json \
-        "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic,platforms,genres" \
+        "https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic,platforms,genres,release_date,developers,publishers,price_overview,metacritic,recommendations,categories" \
         "steam_details_${appid}" 3600 2>/dev/null || true)
     [ -n "$raw_json" ] || return 1
 
@@ -5908,6 +6043,169 @@ resolve_steam_app_type() {
         parent_name=""
     fi
     printf '%s\t%s\t%s\n' "${norm_type:-APP}" "$parent_id" "$parent_name"
+    return 0
+}
+
+# Parse extended Steam appdetails data JSON into an 18-field \x1f-delimited metadata row
+# (plus trailing sentinel "1"):
+# storage_linux, storage_win, storage_mac, release_str, price_str, devs, pubs,
+# dlc_count, controller, metacritic, recs, short_desc, has_req_obj,
+# drm_warn, min_specs, modes, cat_ctrl, st_req_bytes, sentinel
+parse_steam_app_metadata_json() {
+    local details="${1:-}"
+    if [ -z "$details" ] || [ "$details" = "null" ]; then
+        return 1
+    fi
+
+    printf '%s' "$details" | jq -r '
+        def clean_txt:
+            tostring
+            | gsub("<br\\s*/?>"; " ")
+            | gsub("<[^>]+>"; " ")
+            | gsub("&amp;"; "&")
+            | gsub("&quot;"; "\"")
+            | gsub("&#39;"; "'"'"'")
+            | gsub("&lt;"; "<")
+            | gsub("&gt;"; ">")
+            | gsub("&nbsp;"; " ")
+            | gsub("[\\t\\r\\n]+"; " ")
+            | gsub("  +"; " ")
+            | sub("^ +"; "")
+            | sub(" +$"; "");
+        def first_cap($txt; $re):
+            try ([$txt | match($re; "i") | .captures[0].string] | .[0] // "") catch "";
+        def extract_storage($req):
+            if ($req | type) == "object" then
+                ([$req.minimum, $req.recommended] | map(select(. != null and . != "") | clean_txt) | join(" ")) as $t |
+                first_cap($t; "(?:storage|hard\\s*drive|disk\\s*space|hard\\s*disk(?:\\s*space)?)[^0-9]{0,30}([0-9]+(?:[.,][0-9]+)?\\s*(?:TB|GB|MB|KB))")
+            else "" end;
+        (extract_storage(.linux_requirements)) as $st_lin |
+        (extract_storage(.pc_requirements)) as $st_win |
+        (extract_storage(.mac_requirements)) as $st_mac |
+        (if (.release_date | type) == "object" then
+            ((.release_date.date // "") | clean_txt) as $d |
+            if (.release_date.coming_soon // false) == true then
+                "Coming Soon" + (if $d != "" then " (" + $d + ")" else "" end)
+            else $d end
+         else "" end) as $rel |
+        (if (.is_free // false) == true then "Free"
+         elif (.price_overview | type) == "object" then
+            ((.price_overview.final_formatted // "") | clean_txt) as $fin |
+            ((.price_overview.initial_formatted // "") | clean_txt) as $init |
+            (.price_overview.discount_percent // 0) as $disc |
+            if ($disc | tonumber? // 0) > 0 and $fin != "" then
+                $fin + " (-" + ($disc | tostring) + "%" + (if $init != "" then " from " + $init else "" end) + ")"
+            else $fin end
+         else "" end) as $price |
+        (if (.developers | type) == "array" then ([.developers[]? | clean_txt | select(. != "")] | join(", ")) else "" end) as $devs |
+        (if (.publishers | type) == "array" then ([.publishers[]? | clean_txt | select(. != "")] | join(", ")) else "" end) as $pubs |
+        (if (.dlc | type) == "array" then (.dlc | length | tostring) else "0" end) as $dlc_cnt |
+        ((.controller_support // "") | clean_txt) as $ctrl |
+        (if (.metacritic | type) == "object" and (.metacritic.score != null) then (.metacritic.score | tostring) else "" end) as $meta |
+        (if (.recommendations | type) == "object" and (.recommendations.total != null) then (.recommendations.total | tostring) else "" end) as $recs |
+        ((.short_description // "") | clean_txt | if length > 180 then .[0:177] + "..." else . end) as $desc |
+        (if ((.pc_requirements != null) or (.linux_requirements != null) or (.mac_requirements != null)) then "1" else "0" end) as $has_req |
+        ([(.drm_notice // ""), (.ext_user_account_notice // "")] | map(select(. != null and . != "") | clean_txt | select(. != "")) | unique | join(" • ") | if length > 110 then .[0:107] + "..." else . end) as $drm_warn |
+        ((if (.linux_requirements | type) == "object" then (.linux_requirements.minimum // "" | clean_txt) else "" end) as $lin_min |
+         (if (.pc_requirements | type) == "object" then (.pc_requirements.minimum // "" | clean_txt) else "" end) as $pc_min |
+         (if ($lin_min | test("(?:memory|ram|graphics|video)"; "i")) then $lin_min else $pc_min end) as $min_txt |
+         (first_cap($min_txt; "(?:memory|ram)[^0-9]{0,20}([0-9]+(?:[.,][0-9]+)?\\s*(?:GB|MB)(?:\\s*RAM)?)") | clean_txt | if . != "" and (test("RAM$"; "i") | not) then . + " RAM" else . end) as $ram |
+         (first_cap($min_txt; "(?:graphics|video\\s*card)[^:]{0,12}:\\s*([^;\\n]{3,65})") | sub("\\s*(?:DirectX|Storage|Hard\\s*Disk|Sound|Network|Additional|OS:|Processor:|Memory:).*$"; ""; "i") | clean_txt | if length > 42 then .[0:39] + "..." else . end) as $gpu |
+         ([(.linux_requirements.minimum? // ""), (.linux_requirements.recommended? // ""), (.pc_requirements.minimum? // ""), (.pc_requirements.recommended? // "")] | map(select(. != null) | clean_txt) | join(" ")) as $all_req |
+         (if ($all_req | test("SSD[^.,;]{0,20}(?:required|mandatory)|requires?[^.,;]{0,15}SSD"; "i")) then "SSD Req"
+          elif ($all_req | test("\\bSSD\\b"; "i")) then "SSD"
+          else "" end) as $ssd |
+         [$ram, $gpu, $ssd] | map(select(. != "")) | join(" • ")) as $min_specs |
+        (if (.categories | type) == "array" then
+            (reduce (.categories[]?.description // empty | clean_txt) as $c ([];
+                if ($c == "Single-player" or $c == "Multi-player" or $c == "Co-op" or $c == "Online Co-op" or $c == "LAN Co-op" or $c == "Shared/Split Screen Co-op" or $c == "PvP" or $c == "Online PvP" or $c == "LAN PvP" or $c == "Cross-Platform Multiplayer") and (index($c) == null) then
+                    . + [$c]
+                else . end) | .[0:4] | join(", "))
+         else "" end) as $modes |
+        (if (.categories | type) == "array" then
+            if any(.categories[]?; (.description // "") == "Full controller support") then "full"
+            elif any(.categories[]?; (.description // "") == "Partial Controller Support") then "partial"
+            else "" end
+         else "" end) as $cat_ctrl |
+        ((if $st_lin != "" then $st_lin elif $st_win != "" then $st_win else $st_mac end) as $st_prim |
+         (try ([$st_prim | match("([0-9]+(?:[.,][0-9]+)?)\\s*(TB|GB|MB|KB)"; "i") | .captures] | .[0]) catch null) as $m |
+         if $m != null then
+            ($m[0].string | gsub(","; ".") | tonumber? // 0) as $num |
+            ($m[1].string | ascii_upcase) as $unit |
+            (($num * (if $unit == "TB" then 1099511627776 elif $unit == "GB" then 1073741824 elif $unit == "MB" then 1048576 else 1024 end)) | floor | tostring)
+         else "" end) as $st_req_bytes |
+        [$st_lin, $st_win, $st_mac, $rel, $price, $devs, $pubs, $dlc_cnt, $ctrl, $meta, $recs, $desc, $has_req, $drm_warn, $min_specs, $modes, $cat_ctrl, $st_req_bytes, "1"] | join("\u001f")
+    ' 2>/dev/null
+}
+
+# Fetch cached SteamOS / Steam Deck compatibility summary (<CAT_LABEL>\t<NOTE>).
+fetch_steam_deck_compat() {
+    local appid="${1:-}"
+    appid="${appid//[[:space:]]/}"
+    [[ "$appid" =~ ^[0-9]+$ ]] || return 1
+
+    local raw_json
+    raw_json=$(fetch_cached_json \
+        "https://store.steampowered.com/saleaction/ajaxgetdeckappcompatibilityreport?nAppID=${appid}" \
+        "steam_deck_${appid}" 86400 2>/dev/null || true)
+    [ -n "$raw_json" ] && [ "$raw_json" != "null" ] || return 1
+
+    local out cat_label="" note=""
+    out=$(printf '%s' "$raw_json" | jq -r '
+        select((.success // 0) == 1 and (.results | type) == "object") |
+        (.results.steamos_resolved_category // .results.resolved_category // 0) as $cat |
+        (if $cat == 3 then "VERIFIED"
+         elif $cat == 2 then "PLAYABLE"
+         elif $cat == 1 then "UNSUPPORTED"
+         else empty end) as $lbl |
+        ([(.results.steamos_resolved_items // .results.resolved_items // [])[]?.loc_token // "" |
+          if test("UnsupportedAntiCheat"; "i") then "Unsupported Anti-Cheat"
+          elif test("UnsupportedGraphics"; "i") then "Unsupported Graphics/API"
+          elif test("Launcher"; "i") then "3rd-Party Launcher"
+          elif test("UnsupportedByDeveloper"; "i") then "Unsupported by Developer"
+          elif test("VR"; "i") then "VR Required"
+          else empty end] | unique | .[0:2] | join(", ")) as $note |
+        [$lbl, $note] | @tsv
+    ' 2>/dev/null || true)
+    [ -n "$out" ] || return 1
+
+    IFS=$'\t' read -r cat_label note <<< "$out"
+    if declare -F validate_tui_fields >/dev/null 2>&1; then
+        validate_tui_fields "$cat_label" "$note" 2>/dev/null || return 1
+    fi
+    printf '%s\t%s\n' "$cat_label" "$note"
+    return 0
+}
+
+# Check local free disk space for target library path (<FREE_HUMAN>\t<IS_LOW>).
+get_library_disk_free_info() {
+    local req_bytes="${1:-0}"
+    local base_dir=""
+    if declare -F resolve_standalone_library_dir >/dev/null 2>&1; then
+        base_dir=$(resolve_standalone_library_dir "" 2>/dev/null || true)
+    fi
+    [ -n "$base_dir" ] || base_dir="${GAMECTL_LIBRARY_DIR:-$HOME/Games}"
+
+    local probe="$base_dir"
+    while [ ! -e "$probe" ] && [ "$probe" != "/" ] && [ -n "$probe" ]; do
+        probe=$(dirname "$probe")
+    done
+    [ -e "$probe" ] || probe="/"
+
+    local free_bytes
+    free_bytes=$(df -PB1 "$probe" 2>/dev/null | awk 'NR==2 {print $4}' | tr -d '[:space:]')
+    [[ "$free_bytes" =~ ^[0-9]+$ ]] || return 1
+
+    local free_human="${free_bytes} B"
+    if declare -F format_bytes >/dev/null 2>&1; then
+        free_human=$(format_bytes "$free_bytes")
+    fi
+
+    local is_low="0"
+    if [[ "$req_bytes" =~ ^[0-9]+$ ]] && [ "$req_bytes" -gt 0 ] && [ "$free_bytes" -lt "$req_bytes" ]; then
+        is_low="1"
+    fi
+    printf '%s\t%s\n' "$free_human" "$is_low"
     return 0
 }
 
@@ -8485,7 +8783,7 @@ store_search_all() {
 # Standalone-source compatibility: load split store adapters when sourced directly outside bin/gamectl
 if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
     _stores_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-    for _stores_sub in 10_store_steam.sh 20_store_gog.sh 30_store_epic.sh 40_store_amazon.sh; do
+    for _stores_sub in 10_store_steam.sh 20_store_gog.sh 21_gog_installer.sh 30_store_epic.sh 40_store_amazon.sh; do
         if [ -f "$_stores_dir/$_stores_sub" ]; then
             # shellcheck source=/dev/null
             source "$_stores_dir/$_stores_sub"
@@ -8670,9 +8968,13 @@ store_gog_status() {
         cli_path="$(command -v "$cli_name" 2>/dev/null || echo "$cli_name")"
         cli_status="ready ($cli_name: $cli_path)"
     fi
+    local ext_status="missing (optional: install innoextract for offline .exe installers)"
+    if command -v innoextract >/dev/null 2>&1; then
+        ext_status="ready (innoextract: $(command -v innoextract 2>/dev/null || echo innoextract))"
+    fi
     local auth_status="unconfigured (run 'gamectl gog auth')"
     _gog_auth_session_present && auth_status="session present (external tool-managed)"
-    printf 'store=gog\n  cli      : %s\n  auth     : %s\n' "$cli_status" "$auth_status"
+    printf 'store=gog\n  cli      : %s\n  extractor: %s\n  auth     : %s\n' "$cli_status" "$ext_status" "$auth_status"
     return 0
 }
 
@@ -8787,9 +9089,317 @@ gog_cli() {
         search) store_dispatch gog search "$@" ;;
         download) store_dispatch gog download "$@" ;;
         sync) store_dispatch gog sync "$@" ;;
-        --help|-h|help) echo "Usage: gamectl gog <status|auth|search|download|sync> [args...]" ;;
-        *) echo "[ERROR] Unknown gog subcommand '$action'. Usage: gamectl gog <status|auth|search|download|sync> [args...]" >&2; return 1 ;;
+        install-offline|install) install_gog_offline "$@" ;;
+        --help|-h|help) echo "Usage: gamectl gog <status|auth|search|download|sync|install-offline> [args...]" ;;
+        *) echo "[ERROR] Unknown gog subcommand '$action'. Usage: gamectl gog <status|auth|search|download|sync|install-offline> [args...]" >&2; return 1 ;;
     esac
+}
+
+if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
+    _gog_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    if [ -f "$_gog_dir/21_gog_installer.sh" ]; then
+        # shellcheck source=/dev/null
+        source "$_gog_dir/21_gog_installer.sh"
+    fi
+    unset _gog_dir
+fi
+
+# --- [MODULE] src/stores/21_gog_installer.sh ---
+# ==============================================================================
+# GOG Offline Installer Extractor (Zero Login: innoextract + MojoSetup)
+# ==============================================================================
+
+_gog_derive_title_from_filename() {
+    local fname="${1##*/}"
+    fname="${fname%.exe}"
+    fname="${fname%.EXE}"
+    fname="${fname%.sh}"
+    fname="${fname%.SH}"
+    fname="${fname#setup_}"
+    fname="${fname#Setup_}"
+    fname=$(printf '%s' "$fname" | sed -E 's/[_-](v?[0-9]+(\.[0-9]+)+.*|\([0-9]+\))$//' | tr '_' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+//; s/[[:space:]]+$//')
+    [ -n "$fname" ] || fname="GOG_Game"
+    printf '%s\n' "$fname"
+}
+
+_gog_audit_extracted_symlinks() {
+    local stage_dir="$1"
+    local canon_stage link_target
+    canon_stage=$(realpath -m "$stage_dir" 2>/dev/null || echo "$stage_dir")
+    while IFS= read -r sym; do
+        [ -n "$sym" ] || continue
+        link_target=$(readlink "$sym" 2>/dev/null || true)
+        if [[ "$link_target" == /* ]]; then
+            echo "[ERROR] Unsafe absolute symlink in GOG installer payload: $sym -> $link_target" >&2
+            return 1
+        fi
+        local resolved_link
+        resolved_link=$(realpath -m "$(dirname "$sym")/$link_target" 2>/dev/null || echo "")
+        if [ -z "$resolved_link" ] || [[ "$resolved_link" != "$canon_stage/"* && "$resolved_link" != "$canon_stage" ]]; then
+            echo "[ERROR] Unsafe path traversal symlink in GOG installer payload: $sym -> $link_target" >&2
+            return 1
+        fi
+    done < <(find "$stage_dir" -type l 2>/dev/null || true)
+    return 0
+}
+
+_gog_extract_exe() {
+    local installer_abs="$1"
+    local stage_dir="$2"
+    if ! command -v innoextract >/dev/null 2>&1; then
+        echo "[ERROR] 'innoextract' is required for Windows GOG installers (.exe)." >&2
+        echo "[INFO] Install via package manager (e.g. sudo pacman -S innoextract / sudo apt install innoextract)." >&2
+        return 1
+    fi
+    echo "[INFO] Extracting GOG Windows installer with innoextract..."
+    innoextract -e -d "$stage_dir" "$installer_abs" || return 1
+    _gog_audit_extracted_symlinks "$stage_dir" || return 1
+    return 0
+}
+
+_gog_extract_sh() {
+    local installer_abs="$1"
+    local stage_dir="$2"
+    local rc=0
+    echo "[INFO] Extracting GOG Linux MojoSetup installer (.sh)..."
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -q -o "$installer_abs" -d "$stage_dir" 2>/dev/null || rc=$?
+        # MojoSetup .sh wrappers prepend a shell header, causing Info-ZIP unzip to return 1 (warning).
+        if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
+            echo "[ERROR] Failed to extract GOG .sh installer with unzip (exit $rc)." >&2
+            return 1
+        fi
+    elif command -v 7z >/dev/null 2>&1; then
+        7z x -y "-o$stage_dir" "$installer_abs" >/dev/null || return 1
+    else
+        echo "[ERROR] 'unzip' or '7z' is required to extract GOG .sh installers." >&2
+        return 1
+    fi
+
+    local entry_count
+    entry_count=$(find "$stage_dir" -mindepth 1 -maxdepth 2 2>/dev/null | head -n 1 | wc -l)
+    if [ "$entry_count" -eq 0 ]; then
+        echo "[ERROR] Extracted GOG .sh archive yielded no files." >&2
+        return 1
+    fi
+    _gog_audit_extracted_symlinks "$stage_dir" || return 1
+    return 0
+}
+
+_gog_resolve_stage_root() {
+    local stage_dir="$1"
+    if [ -d "$stage_dir/data/noarch" ]; then
+        printf '%s\n' "$stage_dir/data/noarch"
+    elif [ -d "$stage_dir/app" ]; then
+        local mf
+        for mf in "$stage_dir"/goggame-*.info; do
+            [ -f "$mf" ] && cp -f "$mf" "$stage_dir/app/" 2>/dev/null || true
+        done
+        printf '%s\n' "$stage_dir/app"
+    else
+        printf '%s\n' "$stage_dir"
+    fi
+}
+
+_gog_read_extracted_metadata() {
+    local content_root="$1"
+    local fallback_title="$2"
+    local gog_id="" gog_title="" gog_info="" gf
+
+    for gf in "$content_root"/goggame-*.info "$content_root"/game/goggame-*.info; do
+        [ -f "$gf" ] && gog_info="$gf" && break
+    done
+
+    if [ -n "$gog_info" ] && command -v jq >/dev/null 2>&1; then
+        local tsv=""
+        tsv=$(jq -r '[((.gameId // .rootGameId // "") | tostring), ((.name // "") | tostring)] | if any(test("[\\t\\r\\n]")) then "" else @tsv end' "$gog_info" 2>/dev/null || true)
+        if [ -n "$tsv" ]; then
+            IFS=$'\t' read -r gog_id gog_title <<< "$tsv"
+        fi
+        if [ -z "$gog_id" ]; then
+            local bname="${gog_info##*/}"
+            bname="${bname#goggame-}"
+            gog_id="${bname%.info}"
+        fi
+    fi
+
+    if [ -z "$gog_title" ] && [ -f "$content_root/gameinfo" ]; then
+        gog_title=$(head -n 1 "$content_root/gameinfo" 2>/dev/null | tr -d '\r\n' || true)
+    fi
+
+    [ -n "$gog_title" ] || gog_title="$fallback_title"
+    if [ -z "$gog_id" ]; then
+        local slug
+        slug=$(printf '%s' "$gog_title" | tr '[:upper:]' '[:lower:]' | tr -cs '[:alnum:]' '_' | sed 's/^_//; s/_$//')
+        gog_id="LOCAL_${slug:-gog}"
+    fi
+
+    printf '%s\t%s\n' "$gog_id" "$gog_title"
+}
+
+_gog_init_windows_prefix() {
+    local target_dir="$1"
+    local gog_id="$2"
+    local runner_bin=""
+    declare -F find_runner >/dev/null 2>&1 && runner_bin=$(find_runner "$target_dir" 2>/dev/null || true)
+    [ -z "$runner_bin" ] && command -v wine >/dev/null 2>&1 && runner_bin="wine"
+
+    if [ -z "$runner_bin" ]; then
+        echo "[WARN] No Wine/Proton runner detected on host; skipping initial prefix creation for $target_dir." >&2
+        return 0
+    fi
+
+    local pfx_dir="$target_dir/pfx"
+    mkdir -p "$pfx_dir" || return 1
+    if declare -F prepare_windows_runner_env >/dev/null 2>&1; then
+        prepare_windows_runner_env "$runner_bin" "$target_dir" "$gog_id" "auto" "0"
+    else
+        GAMECTL_WIN_PFX_DIR="$pfx_dir"
+        GAMECTL_WIN_RUNNER_KIND="wine"
+    fi
+
+    echo "[INFO] Initializing isolated Wine prefix ($pfx_dir) via $(basename "$runner_bin")..."
+    (
+        export WINEPREFIX="$GAMECTL_WIN_PFX_DIR"
+        [ -n "${GAMECTL_WIN_UMU_GAMEID:-}" ] && export GAMEID="$GAMECTL_WIN_UMU_GAMEID"
+        [ "${GAMECTL_WIN_RUNNER_KIND:-}" = "proton" ] && export STEAM_COMPAT_CLIENT_INSTALL_PATH="${GAMECTL_WIN_STEAM_ROOT:-$HOME/.local/share/Steam}" STEAM_COMPAT_DATA_PATH="$target_dir"
+        local wb_bin
+        wb_bin="$(dirname "$runner_bin")/wineboot"
+        [ -x "$wb_bin" ] || wb_bin="wineboot"
+        case "${GAMECTL_WIN_RUNNER_KIND:-wine}" in
+            proton) "$runner_bin" run wineboot -u >/dev/null 2>&1 ;;
+            umu)    "$runner_bin" wineboot -u >/dev/null 2>&1 ;;
+            *)      WINEARCH=win64 WINEDEBUG=-all "$wb_bin" -u >/dev/null 2>&1 || WINEPREFIX="$pfx_dir" "$runner_bin" wineboot -u >/dev/null 2>&1 ;;
+        esac
+    ) || echo "[WARN] Wine prefix pre-initialization returned non-zero; prefix will complete on first launch." >&2
+    return 0
+}
+
+# Offline GOG Installer Extractor: gamectl install-gog <setup.exe|installer.sh> [target_dir] [--title <name>] [--no-prefix] [--dry-run]
+install_gog_offline() {
+    local installer="" target_dir="" custom_title="" no_prefix=false is_dry_run=false
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --title)
+                [ -n "${2:-}" ] || { echo "[ERROR] --title requires a value." >&2; return 1; }
+                custom_title="$2"; shift 2 ;;
+            --title=*)
+                custom_title="${1#*=}"; shift ;;
+            --no-prefix)
+                no_prefix=true; shift ;;
+            --dry-run|-n)
+                is_dry_run=true; shift ;;
+            --help|-h)
+                echo "Usage: gamectl install-gog <setup.exe|installer.sh> [target_dir] [--title <name>] [--no-prefix] [--dry-run]"
+                return 0 ;;
+            -*)
+                echo "[ERROR] Unknown option: $1" >&2
+                return 1 ;;
+            *)
+                if [ -z "$installer" ]; then installer="$1"
+                elif [ -z "$target_dir" ]; then target_dir="$1"
+                else echo "[ERROR] Unexpected argument: $1" >&2; return 1; fi
+                shift ;;
+        esac
+    done
+
+    if [ -z "$installer" ] || [ ! -f "$installer" ]; then
+        echo "[ERROR] GOG installer file not found: ${installer:-<empty>}" >&2
+        echo "Usage: gamectl install-gog <setup.exe|installer.sh> [target_dir] [--title <name>] [--no-prefix]" >&2
+        return 1
+    fi
+
+    local installer_abs
+    installer_abs=$(realpath -e "$installer" 2>/dev/null || echo "$installer")
+    local ext="${installer_abs##*.}"
+    ext="${ext,,}"
+    if [ "$ext" != "exe" ] && [ "$ext" != "sh" ]; then
+        local ftype=""
+        ftype=$(file -b "$installer_abs" 2>/dev/null || true)
+        if echo "$ftype" | grep -qiE 'PE32|MS Windows'; then ext="exe"
+        elif echo "$ftype" | grep -qiE 'shell script|Zip archive'; then ext="sh"
+        else
+            echo "[ERROR] Unsupported GOG installer format '$installer' (expected .exe or .sh)." >&2
+            return 1
+        fi
+    fi
+
+    local fallback_title="${custom_title:-$(_gog_derive_title_from_filename "$installer_abs")}"
+    declare -F validate_tui_fields >/dev/null 2>&1 && { validate_tui_fields "$fallback_title" || return 1; }
+
+    if [ "$is_dry_run" = true ]; then
+        local dry_dir="${target_dir:-${GAMECTL_LIBRARY_DIR:-$HOME/GOG Games}/$fallback_title}"
+        echo "[INFO] [DRY-RUN] GOG offline installer: $installer_abs (type: .$ext)"
+        echo "[INFO] [DRY-RUN] Target directory: $dry_dir"
+        return 0
+    fi
+
+    local run_dir stage_dir
+    run_dir="$(get_runtime_dir 2>/dev/null || echo "${TMPDIR:-/tmp}")"
+    stage_dir=$(mktemp -d "${run_dir}/gog_extract_XXXXXX") || return 1
+    trap 'rm -rf "${stage_dir:-}" 2>/dev/null || true; trap - RETURN' RETURN
+
+    if [ "$ext" = "exe" ]; then
+        _gog_extract_exe "$installer_abs" "$stage_dir" || return 1
+    else
+        _gog_extract_sh "$installer_abs" "$stage_dir" || return 1
+    fi
+
+    local content_root meta_tsv gog_id gog_title
+    content_root=$(_gog_resolve_stage_root "$stage_dir")
+    meta_tsv=$(_gog_read_extracted_metadata "$content_root" "$fallback_title")
+    IFS=$'\t' read -r gog_id gog_title <<< "$meta_tsv"
+    [ -n "$custom_title" ] && gog_title="$custom_title"
+    declare -F validate_tui_fields >/dev/null 2>&1 && { validate_tui_fields "$gog_id" "$gog_title" || return 1; }
+
+    if [ -z "$target_dir" ]; then
+        local safe_folder
+        safe_folder=$(printf '%s' "$gog_title" | tr '/\\:*?"<>|' '_' | sed -E 's/^[.[:space:]]+//; s/[[:space:]]+$//')
+        [ -n "$safe_folder" ] || safe_folder="GOG_Game"
+        target_dir="${GAMECTL_LIBRARY_DIR:-$HOME/GOG Games}/$safe_folder"
+    fi
+
+    if [ "$target_dir" = "/" ] || [[ "$target_dir" == *".."* ]]; then
+        echo "[ERROR] Invalid target directory: $target_dir" >&2
+        return 1
+    fi
+
+    if [ -d "$target_dir" ] && declare -F is_game_active_for_dir >/dev/null 2>&1; then
+        local active_pid=""
+        if active_pid=$(is_game_active_for_dir "$target_dir" 2>/dev/null); then
+            echo "[ERROR] Cannot overwrite running game in $target_dir (PID: $active_pid)." >&2
+            return 1
+        fi
+    fi
+
+    mkdir -p "$target_dir" "$target_dir/saves" || return 1
+    echo "[INFO] Installing '$gog_title' into $target_dir..."
+    cp -a "$content_root"/. "$target_dir/" || return 1
+
+    # Ensure scanner metadata is present even for stripped GOG installers
+    local has_gog_info=0
+    local _gf
+    for _gf in "$target_dir"/goggame-*.info; do
+        [ -f "$_gf" ] && has_gog_info=1 && break
+    done
+    if [ "$has_gog_info" -eq 0 ]; then
+        printf '%s\n' "$gog_id" > "$target_dir/.gog_id"
+    fi
+    printf '%s\n' "$gog_title" > "$target_dir/.gamectl_title"
+
+    declare -F ensure_linux_binaries_executable >/dev/null 2>&1 && ensure_linux_binaries_executable "$target_dir"
+    [ -f "$target_dir/start.sh" ] && chmod +x "$target_dir/start.sh" 2>/dev/null || true
+
+    local detected_bin=""
+    declare -F find_game_binary >/dev/null 2>&1 && detected_bin=$(find_game_binary "$target_dir" 2>/dev/null || true)
+    if [ "$no_prefix" = false ] && [[ "${detected_bin,,}" == *.exe ]]; then
+        _gog_init_windows_prefix "$target_dir" "$gog_id"
+    fi
+
+    declare -F invalidate_scan_cache >/dev/null 2>&1 && invalidate_scan_cache || true
+    echo "[VERIFIED] GOG offline install complete: '$gog_title' ($gog_id) -> $target_dir${detected_bin:+ [bin: $detected_bin]}"
+    declare -F log_msg >/dev/null 2>&1 && log_msg "INFO" "GOG" "Installed offline GOG package '$gog_title' ($gog_id) to $target_dir" || true
+    return 0
 }
 
 # --- [MODULE] src/stores/30_store_epic.sh ---
@@ -8801,25 +9411,73 @@ _epic_config_dir() {
     printf '%s\n' "${LEGENDARY_CONFIG_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/legendary}"
 }
 
+resolve_gamectl_core_bin() {
+    if [ -n "${GAMECTL_CORE_BIN:-}" ] && [ -x "$GAMECTL_CORE_BIN" ]; then
+        echo "$GAMECTL_CORE_BIN"
+        return 0
+    fi
+    if command -v gamectl-core >/dev/null 2>&1; then
+        command -v gamectl-core
+        return 0
+    fi
+    local candidate
+    for candidate in \
+        "$HOME/.local/bin/gamectl-core" \
+        "/usr/local/bin/gamectl-core" \
+        "/usr/bin/gamectl-core"; do
+        if [ -x "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    if [ "${GAMECTL_BUNDLED:-0}" = "1" ] || [ "${GAMECTL_CORE_ALLOW_REPO_BIN:-0}" = "1" ]; then
+        local self_dir=""
+        [ -n "${SELF_BIN:-}" ] && self_dir="$(dirname "$SELF_BIN")"
+        for candidate in \
+            "${self_dir:+$self_dir/gamectl-core}" \
+            "${self_dir:+$self_dir/../bin/gamectl-core}"; do
+            if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+                echo "$candidate"
+                return 0
+            fi
+        done
+    fi
+    return 1
+}
+
 _epic_resolve_cli() {
+    if [ "${GAMECTL_EPIC_ENGINE:-auto}" = "core" ]; then
+        resolve_gamectl_core_bin >/dev/null 2>&1 && { echo "gamectl-core"; return 0; }
+        return 1
+    fi
     command -v legendary >/dev/null 2>&1 && { echo "legendary"; return 0; }
+    resolve_gamectl_core_bin >/dev/null 2>&1 && { echo "gamectl-core"; return 0; }
     return 1
 }
 
 _epic_auth_session_present() {
-    [ -s "$(_epic_config_dir)/user.json" ]
+    local native_auth="${GAMECTL_EPIC_AUTH_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/gamectl/epic_auth.json}"
+    [ -s "$native_auth" ] || [ -s "$(_epic_config_dir)/user.json" ]
 }
 
 store_epic_available() { _epic_resolve_cli >/dev/null 2>&1; }
 
 store_epic_status() {
-    local cli_path="" cli_status="missing (optional: install legendary)"
-    if _epic_resolve_cli >/dev/null 2>&1; then
+    local cli_name="" cli_path="" cli_status="missing (optional: build gamectl-core or install legendary)"
+    cli_name="$(_epic_resolve_cli 2>/dev/null || true)"
+    if [ "$cli_name" = "legendary" ]; then
         cli_path="$(command -v legendary 2>/dev/null || echo "legendary")"
         cli_status="ready (legendary: $cli_path)"
+    elif [ "$cli_name" = "gamectl-core" ]; then
+        cli_path="$(resolve_gamectl_core_bin 2>/dev/null || echo "gamectl-core")"
+        cli_status="ready (gamectl-core: $cli_path)"
     fi
     local auth_status="unconfigured (run 'gamectl epic auth')"
-    _epic_auth_session_present && auth_status="session present (external tool-managed)"
+    if [ "$cli_name" = "gamectl-core" ] && [ -x "$cli_path" ]; then
+        auth_status="$("$cli_path" epic status 2>/dev/null || echo "$auth_status")"
+    elif _epic_auth_session_present; then
+        auth_status="session present (external tool-managed)"
+    fi
     printf 'store=epic\n  cli      : %s\n  auth     : %s\n' "$cli_status" "$auth_status"
     return 0
 }
@@ -8849,11 +9507,18 @@ _epic_parse_catalog_json() {
 }
 
 store_epic_search() {
-    local query="${1:-}" raw_out="" parsed_rows=""
+    local query="${1:-}" cli_name="" raw_out="" parsed_rows=""
     [ -n "$query" ] || { echo "[ERROR] Usage: store_epic_search <query>" >&2; return 1; }
-    _epic_resolve_cli >/dev/null 2>&1 || { echo "[ERROR] Epic CLI not installed (optional: install legendary)." >&2; return 1; }
+    cli_name="$(_epic_resolve_cli 2>/dev/null || true)"
+    [ -n "$cli_name" ] || { echo "[ERROR] Epic engine not available (build gamectl-core or install legendary)." >&2; return 1; }
 
-    raw_out=$(legendary list --json 2>/dev/null) || { echo "[ERROR] Epic catalog query failed (legendary list --json)." >&2; return 1; }
+    if [ "$cli_name" = "gamectl-core" ]; then
+        local core_bin
+        core_bin="$(resolve_gamectl_core_bin)"
+        raw_out=$("$core_bin" epic list --json 2>/dev/null) || { echo "[ERROR] Epic catalog query failed (gamectl-core epic list --json)." >&2; return 1; }
+    else
+        raw_out=$(legendary list --json 2>/dev/null) || { echo "[ERROR] Epic catalog query failed (legendary list --json)." >&2; return 1; }
+    fi
     local trimmed="${raw_out#"${raw_out%%[![:space:]]*}"}"
     if [ -z "$trimmed" ] || [[ "$trimmed" != "["* ]]; then
         echo "[ERROR] Invalid Epic search catalog JSON." >&2
@@ -8890,16 +9555,23 @@ store_epic_list_installed() {
 }
 
 store_epic_download() {
-    local app_name="${1:-}"
+    local app_name="${1:-}" cli_name=""
     if [ -z "$app_name" ] || [[ ! "$app_name" =~ ^[0-9A-Za-z._-]+$ ]] || [[ "$app_name" == *".."* ]]; then
         echo "[ERROR] Usage: store_epic_download <app_name> [target_dir] [options...]" >&2
         return 1
     fi
-    _epic_resolve_cli >/dev/null 2>&1 || { echo "[ERROR] Epic CLI not installed (optional: install legendary)." >&2; return 1; }
+    cli_name="$(_epic_resolve_cli 2>/dev/null || true)"
+    [ -n "$cli_name" ] || { echo "[ERROR] Epic engine not available (build gamectl-core or install legendary)." >&2; return 1; }
     local target_dir="${GAMECTL_LIBRARY_DIR:-$HOME/Games}/$app_name"
     if [ -n "${2:-}" ] && [[ "${2:-}" != -* ]]; then target_dir="$2"; shift 2; else shift; fi
     mkdir -p "$target_dir" || return 1
-    legendary install "$app_name" --game-folder "$target_dir" -y "$@" || return $?
+    if [ "$cli_name" = "gamectl-core" ]; then
+        local core_bin
+        core_bin="$(resolve_gamectl_core_bin)"
+        "$core_bin" epic install "$app_name" --dir "$target_dir" "$@" || return $?
+    else
+        legendary install "$app_name" --game-folder "$target_dir" -y "$@" || return $?
+    fi
     declare -F invalidate_scan_cache >/dev/null 2>&1 && invalidate_scan_cache || true
 }
 
@@ -8916,23 +9588,98 @@ store_epic_sync() {
 }
 
 epic_cli() {
-    local action="${1:-status}"
+    local action="${1:-status}" cli_name=""
     [ $# -gt 0 ] && shift
+    cli_name="$(_epic_resolve_cli 2>/dev/null || true)"
     case "$action" in
         status) store_dispatch epic status ;;
         auth)
-            _epic_resolve_cli >/dev/null 2>&1 || { echo "[ERROR] Epic auth requires legendary." >&2; return 1; }
-            legendary auth "$@" ;;
+            if [ "$cli_name" = "gamectl-core" ]; then
+                "$(resolve_gamectl_core_bin)" epic auth "$@"
+            elif [ "$cli_name" = "legendary" ]; then
+                legendary auth "$@"
+            else
+                echo "[ERROR] Epic auth requires gamectl-core or legendary." >&2; return 1
+            fi ;;
         search) store_dispatch epic search "$@" ;;
         download) store_dispatch epic download "$@" ;;
         sync) store_dispatch epic sync "$@" ;;
         launch)
-            _epic_resolve_cli >/dev/null 2>&1 || { echo "[ERROR] Epic launch requires legendary." >&2; return 1; }
-            [ -n "${1:-}" ] || { echo "[ERROR] Usage: gamectl epic launch <app_name> [args...]" >&2; return 1; }
-            legendary launch "$@" ;;
+            if [ "$cli_name" = "legendary" ]; then
+                [ -n "${1:-}" ] || { echo "[ERROR] Usage: gamectl epic launch <app_name> [args...]" >&2; return 1; }
+                legendary launch "$@"
+            elif [ "$cli_name" = "gamectl-core" ]; then
+                local app_arg="${1:-}" row_id row_title _row_st row_dir row_bin _rest
+                [ -n "$app_arg" ] || { echo "[ERROR] Usage: gamectl epic launch <app_name>" >&2; return 1; }
+                while IFS=$'\t' read -r row_id row_title _row_st row_dir row_bin _rest; do
+                    row_id="${row_id//[[:space:]]/}"
+                    if [ "$row_id" = "$app_arg" ] && [ -d "$row_dir" ]; then
+                        launch_game "$row_dir" "$row_bin" "$row_title"
+                        return $?
+                    fi
+                done < <(scan_installed_games --store EPIC 2>/dev/null || true)
+                echo "[ERROR] Epic game '$app_arg' is not installed locally." >&2
+                return 1
+            else
+                echo "[ERROR] Epic launch requires gamectl-core or legendary." >&2; return 1
+            fi ;;
         --help|-h|help) echo "Usage: gamectl epic <status|auth|search|download|sync|launch> [args...]" ;;
         *) echo "[ERROR] Unknown epic subcommand '$action'. Usage: gamectl epic <status|auth|search|download|sync|launch> [args...]" >&2; return 1 ;;
     esac
+}
+
+# Cached Epic metadata helper via legendary info --json (dl_bytes\x1fdisk_bytes\x1fdev\x1fdlc_count\x1fversion\x1f1)
+fetch_epic_app_metadata() {
+    local app_name="${1:-}"
+    if [ -z "$app_name" ] || [[ ! "$app_name" =~ ^[0-9A-Za-z._-]+$ ]] || [[ "$app_name" == *".."* ]]; then
+        return 1
+    fi
+
+    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/gamectl"
+    local safe_key
+    safe_key=$(printf '%s' "$app_name" | tr -cd '[:alnum:]_-')
+    local cache_file="$cache_dir/epic_info_${safe_key}.json"
+    local raw_json="" now mtime age
+
+    now=$(date +%s)
+    if [ -s "$cache_file" ]; then
+        mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null || echo 0)
+        age=$(( now - mtime ))
+        if [ "$age" -ge 0 ] && [ "$age" -lt 3600 ]; then
+            raw_json=$(cat "$cache_file" 2>/dev/null || true)
+        fi
+    fi
+
+    if [ -z "$raw_json" ]; then
+        local cli_name fetched tmp_file="${cache_file}.tmp.$$"
+        cli_name="$(_epic_resolve_cli 2>/dev/null || true)"
+        if [ "$cli_name" = "gamectl-core" ]; then
+            fetched=$("$(resolve_gamectl_core_bin)" epic info "$app_name" --json 2>/dev/null || true)
+        elif [ "$cli_name" = "legendary" ]; then
+            fetched=$(legendary info "$app_name" --json 2>/dev/null || true)
+        fi
+        if [ -n "${fetched:-}" ] && [ "$fetched" != "null" ] && printf '%s' "$fetched" | jq . >/dev/null 2>&1; then
+            mkdir -p "$cache_dir" 2>/dev/null || true
+            printf '%s\n' "$fetched" > "$tmp_file" 2>/dev/null && mv -f "$tmp_file" "$cache_file" 2>/dev/null || rm -f "$tmp_file" 2>/dev/null
+            raw_json="$fetched"
+        fi
+        rm -f "$tmp_file" 2>/dev/null || true
+    fi
+
+    if [ -z "$raw_json" ] && [ -s "$cache_file" ]; then
+        raw_json=$(cat "$cache_file" 2>/dev/null || true)
+    fi
+    [ -n "$raw_json" ] && [ "$raw_json" != "null" ] || return 1
+
+    printf '%s' "$raw_json" | jq -r '
+        select(type == "object") |
+        (.manifest.download_size // .download_size // 0 | tonumber? // 0 | floor | tostring) as $dl |
+        (.manifest.disk_size // .install_size // 0 | tonumber? // 0 | floor | tostring) as $disk |
+        ((.game.developer // .metadata.developer // "") | tostring | gsub("[\\t\\r\\n]+"; " ")) as $dev |
+        (if (.game.dlc_list | type) == "array" then (.game.dlc_list | length | tostring) else "0" end) as $dlc |
+        ((.manifest.version // .game.app_version // "") | tostring | gsub("[\\t\\r\\n]+"; " ")) as $ver |
+        [$dl, $disk, $dev, $dlc, $ver, "1"] | join("\u001f")
+    ' 2>/dev/null
 }
 
 # --- [MODULE] src/stores/40_store_amazon.sh ---
@@ -11784,6 +12531,7 @@ launch_game() {
         _launch_echo "[INFO] Log stream: $log_file"
         (
             export LD_LIBRARY_PATH=".:lib64:lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            [[ ":${GLIBC_TUNABLES:-}:" == *:glibc.rtld.execstack=* ]] || export GLIBC_TUNABLES="${GLIBC_TUNABLES:+${GLIBC_TUNABLES}:}glibc.rtld.execstack=2"
             [ -n "${GAMECTL_DEV_RESOLVED_WINEDEBUG:-}" ] && export WINEDEBUG="$GAMECTL_DEV_RESOLVED_WINEDEBUG"
             [ -n "${GAMECTL_DEV_RESOLVED_VK_DEBUG:-}" ] && export VK_LOADER_DEBUG="$GAMECTL_DEV_RESOLVED_VK_DEBUG"
             [ "${GAMECTL_DEV_RESOLVED_GBE_LOG:-0}" = "1" ] && export GAMECTL_GBE_LOG=1 GBE_LOG_FILE="$dev_trace_log"
@@ -12363,6 +13111,419 @@ pull_from_companion() {
 
 pull_from_tuf() {
     pull_save_remote "$@"
+}
+
+if [ -z "${GAMECTL_BUNDLED:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
+    _sync_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    if [ -f "$_sync_dir/54_lan_mesh.sh" ]; then
+        # shellcheck source=/dev/null
+        source "$_sync_dir/54_lan_mesh.sh"
+    fi
+    unset _sync_dir
+fi
+
+# --- [MODULE] src/runners/54_lan_mesh.sh ---
+# ==============================================================================
+# P2P LAN Mesh Sync & Manifest 404 Sovereign Fallback (SSH / rsync)
+# ==============================================================================
+
+_lan_peers_file() {
+    printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/gamectl/peers"
+}
+
+_lan_validate_peer() {
+    local host="${1:-}"
+    [ -n "$host" ] || return 1
+    [[ "$host" == -* ]] && return 1
+    [[ "$host" == rclone:* ]] && return 1
+    if [[ "$host" =~ [[:space:]\;\|\&\$\`\\] ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Print configured LAN companion peers (one SSH host per line, deduplicated)
+get_lan_peers() {
+    local -a raw_peers=()
+    local item
+    if [ -n "${GAMECTL_LAN_PEERS:-}" ]; then
+        local normalized="${GAMECTL_LAN_PEERS//,/:}"
+        normalized="${normalized//$'\n'/:}"
+        local -a env_arr=()
+        IFS=':' read -r -a env_arr <<< "$normalized"
+        raw_peers+=("${env_arr[@]}")
+    fi
+
+    local pfile
+    pfile="$(_lan_peers_file)"
+    if [ -f "$pfile" ]; then
+        while IFS= read -r item || [ -n "$item" ]; do
+            item="${item%%#*}"
+            item=$(printf '%s' "$item" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            [ -n "$item" ] && raw_peers+=("$item")
+        done < "$pfile"
+    fi
+
+    local rhost=""
+    declare -F get_remote_host >/dev/null 2>&1 && rhost=$(get_remote_host 2>/dev/null || true)
+    if [ -n "$rhost" ] && [[ "$rhost" != rclone:* ]]; then
+        rhost="${rhost%%:*}"
+        raw_peers+=("$rhost")
+    fi
+
+    declare -A seen=()
+    for item in "${raw_peers[@]}"; do
+        _lan_validate_peer "$item" || continue
+        [[ -v seen["$item"] ]] && continue
+        seen["$item"]=1
+        printf '%s\n' "$item"
+    done
+}
+
+# Manage companion LAN peers (~/.config/gamectl/peers)
+peers_cli() {
+    local action="${1:-list}"
+    local target="${2:-}"
+    local pfile
+    pfile="$(_lan_peers_file)"
+
+    case "$action" in
+        list)
+            local peers_out
+            peers_out=$(get_lan_peers)
+            if [ -z "$peers_out" ]; then
+                echo "[INFO] No LAN peers configured. Add one with: gamectl peers add <user@host>"
+                return 0
+            fi
+            printf '%s\n' "$peers_out"
+            ;;
+        add)
+            if ! _lan_validate_peer "$target"; then
+                echo "[ERROR] Invalid SSH peer host: '${target:-<empty>}'" >&2
+                return 1
+            fi
+            mkdir -p "$(dirname "$pfile")" || return 1
+            if [ -f "$pfile" ] && grep -Fxq "$target" "$pfile" 2>/dev/null; then
+                echo "[INFO] LAN peer already registered: $target"
+                return 0
+            fi
+            printf '%s\n' "$target" >> "$pfile"
+            echo "[VERIFIED] Added LAN peer: $target ($pfile)"
+            ;;
+        remove|rm|del)
+            [ -n "$target" ] || { echo "Usage: gamectl peers remove <host>" >&2; return 1; }
+            if [ ! -f "$pfile" ]; then
+                echo "[INFO] No peers file found at $pfile"
+                return 0
+            fi
+            local tmp_p
+            tmp_p=$(mktemp "${pfile}.tmp.XXXXXX") || return 1
+            grep -Fxv "$target" "$pfile" > "$tmp_p" 2>/dev/null || true
+            mv -f "$tmp_p" "$pfile"
+            echo "[VERIFIED] Removed LAN peer: $target"
+            ;;
+        --help|-h|help)
+            echo "Usage: gamectl peers [list|add <user@host>|remove <host>]"
+            ;;
+        *)
+            echo "[ERROR] Unknown peers action '$action'. Usage: gamectl peers [list|add <user@host>|remove <host>]" >&2
+            return 1
+            ;;
+    esac
+}
+
+_lan_ssh_exec() {
+    local peer="$1"
+    local remote_cmd="$2"
+    local timeout="${GAMECTL_LAN_TIMEOUT:-${GAMECTL_SSH_TIMEOUT:-2}}"
+    [[ "$timeout" =~ ^[1-9][0-9]*$ ]] || timeout=2
+    ssh -o LogLevel=ERROR -o ConnectTimeout="$timeout" -o BatchMode=yes "$peer" "$remote_cmd"
+}
+
+# Pull cached manifest zip or stplug-in lua + depotcache manifests from a LAN peer
+lan_pull_manifest() {
+    local appid="${1:-}"
+    local explicit_peer="${2:-}"
+    if [ -z "$appid" ] || [[ ! "$appid" =~ ^[0-9]+$ ]]; then
+        echo "[ERROR] lan_pull_manifest requires a numeric AppID." >&2
+        return 1
+    fi
+
+    local -a peers=()
+    if [ -n "$explicit_peer" ]; then
+        _lan_validate_peer "$explicit_peer" || { echo "[ERROR] Invalid peer: $explicit_peer" >&2; return 1; }
+        peers=("$explicit_peer")
+    else
+        local p
+        while IFS= read -r p; do
+            [ -n "$p" ] && peers+=("$p")
+        done < <(get_lan_peers)
+    fi
+    [ "${#peers[@]}" -gt 0 ] || return 1
+
+    local timeout="${GAMECTL_LAN_TIMEOUT:-${GAMECTL_SSH_TIMEOUT:-2}}"
+    [[ "$timeout" =~ ^[1-9][0-9]*$ ]] || timeout=2
+    local rsync_ssh="ssh -o LogLevel=ERROR -o ConnectTimeout=${timeout} -o BatchMode=yes"
+
+    local run_dir stage_dir
+    run_dir="$(get_runtime_dir 2>/dev/null || echo "${TMPDIR:-/tmp}")"
+    stage_dir=$(mktemp -d "${run_dir}/lan_mf_${appid}_XXXXXX") || return 1
+
+    local peer remote_res kind r_files
+    for peer in "${peers[@]}"; do
+        echo "[INFO] Probing LAN peer '$peer' for AppID $appid manifest..." >&2
+        remote_res=$(_lan_ssh_exec "$peer" "bash -s -- '$appid'" 2>/dev/null <<'REMOTE_MF'
+appid="$1"
+for z in "$HOME/.cache/gamectl/${appid}.zip" "$HOME/.cache/gamectl/manifest_${appid}.zip" "${XDG_RUNTIME_DIR:-/tmp}/gamectl-${UID:-$(id -u)}"/*"${appid}"*.zip; do
+    if [ -f "$z" ]; then
+        printf 'ZIP\t%s\n' "$z"
+        exit 0
+    fi
+done
+lua_f=""
+for l in "$HOME/.local/share/Steam/config/stplug-in/${appid}.lua" "$HOME/.config/SLSsteam/manifests/${appid}.lua" "$HOME/.cache/gamectl/${appid}.lua"; do
+    if [ -f "$l" ]; then
+        lua_f="$l"
+        break
+    fi
+done
+[ -n "$lua_f" ] || exit 1
+files="$lua_f"
+dids=$(grep -Eo 'addappid\([[:space:]]*[0-9]+' "$lua_f" 2>/dev/null | tr -dc '0-9\n' || true)
+for d in $dids; do
+    for mf in "$HOME/.local/share/Steam/depotcache/${d}_"*.manifest "$HOME/.steam/root/depotcache/${d}_"*.manifest; do
+        [ -f "$mf" ] && files="$files|$mf"
+    done
+done
+printf 'RAW\t%s\n' "$files"
+REMOTE_MF
+) || continue
+
+        [ -n "$remote_res" ] || continue
+        IFS=$'\t' read -r kind r_files <<< "$remote_res"
+        local out_zip="$run_dir/lan_manifest_${appid}.zip"
+
+        if [ "$kind" = "ZIP" ] && [ -n "$r_files" ]; then
+            if rsync -s -e "$rsync_ssh" -az "${peer}:${r_files}" "$out_zip" >/dev/null 2>&1; then
+                if ! declare -F validate_manifest_zip >/dev/null 2>&1 || validate_manifest_zip "$out_zip" "$appid" true >/dev/null 2>&1; then
+                    rm -rf "$stage_dir" 2>/dev/null || true
+                    echo "[VERIFIED] Pulled manifest archive for AppID $appid from LAN peer '$peer'." >&2
+                    printf '%s\n' "$out_zip"
+                    return 0
+                fi
+                rm -f "$out_zip" 2>/dev/null || true
+            fi
+        elif [ "$kind" = "RAW" ] && [ -n "$r_files" ]; then
+            local -a src_list=()
+            IFS='|' read -r -a src_list <<< "$r_files"
+            local pulled=0 rf
+            for rf in "${src_list[@]}"; do
+                [ -n "$rf" ] || continue
+                rsync -s -e "$rsync_ssh" -az "${peer}:${rf}" "$stage_dir/" >/dev/null 2>&1 && pulled=$((pulled + 1))
+            done
+            if [ "$pulled" -gt 0 ] && command -v zip >/dev/null 2>&1; then
+                (cd "$stage_dir" && zip -q -j "$out_zip" ./*) 2>/dev/null || true
+                if [ -f "$out_zip" ] && { ! declare -F validate_manifest_zip >/dev/null 2>&1 || validate_manifest_zip "$out_zip" "$appid" true >/dev/null 2>&1; }; then
+                    rm -rf "$stage_dir" 2>/dev/null || true
+                    echo "[VERIFIED] Assembled manifest archive for AppID $appid from LAN peer '$peer'." >&2
+                    printf '%s\n' "$out_zip"
+                    return 0
+                fi
+                rm -f "$out_zip" 2>/dev/null || true
+            fi
+        fi
+    done
+
+    rm -rf "$stage_dir" 2>/dev/null || true
+    return 1
+}
+
+# Pull installed game directory (or manifest only) from companion LAN mesh peer
+lan_pull() {
+    local query="" explicit_peer="" target_dir="" manifest_only=false with_pfx=false is_dry_run=false
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --manifest-only|-m) manifest_only=true; shift ;;
+            --with-pfx)         with_pfx=true; shift ;;
+            --dry-run|-n)       is_dry_run=true; shift ;;
+            --target|-d)
+                [ -n "${2:-}" ] || { echo "[ERROR] --target requires a directory path." >&2; return 1; }
+                target_dir="$2"; shift 2 ;;
+            --target=*)
+                target_dir="${1#*=}"; shift ;;
+            --peer|-p)
+                [ -n "${2:-}" ] || { echo "[ERROR] --peer requires a host." >&2; return 1; }
+                explicit_peer="$2"; shift 2 ;;
+            --peer=*)
+                explicit_peer="${1#*=}"; shift ;;
+            --help|-h)
+                echo "Usage: gamectl lan-pull <appid|title> [peer] [--manifest-only] [--target <dir>] [--with-pfx] [--dry-run]"
+                return 0 ;;
+            -*)
+                echo "[ERROR] Unknown option: $1" >&2
+                return 1 ;;
+            *)
+                if [ -z "$query" ]; then query="$1"
+                elif [ -z "$explicit_peer" ]; then explicit_peer="$1"
+                else echo "[ERROR] Unexpected argument: $1" >&2; return 1; fi
+                shift ;;
+        esac
+    done
+
+    if [ -z "$query" ]; then
+        echo "Usage: gamectl lan-pull <appid|title> [peer] [--manifest-only] [--target <dir>] [--with-pfx] [--dry-run]" >&2
+        return 1
+    fi
+
+    if [ "$manifest_only" = true ]; then
+        lan_pull_manifest "$query" "$explicit_peer"
+        return $?
+    fi
+
+    local -a peers=()
+    if [ -n "$explicit_peer" ]; then
+        _lan_validate_peer "$explicit_peer" || { echo "[ERROR] Invalid peer host: $explicit_peer" >&2; return 1; }
+        peers=("$explicit_peer")
+    else
+        local p
+        while IFS= read -r p; do
+            [ -n "$p" ] && peers+=("$p")
+        done < <(get_lan_peers)
+    fi
+
+    if [ "${#peers[@]}" -eq 0 ]; then
+        echo "[ERROR] No LAN peers configured. Run: gamectl peers add <user@host>" >&2
+        return 1
+    fi
+
+    local timeout="${GAMECTL_LAN_TIMEOUT:-${GAMECTL_SSH_TIMEOUT:-2}}"
+    [[ "$timeout" =~ ^[1-9][0-9]*$ ]] || timeout=2
+    local rsync_ssh="ssh -o LogLevel=ERROR -o ConnectTimeout=${timeout} -o BatchMode=yes"
+
+    local peer match_line r_appid r_title r_dir
+    for peer in "${peers[@]}"; do
+        echo "[INFO] Querying LAN peer '$peer' for '$query'..."
+        match_line=$(_lan_ssh_exec "$peer" "bash -s -- '$query'" 2>/dev/null <<'REMOTE_FIND'
+q="$1"
+q_low=$(printf '%s' "$q" | tr '[:upper:]' '[:lower:]')
+gctl=$(command -v gamectl 2>/dev/null || echo "$HOME/.local/bin/gamectl")
+if [ -x "$gctl" ]; then
+    while IFS=$'\t' read -r col1 col2 _col3 col4 _rest; do
+        c1=$(printf '%s' "$col1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        c2=$(printf '%s' "$col2" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        [ -n "$col4" ] || continue
+        if [ "$c1" = "$q" ] || printf '%s' "$c2" | tr '[:upper:]' '[:lower:]' | grep -Fq "$q_low"; then
+            printf '%s\t%s\t%s\n' "$c1" "$c2" "$col4"
+            exit 0
+        fi
+    done < <("$gctl" --list 2>/dev/null || true)
+fi
+for base in "$HOME/Games" "$HOME/GOG Games" "$HOME/.local/share/Steam/steamapps/common"; do
+    [ -d "$base" ] || continue
+    for d in "$base"/*; do
+        [ -d "$d" ] || continue
+        bname="${d##*/}"
+        if [[ "$q" =~ ^[0-9]+$ ]] && [ -f "$d/steam_appid.txt" ]; then
+            aid=$(tr -dc '0-9' < "$d/steam_appid.txt" 2>/dev/null || true)
+            if [ "$aid" = "$q" ]; then
+                printf '%s\t%s\t%s\n' "$aid" "$bname" "$d"
+                exit 0
+            fi
+        fi
+        if printf '%s' "$bname" | tr '[:upper:]' '[:lower:]' | grep -Fq "$q_low"; then
+            printf 'STANDALONE\t%s\t%s\n' "$bname" "$d"
+            exit 0
+        fi
+    done
+done
+exit 1
+REMOTE_FIND
+) || continue
+
+        [ -n "$match_line" ] || continue
+        IFS=$'\t' read -r r_appid r_title r_dir <<< "$match_line"
+        [ -n "$r_dir" ] && [[ "$r_dir" != *".."* ]] && [ "$r_dir" != "/" ] || continue
+        [[ "$r_dir" == *$'\n'* || "$r_dir" == *$'\r'* ]] && continue
+        declare -F validate_tui_fields >/dev/null 2>&1 && { validate_tui_fields "$r_appid" "$r_title" "$r_dir" || continue; }
+
+        local dest_dir="$target_dir"
+        if [ -z "$dest_dir" ]; then
+            local safe_title="${r_title:-$(basename "$r_dir")}"
+            safe_title=$(printf '%s' "$safe_title" | tr '/\\:*?"<>|' '_' | sed -E 's/^[.[:space:]]+//; s/[[:space:]]+$//')
+            if declare -F resolve_target_library_dir >/dev/null 2>&1; then
+                dest_dir="$(resolve_target_library_dir "${safe_title:-game}")"
+            else
+                dest_dir="${GAMECTL_LIBRARY_DIR:-$HOME/Games}/${safe_title:-game}"
+            fi
+        fi
+
+        if [ "$is_dry_run" = false ] && [ -d "$dest_dir" ] && declare -F is_game_active_for_dir >/dev/null 2>&1; then
+            local active_pid=""
+            if active_pid=$(is_game_active_for_dir "$dest_dir" 2>/dev/null); then
+                echo "[ERROR] Cannot pull into $dest_dir while game process is active (PID: $active_pid)." >&2
+                return 1
+            fi
+        fi
+
+        if [ "$is_dry_run" = false ] && [ -d "$dest_dir/saves" ] && declare -F backup_save >/dev/null 2>&1; then
+            backup_save "$dest_dir" true || return $?
+        fi
+
+        local -a rsync_opts=("-avzP" "--exclude=.save_snapshots/")
+        [ "$with_pfx" = false ] && rsync_opts+=("--exclude=pfx/")
+        [ "$is_dry_run" = true ] && rsync_opts+=("-n")
+
+        [ "$is_dry_run" = false ] && { mkdir -p "$dest_dir" || return 1; }
+        echo "[INFO] Pulling '$r_title' ($r_appid) from ${peer}:${r_dir}/ -> ${dest_dir}/"
+        if ! rsync -s -e "$rsync_ssh" "${rsync_opts[@]}" "${peer}:${r_dir}/" "${dest_dir}/"; then
+            echo "[ERROR] LAN mesh transfer from ${peer}:${r_dir} failed." >&2
+            return 1
+        fi
+
+        if [ "$is_dry_run" = true ]; then
+            echo "[INFO] [DRY-RUN] LAN mesh pull simulated from ${peer}:${r_dir} -> ${dest_dir}."
+            return 0
+        fi
+
+        declare -F ensure_linux_binaries_executable >/dev/null 2>&1 && ensure_linux_binaries_executable "$dest_dir"
+        if [[ "$r_appid" =~ ^[0-9]+$ ]] && declare -F inject_game >/dev/null 2>&1; then
+            inject_game "$dest_dir" "$r_appid" --no-sync >/dev/null 2>&1 || true
+        fi
+        declare -F invalidate_scan_cache >/dev/null 2>&1 && invalidate_scan_cache || true
+        echo "[VERIFIED] LAN mesh pull complete: '$r_title' ($r_appid) from $peer -> $dest_dir"
+        declare -F log_msg >/dev/null 2>&1 && log_msg "INFO" "LAN" "Pulled '$r_title' ($r_appid) from $peer to $dest_dir" || true
+        return 0
+    done
+
+    echo "[ERROR] '$query' not found on any reachable LAN peer (${peers[*]})." >&2
+    return 1
+}
+
+# Fallback helper called by download_game when external manifest providers fail (404)
+# Prints manifest zip path on stdout if manifest was retrieved (rc=0); returns 2 if full game was pulled via rsync; returns 1 otherwise.
+lan_fallback_for_download() {
+    local appid="$1"
+    local target_dir="${2:-}"
+    local title="${3:-}"
+    declare -F get_lan_peers >/dev/null 2>&1 || return 1
+    [ -n "$(get_lan_peers 2>/dev/null || true)" ] || return 1
+
+    echo "[WARN] External manifest providers returned no archive for AppID $appid. Trying LAN mesh fallback..." >&2
+    local mzip=""
+    mzip=$(lan_pull_manifest "$appid" 2>/dev/null || true)
+    if [ -n "$mzip" ] && [ -f "$mzip" ]; then
+        printf '%s\n' "$mzip"
+        return 0
+    fi
+
+    local lan_dest="$target_dir"
+    if [ -z "$lan_dest" ] && declare -F resolve_standalone_library_dir >/dev/null 2>&1; then
+        lan_dest="$(resolve_standalone_library_dir "${title:-AppID_${appid}}")"
+    fi
+    if lan_pull "$appid" --target "$lan_dest"; then
+        return 2
+    fi
+    return 1
 }
 
 # --- [MODULE] src/runners/52_inject_runtime.sh ---
@@ -13192,11 +14353,23 @@ doctor_audit() {
         echo "    • $(printf '%-18s' "GOG Store CLI") : ${UI_DIM}[OPT]${UI_RST} Optional (Install gogdl or lgogdownloader for GOG support)"
     fi
 
+    if command -v innoextract >/dev/null 2>&1; then
+        echo "    • $(printf '%-18s' "GOG Extractor") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(command -v innoextract))${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
+    else
+        echo "    • $(printf '%-18s' "GOG Extractor") : ${UI_DIM}[OPT]${UI_RST} Optional (Install innoextract for offline GOG .exe installers)"
+    fi
+
+    local epic_native_bin=""
+    declare -F resolve_gamectl_core_bin >/dev/null 2>&1 && epic_native_bin="$(resolve_gamectl_core_bin 2>/dev/null || true)"
     if command -v legendary >/dev/null 2>&1; then
         echo "    • $(printf '%-18s' "Epic Store CLI") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}($(command -v legendary))${UI_RST}"
         pass_cnt=$((pass_cnt + 1))
+    elif [ -n "$epic_native_bin" ] && [ -x "$epic_native_bin" ]; then
+        echo "    • $(printf '%-18s' "Epic Store CLI") : ${UI_GREEN}[READY]${UI_RST} ${UI_DIM}(native: $epic_native_bin)${UI_RST}"
+        pass_cnt=$((pass_cnt + 1))
     else
-        echo "    • $(printf '%-18s' "Epic Store CLI") : ${UI_DIM}[OPT]${UI_RST} Optional (Install legendary for Epic Games support)"
+        echo "    • $(printf '%-18s' "Epic Store CLI") : ${UI_DIM}[OPT]${UI_RST} Optional (Build gamectl-core or install legendary for Epic Games support)"
     fi
 
     if command -v nile >/dev/null 2>&1; then
@@ -13564,8 +14737,8 @@ dashboard_menu() {
         local menu_entries
         menu_entries=$(cat <<EOF
 1	${UI_PURPLE}[01]${UI_RST} ${UI_BOLD}GAME LIBRARY${UI_RST}	${UI_DIM}Browse, inject and launch installed games${UI_RST}
-2	${UI_PURPLE}[02]${UI_RST} ${UI_BOLD}STEAM STORE SEARCH${UI_RST}	${UI_DIM}Search games & check ProtonDB compatibility${UI_RST}
-3	${UI_PURPLE}[03]${UI_RST} ${UI_BOLD}DOWNLOAD MONITOR${UI_RST}	${UI_DIM}Track Steam native downloads & ACF telemetry${UI_RST}
+2	${UI_PURPLE}[02]${UI_RST} ${UI_BOLD}STORE CATALOG SEARCH${UI_RST}	${UI_DIM}Search Steam & Multi-Store (GOG/Epic/Amazon) + ProtonDB${UI_RST}
+3	${UI_PURPLE}[03]${UI_RST} ${UI_BOLD}DOWNLOAD MONITOR${UI_RST}	${UI_DIM}Track Standalone CDN & Steam download telemetry${UI_RST}
 4	${UI_PURPLE}[04]${UI_RST} ${UI_BOLD}STEAM ACF ADOPTION & ASSET MANAGER${UI_RST}	${UI_DIM}Adopt physical files, shaders & bridge downloads${UI_RST}
 5	${UI_PURPLE}[05]${UI_RST} ${UI_BOLD}GLOBAL SETTINGS${UI_RST}	${UI_DIM}Configure LAN persona, default wrappers & remote host${UI_RST}
 6	${UI_PURPLE}[06]${UI_RST} ${UI_BOLD}SYSTEM DIAGNOSTICS${UI_RST}	${UI_DIM}Audit 7-layer dependencies, runners & GPU health${UI_RST}
@@ -13753,6 +14926,18 @@ remote_sync_interactive() {
     done
 }
 
+# Canonical store filter labels for dynamic Alt-S picker (Packet 43A)
+_store_filter_label_row() {
+    case "${1:-ALL}" in
+        ALL)        printf 'ALL\tAll Stores (Unified)\n' ;;
+        STEAM)      printf 'STEAM\tSteam Library\n' ;;
+        GOG)        printf 'GOG\tGOG Library (DRM-Free)\n' ;;
+        EPIC)       printf 'EPIC\tEpic Games Library (Native/Legendary)\n' ;;
+        AMAZON)     printf 'AMAZON\tAmazon Games Library (Nile)\n' ;;
+        STANDALONE) printf 'STANDALONE\tStandalone / Portable\n' ;;
+    esac
+}
+
 # Main Library View
 library_menu() {
     if [ ! -t 0 ] || [ ! -t 1 ]; then
@@ -13774,6 +14959,7 @@ library_menu() {
 
     while true; do
         flush_tty_input
+        active_store="$(validate_visible_store_filter "$active_store")"
         _format_library_chrome "$active_store" "$last_status_banner"
         last_status_banner=""
         local lib_label="$GAMECTL_LIB_LABEL" lib_header="$GAMECTL_LIB_HEADER"
@@ -13825,29 +15011,17 @@ library_menu() {
             search_steam "" false || hk_rc=$?
             invalidate_scan_cache
         elif [ "$trigger_key" = "tab" ]; then
-            case "$active_store" in
-                ALL) active_store="STEAM" ;;
-                STEAM) active_store="GOG" ;;
-                GOG) active_store="EPIC" ;;
-                EPIC) active_store="AMAZON" ;;
-                AMAZON) active_store="STANDALONE" ;;
-                *) active_store="ALL" ;;
-            esac
+            active_store="$(get_next_visible_store_filter "$active_store")"
             continue
         elif [ "$trigger_key" = "alt-s" ]; then
-            local store_pick=""
-            store_pick=$(tui_action_palette \
-                "Store Filter" \
-                "Select Store View (Enter: Apply │ Esc: Cancel)" \
-                "$(printf 'ALL\tAll Stores (Unified)\nSTEAM\tSteam Library\nGOG\tGOG Library (DRM-Free)\nEPIC\tEpic Games Library (Legendary)\nAMAZON\tAmazon Games Library (Nile)\nSTANDALONE\tStandalone / Portable\n')" \
-                "" \
-                "Store > ") || hk_rc=$?
+            local store_pick="" store_palette=""
+            store_palette="$(build_visible_store_palette)"
+            [ -n "$store_palette" ] || store_palette="$(_store_filter_label_row ALL)"
+            store_pick=$(tui_action_palette "Store Filter" "Select Store View (Enter: Apply │ Esc: Cancel)" "$store_palette" "" "Store > ") || hk_rc=$?
             if [ "$hk_rc" -ne 0 ] && [ "$hk_rc" -ne 1 ] && [ "$hk_rc" -ne 130 ]; then
                 return "$hk_rc"
             fi
-            if [ "$hk_rc" -eq 0 ] && [ -n "$store_pick" ]; then
-                active_store=$(printf '%s' "$store_pick" | cut -f1)
-            fi
+            [ "$hk_rc" -eq 0 ] && [ -n "$store_pick" ] && active_store=$(printf '%s' "$store_pick" | cut -f1)
             continue
         fi
         if [ "$hk_rc" -ne 0 ] && [ "$hk_rc" -ne 1 ] && [ "$hk_rc" -ne 130 ]; then
@@ -14267,17 +15441,82 @@ preview_game() {
     echo "========================================================"
 }
 
-# Preview pane generator for Steam Store Search & ProtonDB compatibility
+# Preview pane generator for Store Catalog Search & ProtonDB compatibility
 preview_search_game() {
     local appid="${1:-}"
     local title="${2:-}"
     local app_status="${3:-[NOT INSTALLED]}"
+    local store="${4:-STEAM}"
 
     appid=$(strip_ansi "$appid" | tr -d '[:space:]')
     title=$(strip_ansi "$title" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     app_status=$(strip_ansi "$app_status" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    store=$(strip_ansi "$store" | tr -d '[:space:]')
+    store="${store^^}"
+    [ -z "$store" ] && store="STEAM"
 
-    printf "%s╭─ STEAM METADATA & PROTONDB AUDIT ───────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
+    if [ "$store" != "STEAM" ]; then
+        printf "%s╭─ STORE METADATA (%s) ───────────────────────────────╮%s\n" "${UI_BOX}" "$store" "${UI_RST}"
+        printf "│ %s%s%s %s(ID: %s)%s\n" "${UI_BOLD}" "$title" "${UI_RST}" "${UI_DIM}" "${appid:-N/A}" "${UI_RST}"
+        printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
+        printf "  %sLocal State%s : %s\n" "${UI_CYAN}" "${UI_RST}" "$app_status"
+        printf "  %sStore      %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_PURPLE}" "$store" "${UI_RST}"
+
+        if [ "$store" = "GOG" ] && [[ "$appid" =~ ^[0-9]+$ ]]; then
+            local gog_json=""
+            gog_json=$(fetch_cached_json "https://api.gog.com/products/${appid}?expand=downloads" "gog_details_${appid}" 3600 2>/dev/null || true)
+            if [ -n "$gog_json" ] && [ "$gog_json" != "null" ]; then
+                local g_row g_rel="" g_bytes="" g_plats=""
+                g_row=$(printf '%s' "$gog_json" | jq -r '
+                    [
+                        ((.release_date // "") | tostring | gsub("[\\t\\r\\n]"; " ") | sub("T.*$"; "")),
+                        (([.downloads.installers[]?.total_size // 0 | tonumber? // 0] | add // 0) | tostring),
+                        ([(.content_system_compatibility // {} | to_entries[] | select(.value == true) | .key)] | join(", "))
+                    ] | join("\u001f")
+                ' 2>/dev/null || true)
+                IFS=$'\x1f' read -r g_rel g_bytes g_plats <<< "$g_row"
+                if [[ "$g_bytes" =~ ^[0-9]+$ ]] && [ "$g_bytes" -gt 0 ]; then
+                    local g_sz="$g_bytes"
+                    declare -F format_bytes >/dev/null 2>&1 && g_sz=$(format_bytes "$g_bytes")
+                    printf "  %sEst. Size  %s : %s%s%s %s(Installers)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_BOLD}" "$g_sz" "${UI_RST}" "${UI_DIM}" "${UI_RST}"
+                fi
+                [ -n "$g_rel" ] && printf "  %sRelease    %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$g_rel" "${UI_RST}"
+                [ -n "$g_plats" ] && printf "  %sPlatforms  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_GREEN}" "$g_plats" "${UI_RST}"
+            fi
+            printf "  %sDRM        %s : %sDRM-Free (GOG)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_GREEN}" "${UI_RST}"
+        elif [ "$store" = "EPIC" ]; then
+            if declare -F fetch_epic_app_metadata >/dev/null 2>&1; then
+                local e_row=""
+                e_row=$(fetch_epic_app_metadata "$appid" 2>/dev/null || true)
+                if [ -n "$e_row" ]; then
+                    local e_dl="0" e_disk="0" e_dev="" e_dlc="0" e_ver="" _e_end=""
+                    IFS=$'\x1f' read -r e_dl e_disk e_dev e_dlc e_ver _e_end <<< "$e_row"
+                    local e_sz_parts="" e_dl_h="" e_disk_h=""
+                    if [[ "$e_dl" =~ ^[0-9]+$ ]] && [ "$e_dl" -gt 0 ]; then
+                        e_dl_h="$e_dl"; declare -F format_bytes >/dev/null 2>&1 && e_dl_h=$(format_bytes "$e_dl")
+                        e_sz_parts="${e_dl_h} (Download)"
+                    fi
+                    if [[ "$e_disk" =~ ^[0-9]+$ ]] && [ "$e_disk" -gt 0 ]; then
+                        e_disk_h="$e_disk"; declare -F format_bytes >/dev/null 2>&1 && e_disk_h=$(format_bytes "$e_disk")
+                        e_sz_parts="${e_sz_parts:+${e_sz_parts} • }${e_disk_h} (Disk)"
+                    fi
+                    [ -n "$e_sz_parts" ] && printf "  %sEst. Size  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_BOLD}" "$e_sz_parts" "${UI_RST}"
+                    [ -n "$e_dev" ] && printf "  %sDeveloper  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$e_dev" "${UI_RST}"
+                    if [[ "$e_dlc" =~ ^[0-9]+$ ]] && [ "$e_dlc" -gt 0 ]; then
+                        printf "  %sDLCs       %s : %s%s available%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_ICE}" "$e_dlc" "${UI_RST}"
+                    fi
+                    [ -n "$e_ver" ] && printf "  %sVersion    %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$e_ver" "${UI_RST}"
+                fi
+            fi
+            printf "  %sAdapter    %s : %slegendary (Epic Games Store)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "${UI_RST}"
+        elif [ "$store" = "AMAZON" ]; then
+            printf "  %sAdapter    %s : %snile (Amazon Prime Gaming)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "${UI_RST}"
+        fi
+        printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
+        return 0
+    fi
+
+    printf "%s╭─ STORE METADATA & PROTONDB AUDIT (STEAM) ───────────╮%s\n" "${UI_BOX}" "${UI_RST}"
     printf "│ %s%s%s %s(AppID: %s)%s\n" "${UI_BOLD}" "$title" "${UI_RST}" "${UI_DIM}" "$appid" "${UI_RST}"
     printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
     printf "  %sLocal State%s : %s\n" "${UI_CYAN}" "${UI_RST}" "$app_status"
@@ -14314,17 +15553,86 @@ preview_search_game() {
             elif [ "$is_win" = "true" ]; then
                 printf "  %sPlatform   %s : %sWindows PE (Requires Proton/Wine)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_PURPLE}" "${UI_RST}"
             fi
+
+            if declare -F parse_steam_app_metadata_json >/dev/null 2>&1; then
+                local meta_row=""
+                meta_row=$(parse_steam_app_metadata_json "$details" 2>/dev/null || true)
+                if [ -n "$meta_row" ]; then
+                    local st_lin="" st_win="" st_mac="" rel_str="" price_str="" devs="" pubs="" dlc_cnt="0" ctrl="" meta_sc="" recs="" short_d="" has_req="0" drm_warn="" min_specs="" modes="" cat_ctrl="" st_req_bytes="" _meta_end=""
+                    IFS=$'\x1f' read -r st_lin st_win st_mac rel_str price_str devs pubs dlc_cnt ctrl meta_sc recs short_d has_req drm_warn min_specs modes cat_ctrl st_req_bytes _meta_end <<< "$meta_row"
+                    ctrl="${ctrl:-$cat_ctrl}"
+
+                    local size_disp=""
+                    if [ -n "$st_lin" ] && [ -n "$st_win" ] && [ "${st_lin,,}" != "${st_win,,}" ]; then
+                        size_disp="${st_lin} (Linux) • ${st_win} (Win)"
+                    elif [ -n "$st_lin" ]; then
+                        size_disp="${st_lin} (Req. Storage)"
+                    elif [ -n "$st_win" ]; then
+                        size_disp="${st_win} (Req. Storage)"
+                    elif [ -n "$st_mac" ]; then
+                        size_disp="${st_mac} (Mac Storage)"
+                    elif [ "$has_req" = "1" ]; then
+                        size_disp="Not listed by store"
+                    fi
+                    [ -n "$size_disp" ] && printf "  %sEst. Size  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_BOLD}" "$size_disp" "${UI_RST}"
+                    if [[ "$st_req_bytes" =~ ^[0-9]+$ ]] && [ "$st_req_bytes" -gt 0 ] && declare -F get_library_disk_free_info >/dev/null 2>&1; then
+                        local disk_info="" free_h="" is_low="0"
+                        disk_info=$(get_library_disk_free_info "$st_req_bytes" 2>/dev/null || true)
+                        if [ -n "$disk_info" ]; then
+                            IFS=$'\t' read -r free_h is_low <<< "$disk_info"
+                            if [ "$is_low" = "1" ]; then
+                                printf "  %sFree Disk  %s : %s%s [LOW DISK]%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_RED}" "$free_h" "${UI_RST}"
+                            else
+                                printf "  %sFree Disk  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$free_h" "${UI_RST}"
+                            fi
+                        fi
+                    fi
+                    [ -n "$min_specs" ] && printf "  %sMin Specs  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$min_specs" "${UI_RST}"
+                    [ -n "$drm_warn" ] && printf "  %sDRM / Acct %s : %s[WARN] %s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_AMBER}" "$drm_warn" "${UI_RST}"
+                    [ -n "$modes" ] && printf "  %sModes      %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$modes" "${UI_RST}"
+
+                    if [ "$price_str" = "Free" ]; then
+                        printf "  %sPrice      %s : %sFree%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_GREEN}" "${UI_RST}"
+                    elif [ -n "$price_str" ]; then
+                        printf "  %sPrice      %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_AMBER}" "$price_str" "${UI_RST}"
+                    fi
+                    [ -n "$rel_str" ] && printf "  %sRelease    %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$rel_str" "${UI_RST}"
+                    if [ -n "$devs" ]; then
+                        local dev_line="$devs"
+                        [ -n "$pubs" ] && [ "$pubs" != "$devs" ] && dev_line+=" • Pub: $pubs"
+                        printf "  %sDeveloper  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$dev_line" "${UI_RST}"
+                    elif [ -n "$pubs" ]; then
+                        printf "  %sPublisher  %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$pubs" "${UI_RST}"
+                    fi
+                    if [[ "$dlc_cnt" =~ ^[0-9]+$ ]] && [ "$dlc_cnt" -gt 0 ] && [ "$norm_type" = "GAME" ]; then
+                        printf "  %sDLCs       %s : %s%s available%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_ICE}" "$dlc_cnt" "${UI_RST}"
+                    fi
+                    [ -n "$ctrl" ] && printf "  %sController %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$ctrl" "${UI_RST}"
+                    if [ -n "$recs" ] || [ -n "$meta_sc" ]; then
+                        local rev_parts=""
+                        [ -n "$recs" ] && rev_parts="${recs} recs"
+                        [ -n "$meta_sc" ] && rev_parts="${rev_parts:+${rev_parts} • }Metacritic: ${meta_sc}"
+                        printf "  %sReviews    %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$rev_parts" "${UI_RST}"
+                    fi
+                    [ -n "$short_d" ] && printf "  %sSummary    %s : %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$short_d" "${UI_RST}"
+                fi
+            fi
+        fi
+        if [ -s "${XDG_CACHE_HOME:-$HOME/.cache}/gamectl/manifests/${appid}.zip" ]; then
+            printf "  %sLocal Cache%s : %s[MANIFEST READY]%s %s(Offline manifest cached)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_GREEN}" "${UI_RST}" "${UI_DIM}" "${UI_RST}"
         fi
 
         printf "\n%s╭─ COMMUNITY COMPATIBILITY ───────────────────────────╮%s\n" "${UI_BOX}" "${UI_RST}"
         local pdb
         pdb=$(fetch_cached_json "https://www.protondb.com/api/v1/reports/summaries/${appid}.json" "protondb_${appid}" 3600 2>/dev/null || true)
         if [ -n "$pdb" ] && [ "$pdb" != "null" ]; then
-            local tier score conf total tier_upper c_tier
+            local tier score conf total tier_upper c_tier trend_t="" best_t=""
             tier=$(echo "$pdb" | jq -r ".tier // \"Unknown\"" 2>/dev/null || echo "Unknown")
             score=$(echo "$pdb" | jq -r ".score // \"-\"" 2>/dev/null || echo "-")
             conf=$(echo "$pdb" | jq -r ".confidence // \"-\"" 2>/dev/null || echo "-")
             total=$(echo "$pdb" | jq -r ".total // \"-\"" 2>/dev/null || echo "-")
+            trend_t=$(echo "$pdb" | jq -r ".trendingTier // \"\"" 2>/dev/null || true)
+            best_t=$(echo "$pdb" | jq -r ".bestReportedTier // \"\"" 2>/dev/null || true)
             tier_upper="${tier^^}"
             c_tier="${UI_GREEN}[$tier_upper]${UI_RST}"
             case "$tier_upper" in
@@ -14338,8 +15646,33 @@ preview_search_game() {
             local rep_str=""
             [ "$total" != "-" ] && rep_str=" • Reports: $total"
             printf "  %sRating Score  %s: %s%s%s %s(Confidence: %s%s)%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_BOLD}" "$score" "${UI_RST}" "${UI_DIM}" "$conf" "$rep_str" "${UI_RST}"
+            if [ -n "$trend_t" ] || [ -n "$best_t" ]; then
+                if { [ -n "$trend_t" ] && [ "${trend_t,,}" != "${tier,,}" ]; } || { [ -n "$best_t" ] && [ "${best_t,,}" != "${tier,,}" ]; }; then
+                    local tb_parts=""
+                    [ -n "$trend_t" ] && tb_parts="Trending: [${trend_t^^}]"
+                    [ -n "$best_t" ] && tb_parts="${tb_parts:+${tb_parts} • }Best: [${best_t^^}]"
+                    printf "  %sTrend / Best  %s: %s%s%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "$tb_parts" "${UI_RST}"
+                fi
+            fi
         else
             printf "  %sProtonDB Tier %s: %s[NO REPORTS YET]%s\n" "${UI_CYAN}" "${UI_RST}" "${UI_DIM}" "${UI_RST}"
+        fi
+        if declare -F fetch_steam_deck_compat >/dev/null 2>&1; then
+            local deck_row="" deck_cat="" deck_note="" deck_col="${UI_DIM}"
+            deck_row=$(fetch_steam_deck_compat "$appid" 2>/dev/null || true)
+            if [ -n "$deck_row" ]; then
+                IFS=$'\t' read -r deck_cat deck_note <<< "$deck_row"
+                case "$deck_cat" in
+                    VERIFIED) deck_col="${UI_GREEN}" ;;
+                    PLAYABLE) deck_col="${UI_CYAN}" ;;
+                    UNSUPPORTED) deck_col="${UI_RED}" ;;
+                esac
+                if [ -n "$deck_note" ]; then
+                    printf "  %sSteamOS/Deck  %s: %s[%s]%s %s(%s)%s\n" "${UI_CYAN}" "${UI_RST}" "$deck_col" "$deck_cat" "${UI_RST}" "${UI_DIM}" "$deck_note" "${UI_RST}"
+                else
+                    printf "  %sSteamOS/Deck  %s: %s[%s]%s\n" "${UI_CYAN}" "${UI_RST}" "$deck_col" "$deck_cat" "${UI_RST}"
+                fi
+            fi
         fi
         printf "%s╰─────────────────────────────────────────────────────╯%s\n" "${UI_BOX}" "${UI_RST}"
     else
@@ -14389,7 +15722,7 @@ preview_log_entry() {
                 advice="Savegame snapshot error. Verify disk space in target directory or storage quota."
                 ;;
             *STORE*|*DOWNLOAD*|*DEPOT*)
-                advice="Network or CDN timeout. Check connectivity to Steam Store or CDN endpoints."
+                advice="Network or CDN timeout. Check connectivity to Store API or CDN endpoints."
                 ;;
             *GBE*|*INJECT*)
                 advice="GBE injection failure. Check file permissions or verify 32-bit vs 64-bit architecture."
@@ -14446,10 +15779,13 @@ search_stores_interactive() {
         rows+="${r_store}"$'\t'"${r_id}"$'\t'"${badge}"$'\t'"${r_title}"$'\t'"${r_plats}"$'\t'"${r_status}"$'\t'"${r_type}"$'\t'"${r_parent}"$'\n'
     done <<< "$raw_rows"
 
+    export GAMECTL_PREVIEW_BIN="$SELF_BIN"
     local pick p_rc=0
     pick=$(printf '%s' "$rows" | fzf --delimiter=$'\t' --with-nth=1,2,3,4,5,6 \
         --border-label="  ╢ gamectl :: Cross-Store Catalog ($target_store) ╟  " --border-label-pos=2 \
-        --header="Enter: Download via Store Adapter │ Esc: Return" --prompt="Cross-Store > ") || p_rc=$?
+        --header="Enter: Download via Store Adapter │ Esc: Return" --prompt="Cross-Store > " \
+        --preview='"$GAMECTL_PREVIEW_BIN" --preview-search {2} {4} {6} {1}' \
+        --preview-window=right:52%:border-rounded:wrap) || p_rc=$?
     [ "$p_rc" -eq 130 ] && return 0
     [ "$p_rc" -ne 0 ] && [ "$p_rc" -ne 1 ] && return "$p_rc"
     [ -n "$pick" ] || return 0
@@ -14512,9 +15848,108 @@ tui_library_sync_actions() {
         "$store_filter" "$GAMECTL_LIB_LABEL" "$GAMECTL_LIB_HEADER"
 }
 
+# Compute active store filter tokens using Installed-or-Authenticated pruning (Packet 43A)
+get_visible_store_filters() {
+    local -A store_counts=()
+    local _id _title _st _dir _bin c_store
+    if declare -F scan_installed_games >/dev/null 2>&1; then
+        while IFS=$'\t' read -r _id _title _st _dir _bin c_store; do
+            [[ "$_id" == \#* ]] && continue
+            [ -n "$_dir" ] || continue
+            c_store="${c_store:-STANDALONE}"
+            c_store="${c_store^^}"
+            store_counts["$c_store"]=$(( ${store_counts["$c_store"]:-0} + 1 ))
+        done < <(scan_installed_games 2>/dev/null || true)
+    fi
+
+    printf '%s\n' "ALL"
+
+    local has_steam_lib=0
+    if [ "${store_counts[STEAM]:-0}" -gt 0 ]; then
+        has_steam_lib=1
+    elif declare -F get_steam_libraries >/dev/null 2>&1; then
+        local slib
+        while IFS= read -r slib; do
+            if [ -n "$slib" ] && [ -d "$slib" ]; then
+                has_steam_lib=1
+                break
+            fi
+        done < <(get_steam_libraries 2>/dev/null || true)
+    fi
+    [ "$has_steam_lib" -eq 1 ] && printf '%s\n' "STEAM"
+
+    if [ "${store_counts[GOG]:-0}" -gt 0 ] || \
+       { declare -F _gog_resolve_cli >/dev/null 2>&1 && _gog_resolve_cli >/dev/null 2>&1 && \
+         declare -F _gog_auth_session_present >/dev/null 2>&1 && _gog_auth_session_present; }; then
+        printf '%s\n' "GOG"
+    fi
+
+    # Keep EPIC hidden when only gamectl-core binary exists without games or active auth
+    if [ "${store_counts[EPIC]:-0}" -gt 0 ] || \
+       { declare -F store_epic_available >/dev/null 2>&1 && store_epic_available >/dev/null 2>&1 && \
+         declare -F _epic_auth_session_present >/dev/null 2>&1 && _epic_auth_session_present; }; then
+        printf '%s\n' "EPIC"
+    fi
+
+    if [ "${store_counts[AMAZON]:-0}" -gt 0 ] || \
+       { declare -F store_amazon_available >/dev/null 2>&1 && store_amazon_available >/dev/null 2>&1 && \
+         declare -F _amazon_auth_session_present >/dev/null 2>&1 && _amazon_auth_session_present; }; then
+        printf '%s\n' "AMAZON"
+    fi
+
+    if [ "${store_counts[STANDALONE]:-0}" -gt 0 ]; then
+        printf '%s\n' "STANDALONE"
+    fi
+}
+
+# Cycle to the next visible store filter token wrapping back to ALL
+get_next_visible_store_filter() {
+    local current="${1:-ALL}"
+    local -a visible=()
+    local item
+    while IFS= read -r item; do
+        [ -n "$item" ] && visible+=("$item")
+    done < <(get_visible_store_filters)
+
+    [ "${#visible[@]}" -gt 0 ] || { printf '%s\n' "ALL"; return 0; }
+
+    local i idx=-1
+    for i in "${!visible[@]}"; do
+        if [ "${visible[$i]}" = "$current" ]; then
+            idx="$i"
+            break
+        fi
+    done
+
+    if [ "$idx" -lt 0 ]; then
+        printf '%s\n' "ALL"
+    else
+        local next_idx=$(( (idx + 1) % ${#visible[@]} ))
+        printf '%s\n' "${visible[$next_idx]}"
+    fi
+}
+
+# Build visible store picker TSV rows for Alt-S palette (Packet 43A)
+build_visible_store_palette() {
+    local s_tok=""
+    while IFS= read -r s_tok; do
+        [ -n "$s_tok" ] && _store_filter_label_row "$s_tok"
+    done < <(get_visible_store_filters)
+}
+
+# Reset active store filter back to ALL if no longer visible (Packet 43A)
+validate_visible_store_filter() {
+    local current="${1:-ALL}" item=""
+    [ "$current" = "ALL" ] && { printf '%s\n' "ALL"; return 0; }
+    while IFS= read -r item; do
+        [ "$item" = "$current" ] && { printf '%s\n' "$current"; return 0; }
+    done < <(get_visible_store_filters)
+    printf '%s\n' "ALL"
+}
+
 # --- [MODULE] src/tui/73_search_tui.sh ---
 # ==============================================================================
-# Live Steam Store Search & Actionable TUI Picker (Split from 70_dashboard.sh)
+# Live Store Catalog Search & Actionable TUI Picker (Split from 70_dashboard.sh)
 # ==============================================================================
 
 # Live Steam Search View (Actionable TUI Search)
@@ -14535,7 +15970,7 @@ search_steam() {
     if [ -z "$query" ]; then
         local fzf_rc=0
         # Input primitive canonicalized via tui_prompt_input (: | fzf wrapper)
-        query=$(tui_prompt_input "gamectl :: Steam Store Search" "Type game title to search (Enter: Search │ Esc: Cancel)" "" "Search Store > ") || fzf_rc=$?
+        query=$(tui_prompt_input "gamectl :: Store Catalog Search" "Type game title to search (Enter: Search │ Esc: Cancel)" "" "Search Catalog > ") || fzf_rc=$?
         [ "$fzf_rc" -eq 130 ] && return 0
         if [ "$fzf_rc" -ne 0 ]; then
             [ "$standalone" = "true" ] && exit_tui_screen
@@ -14562,7 +15997,7 @@ search_steam() {
 
     if [ -z "$items" ]; then
         log_msg "WARN" "STORE" "Game '$query' not found on Steam Store API."
-        tui_modal_notice "Steam Store Search" "Game '$query' was not found on Steam Store." || return $?
+        tui_modal_notice "Store Catalog Search" "Game '$query' was not found on Steam catalog." || return $?
         [ "$standalone" = "true" ] && exit_tui_screen
         return 0
     fi
@@ -14659,7 +16094,7 @@ search_steam() {
             --with-nth=1,2,3,4 \
             --expect=tab,alt-s,ctrl-a,ctrl-u,ctrl-s,ctrl-d,ctrl-f \
             --bind="tab:accept,alt-s:accept,ctrl-a:accept,ctrl-u:accept,ctrl-s:accept,ctrl-d:accept,ctrl-f:accept" \
-            --border-label="  ╢ gamectl :: Steam Store Catalog [Type: $type_filter] ╟  " \
+            --border-label="  ╢ gamectl :: Store Catalog [Steam │ Type: $type_filter] ╟  " \
             --border-label-pos=2 \
             --header="$fzf_header" \
             --prompt="Filter Results > " \
@@ -14695,7 +16130,7 @@ search_steam() {
 
         if [ "$trigger_key" = "ctrl-f" ]; then
             local new_q n_rc=0
-            new_q=$(tui_prompt_input "gamectl :: Steam Store Search" "Type game title to search (Enter: Search │ Esc: Keep Current List)" "" "Search Store > ") || n_rc=$?
+            new_q=$(tui_prompt_input "gamectl :: Store Catalog Search" "Type game title to search (Enter: Search │ Esc: Keep Current List)" "" "Search Catalog > ") || n_rc=$?
             if [ "$n_rc" -eq 130 ]; then
                 continue
             fi
@@ -14717,7 +16152,7 @@ search_steam() {
 
             if [ -z "$new_items" ]; then
                 log_msg "WARN" "STORE" "Game '$new_q' not found on Steam Store API."
-                tui_modal_notice "Steam Store Search" "Game '$new_q' was not found on Steam Store." || true
+                tui_modal_notice "Store Catalog Search" "Game '$new_q' was not found on Steam catalog." || true
                 continue
             fi
 
@@ -15110,7 +16545,7 @@ preview_dashboard() {
             echo "  • ${UI_CYAN}Ctrl-P${UI_RST} LAN Persona       • ${UI_CYAN}Ctrl-S${UI_RST} Savegame Snapshots"
             ;;
         *2*|*SEARCH*|*PENCARIAN*)
-            echo "${UI_BOX}╭─ SELECTED MODULE: [02] STEAM STORE & PROTONDB ────────╮${UI_RST}"
+            echo "${UI_BOX}╭─ SELECTED MODULE: [02] MULTI-STORE CATALOG & PROTONDB ╮${UI_RST}"
             echo "│ ${UI_BOLD}REMOTE CATALOG & COMPATIBILITY TELEMETRY${UI_RST}"
             echo "${UI_BOX}╰───────────────────────────────────────────────────────╯${UI_RST}"
 
@@ -15152,6 +16587,22 @@ preview_dashboard() {
                 printf "%s %s %s\n" "$c_size" "$c_steam" "$c_pdb" > "$c_cache" 2>/dev/null || true
             fi
 
+            local store_adapters="" s_name s_label
+            for s_name in steam gog epic amazon; do
+                case "$s_name" in
+                    steam) s_label="Steam" ;;
+                    gog) s_label="GOG" ;;
+                    epic) s_label="Epic" ;;
+                    amazon) s_label="Amazon" ;;
+                esac
+                if declare -F store_dispatch >/dev/null 2>&1 && store_dispatch "$s_name" available >/dev/null 2>&1; then
+                    store_adapters+="${store_adapters:+ • }${s_label} ${UI_GREEN}[READY]${UI_RST}"
+                else
+                    store_adapters+="${store_adapters:+ • }${s_label} ${UI_DIM}[OPT]${UI_RST}"
+                fi
+            done
+
+            echo "  ${UI_CYAN}Store Adapters     ${UI_RST}: $store_adapters"
             echo "  ${UI_CYAN}Steam Store API    ${UI_RST}: $steam_st ${UI_DIM}(store.steampowered.com)${UI_RST}"
             echo "  ${UI_CYAN}ProtonDB API       ${UI_RST}: $pdb_st ${UI_DIM}(protondb.com/api/v1)${UI_RST}"
             echo "  ${UI_CYAN}Local Cache Dir    ${UI_RST}: ${UI_BOLD}~/.cache/gamectl/${UI_RST} ${UI_DIM}($c_size total)${UI_RST}"
@@ -15159,9 +16610,9 @@ preview_dashboard() {
             echo "  ${UI_CYAN}Cached ProtonDB    ${UI_RST}: ${UI_BOLD}$c_pdb ratings${UI_RST}"
             echo
             echo "  ${UI_DIM}Catalog Features:${UI_RST}"
-            echo "  • Live ProtonDB tier badges: Platinum, Gold, Silver, Bronze, Borked"
-            echo "  • Direct metadata retrieval: Genres, Platform (Linux ELF vs Windows PE)"
-            echo "  • Headless downloads via Standalone CDN or Steam native install"
+            echo "  • Multi-Store Search (Alt-S): Steam, GOG, Epic & Amazon adapters"
+            echo "  • Essential Metadata: Est. Size, Release, Price, DLC count & ProtonDB tier"
+            echo "  • Headless downloads via Standalone CDN or store adapter CLIs"
             ;;
         *3*|*DOWNLOAD*|*UNDUHAN*)
             echo "${UI_BOX}╭─ SELECTED MODULE: [03] DOWNLOAD MONITOR ──────────────╮${UI_RST}"
@@ -15618,6 +17069,9 @@ case "${1:-}" in
     gog)
         gog_cli "${2:-status}" "${@:3}"
         ;;
+    install-gog|gog-install|import|gog-import)
+        install_gog_offline "${@:2}"
+        ;;
     epic)
         epic_cli "${2:-status}" "${@:3}"
         ;;
@@ -15661,7 +17115,7 @@ case "${1:-}" in
         preview_dashboard "${2:-1}" "${3:-}"
         ;;
     --preview-search)
-        preview_search_game "${2:-}" "${3:-}" "${4:-}"
+        preview_search_game "${2:-}" "${3:-}" "${4:-}" "${5:-}"
         ;;
     --preview-download)
         preview_download "${2:-}" "${3:-}" "${4:-}"
@@ -15961,6 +17415,12 @@ case "${1:-}" in
             exit 1
         fi
         ;;
+    lan-pull|mesh-pull)
+        lan_pull "${@:2}"
+        ;;
+    peers)
+        peers_cli "${2:-list}" "${@:3}"
+        ;;
     --list|list)
         scan_installed_games "${@:2}"
         ;;
@@ -15971,113 +17431,7 @@ case "${1:-}" in
         echo "gamectl v1.5.0 (sovereign native TUI)"
         ;;
     --help|-h)
-        cat <<EOF
-gamectl - Sovereign TUI Game Manager & Launcher (Zero-Bloat)
-
-Usage:
-  gamectl [menu]      Open Master Dashboard Hub TUI (alias: dashboard)
-  gamectl library     Open Game Library TUI directly (alias: list-ui)
-  gamectl config [set <k> <v>|get <k>|list]
-                      Open global configuration menu or read/write settings (~/.config/gamectl/config)
-  gamectl doctor      Run 8-layer system & GPU health diagnostics (alias: audit)
-  gamectl stores [list|status]
-                      Inspect registered store adapters and offline readiness
-  gamectl gog <status|auth|search|download|sync> [args...]
-                      Optional DRM-free GOG adapter (delegates to gogdl / lgogdownloader)
-  gamectl epic <status|auth|search|download|sync|launch> [args...]
-                      Optional Epic Games adapter (delegates to legendary)
-  gamectl amazon <status|auth|search|download|sync> [args...]
-                      Optional Amazon Prime Gaming adapter (delegates to nile)
-  gamectl auth [status|gog|epic|amazon|luatools] [args...]
-                      Unified offline auth status and native CLI login delegation
-  gamectl search-stores <query> [--store <all|steam|gog|epic|amazon>]
-                      Cross-store catalog search with canonical app-type taxonomy
-  gamectl launch <dir> [bin] [title] [--hud] [--gamemode] [--gamescope] [--fsr] [--glthread] [--scope|--no-scope] [--prime|--no-prime] [--sandbox|--no-sandbox]
-                      Launch game with isolated prefix and runtime wrapper options
-  gamectl configure-wrappers <dir> [title]
-                      Configure per-game wrappers (GameMode/MangoHud/Gamescope FSR/MesaGL)
-  gamectl dev-profile <dir> [status|basic|full|off]
-                      Inspect or toggle developer profiler (WINEDEBUG/VK_LOADER_DEBUG/GBE log)
-  gamectl scan-saves <dir>
-                      Discover savegame directories inside a Wine/Proton prefix (read-only)
-  gamectl collect-saves <dir>
-                      Collect discovered Wine prefix saves into <dir>/saves/_prefix_saves/
-  gamectl restore-prefix-saves <dir>
-                      Restore staged Wine prefix saves back into <dir>/pfx/drive_c/users/
-  gamectl download <appid> [dir] [title] [--source <auto|...>] [--allow-dlc] [--standalone|--sls] [--raw|--inject-only]
-                      Download game via native Valve CDN (default: Pure Standalone zero-client)
-  gamectl downloads   Monitor active & recent downloads (Interactive TUI)
-  gamectl download-status
-                      Display active download tasks across Steam & Standalone engines
-  gamectl fetch-manifest <appid> [dest] [source]
-                      Harvest manifest archive across Hubcap/Ryuu/Sushi/LuaTools providers
-  gamectl auth-status Display current LuaTools authentication session & auto-refresh status
-  gamectl login-luatools <code|token|file>
-                      Authenticate standalone LuaTools provider (6-char code, refresh token, or json)
-  gamectl deploy-manifest <appid> [manifest_zip] [title]
-                      Deploy manifest & stplug-in keys into SLSsteam & Steam depotcache
-  gamectl entitle <appid> [title]
-                      Adopt local assets, Steam Input & shaders via Steam entitlement & ACF (aliases: unlock, adopt-steam)
-  gamectl unlock <appid> [title] (Alias for entitle)
-  gamectl inject <dir> [appid] [--no-sync|--all]
-                      Inject offline LAN runtime & saves; --all explicitly syncs Steam
-  gamectl setup-gbe [--yes] [--force] [--linux-only|--win-only] [--dest <dir>]
-                      Auto-download & provision Goldberg Emulator templates into ~/.local/share/gbe-fork/
-  gamectl setup-runtime [--yes] [--force] [--dry-run] [--source <file|url>] [--dest <dir>]
-                      Provision standalone Steam Runtime (Scout) into ~/.local/share/gamectl/runtime/
-  gamectl mod-overrides <dir>
-                      Setup P2P multiplayer compatibility & mod DLL overrides (alias: onlinefix)
-  gamectl onlinefix <dir> (Alias for mod-overrides)
-  gamectl fix-check <appid>
-                      Query available community, Denuvo, & Online-Fix bypasses (Public)
-  gamectl fix-install <appid> [dir] [--type online|generic] [--yes] [--restart]
-                      Download, verify, backup, & deploy Online-Fix/bypass directly to game
-  gamectl fix-revert <dir|appid> [--dry-run]
-                      Safely revert game fix and restore pristine vanilla files from snapshot
-  gamectl restart-steam
-                      Graceful Steam client hot-reload (SLSsteam & Game Mode supervisor)
-  gamectl proton-list List local & latest upstream GE-Proton releases
-  gamectl proton-install [tag|latest] Headless GE-Proton installer
-  gamectl proton-remove <tag> Safely remove an installed GE-Proton version
-  gamectl pfx <dir> [action] [args...] [--dry-run]
-                      Wine prefix Swiss Army knife (winecfg/regedit/cmd/shell/kill/clean/winetricks)
-  gamectl protondb <appid|dir>
-                      Query ProtonDB community rating & launch recommendations
-  gamectl make-desktop <dir> [title]
-                      Generate FreeDesktop .desktop application shortcut
-  gamectl add-to-steam <dir> [title]
-                      Register standalone game as non-Steam shortcut in Steam Deck Game Mode
-  gamectl fetch-art <dir|appid> [appid]
-                      Download official Steam capsule, banner, hero, & logo artwork
-  gamectl set-id <player> [steamid] [dir] [--broadcast <ip>] [--global]
-                      Configure LAN player name & SteamID for offline co-op
-  gamectl fetch-dlc <dir> [appid] Fetch & generate steam_settings/DLC.txt
-  gamectl harvest-dlc <appid> [dir]
-                      Harvest & unpack multi-depot DLC manifests across CDN providers
-  gamectl sync-steam <appid> [title] [dir] Sync Steam Client & SLSsteam entitlements
-  gamectl get-resolution Print detected native display resolution
-  gamectl get-gamescope-args Print dynamically scaled Gamescope FSR parameters
-  gamectl get-steam-root   Print detected active Steam root directory
-  gamectl get-steam-libraries Print all detected Steam library folders
-  gamectl detect-gpu       Audit and print detected secondary discrete GPU vendor
-  gamectl check-scope      Check if cgroups v2 / systemd-run user scope isolation is supported
-  gamectl check-sandbox    Check if bubblewrap (bwrap) rootless security sandbox is available
-  gamectl search [query]   Search Steam Store catalog & audit ProtonDB rating
-  gamectl --search         Search Steam Store catalog (interactive TUI prompt)
-  gamectl --list      Print detected installed games list
-  gamectl list-formatted  Print formatted games list with ANSI badges
-  gamectl detect-steamstub <bin>
-                      Audit SteamStub (.bind ELF & PE markers) and print forensic diagnostics
-  gamectl unpack-stub <bin>
-                      Unpack SteamStub DRM binary (Linux ELF .bind or Windows PE)
-  gamectl --sync <dir> [title] [host]   Push saves to remote companion host (alias: sync)
-  gamectl sync-pull <dir> [title] [host] Pull saves from remote companion host (alias: --sync-pull)
-  gamectl backup <dir>        Create manual savegame backup snapshot (alias: --backup)
-  gamectl restore <dir> [slot]  Restore savegame snapshot from recovery slot (1-3)
-  gamectl logs        View centralized runtime activity logs
-  gamectl --help      Show this help documentation
-  gamectl --version   Print active version
-EOF
+        print_cli_help
         ;;
     *)
         dashboard_menu

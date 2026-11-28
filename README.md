@@ -86,7 +86,7 @@ Low memory use and fast startup are design goals. Publish measured values only w
 - **Wine Prefix Swiss Army Knife (`gamectl pfx`) & Wineserver Guard**: Dedicated maintenance toolkit (`winecfg`, `regedit`, `cmd`, `shell`, `winetricks`, `kill`, `clean`) with deterministic wineserver teardown (`wineserver -w` / `-k`) to eliminate registry lock contention.
 - **Real-Time PipeWire Audio Scheduling**: Exports optimal quantum buffer configurations (`PIPEWIRE_LATENCY="256/48000"`, `PULSE_LATENCY_MSEC=60`) to prevent audio crackling and buffer starvation during high CPU spikes.
 - **One-Key Multi-Node Sync (`<Ctrl-S>`)**: Synchronizes portable save states to secondary handhelds or remote servers over SSH/Rsync with pre-flight network checks.
-- **Steam Store Catalog & ProtonDB Compatibility Audit**: Fast online search integrating public Steam Store metadata with live ProtonDB Linux compatibility tier ratings (Native, Platinum, Gold, Silver, Bronze, Borked).
+- **Multi-Store Catalog & ProtonDB Compatibility Audit**: Fast online search across Steam and Multi-Store adapters (GOG/Epic/Amazon) with essential metadata (estimated size, release date, price, DLC count) and live ProtonDB Linux compatibility tier ratings (Native, Platinum, Gold, Silver, Bronze, Borked).
 
 ---
 
@@ -104,7 +104,7 @@ The interactive TUI library navigation provides instantaneous single-keystroke o
 | `<Ctrl-I>` | Inject Decentralized LAN Runtime & Portable Saves |
 | `<Ctrl-S>` | Sync Portable Savegame to Remote Companion Host via SSH / Rclone |
 | `<Ctrl-B>` / `<Ctrl-R>` | Create Manual Save Snapshot (`Ctrl-B`) / Restore Snapshot Slot (`Ctrl-R`) |
-| `<Ctrl-F>` / `<Ctrl-X>` | Search Steam Store & ProtonDB (`Ctrl-F`) / Community Fixes (`Ctrl-X`) |
+| `<Ctrl-F>` / `<Ctrl-X>` | Search Store Catalog & ProtonDB (`Ctrl-F`) / Community Fixes (`Ctrl-X`) |
 | `<Ctrl-D>` / `<Ctrl-L>` | Create Desktop Entry (`Ctrl-D`) / View Activity Logs (`Ctrl-L`) |
 | `<ESC>` / `<Ctrl-C>` | Return to Master Dashboard Hub / Exit |
 

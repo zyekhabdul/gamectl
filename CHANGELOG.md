@@ -6,6 +6,16 @@ All notable changes to `gamectl` are documented in this file according to [Keep 
 
 ## [Unreleased]
 
+### Added
+- **Dynamic auto-prune multi-store TUI (`Tab` & `Alt-S`)**: Library filter cycles only through stores that have installed games or active authenticated sessions (`Installed-or-Authenticated` pruning), keeping unconfigured `EPIC`/`GOG`/`AMAZON` tabs hidden.
+- **GOG offline installer importer (`gamectl install-gog` / `gamectl import`)**: Extracts DRM-free `.exe` (`innoextract`) and `.sh` (MojoSetup) installers without web login, audits symlinks against traversal, initializes `$GAME_DIR/saves/` and Wine prefixes, and registers `[GOG]` library metadata.
+- **P2P LAN mesh (`gamectl lan-pull` & `gamectl peers`)**: Manages companion SSH peers (`~/.config/gamectl/peers`), pulls manifests or installed games over `rsync`/SSH (excluding `pfx/`), and provides automatic LAN fallback when external Steam manifest providers return 404.
+- **MIT Rust core crate (`crates/gamectl-core/`, `gamectl-core`)**: Separate MIT-licensed native engine implementing Epic OAuth2, library/assets resolution, binary (`0x44BEC00C`) and JSON manifest parsing, parallel chunk downloading (`0xB1FE3AA2`), and `epic_installed.json` tracking with `legendary` fallback preserved.
+- **Store catalog preview metadata & Linux runtime hardening**: Extended Steam `appdetails` and cached Epic metadata previews, subdirectory Linux binary discovery (`Priority 5a`), and `GLIBC_TUNABLES=glibc.rtld.execstack=2` guard in `launch_game`.
+
+### Changed
+- Extracted CLI usage output from `src/main.sh` into `src/core/05_cli_help.sh`, dropping `src/main.sh` below the 600 LOC budget cap and removing its legacy ceiling.
+
 ## [1.5.0] - 2026-11-26
 
 ### Added

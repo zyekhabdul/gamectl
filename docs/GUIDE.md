@@ -374,7 +374,7 @@ gamectl sync-steam <appid> [title] [game_dir]
 # 12. Tampilkan daftar game terdeteksi dalam format teks deterministik
 gamectl --list
 
-# 13. Cari game di Steam Store API dan cek kompatibilitas ProtonDB
+# 13. Cari game di katalog Store (Steam & Multi-Store) dan cek kompatibilitas ProtonDB
 gamectl --search
 
 # 14. Sinkronisasi manual direktori game ke remote companion host
